@@ -61,8 +61,9 @@ fun MapMyRunSetupScreen(
         liveTrackingEnabled: Boolean,
         isGroupRun: Boolean,
         latitude: Double,
-        longitude: Double
-    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
+        longitude: Double,
+        aiCoachEnabled: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> },
     onStartRunWithoutRoute: (
         distance: Float,
         targetTimeEnabled: Boolean,
@@ -91,6 +92,7 @@ fun MapMyRunSetupScreen(
     // Social toggles
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
     var isGroupRunEnabled by remember { mutableStateOf(false) } // visual toggle only for now
+    var isAiCoachEnabled by remember { mutableStateOf(false) } // Default off - user can opt in
 
     // GPS State
     var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
@@ -159,7 +161,7 @@ fun MapMyRunSetupScreen(
 
     // Header copy by mode
     val title = if (mode != "route") "MAP MY RUN SETUP" else "RUN SETUP"
-    val subtitle = if (mode == "route") "Configure your AI-generated route" else "Set your run basics"
+    val subtitle = if (mode == "route") "Configure your desired route" else "Set your run basics"
 
     // Button enablement
     val gpsReady = currentLocation != null && !isGettingLocation
@@ -247,6 +249,16 @@ fun MapMyRunSetupScreen(
 
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
+            // AI Coach toggle
+            item {
+                AiCoachToggleSection(
+                    enabled = isAiCoachEnabled,
+                    onToggle = { isAiCoachEnabled = it }
+                )
+            }
+
+            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+
             // Social — redesigned into a single clean section
             item {
                 SocialSection(
@@ -313,7 +325,8 @@ fun MapMyRunSetupScreen(
                                     isLiveTrackingEnabled,
                                     isGroupRunEnabled,
                                     lat,
-                                    lng
+                                    lng,
+                                    isAiCoachEnabled
                                 )
                             }
                         }
@@ -619,7 +632,7 @@ private fun CompactModeRow(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
-            text = "Mode",
+            text = "Session Type:",
             style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
             color = Colors.textSecondary
         )
@@ -851,6 +864,75 @@ private fun TimeField(
         ),
         shape = RoundedCornerShape(BorderRadius.md)
     )
+}
+
+/* =====================================================================================
+   AI COACH TOGGLE
+===================================================================================== */
+
+@Composable
+private fun AiCoachToggleSection(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
+        Text(
+            text = "AI Coach",
+            style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+            color = Colors.textPrimary
+        )
+        Spacer(modifier = Modifier.height(Spacing.sm))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(BorderRadius.md),
+            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.65f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (enabled) Colors.primary.copy(alpha = 0.18f)
+                            else Colors.backgroundTertiary.copy(alpha = 0.7f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_ai_vector),
+                        contentDescription = null,
+                        tint = if (enabled) Colors.primary else Colors.textMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(Spacing.md))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Enable AI Coach",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        text = if (enabled) "Coach will guide your run" else "Off – run without coaching",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                }
+
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onToggle
+                )
+            }
+        }
+    }
 }
 
 /* =====================================================================================

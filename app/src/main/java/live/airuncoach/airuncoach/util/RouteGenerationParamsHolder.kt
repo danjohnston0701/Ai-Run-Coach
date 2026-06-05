@@ -16,7 +16,8 @@ object RouteGenerationParamsHolder {
         minutes: Int,
         seconds: Int,
         latitude: Double,
-        longitude: Double
+        longitude: Double,
+        aiCoachEnabled: Boolean = false
     ) {
         params = RouteGenerationParams(
             distance = distance,
@@ -25,7 +26,8 @@ object RouteGenerationParamsHolder {
             minutes = minutes,
             seconds = seconds,
             latitude = latitude,
-            longitude = longitude
+            longitude = longitude,
+            aiCoachEnabled = aiCoachEnabled
         )
     }
 
@@ -49,5 +51,6 @@ data class RouteGenerationParams(
     val minutes: Int,
     val seconds: Int,
     val latitude: Double,
-    val longitude: Double
+    val longitude: Double,
+    val aiCoachEnabled: Boolean = false
 )

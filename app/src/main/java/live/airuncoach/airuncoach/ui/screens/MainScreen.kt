@@ -299,12 +299,6 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val h = backStackEntry.arguments?.getString("h")?.toIntOrNull() ?: 0
                 val m = backStackEntry.arguments?.getString("m")?.toIntOrNull() ?: 0
                 val s = backStackEntry.arguments?.getString("s")?.toIntOrNull() ?: 0
-                val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry(navController.graph.id)
-                }
-                val viewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
-                val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
-
                 var isNavigatingToRoute by remember { mutableStateOf(false) }
                 MapMyRunSetupScreen(
                     mode = mode,
@@ -314,7 +308,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     initialMinutes = m,
                     initialSeconds = s,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, _, _, latitude, longitude ->
+                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, _, _, latitude, longitude, aiCoach ->
                         // Guard against double-taps - only allow one navigation at a time
                         if (isNavigatingToRoute) return@MapMyRunSetupScreen
                         isNavigatingToRoute = true
@@ -327,11 +321,11 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             minutes = minutes,
                             seconds = seconds,
                             latitude = latitude,
-                            longitude = longitude
+                            longitude = longitude,
+                            aiCoachEnabled = aiCoach
                         )
                         
-                        // Check route availability before generating
-                        featureLimitViewModel.checkRunRouteAvailability()
+                        // Navigate to check_route_availability - it will handle the API check itself
                         navController.navigate("check_route_availability")
                     },
                     onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds ->
@@ -357,7 +351,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             }
             
             // ── Run Route Availability Check ──────────────────────────────────
-            composable("check_route_availability") { backStackEntry ->
+            // NOTE: There is a second composable("check_route_availability") below (the active one).
+            // This first registration is intentionally kept as dead code to avoid NavGraph conflicts,
+            // but the second one (lower in file) is the one that actually runs.
+            composable("check_route_availability_legacy_unused") { backStackEntry ->
                 val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
                 val availability by featureLimitViewModel.runRouteAvailability.collectAsState()
                 val isLoading by featureLimitViewModel.runRouteLoading.collectAsState()
@@ -466,7 +463,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             preferTrails = true,
                             avoidHills = false,
                             targetTime = targetTimeMinutes,
-                            aiCoachEnabled = false
+                            aiCoachEnabled = params.aiCoachEnabled
                         )
                     } else if (params == null) {
                         Log.e("RouteNavigation", "❌ No route params available - cannot generate routes")
@@ -746,78 +743,62 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 }
             }
-            // ── Run Route Availability Check ─────────────────────────────────
+            // ── Run Route Availability Check ───────────────────────��─────────
+            // This is the ACTIVE composable for "check_route_availability".
+            // Key fix: ONLY navigate to route_generating from the availability.isAvailable branch.
+            // The else branch (null availability, not yet loaded) shows a loading indicator.
+            // This prevents a race condition where two navigations to route_generating were created:
+            //   1. The else branch fires on the very first frame (before isLoading becomes true)
+            //   2. The isAvailable branch fires after the API returns
+            // Both would push route_generating, the second with null params → stuck loading forever.
             composable("check_route_availability") {
                 val featureLimitViewModel: live.airuncoach.airuncoach.viewmodel.FeatureLimitViewModel = hiltViewModel()
                 val availability by featureLimitViewModel.runRouteAvailability.collectAsState()
                 val isLoading by featureLimitViewModel.runRouteLoading.collectAsState()
                 
-                // Trigger availability check when this route first loads
+                // Trigger availability check. This sets isLoading=true on next dispatch,
+                // which prevents the else branch below from ever navigating.
                 LaunchedEffect(Unit) {
                     featureLimitViewModel.checkRunRouteAvailability()
                 }
 
-                if (isLoading) {
-                    // Show loading while we check
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                when {
+                    // Loading OR not yet started (first frame, before isLoading=true is dispatched)
+                    isLoading || availability == null -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
                     }
-                } else if (availability != null) {
-                    if (availability!!.isAvailable) {
-                        // User can create route - proceed with generation
-                        // Use peek() NOT consume() so params are still available in route_generating
+                    availability!!.isAvailable -> {
+                        // User can create route - navigate ONCE from here
                         val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
                         if (params != null) {
                             LaunchedEffect(Unit) {
                                 featureLimitViewModel.resetRunRouteAvailability()
-                                // Navigate to loading screen - route generation will happen there
                                 navController.navigate("route_generating/${params.distance.toInt()}") {
                                     popUpTo("check_route_availability") { inclusive = true }
                                 }
                             }
                         } else {
-                            // No params - go back
                             LaunchedEffect(Unit) {
                                 navController.popBackStack()
                             }
                         }
-                    } else {
+                    }
+                    else -> {
                         // Limit reached - show upsell screen
                         live.airuncoach.airuncoach.ui.components.RunRouteLimitUpsellScreen(
                             nextRenewalDate = availability!!.renewalDate,
                             usedCount = availability!!.used,
                             limitCount = availability!!.limit,
                             onUpgradeClick = {
-                                // Navigate to subscription screen
                                 navController.navigate(Screen.Profile.route) {
                                     popUpTo("check_route_availability") { inclusive = true }
                                 }
                             },
-                            onPromoCodeClick = {
-                                // Show promo code dialog or navigate to settings
-                                navController.popBackStack()
-                            },
-                            onBackClick = {
-                                navController.popBackStack()
-                            }
+                            onPromoCodeClick = { navController.popBackStack() },
+                            onBackClick = { navController.popBackStack() }
                         )
-                    }
-                } else {
-                    // Default: allow access (error case)
-                    // Use peek() NOT consume() so params are still available in route_generating
-                    val params = live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.peek()
-                    if (params != null) {
-                        LaunchedEffect(Unit) {
-                            featureLimitViewModel.resetRunRouteAvailability()
-                            // Navigate to loading screen - route generation will happen there
-                            navController.navigate("route_generating/${params.distance.toInt()}") {
-                                popUpTo("check_route_availability") { inclusive = true }
-                            }
-                        }
-                    } else {
-                        LaunchedEffect(Unit) {
-                            navController.popBackStack()
-                        }
                     }
                 }
             }
