@@ -104,7 +104,7 @@ fun RouteGeneratingLoadingScreen(
         ) {
             // Title
             Text(
-                text = "CHOOSE YOUR ROUTE",
+                text = "GENERATING YOUR ROUTES",
                 color = Color.White,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
