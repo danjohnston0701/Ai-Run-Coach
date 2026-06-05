@@ -6,7 +6,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -103,10 +105,16 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
-            .padding(horizontal = Spacing.xxxl)
-            .padding(top = 40.dp),
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.xxxl)
+                .padding(top = 40.dp, bottom = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
         // Title
         Text(
             text = "Enable Tracking",
@@ -247,9 +255,10 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
                     text = "Continue",
                     style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
                 )
-            }
+        }
         }
     }
+}
 }
 
 @Composable

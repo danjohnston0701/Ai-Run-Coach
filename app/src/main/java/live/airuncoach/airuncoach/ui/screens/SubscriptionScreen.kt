@@ -16,8 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -74,7 +73,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.DeleteAccountState
 import live.airuncoach.airuncoach.viewmodel.DowngradeState
-import live.airuncoach.airuncoach.viewmodel.Plan
+
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModelFactory
 import retrofit2.HttpException
@@ -105,8 +104,6 @@ fun SubscriptionScreen(
 ) {
     val context = LocalContext.current
     val viewModel: SubscriptionViewModel = viewModel(factory = SubscriptionViewModelFactory(context))
-    val plans by viewModel.plans.collectAsState()
-    val selectedPlan by viewModel.selectedPlan.collectAsState()
     val deleteAccountState by viewModel.deleteAccountState.collectAsState()
     val downgradeState by viewModel.downgradeState.collectAsState()
     val usage by viewModel.usage.collectAsState()
@@ -117,12 +114,16 @@ fun SubscriptionScreen(
     //   2 — final irreversible delete confirmation
     var dialogStep by remember { mutableIntStateOf(0) }
 
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTier by remember { mutableStateOf<String?>(null) }
+    val tabs = listOf("Plans", "Usage")
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        "My Account",
+                        "Account Management",
                         style = AppTextStyles.h2,
                         color = Colors.textPrimary
                     )
@@ -151,50 +152,199 @@ fun SubscriptionScreen(
                 .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            item { PremiumHeader() }
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-
-            item { SectionTitle(title = "Unlock Premium Features") }
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-            item { PremiumFeature(icon = R.drawable.icon_mic_vector, title = "AI Coach", description = "Personalized real-time coaching") }
-            item { PremiumFeature(icon = R.drawable.icon_navigation_vector, title = "Unlimited Routes", description = "Generate unlimited AI routes") }
-            item { PremiumFeature(icon = R.drawable.icon_people_vector, title = "Group Runs", description = "Create and join group runs") }
-            item { PremiumFeature(icon = R.drawable.icon_chart_vector, title = "Advanced Analytics", description = "Detailed performance insights") }
-
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-            item { SectionTitle(title = "Choose Your Plan") }
-            item { Spacer(modifier = Modifier.height(Spacing.md)) }
-
-            items(plans) { plan ->
-                PlanSelector(
-                    plan = plan,
-                    isSelected = plan == selectedPlan,
-                    onClick = { viewModel.selectPlan(plan) }
-                )
-                Spacer(modifier = Modifier.height(Spacing.sm))
-            }
-
-            // Monthly usage meters
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-            item { SectionTitle(title = "This Month's Usage") }
-            item { Spacer(modifier = Modifier.height(Spacing.sm)) }
-            item { MonthlyUsageSection(usage = usage) }
-
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-
+            // Tab selector
             item {
-                Button(
-                    onClick = { /* TODO: wire up payment processor */ },
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(BorderRadius.lg),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary,
-                        contentColor = Colors.buttonText
-                    )
+                        .padding(vertical = Spacing.md),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Subscribe Now", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                    tabs.forEachIndexed { index, tab ->
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { selectedTab = index },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = tab,
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (selectedTab == index) Colors.textPrimary else Colors.textSecondary
+                            )
+                            if (selectedTab == index) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .height(3.dp)
+                                        .fillMaxWidth(0.6f)
+                                        .background(Colors.primary, shape = RoundedCornerShape(2.dp))
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // PLANS TAB
+            if (selectedTab == 0) {
+                item {
+                    Text(
+                        text = "Choose a plan that fits your training",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(vertical = Spacing.md)
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                }
+
+                item {
+                    TierCard(
+                        name = "Free",
+                        price = null,
+                        badge = "CURRENT",
+                        features = listOf(
+                            "1 AI Run per month",
+                            "5km of AI Coaching per month",
+                            "1 AI Post-Run Summaries per month",
+                            "1 AI Route Generations per month"
+                        ),
+                        isSelected = selectedTier == "free" || selectedTier == null,
+                        onClick = { selectedTier = "free" }
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                }
+
+                item {
+                    TierCard(
+                        name = "Lite",
+                        price = "$9.99/month (USD)",
+                        badge = null,
+                        features = listOf(
+                            "50km of AI Coaching per month",
+                            "10 AI Post-Run Summaries per month",
+                            "5 AI Route Generations per month",
+                            "1 AI Training Plan generations per month"
+                        ),
+                        isSelected = selectedTier == "lite",
+                        onClick = { selectedTier = "lite" }
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                }
+
+                item {
+                    TierCard(
+                        name = "Standard",
+                        price = "$14.99/month (USD)",
+                        badge = "MOST POPULAR",
+                        features = listOf(
+                            "200km of AI Coaching per month",
+                            "50 AI Post-Run Summaries per month",
+                            "30 AI Route Generations per month",
+                            "3 AI Training Plan generations per month"
+                        ),
+                        isSelected = selectedTier == "standard",
+                        onClick = { selectedTier = "standard" }
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                }
+
+                // Action button based on selected tier
+                if (selectedTier != null && selectedTier != "free") {
+                    item {
+                        val buttonText = when (selectedTier) {
+                            "lite" -> "Upgrade to Lite"
+                            "standard" -> "Upgrade to Standard"
+                            else -> "Subscribe Now"
+                        }
+                        
+                        Button(
+                            onClick = { /* TODO: wire up Google Play subscription */ },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                            shape = RoundedCornerShape(BorderRadius.lg),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Colors.primary,
+                                contentColor = Colors.buttonText
+                            )
+                        ) {
+                            Text(buttonText, style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                        }
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
+                }
+
+                item {
+                    Text(
+                        text = "Pricing displayed in USD. You will be charged in your local currency.",
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.xxxxl))
+                }
+            }
+
+            // USAGE TAB
+            if (selectedTab == 1) {
+                item {
+                    Spacer(modifier = Modifier.height(Spacing.md))
+                    Text(
+                        text = "Current Plan",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(Spacing.md)
+                            .background(Colors.backgroundSecondary, shape = RoundedCornerShape(BorderRadius.lg))
+                            .padding(Spacing.lg),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Free",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textSecondary
+                            )
+                            Text(
+                                text = "Resets 1 Jul 2026",
+                                style = AppTextStyles.caption,
+                                color = Colors.textMuted
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+                }
+
+                item {
+                    MonthlyUsageSection(usage = usage)
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+
+                    Button(
+                        onClick = { /* TODO: navigate to plans */ },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(BorderRadius.lg),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.primary,
+                            contentColor = Colors.buttonText
+                        )
+                    ) {
+                        Text("Upgrade for more", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                    }
+                    Spacer(modifier = Modifier.height(Spacing.xxxxl))
                 }
             }
 
@@ -210,7 +360,6 @@ fun SubscriptionScreen(
             item { DangerZoneSection(
                 deleteAccountState = deleteAccountState,
                 downgradeState = downgradeState,
-                isOnPaidPlan = viewModel.isOnPaidPlan,
                 onDeleteTap = {
                     viewModel.resetDeleteState()
                     viewModel.resetDowngradeState()
@@ -254,7 +403,6 @@ fun SubscriptionScreen(
 private fun DangerZoneSection(
     deleteAccountState: DeleteAccountState,
     downgradeState: DowngradeState,
-    isOnPaidPlan: Boolean,
     onDeleteTap: () -> Unit
 ) {
     val isWorking = deleteAccountState is DeleteAccountState.Loading ||
@@ -785,124 +933,105 @@ fun CouponCodeSection() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun PremiumHeader() {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-    ) {
-        Icon(
-            painter = painterResource(id = R.drawable.icon_crown_vector),
-            contentDescription = "Premium",
-            tint = Color(0xFFFFD700),
-            modifier = Modifier.size(60.dp)
-        )
-        Text(
-            text = "Upgrade to Premium",
-            style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
-            color = Colors.textPrimary
-        )
-        Text(
-            text = "Unlock the full potential of your AI running coach",
-            style = AppTextStyles.body,
-            color = Colors.textSecondary
-        )
-    }
-}
-
-@Composable
-fun PremiumFeature(icon: Int, title: String, description: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = Spacing.sm),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Colors.backgroundSecondary),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(id = icon),
-                contentDescription = title,
-                tint = Colors.primary,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(Spacing.md))
-        Column {
-            Text(
-                text = title,
-                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                color = Colors.textPrimary
-            )
-            Text(
-                text = description,
-                style = AppTextStyles.body,
-                color = Colors.textSecondary
-            )
-        }
-    }
-}
-
-@Composable
-fun PlanSelector(plan: Plan, isSelected: Boolean, onClick: () -> Unit) {
+fun TierCard(
+    name: String,
+    price: String? = null,
+    badge: String? = null,
+    features: List<String>,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .border(
                 width = 2.dp,
-                color = if (isSelected) Colors.primary else Color.Transparent,
-                shape = RoundedCornerShape(BorderRadius.md)
+                color = if (isSelected) Colors.primary else Colors.border.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(BorderRadius.lg)
             )
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(BorderRadius.md),
+        shape = RoundedCornerShape(BorderRadius.lg),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(Spacing.lg),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(
-                    selected = isSelected,
-                    onClick = onClick,
-                    colors = RadioButtonDefaults.colors(
-                        selectedColor = Colors.primary,
-                        unselectedColor = Colors.textMuted
+            // Header with name, price and badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    RadioButton(
+                        selected = isSelected,
+                        onClick = onClick,
+                        colors = RadioButtonDefaults.colors(
+                            selectedColor = Colors.primary,
+                            unselectedColor = Colors.textMuted
+                        )
                     )
-                )
-                Spacer(modifier = Modifier.width(Spacing.sm))
-                Column {
-                    Text(
-                        text = plan.name,
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.textPrimary
-                    )
-                    Text(
-                        text = plan.price,
-                        style = AppTextStyles.body,
-                        color = Colors.textSecondary
-                    )
+                    Column {
+                        Text(
+                            text = name,
+                            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        if (price != null) {
+                            Text(
+                                text = price,
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                                color = Colors.textSecondary
+                            )
+                        }
+                    }
+                }
+                if (badge != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(BorderRadius.full))
+                            .background(Color(0xFF6366F1).copy(alpha = 0.2f))
+                            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+                    ) {
+                        Text(
+                            text = badge,
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                            color = Color(0xFF6366F1)
+                        )
+                    }
                 }
             }
-            if (plan.discount != null) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(BorderRadius.full))
-                        .background(Colors.success.copy(alpha = 0.2f))
-                        .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
-                ) {
-                    Text(
-                        text = plan.discount,
-                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.success
-                    )
+
+            // Feature list
+            HorizontalDivider(color = Colors.border.copy(alpha = 0.2f))
+            
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                features.forEach { feature ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_check_vector),
+                            contentDescription = null,
+                            tint = if (isSelected) Colors.primary else Color(0xFF4F46E5),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = feature,
+                            style = AppTextStyles.body,
+                            color = Colors.textSecondary
+                        )
+                    }
                 }
             }
         }
