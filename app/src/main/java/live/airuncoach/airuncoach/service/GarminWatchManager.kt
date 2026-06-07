@@ -194,6 +194,13 @@ class GarminWatchManager(private val context: Context) {
      */
     var onWatchAppReady: (() -> Unit)? = null
 
+    // ── Cached auth credentials ───────────────────────────────────────────────
+    // Stored whenever sendAuth() is called so we can auto-respond to "watchReady"
+    // messages that arrive when no ViewModel has registered an onWatchCommand handler
+    // (e.g. the user opens the watch app while the phone app is idle on the home screen).
+    private var cachedAuthToken: String? = null
+    private var cachedRunnerName: String = ""
+
     // ── Private SDK handles ───────────────────────────────────────────────────
     private var connectIQ: ConnectIQ? = null
     private var connectedDevice: IQDevice? = null
@@ -241,6 +248,10 @@ class GarminWatchManager(private val context: Context) {
     // ── Phone → Watch ─────────────────────────────────────────────────────────
 
     fun sendAuth(authToken: String, runnerName: String) {
+        // Cache credentials so we can auto-respond to future "watchReady" messages
+        // without requiring a ViewModel to be active.
+        cachedAuthToken = authToken
+        cachedRunnerName = runnerName
         sendToWatch(mapOf(
             "type"       to "auth",
             "authToken"  to authToken,
@@ -415,8 +426,28 @@ class GarminWatchManager(private val context: Context) {
                 "command" -> {
                     val action = map["action"] as? String ?: return
                     Log.d(TAG, "Watch command: $action")
-                    // If no ViewModel has registered a handler (user is not on the Run screen)
-                    // show a passive notification so the user knows a watch run is in progress.
+
+                    // "watchReady" means the user just opened the watch app.
+                    // Immediately send auth so the watch shows "Connected" instead of the
+                    // "OFFLINE - 90min charts" warning — this must happen regardless of
+                    // whether a ViewModel has registered onWatchCommand.
+                    if (action == "watchReady") {
+                        val token = cachedAuthToken
+                        if (token != null) {
+                            Log.d(TAG, "watchReady received — auto-sending cached auth to watch")
+                            sendAuth(token, cachedRunnerName)
+                        } else {
+                            // No cached credentials yet — fall back to external handler
+                            Log.d(TAG, "watchReady received — no cached auth, firing onWatchAppReady")
+                            onWatchAppReady?.invoke()
+                        }
+                        // Also notify any active ViewModel so it can react (e.g. push preparedRun)
+                        onWatchCommand?.invoke(action)
+                        return
+                    }
+
+                    // For all other commands: if no ViewModel is listening, show a passive
+                    // notification when a watch-initiated run starts/stops.
                     if (onWatchCommand == null) {
                         when (action) {
                             "start" -> showWatchRunNotification()

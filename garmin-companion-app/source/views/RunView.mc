@@ -33,6 +33,9 @@ class RunView extends Ui.View {
     private var _isConnected     = false;
     private var _overlayState    = OVERLAY_READY;
     private var _dotCount        = 0;
+    // Grace period before showing "OFFLINE" label (lets auth message arrive first)
+    private var _connectWaitTicks = 0;
+    private const CONNECT_WAIT_MAX = 32; // 32 x 250ms = 8 seconds
 
     // Prepared-run data
     private var _prepRunType      = "";
@@ -85,6 +88,9 @@ class RunView extends Ui.View {
     private var _gpsReady     = false;
     private var _gpsQuality   = 0;
     private var _gpsListening = false;
+    // GPS signal-lost indicator during a run: counts ticks with quality < 2
+    private var _gpsLostTicks = 0;
+    private const GPS_LOST_THRESHOLD = 8; // 8 x 250ms = 2 s before warning shown
 
     // Smoothed display values
     private var _elapsedMs     = 0;
@@ -107,8 +113,11 @@ class RunView extends Ui.View {
     private var _anate = 0.0;   // Anaerobic training effect (0-5)
 
     // 5-second pace smoothing buffer (20 ticks x 250ms = 5s)
+    // Circular buffer: writes in-place once full, avoiding repeated Array.slice()
+    // allocations every 250ms that cause GC pressure and IQ crashes on memory-limited watches.
     private var _paceHistory    = [];
     private var _paceHistoryMax = 20;
+    private var _paceHistoryIdx = 0;   // write head for circular buffer
 
     // ── Run summary accumulators (for endSession summary sent to backend) ──────
     private var _sumHR      = 0;     // Heart rate sum
@@ -198,11 +207,10 @@ class RunView extends Ui.View {
         _statusTicks   = 20;
     }
 
-    // Keep setCoachingCue for backward compat — maps to status only
+    // Keep setCoachingCue for backward compat — coaching audio plays on phone/headphones only.
+    // No text is shown on the watch screen; a single haptic pulse confirms delivery.
     function setCoachingCue(cueText) {
-        // Status-only on watch: show a brief prompt, no coaching text
-        _statusMessage = "Coach update";
-        _statusTicks   = 20;
+        _vibeShort();
     }
 
     function setCoachingMode(data) {
@@ -249,7 +257,10 @@ class RunView extends Ui.View {
 
     function startRun() {
         if (_isRunning) { return; }
-        if (!_gpsReady) { _vibeShort(); return; }
+        // GPS quality gate: require "Usable" (>=3) for standalone, but allow "Last known"
+        // (>=2) when phone is connected since phone GPS will be authoritative for the run.
+        var minGpsQ = _isConnected ? 2 : 3;
+        if (_gpsQuality < minGpsQ) { _vibeShort(); return; }
         _isRunning     = true;
         _isPaused      = false;
         _elapsedMs     = 0;
@@ -262,10 +273,15 @@ class RunView extends Ui.View {
         _prevGpsLng = null;
         _pace = 0.0;
         _dispPace = 0.0;
-        _paceHistory = [];  // Clear history so stale readings do not bias the new run
+        _paceHistory = [];    // Clear history so stale readings do not bias the new run
+        _paceHistoryIdx = 0;  // Reset circular buffer write head
 
-        Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
-        _gpsListening = true;
+        // Only register GPS if not already listening — avoids duplicate registration
+        // which can cause IQ errors on some Garmin devices.
+        if (!_gpsListening) {
+            Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+            _gpsListening = true;
+        }
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
         Sensor.enableSensorEvents(method(:onSensor));
 
@@ -284,8 +300,10 @@ class RunView extends Ui.View {
         // relay even when the phone app hasn't opened. We show the notice only once
         // HTTP has actually failed enough times to confirm the relay is unavailable.
 
-        // Prepare backend session (safe to call Comm here — app is fully initialised)
-        if (_dataStreamer != null) { _dataStreamer.prepareSession(); }
+        // Prepare backend session ONLY in standalone mode (Scenario C - no phone).
+        // When phone IS connected (Scenario B), it owns the backend session via RunTrackingService.
+        // Calling prepareSession() here in Scenario B creates orphaned duplicate sessions.
+        if (!_isConnected && _dataStreamer != null) { _dataStreamer.prepareSession(); }
 
         // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
         _startSession();
@@ -383,6 +401,12 @@ class RunView extends Ui.View {
             });
         }
         _vibeLong();
+        // Re-enable GPS for idle monitoring so the user can see GPS quality
+        // before starting the next run, and so _gpsReady stays accurate.
+        if (_isAuthenticated && !_gpsListening) {
+            Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+            _gpsListening = true;
+        }
         Ui.requestUpdate();
     }
 
@@ -390,11 +414,15 @@ class RunView extends Ui.View {
         _phoneLink.register(method(:onPhoneMessage));
         _phoneLink.sendCommand("watchReady");
         if (!_phoneControlled && _isRunning) {
-            _startSession();
-            Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+            // Restore after view was hidden (system menu etc).
+            // Guard against session re-creation which would split the Garmin activity.
+            if (_session == null) { _startSession(); }
+            if (!_gpsListening) {
+                Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+                _gpsListening = true;
+            }
             Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE]);
             Sensor.enableSensorEvents(method(:onSensor));
-            _gpsListening = true;
         } else if (_isAuthenticated && !_gpsListening) {
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
             _gpsListening = true;
@@ -405,11 +433,15 @@ class RunView extends Ui.View {
 
     function onHide() {
         if (_timer != null) { _timer.stop(); _timer = null; }
-        if (_gpsListening) {
-            Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
-            _gpsListening = false;
+        // Do NOT disable GPS or sensors when a run is active — view may be
+        // temporarily hidden by system menu/glance.  Only clean up when idle.
+        if (!_isRunning) {
+            if (_gpsListening) {
+                Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
+                _gpsListening = false;
+            }
+            Sensor.enableSensorEvents(null);
         }
-        if (_isRunning) { Sensor.enableSensorEvents(null); }
     }
 
     // ── Phone messages ────────────────────────────────────────────────────────
@@ -426,8 +458,11 @@ class RunView extends Ui.View {
             var rname = data.get("runnerName");
             if (tok != null && tok.length() > 0) {
                 App.Storage.setValue("authToken", tok);
-                _isAuthenticated = true;
-                _isConnected     = true;
+                _isAuthenticated  = true;
+                _isConnected      = true;
+                _connectWaitTicks = CONNECT_WAIT_MAX; // Mark grace period done
+                // Refresh DataStreamer token in case the old one expired mid-session
+                if (_dataStreamer != null) { _dataStreamer.setAuthToken(tok); }
                 if (!_isRunning) {
                     if (!_gpsListening) {
                         Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
@@ -438,7 +473,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("2.4.3");
+                _phoneLink.sendHello("2.5.0");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -464,6 +499,20 @@ class RunView extends Ui.View {
                 }
             Ui.requestUpdate();
 
+        } else if (t.equals("startRun")) {
+            // Scenario A: phone initiates the run — watch acts as companion display.
+            // Phone owns the backend session + GPS; watch just mirrors the metrics.
+            _phoneControlled = true;
+            _isRunning       = true;
+            _isPaused        = false;
+            _overlayState    = OVERLAY_NONE;
+            _elapsedMs       = 0; _elapsedTime = 0;
+            _distance        = 0.0; _dispDistance = 0.0;
+            _pace            = 0.0; _dispPace    = 0.0;
+            _gpsStreamTick   = 0;
+            _vibeShort();
+            Ui.requestUpdate();
+
         } else if (t.equals("preparedRun")) {
             var dist = data.get("distance");
             var rt   = data.get("runType");
@@ -481,7 +530,13 @@ class RunView extends Ui.View {
             Ui.requestUpdate();
 
         } else if (t.equals("disconnect")) {
+            // Mid-run disconnect (Scenario B -> C): start standalone session so data is not lost.
+            var midRun = _isConnected && _isRunning && !_phoneControlled;
             _isConnected = false;
+            if (midRun && _dataStreamer != null) {
+                _dataStreamer.prepareSession();
+                setStatusMessage("Phone lost - saving offline");
+            }
             Ui.requestUpdate();
 
         } else if (t.equals("runUpdate")) {
@@ -509,14 +564,24 @@ class RunView extends Ui.View {
             if (msg != null) { setStatusMessage(msg); _vibeShort(); Ui.requestUpdate(); }
 
         } else if (t.equals("coachingCue")) {
-            // Only show a brief status prompt — no coaching text on watch
-            _statusMessage = "Coach update";
-            _statusTicks   = 20;
+            // Coaching audio plays through phone/headphones only — no text on watch.
+            // Single haptic pulse so the runner knows a cue was delivered.
             _vibeShort();
-            Ui.requestUpdate();
 
         } else if (t.equals("sessionEnded")) {
-            _isRunning = false; _isPaused = false; _overlayState = OVERLAY_READY;
+            // Phone ended the session (Scenario A) - clean up all watch resources.
+            _isRunning        = false;
+            _isPaused         = false;
+            _phoneControlled  = false;
+            _sessionReadySent = false;  // Allow next session to send sessionReady again
+            _overlayState     = OVERLAY_READY;
+            if (_gpsListening) {
+                Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
+                _gpsListening = false;
+            }
+            Sensor.enableSensorEvents(null);
+            _stopSession();
+            _vibeLong();
             Ui.requestUpdate();
         }
     }
@@ -525,6 +590,8 @@ class RunView extends Ui.View {
 
     function onTick() as Void {
         _dotCount = (_dotCount + 1) % 4;
+        // Grace period: count up for first 8s so UI does not flash OFFLINE before auth arrives
+        if (_connectWaitTicks < CONNECT_WAIT_MAX) { _connectWaitTicks += 1; }
 
         // ── Read native Garmin Activity metrics (standalone mode) ──────────────
         // Activity.getActivityInfo() returns the same values the Garmin native Run
@@ -599,9 +666,12 @@ class RunView extends Ui.View {
         // allowed brief noise readings (e.g. actInfo.currentSpeed = 8 m/s when
         // near-stationary) to show as absurdly fast pace like "2.04 min/km".
         if (_pace > 0.0) {
-            _paceHistory.add(_pace);
-            if (_paceHistory.size() > _paceHistoryMax) {
-                _paceHistory = _paceHistory.slice(1, null);
+            // Circular buffer: avoid Array.slice() allocation every tick
+            if (_paceHistory.size() < _paceHistoryMax) {
+                _paceHistory.add(_pace);
+            } else {
+                _paceHistory[_paceHistoryIdx] = _pace;
+                _paceHistoryIdx = (_paceHistoryIdx + 1) % _paceHistoryMax;
             }
             _dispPace = _smoothedPace();
         } else {
@@ -616,8 +686,9 @@ class RunView extends Ui.View {
             if (_statusTicks <= 0) { _statusMessage = ""; }
         }
 
-        if (!_phoneControlled && _isRunning && !_isPaused) {
-            // Accumulate summary stats every sample (for endSession)
+        // Scenario C only: accumulate stats + stream to backend.
+        // In Scenario B (phone connected), the phone owns the backend session.
+        if (!_phoneControlled && !_isConnected && _isRunning && !_isPaused) {
             _sampleN += 1;
             if (_heartRate > 0) {
                 _sumHR += _heartRate;
@@ -699,7 +770,7 @@ class RunView extends Ui.View {
             }
         }
 
-        if (_isRunning && !_isPaused) { // Always stream GPS to phone (phone uses watch GPS when available)
+        if (_isConnected && _isRunning && !_isPaused) { // Stream GPS to phone only when connected (saves BT in Scenario C)
             _gpsStreamTick += 1;
             if (_gpsStreamTick >= 8 && _lastGpsLat != null && _lastGpsLng != null) {
                 _gpsStreamTick = 0;
@@ -749,7 +820,8 @@ class RunView extends Ui.View {
         if (info.accuracy != null) {
             _gpsQuality = info.accuracy;
             var wasReady = _gpsReady;
-            _gpsReady = (_gpsQuality >= 3);
+            // "Ready" for standalone = quality 3+ (Usable); connected = 2+ (Last known)
+            _gpsReady = (_gpsQuality >= (_isConnected ? 2 : 3));
             if (_gpsReady && !wasReady && !_isRunning) {
                 if (_overlayState == OVERLAY_GPS_WAIT) {
                     _overlayState = (_isCoached || _prepRunType.length() > 0)
@@ -764,6 +836,17 @@ class RunView extends Ui.View {
                 }
             }
         }
+        // Update GPS-lost counter during a run so the status bar can warn the user
+        if (_isRunning && !_isPaused) {
+            if (_gpsQuality < 2) {
+                if (_gpsLostTicks < GPS_LOST_THRESHOLD + 1) { _gpsLostTicks += 1; }
+            } else {
+                if (_gpsLostTicks > 0) { _gpsLostTicks = 0; }
+            }
+        } else {
+            _gpsLostTicks = 0;
+        }
+
         // Cache raw GPS coordinates for phone streaming only.
         // Metrics (distance, pace) come from Activity.getActivityInfo() in onTick.
         if (info.position != null) {
@@ -897,10 +980,15 @@ class RunView extends Ui.View {
         if (_statusMessage.length() > 0) {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, _statusMessage, Gfx.TEXT_JUSTIFY_CENTER);
-        } else if (!_isRunning && !_isConnected && _isAuthenticated) {
-            // Offline mode: amber notice so user knows charts are limited
+        } else if (_isRunning && _gpsLostTicks >= GPS_LOST_THRESHOLD) {
+            // GPS signal lost during an active run — amber warning
             dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y, Gfx.FONT_XTINY, "OFFLINE - 90min charts", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "GPS LOST", Gfx.TEXT_JUSTIFY_CENTER);
+        } else if (!_isRunning && !_isConnected && _isAuthenticated && _connectWaitTicks >= CONNECT_WAIT_MAX) {
+            // Offline mode: amber notice so user knows charts are limited
+            // Guard with grace period so the label does not flash before auth arrives
+            dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "OFFLINE", Gfx.TEXT_JUSTIFY_CENTER);
         } else if (!_isRunning) {
             dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "PRESS START", Gfx.TEXT_JUSTIFY_CENTER);
@@ -1051,6 +1139,13 @@ class RunView extends Ui.View {
     }
 
     private function _startSession() {
+        // Defensive: ensure no stale session is left open before creating a new one.
+        // A double-open can cause an IQ error on some devices.
+        if (_session != null) {
+            if (_session.isRecording()) { _session.stop(); }
+            _session.save();
+            _session = null;
+        }
         _session = Record.createSession({ :name => "AI Run Coach", :sport => Record.SPORT_RUNNING });
         _session.start();
     }

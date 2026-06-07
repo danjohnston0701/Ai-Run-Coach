@@ -36,6 +36,15 @@ class DataStreamer {
         Sys.println("DataStreamer: session prepared — " + _sessionId);
     }
     
+    // Refresh the auth token — called by RunView when a new "auth" message arrives.
+    // Handles the case where the token expired mid-session and the phone re-authenticated.
+    function setAuthToken(token) {
+        if (token != null && token.length() > 0) {
+            _authToken = token;
+            Sys.println("DataStreamer: auth token refreshed");
+        }
+    }
+
     // Update GPS coordinates
     function updateGPS(lat, lon, alt) {
         _latitude = lat;
@@ -124,7 +133,7 @@ class DataStreamer {
             // Notify RunView: HTTP is reachable — reset failure counter so offline
             // buffer stays dormant in Scenario 3 (phone nearby, app not open).
             var app = Application.getApp();
-            if (app has :onHttpSuccess) { app.onHttpSuccess(); }
+            if (app != null && (app has :onHttpSuccess)) { app.onHttpSuccess(); }
 
             // Deliver coaching cue to the active RunView if one was piggybacked on the response
             if (data != null && data.get("coaching") != null) {
@@ -143,12 +152,12 @@ class DataStreamer {
             // (App.Storage token is intentionally kept so the next open can show a proper
             //  "reconnect needed" prompt rather than a generic "waiting for phone" screen)
             var app = Application.getApp();
-            if (app has :onHttpFailure) { app.onHttpFailure(); }
+            if (app != null && (app has :onHttpFailure)) { app.onHttpFailure(); }
         } else {
             // Notify RunView: HTTP failed — increment failure counter
             Sys.println("Data send failed: " + responseCode);
             var app = Application.getApp();
-            if (app has :onHttpFailure) { app.onHttpFailure(); }
+            if (app != null && (app has :onHttpFailure)) { app.onHttpFailure(); }
         }
     }
     

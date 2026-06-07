@@ -161,7 +161,7 @@ fun MapMyRunSetupScreen(
 
     // Header copy by mode
     val title = if (mode != "route") "MAP MY RUN SETUP" else "RUN SETUP"
-    val subtitle = if (mode == "route") "Configure your desired route" else "Set your run basics"
+    val subtitle = if (mode == "route") "Configure your route preferences" else "Set your run details"
 
     // Button enablement
     val gpsReady = currentLocation != null && !isGettingLocation

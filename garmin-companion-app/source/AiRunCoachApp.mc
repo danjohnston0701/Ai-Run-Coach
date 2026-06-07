@@ -38,12 +38,12 @@ class AiRunCoachApp extends App.AppBase {
         Ui.requestUpdate();
     }
 
-    // Called by DataStreamer.onDataSent when the backend piggybacks a coaching cue
-    // on the metrics POST response.  Forwards to RunView so it can show the overlay.
+    // Called by DataStreamer.onDataSent when the backend piggybacks a coaching cue.
+    // Coaching audio plays on the phone/headphones — watch only delivers a haptic pulse.
     function onCoachingCue(cueText) {
         if (_runView != null) {
             _runView.setCoachingCue(cueText);
-            Ui.requestUpdate();
+            // No Ui.requestUpdate() needed — no text to render on screen.
         }
     }
 

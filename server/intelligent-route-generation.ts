@@ -704,7 +704,20 @@ async function evaluateCandidates(
     const backtrackRatio = calculateBacktrackRatio(coordinates);
     console.log(`${label}: Loop=${loopQuality.toFixed(2)}, Backtrack=${backtrackRatio.toFixed(2)}, Dist=${(path.distance / 1000).toFixed(2)}km (${(distanceDiffPercent * 100).toFixed(1)}% off)`);
 
-    const minLoop = isScenic ? thresholds.loopQualityScenic : thresholds.loopQuality;
+    // Adjust loop quality threshold based on distance: shorter routes can have looser loop criteria
+    // For <3km: accept simpler loops (e.g., a 500m square), for 5km+ maintain stricter standards
+    const distanceKm = distanceMeters / 1000;
+    let minLoop = isScenic ? thresholds.loopQualityScenic : thresholds.loopQuality;
+    if (distanceKm < 3) {
+      // For very short routes (<3km), accept loops with quality 0.25+ (much looser)
+      minLoop = isScenic ? 0.15 : 0.25;
+    } else if (distanceKm < 5) {
+      // For short routes (3-5km), accept loops with quality 0.35+ (looser for city routes)
+      minLoop = isScenic ? 0.25 : 0.35;
+    } else {
+      // For 5km+, accept loops with quality 0.5+ (more forgiving in city environments)
+      minLoop = isScenic ? thresholds.loopQualityScenic : 0.5;
+    }
     
     const compactness = calculateCompactness(coordinates, latitude, longitude);
     const angularSpread = calculateAngularSpread(coordinates, latitude, longitude);

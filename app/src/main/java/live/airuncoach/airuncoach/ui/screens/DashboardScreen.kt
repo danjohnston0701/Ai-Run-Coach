@@ -706,9 +706,9 @@ fun LocationPermissionWarning(onNavigateToLocationPermission: () -> Unit = {}) {
 @Composable
 fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabled: Boolean = true) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
-        // MAP MY RUN button - bright cyan with location icon
+        // PLAN RUN button - blue with play icon (moved to top, swapped with Map My Run)
         Button(
-            onClick = { if (isEnabled) onMapMyRun() },
+            onClick = { if (isEnabled) onRunWithoutRoute() },
             enabled = isEnabled,
             modifier = Modifier
                 .fillMaxWidth()
@@ -720,23 +720,23 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabl
             )
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.icon_location_vector),
-                contentDescription = "Location Icon",
+                painter = painterResource(id = R.drawable.icon_play_vector),
+                contentDescription = "Play Icon",
                 tint = Colors.buttonText,
                 modifier = Modifier.size(24.dp)
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Text(
-                text = "MAP MY RUN",
+                text = "PLAN RUN",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
             )
         }
 
         Spacer(modifier = Modifier.height(Spacing.md))
 
-        // RUN WITHOUT ROUTE button - dark gray with play icon
+        // PREPARE RUN ROUTE button - dark gray with location icon (moved to bottom, uses old Run Without Route colors)
         Button(
-            onClick = { if (isEnabled) onRunWithoutRoute() },
+            onClick = { if (isEnabled) onMapMyRun() },
             enabled = isEnabled,
             modifier = Modifier
                 .fillMaxWidth()
@@ -748,14 +748,14 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabl
             )
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.icon_play_vector),
-                contentDescription = "Play Icon",
+                painter = painterResource(id = R.drawable.icon_location_vector),
+                contentDescription = "Location Icon",
                 tint = Colors.textPrimary,
                 modifier = Modifier.size(24.dp)
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Text(
-                text = "RUN WITHOUT ROUTE",
+                text = "PREPARE RUN ROUTE",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
             )
         }

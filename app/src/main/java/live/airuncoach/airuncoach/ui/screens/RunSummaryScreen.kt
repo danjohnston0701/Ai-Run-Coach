@@ -7548,7 +7548,8 @@ private fun StrugglePointCard(
     onComment: (String, String) -> Unit,
     onDismiss: (String, DismissReason) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(true) }
+    // Start collapsed if comment is already saved, otherwise start expanded
+    var expanded by remember { mutableStateOf(point.userComment.isNullOrBlank()) }
     var commentDraft by remember(point.userComment) { mutableStateOf(point.userComment ?: "") }
     var showDismissOptions by remember { mutableStateOf(false) }
 
@@ -7643,14 +7644,25 @@ private fun StrugglePointCard(
                         }
                     }
 
-                    // Show saved comment if present
+                    // Show saved comment if present (locked state indicator)
                     if (!point.userComment.isNullOrBlank() && !expanded) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "💬 ${point.userComment}",
-                            style = AppTextStyles.caption,
-                            color = Colors.primary
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "💬 ${point.userComment}",
+                                style = AppTextStyles.caption,
+                                color = Colors.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "🔒",
+                                style = AppTextStyles.caption
+                            )
+                        }
                     }
                 }
 
@@ -7699,7 +7711,7 @@ private fun StrugglePointCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Save comment button
+                        // Save/Update comment button
                         Button(
                             onClick = {
                                 onComment(point.id, commentDraft)
@@ -7715,7 +7727,7 @@ private fun StrugglePointCard(
                             contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
                             Text(
-                                "Save Comment",
+                                if (point.userComment.isNullOrBlank()) "Save Comment" else "Update Comment",
                                 style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
                                 color = Colors.backgroundRoot
                             )

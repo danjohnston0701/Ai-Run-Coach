@@ -23,14 +23,25 @@ class PhoneLink {
     // Whether the last transmit succeeded (for optional UI indicator)
     private var _lastSendOk = true;
 
+    // Guard against re-registering the BT listener on every onShow() call.
+    // Comm.registerForPhoneAppMessages() only needs to be called once.
+    private var _registered = false;
+
     function initialize() {}
 
     // ── Register ──────────────────────────────────────────────────────────────
     // Call this once from RunView.onShow() (and StartView.onShow()).
     function register(callback) {
         _onMessage = callback;
-        Comm.registerForPhoneAppMessages(method(:_onRawMessage));
-        Sys.println("PhoneLink registered");
+        // Only register the BT listener once — calling it on every onShow() is
+        // wasteful and on some firmware versions creates duplicate message deliveries.
+        if (!_registered) {
+            Comm.registerForPhoneAppMessages(method(:_onRawMessage));
+            _registered = true;
+            Sys.println("PhoneLink registered");
+        } else {
+            Sys.println("PhoneLink: re-using existing BT registration");
+        }
     }
 
     // ── Send command to phone ─────────────────────────────────────────────────
@@ -55,11 +66,15 @@ class PhoneLink {
         Sys.println("PhoneLink tx hello: v" + appVersion);
     }
 
-    // ── Send run data to phone (Scenario 3 — optional confirmation) ───────────
-    // Not required in Scenario 2 (phone already has the data).
+    // ── Send run data to phone (Scenario B — watch streams GPS + biometrics) ──
+    // Builds a new dictionary so the caller's data dict is never mutated.
     function sendRunData(data) {
-        var msg = data;
-        msg.put("type", "watchData");
+        var msg = { "type" => "watchData" };
+        var keys = data.keys();
+        for (var i = 0; i < keys.size(); i++) {
+            var k = keys[i];
+            msg.put(k, data.get(k));
+        }
         _transmit(msg);
     }
 
