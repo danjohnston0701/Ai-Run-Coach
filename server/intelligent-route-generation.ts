@@ -781,6 +781,25 @@ function removeDeadEnds(
       });
   }
 
+  // ── Recalculate each instruction's segment distance from the cleaned coords ─
+  // Each instruction's `distance` field is the metres from its start point to the
+  // next instruction's start point. After splicing out the dead-end section, the
+  // instruction adjacent to the removed block has a different end point, so we
+  // recompute all instruction distances by summing coordinate-pair haversine
+  // distances across each instruction's [startIdx, endIdx] interval.
+  resultInstructions = resultInstructions.map((inst: any) => {
+    const startIdx: number = inst.interval?.[0] ?? 0;
+    const endIdx: number   = inst.interval?.[1] ?? startIdx;
+    let segDistM = 0;
+    for (let k = startIdx; k < endIdx && k < resultCoords.length - 1; k++) {
+      segDistM += getDistanceKm(
+        { lat: resultCoords[k][1],     lng: resultCoords[k][0] },
+        { lat: resultCoords[k + 1][1], lng: resultCoords[k + 1][0] }
+      ) * 1000;
+    }
+    return { ...inst, distance: segDistM };
+  });
+
   return {
     coordinates: resultCoords,
     instructions: resultInstructions,
