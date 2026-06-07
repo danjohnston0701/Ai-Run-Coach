@@ -33,7 +33,6 @@ import live.airuncoach.airuncoach.domain.model.RouteDifficulty
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
-import kotlin.math.atan
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -236,23 +235,12 @@ fun RouteCard(
         RouteDifficulty.HARD -> Color(0xFFEF5350)
     }
     
-    // Calculate average gradient angle in degrees
-    // route.distance is in KM, route.elevationGain/Loss is in meters — convert distance to meters first
-    val distanceMeters = route.distance * 1000.0
-    val maxClimb = if (distanceMeters > 0 && route.elevationGain > 0) {
-        val angle = (atan(route.elevationGain / distanceMeters) * (180.0 / Math.PI)).format(1)
-        Log.d("RouteCard", "Climb angle: ${route.elevationGain}m / ${distanceMeters}m = $angle°")
-        angle
-    } else {
-        "0.0"
-    }
-    val maxDescent = if (distanceMeters > 0 && route.elevationLoss > 0) {
-        val angle = (atan(route.elevationLoss / distanceMeters) * (180.0 / Math.PI)).format(1)
-        Log.d("RouteCard", "Descent angle: ${route.elevationLoss}m / ${distanceMeters}m = $angle°")
-        angle
-    } else {
-        "0.0"
-    }
+    // Use per-segment max gradient values calculated server-side (steepest individual hill segment).
+    // maxGradientDegrees = steepest climb in degrees (from server maxInclineDegrees)
+    // maxGradientPercent = steepest descent in degrees (repurposed field, from server maxDeclineDegrees)
+    val maxClimb = route.maxGradientDegrees.format(1)
+    val maxDescent = route.maxGradientPercent.format(1)
+    Log.d("RouteCard", "Route ${route.id}: maxClimb=${route.maxGradientDegrees}°, maxDescent=${route.maxGradientPercent}°")
     
     // Store GoogleMap reference for zoom controls
     var googleMapRef by remember { mutableStateOf<GoogleMap?>(null) }

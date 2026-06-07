@@ -300,8 +300,8 @@ class RouteGenerationViewModel @Inject constructor(
             },
             elevationGain = this.elevationGain ?: 0.0, // Already in meters
             elevationLoss = this.elevationLoss ?: 0.0, // Already in meters
-            maxGradientPercent = 0.0,
-            maxGradientDegrees = this.maxInclineDegrees ?: 0.0,
+            maxGradientPercent = this.maxDeclineDegrees ?: 0.0, // repurposed: steepest descent in degrees
+            maxGradientDegrees = this.maxInclineDegrees ?: 0.0,  // steepest climb in degrees
             instructions = mappedTurnInstructions.map { it.instruction },
             turnInstructions = mappedTurnInstructions,
             backtrackRatio = 1.0 - (qualityScore ?: 0.5), // Quality score inverted
