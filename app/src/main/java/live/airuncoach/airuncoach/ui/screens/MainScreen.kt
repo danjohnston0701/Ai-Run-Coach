@@ -304,6 +304,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 }
                 val routeViewModel: RouteGenerationViewModel = hiltViewModel(parentEntry)
                 var isNavigatingToRoute by remember { mutableStateOf(false) }
+                
+                // Reset isNavigatingToRoute flag when navigating back to this screen
+                // This allows users to re-generate routes after coming back from route selection
+                LaunchedEffect(backStackEntry) {
+                    isNavigatingToRoute = false
+                }
+                
                 MapMyRunSetupScreen(
                     mode = mode,
                     initialDistance = dist,
