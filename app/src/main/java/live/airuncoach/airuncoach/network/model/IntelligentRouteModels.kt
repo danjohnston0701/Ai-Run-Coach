@@ -74,6 +74,12 @@ data class IntelligentRoute(
     @SerializedName("qualityScore")
     val qualityScore: Double?,  // 0-1 (circuit quality)
     
+    @SerializedName("maxInclineDegrees")
+    val maxInclineDegrees: Double? = null,  // Steepest uphill segment in degrees
+
+    @SerializedName("maxDeclineDegrees")
+    val maxDeclineDegrees: Double? = null,  // Steepest downhill segment in degrees
+
     @SerializedName("turnInstructions")
     val turnInstructions: List<GraphHopperTurnInstruction>? = null  // Turn-by-turn from GraphHopper
 )

@@ -501,10 +501,20 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 )
                 
-                // Auto-navigate when routes are ready
+                // Auto-navigate when routes are ready.
+                // Enforce a minimum 3-second loading time so the backend has a chance to
+                // assess all tiers and return the best possible set of routes.
+                // This prevents the screen flashing away instantly when only 1 route is found quickly.
+                val generationStartTime = remember { System.currentTimeMillis() }
                 LaunchedEffect(routes.size, isLoading) {
                     Log.d("RouteNavigation", "📊 Routes size: ${routes.size}, isLoading: $isLoading, error: $error")
                     if (routes.isNotEmpty() && !isLoading) {
+                        val elapsed = System.currentTimeMillis() - generationStartTime
+                        val minLoadMs = 3_000L
+                        if (elapsed < minLoadMs) {
+                            Log.d("RouteNavigation", "⏳ Waiting ${minLoadMs - elapsed}ms to meet minimum load time...")
+                            delay(minLoadMs - elapsed)
+                        }
                         Log.d("RouteNavigation", "✨ AUTO-NAVIGATING to route selection with ${routes.size} routes")
                         navController.navigate("route_selection/${distanceKm.toInt()}") {
                             popUpTo("route_generating/${distanceKm.toInt()}") { inclusive = true }

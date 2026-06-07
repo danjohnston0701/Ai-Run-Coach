@@ -521,14 +521,51 @@ function calculateDifficulty(distanceKm: number, elevationGainM: number): string
 }
 
 /**
- * Calculate maximum gradient degrees from elevation gain and horizontal distance
- * Formula: degrees = arctan(elevationGain / horizontalDistance) * (180 / π)
+ * Calculate the steepest climb and descent gradients by analysing each segment
+ * of a 3D route individually.
+ *
+ * GraphHopper returns coordinates as [lng, lat, elevation_m] when elevation=true.
+ * We iterate every consecutive pair of points, compute the horizontal distance and
+ * elevation change, and track the steepest climb and steepest descent seen.
+ *
+ * Segments shorter than 20 m are skipped — SRTM elevation data has ~30 m resolution,
+ * so very short segments can produce spurious spikes from quantisation noise.
  */
-function calculateMaxGradientDegrees(elevationGainMeters: number, distanceMeters: number): number {
-  if (distanceMeters === 0) return 0;
-  const gradientPercent = (elevationGainMeters / distanceMeters) * 100;
-  const gradientDegrees = Math.atan(gradientPercent / 100) * (180 / Math.PI);
-  return Math.round(gradientDegrees * 10) / 10; // Round to 1 decimal place
+function calculateMaxSegmentGradients(
+  coordinates: Array<[number, number, ...number[]]>
+): { maxClimbDegrees: number; maxDescentDegrees: number } {
+  let maxClimb = 0;
+  let maxDescent = 0;
+
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const p1 = coordinates[i];
+    const p2 = coordinates[i + 1];
+
+    const elev1 = p1[2] ?? 0;
+    const elev2 = p2[2] ?? 0;
+    const elevChange = elev2 - elev1; // + = climb, - = descent
+
+    // Horizontal distance in metres
+    const horizDistM = getDistanceKm(
+      { lat: p1[1], lng: p1[0] },
+      { lat: p2[1], lng: p2[0] }
+    ) * 1000;
+
+    if (horizDistM < 20) continue; // ignore very short segments
+
+    const degrees = Math.atan(Math.abs(elevChange) / horizDistM) * (180 / Math.PI);
+
+    if (elevChange > 0) {
+      maxClimb = Math.max(maxClimb, degrees);
+    } else if (elevChange < 0) {
+      maxDescent = Math.max(maxDescent, degrees);
+    }
+  }
+
+  return {
+    maxClimbDegrees: Math.round(maxClimb * 10) / 10,
+    maxDescentDegrees: Math.round(maxDescent * 10) / 10,
+  };
 }
 
 // ==================== SHAPE & QUALITY ANALYSIS ====================
@@ -900,7 +937,7 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
     console.log(`📊 ${tierLabel}: ${tier3.accepted.length} more accepted (total: ${allCandidates.length})`);
 
     // If still not enough, try foot candidates with loose thresholds too
-    if (allCandidates.length < 1 && tier3.rejected.length > 0) {
+    if (allCandidates.length < 3 && tier3.rejected.length > 0) {
       console.log(`\n━━━ ${tierLabel}b: Re-evaluating foot candidates with loose thresholds ━━━`);
       const tier3b = await evaluateCandidates(tier3.rejected.map(r => r.raw), latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier3b-Loose');
       allCandidates.push(...tier3b.accepted);
@@ -961,10 +998,12 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
     const r = c.route, diff = calculateDifficulty(r.distance / 1000, r.ascend || 0);
     const elevGain = r.ascend || 0;
     const elevLoss = r.descend || 0;
-    const maxClimbDegrees = calculateMaxGradientDegrees(elevGain, r.distance);
-    const maxDescentDegrees = calculateMaxGradientDegrees(elevLoss, r.distance);
+    // Calculate steepest climb/descent from segment-by-segment elevation analysis
+    const { maxClimbDegrees, maxDescentDegrees } = calculateMaxSegmentGradients(
+      r.points.coordinates as Array<[number, number, number?]>
+    );
     
-    console.log(`  Route ${i + 1}: ${(r.distance / 1000).toFixed(2)}km ${c.isScenic ? '🌿' : '🔄'}, Score=${c.totalScore.toFixed(2)}`);
+    console.log(`  Route ${i + 1}: ${(r.distance / 1000).toFixed(2)}km ${c.isScenic ? '🌿' : '🔄'}, Score=${c.totalScore.toFixed(2)}, maxClimb=${maxClimbDegrees}°, maxDescent=${maxDescentDegrees}°`);
     return {
       id: generateRouteId(), polyline: encodePolyline(r.points.coordinates), coordinates: r.points.coordinates,
       distance: r.distance, elevationGain: elevGain, elevationLoss: elevLoss,
