@@ -725,12 +725,18 @@ async function evaluateCandidates(
 
     const metrics = { loopQuality, backtrackRatio, compactness, angularSpread, proximityOverlap };
 
+    // For short routes (<3km), compactness and angular spread are geometrically unreliable
+    // (tiny loops enclose very little area, so compactness is near 0 even for a valid square loop)
+    // So we skip those two checks entirely for sub-3km routes.
+    const minCompactness = distanceKm < 3 ? 0 : thresholds.compactness;
+    const minAngularSpread = distanceKm < 3 ? 0 : thresholds.angularSpread;
+
     // Apply threshold checks
     if (loopQuality < minLoop) { console.log(`${label}: Rejected - poor loop (${loopQuality.toFixed(2)} < ${minLoop})`); rejected.push({ raw: result, metrics }); continue; }
     if (backtrackRatio > thresholds.backtrackRatio) { console.log(`${label}: Rejected - backtracking (${backtrackRatio.toFixed(2)} > ${thresholds.backtrackRatio})`); rejected.push({ raw: result, metrics }); continue; }
     if (proximityOverlap > thresholds.proximityOverlap) { console.log(`${label}: Rejected - overlap (${proximityOverlap.toFixed(2)} > ${thresholds.proximityOverlap})`); rejected.push({ raw: result, metrics }); continue; }
-    if (!isScenic && compactness < thresholds.compactness) { console.log(`${label}: Rejected - elongated (${compactness.toFixed(2)} < ${thresholds.compactness})`); rejected.push({ raw: result, metrics }); continue; }
-    if (!isScenic && angularSpread < thresholds.angularSpread) { console.log(`${label}: Rejected - poor spread (${angularSpread.toFixed(2)} < ${thresholds.angularSpread})`); rejected.push({ raw: result, metrics }); continue; }
+    if (!isScenic && minCompactness > 0 && compactness < minCompactness) { console.log(`${label}: Rejected - elongated (${compactness.toFixed(2)} < ${minCompactness})`); rejected.push({ raw: result, metrics }); continue; }
+    if (!isScenic && minAngularSpread > 0 && angularSpread < minAngularSpread) { console.log(`${label}: Rejected - poor spread (${angularSpread.toFixed(2)} < ${minAngularSpread})`); rejected.push({ raw: result, metrics }); continue; }
     
     // Force circular
     if (coordinates.length > 0) {
@@ -860,36 +866,45 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
 
   let allCandidates: RouteCandidate[] = [];
 
-  // ── TIER 1: Hike profile + strict thresholds ──
-  console.log(`\n━━━ TIER 1: Hike profile + strict thresholds ━━━`);
-  const hikeResults = await fetchCandidates(latitude, longitude, distanceMeters, preferTrails, scenicWaypoints, 'Tier1-Hike', true);
-  const tier1 = await evaluateCandidates(hikeResults, latitude, longitude, distanceMeters, STRICT_THRESHOLDS, 'Tier1-Strict');
-  allCandidates.push(...tier1.accepted);
-  console.log(`📊 Tier 1: ${tier1.accepted.length} accepted, ${tier1.rejected.length} rejected`);
+  // GraphHopper's 'hike' profile consistently returns 400 errors for very short round-trips (<3km).
+  // For short distances, skip straight to foot profile which handles sub-3km loops reliably.
+  const useHikeForTier1 = distanceKm >= 3;
 
-  // ── TIER 2: Re-evaluate rejected hike candidates with loose thresholds ──
-  if (allCandidates.length < 3 && tier1.rejected.length > 0) {
-    console.log(`\n━━━ TIER 2: Re-evaluating ${tier1.rejected.length} rejected hike candidates with loose thresholds ━━━`);
-    const rejectedRaws = tier1.rejected.map(r => r.raw);
-    const tier2 = await evaluateCandidates(rejectedRaws, latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier2-Loose');
-    allCandidates.push(...tier2.accepted);
-    console.log(`📊 Tier 2: ${tier2.accepted.length} more accepted (total: ${allCandidates.length})`);
+  if (useHikeForTier1) {
+    // ── TIER 1: Hike profile + strict thresholds ──
+    console.log(`\n━━━ TIER 1: Hike profile + strict thresholds ━━━`);
+    const hikeResults = await fetchCandidates(latitude, longitude, distanceMeters, preferTrails, scenicWaypoints, 'Tier1-Hike', true);
+    const tier1 = await evaluateCandidates(hikeResults, latitude, longitude, distanceMeters, STRICT_THRESHOLDS, 'Tier1-Strict');
+    allCandidates.push(...tier1.accepted);
+    console.log(`📊 Tier 1: ${tier1.accepted.length} accepted, ${tier1.rejected.length} rejected`);
+
+    // ── TIER 2: Re-evaluate rejected hike candidates with loose thresholds ──
+    if (allCandidates.length < 3 && tier1.rejected.length > 0) {
+      console.log(`\n━━━ TIER 2: Re-evaluating ${tier1.rejected.length} rejected hike candidates with loose thresholds ━━━`);
+      const rejectedRaws = tier1.rejected.map(r => r.raw);
+      const tier2 = await evaluateCandidates(rejectedRaws, latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier2-Loose');
+      allCandidates.push(...tier2.accepted);
+      console.log(`📊 Tier 2: ${tier2.accepted.length} more accepted (total: ${allCandidates.length})`);
+    }
+  } else {
+    console.log(`\n━━━ Skipping hike profile for ${distanceKm}km route (hike profile unreliable for <3km) ━━━`);
   }
 
-  // ── TIER 3: Foot profile + strict thresholds (fallback when hike profile fails) ──
+  // ── TIER 3: Foot profile + strict thresholds (fallback when hike profile fails, or primary for <3km) ──
   if (allCandidates.length < 3) {
-    console.log(`\n━━━ TIER 3: Foot profile fallback + strict thresholds ━━━`);
+    const tierLabel = useHikeForTier1 ? 'Tier 3' : 'Tier 1 (foot)';
+    console.log(`\n━━━ ${tierLabel}: Foot profile + strict thresholds ━━━`);
     const footResults = await fetchCandidates(latitude, longitude, distanceMeters, false, scenicWaypoints, 'Tier3-Foot', false);
     const tier3 = await evaluateCandidates(footResults, latitude, longitude, distanceMeters, STRICT_THRESHOLDS, 'Tier3-Strict');
     allCandidates.push(...tier3.accepted);
-    console.log(`📊 Tier 3: ${tier3.accepted.length} more accepted (total: ${allCandidates.length})`);
+    console.log(`📊 ${tierLabel}: ${tier3.accepted.length} more accepted (total: ${allCandidates.length})`);
 
     // If still not enough, try foot candidates with loose thresholds too
     if (allCandidates.length < 1 && tier3.rejected.length > 0) {
-      console.log(`\n━━━ TIER 3b: Re-evaluating foot candidates with loose thresholds ━━━`);
+      console.log(`\n━━━ ${tierLabel}b: Re-evaluating foot candidates with loose thresholds ━━━`);
       const tier3b = await evaluateCandidates(tier3.rejected.map(r => r.raw), latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier3b-Loose');
       allCandidates.push(...tier3b.accepted);
-      console.log(`📊 Tier 3b: ${tier3b.accepted.length} more accepted (total: ${allCandidates.length})`);
+      console.log(`📊 ${tierLabel}b: ${tier3b.accepted.length} more accepted (total: ${allCandidates.length})`);
     }
   }
 
