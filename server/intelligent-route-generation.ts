@@ -816,9 +816,20 @@ async function fetchCandidates(
   useHikeProfile: boolean,
 ): Promise<Array<{ seed: number; ghResponse: any; isScenic: boolean }>> {
   const baseSeed = Math.floor(Math.random() * 1000);
-  const seedOffsets = [0, 17, 37, 53]; // Reduced from 6 to 4 candidates for faster requests
+  const seedOffsets = [0, 17, 37, 53]; // 4 candidates per tier
   
   const profile = useHikeProfile ? 'hike' : 'foot';
+
+  // GraphHopper's round_trip algorithm consistently returns routes ~2x the requested distance
+  // for short targets (<4km). To compensate, request half the distance from GH so the returned
+  // routes land close to the user's actual target (validated against real distanceMeters below).
+  const ghRequestDistance = distanceMeters < 4000
+    ? Math.round(distanceMeters * 0.5)
+    : distanceMeters;
+  
+  if (distanceMeters < 4000) {
+    console.log(`📐 Short route: requesting ${ghRequestDistance}m from GH (half of ${distanceMeters}m target) to compensate for GH overshoot`);
+  }
   console.log(`🔄 Generating ${seedOffsets.length} round-trip candidates (${profileLabel}, ${profile} profile)...`);
 
   const results: Array<{ seed: number; ghResponse: any; isScenic: boolean }> = [];
@@ -829,34 +840,15 @@ async function fetchCandidates(
     try {
       let ghResponse;
       if (useHikeProfile) {
-        ghResponse = await generateGraphHopperRoute(latitude, longitude, distanceMeters, seed, preferTrails);
+        ghResponse = await generateGraphHopperRoute(latitude, longitude, ghRequestDistance, seed, preferTrails);
       } else {
         // foot profile — always use GET (no custom_model needed)
-        ghResponse = await generateGraphHopperRouteGet(latitude, longitude, distanceMeters, 'foot', seed);
+        ghResponse = await generateGraphHopperRouteGet(latitude, longitude, ghRequestDistance, 'foot', seed);
       }
       results.push({ seed, ghResponse, isScenic: false });
     } catch (error: any) {
       console.error(`[${profileLabel}] Seed ${seed} failed: ${error.message}`);
       results.push({ seed, ghResponse: null, isScenic: false });
-    }
-  }
-
-  // For very short routes (<3km), GraphHopper's round_trip algorithm tends to return routes
-  // ~2x the requested distance (e.g. asking for 2km returns 4km).
-  // Try requesting HALF the target distance with extra seeds — GH will hopefully return
-  // routes close to the actual target, which will then pass validation against the real distanceMeters.
-  if (distanceMeters < 3000) {
-    const halfDistance = Math.round(distanceMeters * 0.5);
-    console.log(`📐 Adding 2 half-distance (${halfDistance}m) candidates for short route...`);
-    for (const offset of [71, 97]) {
-      const seed = baseSeed + offset;
-      try {
-        const ghResponse = await generateGraphHopperRouteGet(latitude, longitude, halfDistance, profile, seed);
-        results.push({ seed, ghResponse, isScenic: false });
-      } catch (error: any) {
-        console.error(`[${profileLabel}] Half-dist seed ${seed} failed: ${error.message}`);
-        results.push({ seed, ghResponse: null, isScenic: false });
-      }
     }
   }
 
