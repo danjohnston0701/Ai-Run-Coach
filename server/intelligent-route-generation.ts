@@ -654,6 +654,141 @@ function calculateRouteDiversity(a: Array<[number, number]>, b: Array<[number, n
   return d / 180;
 }
 
+// ==================== DEAD-END REMOVAL ====================
+
+/**
+ * Detect and remove dead-end (out-and-back) sections from an accepted route.
+ *
+ * A dead-end is identified when the route revisits a location within 60 m
+ * of an earlier location AND has a U-turn (bearing change > 150°) between
+ * those two visits — the unmistakeable signature of a cul-de-sac excursion.
+ *
+ * Steps:
+ *  1. Sample up to 200 coordinates to scan efficiently.
+ *  2. For each nearby-revisited pair, confirm there is a U-turn between them.
+ *  3. Splice the dead-end coordinates out of the array.
+ *  4. Remove the matching turn instructions and re-index the remainder.
+ *  5. Return the cleaned coordinates, instructions, and total metres removed.
+ *
+ * The final 10% of the route is excluded from detection to avoid mis-flagging
+ * the normal loop closure (start ≈ end of a circular route).
+ */
+function removeDeadEnds(
+  coordinates: Array<[number, number, ...number[]]>,
+  instructions: any[]
+): {
+  coordinates: Array<[number, number, ...number[]]>;
+  instructions: any[];
+  removedSections: number;
+  distanceReductionM: number;
+} {
+  if (coordinates.length < 20) {
+    return { coordinates, instructions, removedSections: 0, distanceReductionM: 0 };
+  }
+
+  const PROXIMITY_THRESHOLD_KM = 0.060; // 60 m — entry & exit of a dead-end are this close
+  const MIN_SAMPLED_GAP = 4;            // minimum sampled-point gap between entry and exit
+  const LOOP_CLOSE_EXCLUSION = 0.10;    // ignore last 10% of route (normal loop closure)
+
+  // Build a sampled list of up to 200 points for efficient scanning
+  const step = Math.max(1, Math.floor(coordinates.length / 200));
+  const sampled: Array<{ coord: [number, number]; originalIndex: number }> = [];
+  for (let i = 0; i < coordinates.length; i += step) {
+    sampled.push({ coord: [coordinates[i][0], coordinates[i][1]], originalIndex: i });
+  }
+
+  const loopCloseStart = Math.floor(coordinates.length * (1 - LOOP_CLOSE_EXCLUSION));
+
+  // ── Detect dead-end sections ──────────────────────────────────────────────
+  const deadEnds: Array<{ entryIndex: number; exitIndex: number }> = [];
+
+  for (let si = 0; si < sampled.length - MIN_SAMPLED_GAP; si++) {
+    for (let sj = si + MIN_SAMPLED_GAP; sj < sampled.length; sj++) {
+      if (sampled[sj].originalIndex >= loopCloseStart) break; // ignore loop closure
+
+      const dist = getDistanceKm(
+        { lat: sampled[si].coord[1], lng: sampled[si].coord[0] },
+        { lat: sampled[sj].coord[1], lng: sampled[sj].coord[0] }
+      );
+
+      if (dist < PROXIMITY_THRESHOLD_KM) {
+        // Confirm there is a U-turn somewhere between these two sampled points
+        const section = sampled.slice(si, sj + 1).map(s => s.coord as [number, number]);
+        let hasUTurn = false;
+        for (let k = 1; k < section.length - 1; k++) {
+          if (calculateAngle(section[k - 1], section[k], section[k + 1]) > 150) {
+            hasUTurn = true;
+            break;
+          }
+        }
+
+        if (hasUTurn) {
+          deadEnds.push({
+            entryIndex: sampled[si].originalIndex,
+            exitIndex: sampled[sj].originalIndex,
+          });
+          si = sj; // jump past this dead-end before scanning for the next one
+          break;
+        }
+      }
+    }
+  }
+
+  if (deadEnds.length === 0) {
+    return { coordinates, instructions, removedSections: 0, distanceReductionM: 0 };
+  }
+
+  // ── Splice out dead-end sections (process last→first to preserve indices) ─
+  let resultCoords = [...coordinates];
+  let resultInstructions = [...instructions];
+  let totalDistanceReductionM = 0;
+
+  for (const { entryIndex, exitIndex } of [...deadEnds].reverse()) {
+    // Measure the distance of the section being removed
+    let sectionDistM = 0;
+    for (let k = entryIndex; k < exitIndex - 1 && k < resultCoords.length - 1; k++) {
+      sectionDistM += getDistanceKm(
+        { lat: resultCoords[k][1], lng: resultCoords[k][0] },
+        { lat: resultCoords[k + 1][1], lng: resultCoords[k + 1][0] }
+      ) * 1000;
+    }
+    totalDistanceReductionM += sectionDistM;
+
+    const removeCount = exitIndex - entryIndex;
+    console.log(
+      `✂️  Dead-end removed: coord[${entryIndex}→${exitIndex}] ` +
+      `(${removeCount} points, ~${sectionDistM.toFixed(0)}m)`
+    );
+
+    // Splice coordinates
+    resultCoords = [...resultCoords.slice(0, entryIndex), ...resultCoords.slice(exitIndex)];
+
+    // Remove instructions that fall within the dead-end, re-index the rest
+    resultInstructions = resultInstructions
+      .filter((inst: any) => {
+        const start: number = inst.interval?.[0] ?? 0;
+        return !(start >= entryIndex && start < exitIndex);
+      })
+      .map((inst: any) => {
+        const start: number = inst.interval?.[0] ?? 0;
+        if (inst.interval && start >= exitIndex) {
+          return {
+            ...inst,
+            interval: [start - removeCount, (inst.interval[1] ?? start) - removeCount],
+          };
+        }
+        return inst;
+      });
+  }
+
+  return {
+    coordinates: resultCoords,
+    instructions: resultInstructions,
+    removedSections: deadEnds.length,
+    distanceReductionM: totalDistanceReductionM,
+  };
+}
+
 // ==================== CANDIDATE TYPE ====================
 
 type RouteCandidate = {
@@ -1012,22 +1147,45 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
   console.log(`✅ Returning ${selected.length} routes (${selected.filter(s => s.isScenic).length} scenic)`);
   
   return selected.map((c, i) => {
-    const r = c.route, diff = calculateDifficulty(r.distance / 1000, r.ascend || 0);
+    const r = c.route;
+
+    // ── Post-process: remove any dead-end (out-and-back) sections ────────────
+    const {
+      coordinates: finalCoords,
+      instructions: finalInstructions,
+      removedSections,
+      distanceReductionM,
+    } = removeDeadEnds(r.points.coordinates, r.instructions || []);
+
+    if (removedSections > 0) {
+      console.log(
+        `✂️  Route ${i + 1}: removed ${removedSections} dead-end section(s), ` +
+        `distance reduced by ~${distanceReductionM.toFixed(0)}m`
+      );
+    }
+
+    const finalDistance = Math.max(0, r.distance - distanceReductionM);
+    const diff = calculateDifficulty(finalDistance / 1000, r.ascend || 0);
     const elevGain = r.ascend || 0;
     const elevLoss = r.descend || 0;
+
     // Calculate steepest climb/descent from segment-by-segment elevation analysis
     const { maxClimbDegrees, maxDescentDegrees } = calculateMaxSegmentGradients(
-      r.points.coordinates as Array<[number, number, number?]>
+      finalCoords as Array<[number, number, number?]>
     );
-    
-    console.log(`  Route ${i + 1}: ${(r.distance / 1000).toFixed(2)}km ${c.isScenic ? '🌿' : '🔄'}, Score=${c.totalScore.toFixed(2)}, maxClimb=${maxClimbDegrees}°, maxDescent=${maxDescentDegrees}°`);
+
+    console.log(
+      `  Route ${i + 1}: ${(finalDistance / 1000).toFixed(2)}km ` +
+      `${c.isScenic ? '🌿' : '🔄'}, Score=${c.totalScore.toFixed(2)}, ` +
+      `maxClimb=${maxClimbDegrees}°, maxDescent=${maxDescentDegrees}°`
+    );
     return {
-      id: generateRouteId(), polyline: encodePolyline(r.points.coordinates), coordinates: r.points.coordinates,
-      distance: r.distance, elevationGain: elevGain, elevationLoss: elevLoss,
+      id: generateRouteId(), polyline: encodePolyline(finalCoords), coordinates: finalCoords,
+      distance: finalDistance, elevationGain: elevGain, elevationLoss: elevLoss,
       maxInclineDegrees: maxClimbDegrees, maxDeclineDegrees: maxDescentDegrees,
       duration: r.time / 1000, difficulty: diff, popularityScore: c.popularityScore,
       qualityScore: c.validation.qualityScore, loopQuality: c.loopQuality, backtrackRatio: c.backtrackRatio,
-      turnInstructions: r.instructions || [],
+      turnInstructions: finalInstructions,
     };
   });
 }
