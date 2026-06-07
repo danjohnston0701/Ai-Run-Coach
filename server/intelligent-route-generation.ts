@@ -713,6 +713,7 @@ async function evaluateCandidates(
   distanceMeters: number,
   thresholds: QualityThresholds,
   tierLabel: string,
+  distanceToleranceOverride?: number, // optional: override the hard-reject distance tolerance
 ): Promise<{ accepted: RouteCandidate[]; rejected: Array<{ raw: { seed: number; ghResponse: any; isScenic: boolean }; metrics: any }> }> {
   const accepted: RouteCandidate[] = [];
   const rejected: Array<{ raw: { seed: number; ghResponse: any; isScenic: boolean }; metrics: any }> = [];
@@ -727,9 +728,11 @@ async function evaluateCandidates(
     
     // Hard reject: distance must be within tolerance of target.
     // GraphHopper round_trip is less accurate for short routes, so use wider tolerance for <5km.
-    const distanceTolerance = distanceMeters < 3000 ? 0.50  // ±50% for <3km (very short routes)
-                            : distanceMeters < 5000 ? 0.35  // ±35% for 3–5km (short routes)
-                            : 0.15;                          // ±15% for 5km+ (standard)
+    const distanceTolerance = distanceToleranceOverride ?? (
+      distanceMeters < 3000 ? 0.50  // ±50% for <3km (very short routes)
+      : distanceMeters < 5000 ? 0.35  // ±35% for 3–5km (short routes)
+      : 0.15                           // ±15% for 5km+ (standard)
+    );
     const distanceDiffPercent = Math.abs(path.distance - distanceMeters) / distanceMeters;
     if (distanceDiffPercent > distanceTolerance) {
       console.log(`${label}: Rejected - distance ${(path.distance / 1000).toFixed(2)}km is ${(distanceDiffPercent * 100).toFixed(1)}% off target ${(distanceMeters / 1000).toFixed(1)}km (max ±${(distanceTolerance * 100).toFixed(0)}%)`);
@@ -838,6 +841,25 @@ async function fetchCandidates(
     }
   }
 
+  // For very short routes (<3km), GraphHopper's round_trip algorithm tends to return routes
+  // ~2x the requested distance (e.g. asking for 2km returns 4km).
+  // Try requesting HALF the target distance with extra seeds — GH will hopefully return
+  // routes close to the actual target, which will then pass validation against the real distanceMeters.
+  if (distanceMeters < 3000) {
+    const halfDistance = Math.round(distanceMeters * 0.5);
+    console.log(`📐 Adding 2 half-distance (${halfDistance}m) candidates for short route...`);
+    for (const offset of [71, 97]) {
+      const seed = baseSeed + offset;
+      try {
+        const ghResponse = await generateGraphHopperRouteGet(latitude, longitude, halfDistance, profile, seed);
+        results.push({ seed, ghResponse, isScenic: false });
+      } catch (error: any) {
+        console.error(`[${profileLabel}] Half-dist seed ${seed} failed: ${error.message}`);
+        results.push({ seed, ghResponse: null, isScenic: false });
+      }
+    }
+  }
+
   // SEQUENTIAL scenic waypoint requests
   if (useHikeProfile && scenicWaypoints.length >= 2) {
     console.log(`🌿 Generating scenic waypoint candidates (${profileLabel})...`);
@@ -936,10 +958,13 @@ export async function generateIntelligentRoute(request: RouteRequest): Promise<G
     allCandidates.push(...tier3.accepted);
     console.log(`📊 ${tierLabel}: ${tier3.accepted.length} more accepted (total: ${allCandidates.length})`);
 
-    // If still not enough, try foot candidates with loose thresholds too
+    // If still not enough, try foot candidates with loose thresholds too.
+    // As a last resort for <3km routes, widen the distance tolerance to ±120% —
+    // GraphHopper can't always make tight 2km loops so a 4km route is better than no route.
     if (allCandidates.length < 3 && tier3.rejected.length > 0) {
       console.log(`\n━━━ ${tierLabel}b: Re-evaluating foot candidates with loose thresholds ━━━`);
-      const tier3b = await evaluateCandidates(tier3.rejected.map(r => r.raw), latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier3b-Loose');
+      const lastResortDistanceTolerance = distanceKm < 3 ? 1.20 : undefined; // ±120% last resort for <3km
+      const tier3b = await evaluateCandidates(tier3.rejected.map(r => r.raw), latitude, longitude, distanceMeters, LOOSE_THRESHOLDS, 'Tier3b-Loose', lastResortDistanceTolerance);
       allCandidates.push(...tier3b.accepted);
       console.log(`📊 ${tierLabel}b: ${tier3b.accepted.length} more accepted (total: ${allCandidates.length})`);
     }
