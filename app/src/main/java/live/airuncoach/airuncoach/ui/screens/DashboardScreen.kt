@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -719,15 +721,16 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabl
                 contentColor = Colors.buttonText
             )
         ) {
+
             Icon(
-                painter = painterResource(id = R.drawable.icon_play_vector),
-                contentDescription = "Play Icon",
+                imageVector = Icons.AutoMirrored.Filled.DirectionsRun,
+                contentDescription = "Run Icon",
                 tint = Colors.buttonText,
                 modifier = Modifier.size(24.dp)
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Text(
-                text = "PLAN RUN",
+                text = "RUN WITHOUT ROUTE",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
             )
         }
@@ -755,7 +758,7 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabl
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Text(
-                text = "PREPARE RUN ROUTE",
+                text = "RUN WITH ROUTE",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
             )
         }
