@@ -332,13 +332,14 @@ fun MapMyRunSetupScreen(
                         }
                     )
                 } else {
-                    // no_route mode: Prepare on Watch (left) + Prepare Run (right) side-by-side
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                    ) {
-                        // Left: Prepare on Watch button (if installed)
-                        if (companionInstalled) {
+                    // no_route mode: conditional layout based on watch availability
+                    if (companionInstalled) {
+                        // Side-by-side when watch is available
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            // Left: Prepare for Watch button
                             Box(modifier = Modifier.weight(1f)) {
                                 PrepareRunOnWatchButton(
                                     companionInstalled = companionInstalled,
@@ -383,54 +384,99 @@ fun MapMyRunSetupScreen(
                                     }
                                 )
                             }
-                        }
 
-                        // Right: Prepare Run button (takes up remaining space)
-                        Box(modifier = Modifier.weight(1f)) {
-                            PrimaryCtaButton(
-                                text = when {
-                                    !hasLocationPermission -> "GRANT"
-                                    isGettingLocation -> "GPS…"
-                                    currentLocation == null -> "WAITING"
-                                    else -> "PREPARE RUN"
-                                },
-                                leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
-                                    R.drawable.icon_navigation_vector else null,
-                                enabled = canProceed && !runState.isStopping,
-                                onClick = {
-                                    // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
-                                    val config = RunSetupConfig(
-                                        activityType = if (activityMode == ActivityMode.WALK) {
-                                            PhysicalActivityType.WALK
-                                        } else {
-                                            PhysicalActivityType.RUN
-                                        },
-                                        targetDistance = targetDistance,
-                                        hasTargetTime = isTargetTimeEnabled,
-                                        targetHours = hoursInt,
-                                        targetMinutes = minutesInt,
-                                        targetSeconds = secondsInt,
-                                        liveTrackingEnabled = isLiveTrackingEnabled,
-                                        liveTrackingObservers = emptyList(),
-                                        isGroupRun = isGroupRunEnabled,
-                                        groupRunParticipants = emptyList()
-                                    )
-                                    runSessionViewModel.setRunConfig(config)
-                                    runSessionViewModel.fetchWellnessData()
-                                    // NOTE: prepareRun() is now called in RunSessionScreen when it loads
-                                    // to avoid duplicate API calls
+                            // Right: Prepare for Phone button
+                            Box(modifier = Modifier.weight(1f)) {
+                                PrimaryCtaButton(
+                                    text = when {
+                                        !hasLocationPermission -> "GRANT"
+                                        isGettingLocation -> "GPS…"
+                                        currentLocation == null -> "WAITING"
+                                        else -> "PREPARE FOR\nPHONE"
+                                    },
+                                    leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
+                                        R.drawable.icon_navigation_vector else null,
+                                    enabled = canProceed && !runState.isStopping,
+                                    onClick = {
+                                        // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
+                                        val config = RunSetupConfig(
+                                            activityType = if (activityMode == ActivityMode.WALK) {
+                                                PhysicalActivityType.WALK
+                                            } else {
+                                                PhysicalActivityType.RUN
+                                            },
+                                            targetDistance = targetDistance,
+                                            hasTargetTime = isTargetTimeEnabled,
+                                            targetHours = hoursInt,
+                                            targetMinutes = minutesInt,
+                                            targetSeconds = secondsInt,
+                                            liveTrackingEnabled = isLiveTrackingEnabled,
+                                            liveTrackingObservers = emptyList(),
+                                            isGroupRun = isGroupRunEnabled,
+                                            groupRunParticipants = emptyList()
+                                        )
+                                        runSessionViewModel.setRunConfig(config)
+                                        runSessionViewModel.fetchWellnessData()
+                                        // NOTE: prepareRun() is now called in RunSessionScreen when it loads
+                                        // to avoid duplicate API calls
 
-                                    // Navigate immediately
-                                    onStartRunWithoutRoute(
-                                        targetDistance,
-                                        isTargetTimeEnabled,
-                                        hoursInt,
-                                        minutesInt,
-                                        secondsInt
-                                    )
-                                }
-                            )
+                                        // Navigate immediately
+                                        onStartRunWithoutRoute(
+                                            targetDistance,
+                                            isTargetTimeEnabled,
+                                            hoursInt,
+                                            minutesInt,
+                                            secondsInt
+                                        )
+                                    }
+                                )
+                            }
                         }
+                    } else {
+                        // Full-width button when watch is not available
+                        PrimaryCtaButton(
+                            text = when {
+                                !hasLocationPermission -> "GRANT LOCATION"
+                                isGettingLocation -> "ACQUIRING GPS…"
+                                currentLocation == null -> "WAITING FOR GPS SIGNAL"
+                                else -> "PREPARE RUN"
+                            },
+                            leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
+                                R.drawable.icon_navigation_vector else null,
+                            enabled = canProceed && !runState.isStopping,
+                            onClick = {
+                                // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
+                                val config = RunSetupConfig(
+                                    activityType = if (activityMode == ActivityMode.WALK) {
+                                        PhysicalActivityType.WALK
+                                    } else {
+                                        PhysicalActivityType.RUN
+                                    },
+                                    targetDistance = targetDistance,
+                                    hasTargetTime = isTargetTimeEnabled,
+                                    targetHours = hoursInt,
+                                    targetMinutes = minutesInt,
+                                    targetSeconds = secondsInt,
+                                    liveTrackingEnabled = isLiveTrackingEnabled,
+                                    liveTrackingObservers = emptyList(),
+                                    isGroupRun = isGroupRunEnabled,
+                                    groupRunParticipants = emptyList()
+                                )
+                                runSessionViewModel.setRunConfig(config)
+                                runSessionViewModel.fetchWellnessData()
+                                // NOTE: prepareRun() is now called in RunSessionScreen when it loads
+                                // to avoid duplicate API calls
+
+                                // Navigate immediately
+                                onStartRunWithoutRoute(
+                                    targetDistance,
+                                    isTargetTimeEnabled,
+                                    hoursInt,
+                                    minutesInt,
+                                    secondsInt
+                                )
+                            }
+                        )
                     }
                 }
 

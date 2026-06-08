@@ -85,10 +85,11 @@ fun PrepareRunOnWatchButton(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            "Watch",
-                            fontSize = 12.sp,
+                            "Prepare for\nWatch",
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF00E5FF)
+                            color = Color(0xFF00E5FF),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                 }
