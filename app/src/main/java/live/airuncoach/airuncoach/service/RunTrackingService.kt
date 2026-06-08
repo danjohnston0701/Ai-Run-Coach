@@ -871,6 +871,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastPhase = null        // Reset for new run - allow first phase change to trigger
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
+        lastWatchGpsMs = 0L  // Reset watch GPS timestamp so phone GPS is not skipped for phone-only runs
         maxSpeed = 0f
         smoothedWatchSpeedMs = 0f    // Reset EMA smoother for clean pace display on new run
         watchGpsUpdateCount = 0      // Reset warm-up counter
