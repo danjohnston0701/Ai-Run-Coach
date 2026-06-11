@@ -88,6 +88,8 @@ class RunTrackingService : Service(), SensorEventListener {
     // Used to: (a) pre-block phone GPS at run start and (b) skip sending redundant
     // runUpdate messages back to the watch (watch has its own authoritative data).
     private var wasRunStartedByWatch: Boolean = false
+    private var hasGarminData: Boolean = false   // true once any biometric frame is received
+    private var garminDeviceName: String? = null // e.g. "Vívoactive 4", "Forerunner 965"
 
     // AI Coaching
     private lateinit var coachingFeaturePrefs: live.airuncoach.airuncoach.data.CoachingFeaturePreferences
@@ -887,6 +889,8 @@ class RunTrackingService : Service(), SensorEventListener {
         lastKmSplit = 0
         pendingKmSplitCoaching = null  // Clear any deferred split from previous run
         last500mMilestone = 0  // Reset for new run
+        hasGarminData = false       // Will be set true once first watch biometric frame arrives
+        garminDeviceName = null     // Re-captured on first frame new run
         lastPhase = null        // Reset for new run - allow first phase change to trigger
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
@@ -1978,6 +1982,14 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "Ignoring watch sensor data: isTracking=false")
             return
         }
+        // Mark that Garmin sensor data was received (drives hasGarminData flag on upload)
+        if (!hasGarminData) {
+            hasGarminData = true
+            // Capture device name once — requires manager to be available
+            if (garminDeviceName == null) {
+                garminDeviceName = garminWatchManager?.getConnectedDeviceName()
+            }
+        }
         // NOTE: We still accumulate HR/cadence/dynamics data even if _currentRunSession
         // is null (awaiting first GPS fix from phone or watch).  The running dynamics
         // accumulators (watchGctSum, watchHR, etc.) are independent of the RunSession.
@@ -2612,7 +2624,45 @@ class RunTrackingService : Service(), SensorEventListener {
             planProgressWeeks = planTotalWeeks,
             workoutType = planWorkoutType,
             workoutIntensity = planWorkoutIntensity,
-            workoutDescription = planWorkoutDescription
+            workoutDescription = planWorkoutDescription,
+            // ── Garmin watch device info ───────────────────────────────────────
+            hasGarminData = hasGarminData,
+            garminDeviceName = garminDeviceName,
+            // ── Running Dynamics scalars (averaged / min / max over the run) ───
+            avgGroundContactTime       = if (watchGctCount > 0) watchGctSum / watchGctCount else null,
+            minGroundContactTime       = null,  // not separately tracked; use series min if needed
+            maxGroundContactTime       = null,  // not separately tracked; use series max if needed
+            avgGroundContactBalance    = if (watchGcbCount > 0) watchGcbSum / watchGcbCount else null,
+            avgVerticalOscillation     = if (watchVoCount > 0) watchVoSum / watchVoCount else null,
+            maxVerticalOscillation     = if (watchMaxVo > 0f) watchMaxVo else null,
+            avgVerticalRatio           = if (watchVrCount > 0) watchVrSum / watchVrCount else null,
+            minStrideLength            = if (watchMinSl > 0f) watchMinSl else null,
+            maxStrideLength            = if (watchMaxSl > 0f) watchMaxSl else null,
+            // ── Training Effect & Recovery ────────────────────────────────────
+            aerobicTrainingEffect      = if (watchLatestAte > 0f) watchLatestAte else null,
+            anaerobicTrainingEffect    = if (watchLatestAnAte > 0f) watchLatestAnAte else null,
+            trainingEffectLabel        = null,  // derived server-side from TE value
+            recoveryTimeMinutes        = if (watchLatestRecoveryMins > 0) watchLatestRecoveryMins else null,
+            vo2MaxEstimate             = if (watchLatestVo2Max > 0f) watchLatestVo2Max else null,
+            // ── Power & Respiration ───────────────────────────────────────────
+            avgRunningPower            = if (watchPwrCount > 0) (watchPwrSum / watchPwrCount).toInt() else null,
+            maxRunningPower            = if (watchMaxPwr > 0) watchMaxPwr else null,
+            avgRespirationRate         = if (watchRespCount > 0) watchRespSum / watchRespCount else null,
+            // ── Environmental ─────────────────────────────────────────────────
+            avgAmbientPressure         = if (watchLatestPressure > 0f) watchLatestPressure else null,
+            avgBearing                 = if (watchLatestBearing > 0f) watchLatestBearing else null,
+            // ── Time-series arrays (one sample per watch frame, ~2 s interval) ─
+            heartRateData              = watchHrSeries.takeIf { it.isNotEmpty() },
+            cadenceData                = watchCadenceSeries.takeIf { it.isNotEmpty() },
+            altitudeData               = watchAltSeries.takeIf { it.isNotEmpty() },
+            groundContactTimeData      = watchGctSeries.toList().takeIf { it.isNotEmpty() },
+            groundContactBalanceData   = watchGcbSeries.toList().takeIf { it.isNotEmpty() },
+            verticalOscillationData    = watchVoSeries.toList().takeIf { it.isNotEmpty() },
+            verticalRatioData          = watchVrSeries.toList().takeIf { it.isNotEmpty() },
+            strideLengthData           = watchSlSeries.toList().takeIf { it.isNotEmpty() },
+            runningPowerData           = watchPwrSeries.toList().takeIf { it.isNotEmpty() },
+            respirationRateData        = watchRespSeries.toList().takeIf { it.isNotEmpty() },
+            bearingData                = null  // GPS bearing stored per-point in gpsTrack
         )
 
         // ── Broadcast to Garmin watch (Scenario 2) ────────────────────────

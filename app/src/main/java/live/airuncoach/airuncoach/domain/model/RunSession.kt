@@ -124,6 +124,7 @@ data class RunSession(
 
     // ── Environmental (from Garmin GPS) ──────────────────────────────────────
     val avgAmbientPressure: Float? = null,       // Pa – barometric pressure
+    val avgBearing: Float? = null,               // degrees – average heading
 
     // ── Time-series data from watch (for graphs) ──────────────────────────────
     val groundContactTimeData: List<Float>? = null,    // GCT per 2s sample
