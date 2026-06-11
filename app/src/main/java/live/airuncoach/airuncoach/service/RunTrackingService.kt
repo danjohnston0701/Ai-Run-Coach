@@ -183,7 +183,20 @@ class RunTrackingService : Service(), SensorEventListener {
     private var watchPwrSum:   Float = 0f;  private var watchPwrCount:  Int = 0;  private var watchMaxPwr:  Int = 0
     // Respiration Rate (breaths/min — Fenix 7+ only)
     private var watchRespSum:  Float = 0f;  private var watchRespCount: Int = 0
-    
+
+    // ── Time-series lists (one sample per watch frame ~2s, for graph upload) ──
+    // Sampled at ~2-second intervals from the watch. A 60-min run ≈ 1800 samples each.
+    private val watchHrSeries       = mutableListOf<Int>()      // bpm
+    private val watchCadenceSeries  = mutableListOf<Int>()      // steps/min
+    private val watchAltSeries      = mutableListOf<Float>()    // metres (barometric)
+    private val watchGctSeries      = mutableListOf<Float>()    // ms
+    private val watchGcbSeries      = mutableListOf<Float>()    // %
+    private val watchVoSeries       = mutableListOf<Float>()    // cm
+    private val watchVrSeries       = mutableListOf<Float>()    // %
+    private val watchSlSeries       = mutableListOf<Float>()    // m
+    private val watchPwrSeries      = mutableListOf<Int>()      // watts
+    private val watchRespSeries     = mutableListOf<Float>()    // br/min
+
     // Struggle detection - baseline is session average pace, updated every 500m
     private var baselinePace: Float = 0f
     private var lastBaselineUpdateDistance: Double = 0.0
@@ -905,6 +918,12 @@ class RunTrackingService : Service(), SensorEventListener {
         watchLatestVo2Max = 0f; watchLatestPressure = 0f; watchLatestBearing = 0f
         watchPwrSum  = 0f;   watchPwrCount  = 0;   watchMaxPwr  = 0
         watchRespSum = 0f;   watchRespCount = 0
+        // Reset time-series lists
+        watchHrSeries.clear();      watchCadenceSeries.clear()
+        watchAltSeries.clear();     watchGctSeries.clear()
+        watchGcbSeries.clear();     watchVoSeries.clear()
+        watchVrSeries.clear();      watchSlSeries.clear()
+        watchPwrSeries.clear();     watchRespSeries.clear()
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
@@ -2032,6 +2051,24 @@ class RunTrackingService : Service(), SensorEventListener {
         if (frame.ambientPressure > 0f) watchLatestPressure = frame.ambientPressure
         if (frame.bearingDeg != null && frame.bearingDeg >= 0f) watchLatestBearing = frame.bearingDeg
 
+        // ── Append to time-series (every frame ~2s — graphs need this data) ────
+        if (frame.heartRate > 0)            watchHrSeries.add(frame.heartRate)
+        if (frame.cadence > 0)              watchCadenceSeries.add(frame.cadence)
+        // Prefer barometric altitude; fall back to GPS alt from the watch position fix
+        val altSample = when {
+            frame.baroAltitude > 0f             -> frame.baroAltitude
+            (frame.altMetres ?: 0.0) > 0.0      -> frame.altMetres!!.toFloat()
+            else                                 -> null
+        }
+        if (altSample != null)             watchAltSeries.add(altSample)
+        if (frame.groundContactTime > 0f)  watchGctSeries.add(frame.groundContactTime)
+        if (frame.groundContactBalance in 30f..70f) watchGcbSeries.add(frame.groundContactBalance)
+        if (frame.verticalOscillation > 0f) watchVoSeries.add(frame.verticalOscillation)
+        if (frame.verticalRatio > 0f)      watchVrSeries.add(frame.verticalRatio)
+        if (frame.strideLength > 0.1f)     watchSlSeries.add(frame.strideLength)
+        if (frame.runningPower > 0)        watchPwrSeries.add(frame.runningPower)
+        if (frame.respirationRate > 0f)    watchRespSeries.add(frame.respirationRate)
+
         // ── Update live RunSession ─────────────────────────────────────────────
         _currentRunSession.value = _currentRunSession.value?.copy(
             heartRate           = frame.heartRate.takeIf { it > 0 } ?: (_currentRunSession.value?.heartRate ?: 0),
@@ -2954,6 +2991,17 @@ class RunTrackingService : Service(), SensorEventListener {
             // ── Environmental ──────────────────────────────────────────────────
             avgAmbientPressure       = if (watchLatestPressure > 0f) watchLatestPressure else null,
             avgBearing               = if (watchLatestBearing > 0f) watchLatestBearing else null,
+            // ── Time-series arrays for graphs ────────────────────────────────
+            heartRateData            = watchHrSeries.takeIf { it.isNotEmpty() },
+            cadenceData              = watchCadenceSeries.takeIf { it.isNotEmpty() },
+            altitudeData             = watchAltSeries.takeIf { it.isNotEmpty() },
+            groundContactTimeData    = watchGctSeries.takeIf { it.isNotEmpty() },
+            groundContactBalanceData = watchGcbSeries.takeIf { it.isNotEmpty() },
+            verticalOscillationData  = watchVoSeries.takeIf { it.isNotEmpty() },
+            verticalRatioData        = watchVrSeries.takeIf { it.isNotEmpty() },
+            strideLengthData         = watchSlSeries.takeIf { it.isNotEmpty() },
+            runningPowerData         = watchPwrSeries.takeIf { it.isNotEmpty() },
+            respirationRateData      = watchRespSeries.takeIf { it.isNotEmpty() },
         )
 
         // Retry up to 3 times with exponential backoff for server errors

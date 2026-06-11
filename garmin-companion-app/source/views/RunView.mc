@@ -79,6 +79,7 @@ class RunView extends Ui.View {
     private var _lastGpsLat    = null;
     private var _lastGpsLng    = null;
     private var _lastGpsAlt    = null;
+    private var _baroAlt        = null;   // Barometric altitude from Sensor.SensorInfo (continuous)
     private var _lastGpsSpeed  = 0.0;
     private var _gpsStreamTick = 0;
 
@@ -784,6 +785,7 @@ class RunView extends Ui.View {
                     "lat"   => _lastGpsLat,
                     "lng"   => _lastGpsLng,
                     "alt"   => _lastGpsAlt,
+                    "baroAlt" => _baroAlt,
                     "speed" => _lastGpsSpeed,
                     "bear"  => _lastGpsSpeed > 0 ? _lastGpsSpeed : null,
                     "acc"   => _gpsQuality,
@@ -877,6 +879,10 @@ class RunView extends Ui.View {
                 _heartRateZone = _hrZone(_heartRate);
             }
             if (info.cadence != null) { _cadence = info.cadence; }
+        }
+        // Barometric altimeter — available on Fenix/FR965 even without GPS lock
+        if (info has :altitude && info.altitude != null) {
+            _baroAlt = info.altitude;
         }
     }
 

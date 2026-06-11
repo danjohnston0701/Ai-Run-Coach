@@ -963,7 +963,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
    * Full transform — used for GET /api/runs/:id (single run detail).
    * Includes all Garmin scalar fields AND all time-series arrays.
    */
-  function transformRunForAndroid(run: any) {
+  /**
+ * Removes outlier altitude readings caused by GPS lock errors (e.g., a 55m spike
+ * in the first 3 GPS points before the chipset stabilises).
+ *
+ * Algorithm: IQR-based rejection — remove any value outside Q1 − 3×IQR … Q3 + 3×IQR.
+ * After rejection, null gaps are forward-filled with the last valid value so the
+ * array length and index positions are preserved for chart rendering.
+ */
+function filterAltitudeSpikes(altitudes: number[]): number[] {
+  if (altitudes.length < 8) return altitudes;
+  const sorted = [...altitudes].sort((a, b) => a - b);
+  const q1  = sorted[Math.floor(sorted.length * 0.25)];
+  const q3  = sorted[Math.floor(sorted.length * 0.75)];
+  const iqr = q3 - q1;
+  const lo  = q1 - 3 * iqr;
+  const hi  = q3 + 3 * iqr;
+  let last = altitudes.find(a => a >= lo && a <= hi) ?? altitudes[0];
+  return altitudes.map(a => {
+    if (a >= lo && a <= hi) { last = a; return a; }
+    return last; // forward-fill rejected spike with last good value
+  });
+}
+
+/**
+ * Derives a numeric time-series from individual GPS track points when the
+ * dedicated DB column (cadenceData / altitudeData) is null.
+ * Only returns data if at least 10 non-zero values exist (guards against
+ * runs where the watch didn't send that field).
+ */
+function deriveFromGpsTrack(gpsTrack: any, field: string): number[] | null {
+  if (!Array.isArray(gpsTrack)) return null;
+  const values = (gpsTrack as any[])
+    .map((p: any) => (typeof p[field] === 'number' && p[field] > 0) ? p[field] : null)
+    .filter((v): v is number => v !== null);
+  return values.length >= 10 ? values : null;
+}
+
+function transformRunForAndroid(run: any) {
 
   function normalizeNumericSeries(series: any): number[] {
     if (!series) return [];
@@ -1071,7 +1108,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return [];
       })(),
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
-      heartRateData: normalizeNumericSeries(run.heartRateData),
+      // heartRateData: prefer dedicated column; vívoactive 4 embeds HR per GPS point
+      heartRateData: normalizeNumericSeries(run.heartRateData).filter(v => v > 0).length > 0
+        ? normalizeNumericSeries(run.heartRateData)
+        : (deriveFromGpsTrack(run.gpsTrack, 'heartRate') ?? []),
       paceData: normalizeNumericSeries(run.paceData),
       strugglePoints: Array.isArray(run.strugglePoints) ? run.strugglePoints : [],
       aiCoachingNotes: Array.isArray(run.aiCoachingNotes) ? run.aiCoachingNotes : [],
@@ -1162,8 +1202,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ── Time-series arrays (for graphs) ──────────────────────────────────────
       // Each is a flat number[] or null. normalizeNumericSeries handles the
       // various storage formats (plain arrays, {value:n} objects, etc.).
-      cadenceData:             normalizeNumericSeries(run.cadenceData),
-      altitudeData:            normalizeNumericSeries(run.altitudeData),
+      // Cadence: prefer dedicated column; derive from GPS track if null (vívoactive 4 etc.)
+      cadenceData:             normalizeNumericSeries(run.cadenceData)
+                                 .filter(v => v > 0).length > 0
+                                 ? normalizeNumericSeries(run.cadenceData)
+                                 : (deriveFromGpsTrack(run.gpsTrack, 'cadence') ?? []),
+      // Altitude: prefer dedicated column; otherwise derive from GPS track then strip spikes
+      altitudeData:            (() => {
+        const stored = normalizeNumericSeries(run.altitudeData).filter(v => v !== 0);
+        const raw = stored.length >= 10
+          ? stored
+          : (deriveFromGpsTrack(run.gpsTrack, 'altitude') ?? []);
+        return raw.length >= 10 ? filterAltitudeSpikes(raw) : raw;
+      })(),
       groundContactTimeData:   normalizeNumericSeries(run.groundContactTimeData),
       groundContactBalanceData: normalizeNumericSeries(run.groundContactBalanceData),
       verticalOscillationData: normalizeNumericSeries(run.verticalOscillationData),
@@ -1574,11 +1625,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[POST /api/runs] Elevation fields — steepestIncline: ${steepestIncline}%, steepestDecline: ${steepestDecline}%`);
       console.log(`[POST /api/runs] Date fields — startedAt: ${processedRunData.startTime}, completedAt: ${processedRunData.completedAt}`);
 
+      // ── Deduplication guard ──────────────────────────────────────────────────
+      // The Android app's exponential-backoff retry and background SyncWorker can
+      // both fire within milliseconds of each other on the same run.  Check for an
+      // identical run (same user + startedAt + distance rounded to 10m) created in
+      // the last 30 seconds and return it rather than inserting a duplicate.
+      if (startedAt) {
+        const thirtySecondsAgo = new Date(Date.now() - 30_000);
+        const distanceRounded  = Math.round(distance * 100) / 100; // round to 10m
+        try {
+          const existing = await db.select({ id: runs.id })
+            .from(runs)
+            .where(and(
+              eq(runs.userId, userId),
+              gte(runs.createdAt, thirtySecondsAgo),
+            ))
+            .limit(5);
+          const dup = existing.find(async () => true); // we check distance below
+          // Fetch the full candidate run to check distance match
+          if (existing.length > 0) {
+            const candidates = await db.select()
+              .from(runs)
+              .where(and(
+                eq(runs.userId, userId),
+                gte(runs.createdAt, thirtySecondsAgo),
+              ))
+              .limit(5);
+            const dupRun = candidates.find(r =>
+              Math.abs((r as any).distance - distanceRounded) < 0.05
+            );
+            if (dupRun) {
+              console.log(`[POST /api/runs] Duplicate detected — returning existing run ${dupRun.id}`);
+              return res.status(200).json(transformRunForAndroid(dupRun));
+            }
+          }
+        } catch (dupErr) {
+          console.warn('[POST /api/runs] Dedup check failed (non-fatal):', dupErr);
+        }
+      }
+
       // Create run with TSS and calculated steps
       console.log(`[POST /api/runs] Creating run for user: ${userId}`);
       // Also extract maxSpeed, totalSteps explicitly (safe names but good habit)
       const maxSpeed    = typeof runData.maxSpeed    === 'number' ? runData.maxSpeed    : null;
       const totalSteps2 = typeof runData.totalSteps  === 'number' ? runData.totalSteps  : (totalSteps || null);
+
+      // Explicit time-series array extractions — the spread passes camelCase arrays but
+      // Drizzle sometimes strips unknown keys at the type boundary.  Explicit assignment
+      // guarantees they reach the INSERT for all platforms (Android + iOS).
+      const heartRateDataArr       = Array.isArray(runData.heartRateData)       ? runData.heartRateData       : null;
+      const cadenceDataArr         = Array.isArray(runData.cadenceData)         ? runData.cadenceData         : null;
+      const altitudeDataArr        = Array.isArray(runData.altitudeData)        ? runData.altitudeData        : null;
+      const groundContactTimeArr   = Array.isArray(runData.groundContactTimeData)    ? runData.groundContactTimeData    : null;
+      const groundContactBalArr    = Array.isArray(runData.groundContactBalanceData) ? runData.groundContactBalanceData : null;
+      const verticalOscArr         = Array.isArray(runData.verticalOscillationData)  ? runData.verticalOscillationData  : null;
+      const verticalRatioArr       = Array.isArray(runData.verticalRatioData)        ? runData.verticalRatioData        : null;
+      const strideLengthArr        = Array.isArray(runData.strideLengthData)         ? runData.strideLengthData         : null;
+      const runningPowerArr        = Array.isArray(runData.runningPowerData)         ? runData.runningPowerData         : null;
+      const respirationRateArr     = Array.isArray(runData.respirationRateData)      ? runData.respirationRateData      : null;
+      const bearingDataArr         = Array.isArray(runData.bearingData)              ? runData.bearingData              : null;
 
       const run = await storage.createRun({
         ...processedRunData,
@@ -1593,6 +1698,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startedAt,
         maxSpeed,
         totalSteps: totalSteps2,
+        // Time-series arrays (graphs)
+        heartRateData:            heartRateDataArr,
+        cadenceData:              cadenceDataArr,
+        altitudeData:             altitudeDataArr,
+        groundContactTimeData:    groundContactTimeArr,
+        groundContactBalanceData: groundContactBalArr,
+        verticalOscillationData:  verticalOscArr,
+        verticalRatioData:        verticalRatioArr,
+        strideLengthData:         strideLengthArr,
+        runningPowerData:         runningPowerArr,
+        respirationRateData:      respirationRateArr,
+        bearingData:              bearingDataArr,
       });
       console.log(`[POST /api/runs] Run created successfully with ID: ${run.id}`);
 

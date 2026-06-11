@@ -79,6 +79,11 @@ data class WatchBiometricFrame(
 
     // Environmental
     val ambientPressure: Float,       // Pa (~101325 at sea level)
+
+    // Barometric altitude — Activity.Info.altitude on Fenix/fēnix models uses the pressure
+    // altimeter (more accurate than GPS altitude for elevation graphs).  Sent as "baroAlt" key.
+    // Falls back to GPS altMetres when not available (0f = not present).
+    val baroAltitude: Float = 0f,     // metres, barometric
 )
 
 class GarminWatchManager(private val context: Context) {
@@ -497,8 +502,10 @@ class GarminWatchManager(private val context: Context) {
                     val pwr   = (map["pwr"]   as? Number)?.toInt() ?: 0
                     val resp  = (map["resp"]  as? Number)?.toFloat() ?: 0f
                     // Environmental
-                    val pres  = (map["pres"]  as? Number)?.toFloat() ?: 0f
-                    val elap  = (map["elap"]  as? Number)?.toInt() ?: 0
+                    val pres    = (map["pres"]    as? Number)?.toFloat() ?: 0f
+                    val elap    = (map["elap"]    as? Number)?.toInt() ?: 0
+                    // Barometric altitude (Activity.Info.altitude on Fenix — more accurate than GPS)
+                    val baroAlt = (map["baroAlt"] as? Number)?.toFloat() ?: 0f
 
                     Log.d(TAG, "Watch frame: hr=$hr cad=$cad gct=$gct vo=$vo stride=$sl te=$te pwr=$pwr resp=$resp")
 
@@ -525,6 +532,7 @@ class GarminWatchManager(private val context: Context) {
                         runningPower            = pwr,
                         respirationRate         = resp,
                         ambientPressure         = pres,
+                        baroAltitude            = baroAlt,
                     )
 
                     // GPS callback for location tracking

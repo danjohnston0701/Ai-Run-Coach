@@ -4020,9 +4020,9 @@ private fun buildElevationFromAltitudeData(
 
     val step = (altData.size / 260f).coerceAtLeast(1f).toInt()
 
-    // Apply median filter first (window=5) to kill barometric glitches / lock-on spikes,
-    // then apply averaging smooth for a clean curve.
-    val filtered = medianFilter(altData.map { it.toDouble() }, window = 5)
+    // Apply IQR rejection, then median filter, then smooth.
+    val iqrCleaned = iqrFilterAltitude(altData.map { it.toDouble() })
+    val filtered   = medianFilter(iqrCleaned, window = 5)
     val smoothed = smoothY(filtered, window = 9)
 
     val xOut    = mutableListOf<Double>()
@@ -4060,10 +4060,14 @@ private fun buildElevationFromRoutePoints(points: List<LocationPoint>, mode: Cha
                     valid[j].latitude, valid[j].longitude)
     }
 
-    // Extract raw altitude values, then apply median+smooth pipeline to remove GPS spikes
+    // Extract raw altitude values.
+    // 1. IQR rejection — kills GPS lock-on spikes (e.g. 104m vs surrounding 49m)
+    // 2. Median filter — smooths remaining per-point noise
+    // 3. Average smooth — final cosmetic curve
     val rawAltitudes = valid.map { it.altitude!!.toDouble() }
-    val filtered = medianFilter(rawAltitudes, window = 7)
-    val smoothed = smoothY(filtered, window = 11)
+    val iqrCleaned = iqrFilterAltitude(rawAltitudes)
+    val filtered   = medianFilter(iqrCleaned, window = 7)
+    val smoothed   = smoothY(filtered, window = 11)
 
     val xOut    = mutableListOf<Double>()
     val yOut    = mutableListOf<Double>()
@@ -4110,7 +4114,32 @@ private fun smoothY(values: List<Double>, window: Int): List<Double> {
  * Much better than averaging for GPS pace data because it doesn't let a single 2:00 spike
  * drag the average down. Applied before smoothY for a clean two-stage pipeline.
  */
-private fun medianFilter(values: List<Double>, window: Int): List<Double> {
+/**
+ * IQR-based altitude spike rejection.
+ *
+ * GPS altitude can jump 50+ metres when the chipset hasn't locked yet (common in
+ * the first 1–3 points).  A normal median filter can miss these if 3+ consecutive
+ * points are all bad.  This function:
+ *  1. Computes Q1 / Q3 / IQR of the whole series.
+ *  2. Replaces any value outside [Q1 − 3×IQR, Q3 + 3×IQR] with the previous
+ *     valid value (forward-fill), keeping the array length unchanged.
+ */
+private fun iqrFilterAltitude(values: List<Double>): List<Double> {
+    if (values.size < 8) return values
+    val sorted = values.sorted()
+    val q1  = sorted[values.size / 4]
+    val q3  = sorted[values.size * 3 / 4]
+    val iqr = q3 - q1
+    val lo  = q1 - 3.0 * iqr
+    val hi  = q3 + 3.0 * iqr
+    var last = values.firstOrNull { it in lo..hi } ?: values[0]
+    return values.map { v ->
+        if (v in lo..hi) { last = v; v }
+        else last   // forward-fill with last clean reading
+    }
+}
+
+fun medianFilter(values: List<Double>, window: Int): List<Double> {
     if (values.size < window || window <= 1) return values
     val half = window / 2
     return values.mapIndexed { idx, _ ->

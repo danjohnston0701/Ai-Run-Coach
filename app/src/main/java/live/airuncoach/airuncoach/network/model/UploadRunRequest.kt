@@ -88,13 +88,16 @@ data class UploadRunRequest(
     // ── Environmental ─────────────────────────────────────────────────────────
     val avgAmbientPressure: Float? = null,
     val avgBearing: Float? = null,
-    // ── Time-series data for graphs ───────────────────────────────────────────
+    // ── Time-series data for graphs ─────────���─────────────────────────────────
+    val heartRateData: List<Int>? = null,         // bpm samples (one per ~2s watch frame)
+    val cadenceData: List<Int>? = null,           // spm samples
+    val altitudeData: List<Float>? = null,        // metres (barometric preferred, GPS fallback)
     val groundContactTimeData: List<Float>? = null,
     val groundContactBalanceData: List<Float>? = null,
     val verticalOscillationData: List<Float>? = null,
     val verticalRatioData: List<Float>? = null,
     val strideLengthData: List<Float>? = null,
-    val cadenceData: List<Int>? = null,
-    val altitudeData: List<Float>? = null,
+    val runningPowerData: List<Int>? = null,      // watts
+    val respirationRateData: List<Float>? = null, // br/min
     val bearingData: List<Float>? = null
 )
