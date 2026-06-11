@@ -944,7 +944,8 @@ class RunView extends Ui.View {
     private function _drawBattery(dc, cx, cy, ringR, circR) {
         if (!(Sys has :getSystemStats)) { return; }
         var stats = Sys.getSystemStats();
-        if (stats == null) { return; }
+        if (stats == null)         { return; }
+        if (stats.battery == null) { return; }  // Some firmware returns non-null stats but null battery
         var bat = stats.battery.toNumber();
         if (bat < 0)   { bat = 0; }
         if (bat > 100) { bat = 100; }

@@ -358,6 +358,14 @@ class RunSessionViewModel @Inject constructor(
     private var voiceActivationEnabled: Boolean = true
 
     /**
+     * Tracks the currently-active speech-result collector coroutine.
+     * Cancelled before each new [startListening] call so only ONE collector
+     * is ever alive — prevents duplicate [sendMessageToCoach] calls when
+     * the user talks to coach multiple times during a single run.
+     */
+    private var speechListenJob: kotlinx.coroutines.Job? = null
+
+    /**
      * Pre-warmed "Hey, how can I help?" audio bytes from AWS Polly (using user's coach voice).
      * Generated once when wake word detection starts so there's zero network
      * latency when the wake word fires — we just play the cached bytes instantly.
@@ -1274,8 +1282,10 @@ class RunSessionViewModel @Inject constructor(
         speechRecognizerHelper.startListening()
         _runState.update { it.copy(coachText = "Listening...") }
 
-        // Collect speech recognition results
-        viewModelScope.launch {
+        // Cancel any previous listener coroutine — prevents duplicate API calls
+        // if the user invokes talk-to-coach multiple times during a run.
+        speechListenJob?.cancel()
+        speechListenJob = viewModelScope.launch {
             speechRecognizerHelper.speechState.collect { speechState ->
                 when (speechState.status) {
                     SpeechStatus.LISTENING -> {
@@ -1288,13 +1298,13 @@ class RunSessionViewModel @Inject constructor(
                                 wakeWordDetector.resumeListening()
                             })
                         }
+                        speechListenJob?.cancel() // terminal state — stop collecting
                     }
                     SpeechStatus.TIMED_OUT -> {
-                        // User didn't speak within 5 seconds — cancel quietly
                         Log.d("RunSessionViewModel", "Speech timeout — no query received")
                         _runState.update { it.copy(coachText = "") }
                         wakeWordDetector.resumeListening()
-                        return@collect
+                        speechListenJob?.cancel() // terminal state — stop collecting
                     }
                     SpeechStatus.ERROR -> {
                         _runState.update {
@@ -1305,7 +1315,7 @@ class RunSessionViewModel @Inject constructor(
                             _runState.update { it.copy(coachText = "") }
                         }
                         wakeWordDetector.resumeListening()
-                        return@collect
+                        speechListenJob?.cancel() // terminal state — stop collecting
                     }
                 }
             }
