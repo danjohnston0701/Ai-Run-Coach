@@ -202,7 +202,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         val h = dashboardViewModel.targetHours.value
                         val m = dashboardViewModel.targetMinutes.value
                         val s = dashboardViewModel.targetSeconds.value
-                        navController.navigate("map_my_run_setup/route/$dist/$timeOn/$h/$m/$s")
+                        // For route mode: always default to AI Coach disabled
+                        navController.navigate("map_my_run_setup/route/$dist/$timeOn/$h/$m/$s/false")
                     },
                     onNavigateToFreeRunSetup = {
                         val dist = dashboardViewModel.targetDistance.value
@@ -210,7 +211,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         val h = dashboardViewModel.targetHours.value
                         val m = dashboardViewModel.targetMinutes.value
                         val s = dashboardViewModel.targetSeconds.value
-                        navController.navigate("map_my_run_setup/no_route/$dist/$timeOn/$h/$m/$s")
+                        val aiCoach = dashboardViewModel.isAiCoachEnabled.value
+                        // For free run mode: preserve dashboard preference
+                        navController.navigate("map_my_run_setup/no_route/$dist/$timeOn/$h/$m/$s/$aiCoach")
                     },
                     onNavigateToRunSession = {
                         navController.navigate("run_session") {
@@ -292,13 +295,14 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
             // Map My Run Setup Screen (the beautiful redesigned one!)
-            composable("map_my_run_setup/{mode}/{dist}/{timeOn}/{h}/{m}/{s}") { backStackEntry ->
+            composable("map_my_run_setup/{mode}/{dist}/{timeOn}/{h}/{m}/{s}/{aiCoach}") { backStackEntry ->
                 val mode = backStackEntry.arguments?.getString("mode") ?: "route"
                 val dist = backStackEntry.arguments?.getString("dist")?.toFloatOrNull() ?: 5f
                 val timeOn = backStackEntry.arguments?.getString("timeOn")?.toBooleanStrictOrNull() ?: false
                 val h = backStackEntry.arguments?.getString("h")?.toIntOrNull() ?: 0
                 val m = backStackEntry.arguments?.getString("m")?.toIntOrNull() ?: 0
                 val s = backStackEntry.arguments?.getString("s")?.toIntOrNull() ?: 0
+                val aiCoach = backStackEntry.arguments?.getString("aiCoach")?.toBooleanStrictOrNull() ?: false
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(navController.graph.id)
                 }
@@ -318,6 +322,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     initialHours = h,
                     initialMinutes = m,
                     initialSeconds = s,
+                    initialAiCoachEnabled = aiCoach,
                     onNavigateBack = { navController.popBackStack() },
                     onGenerateRoute = { distance, hasTime, hours, minutes, seconds, _, _, latitude, longitude, aiCoach ->
                         // Guard against double-taps - only allow one navigation at a time
@@ -588,7 +593,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onBack = { navController.popBackStack() },
                     onRegenerateRoutes = {
                         viewModel.clearRoutes()
-                        navController.navigate("map_my_run_setup/route/${distanceKm}/${hasTargetTime}/${targetHours}/${targetMinutes}/${targetSeconds}") {
+                        navController.navigate("map_my_run_setup/route/${distanceKm}/${hasTargetTime}/${targetHours}/${targetMinutes}/${targetSeconds}/${aiCoachEnabled}") {
                             popUpTo("route_selection/${distanceKm.toInt()}") { inclusive = true }
                         }
                     },
@@ -699,6 +704,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate("check_plan_availability")
                     },
                     onOpenPlan = { planId -> navController.navigate("training_plan/$planId") },
+                    onNavigateToSubscription = { navController.navigate(Screen.Profile.route) },
                     isActiveDestination = currentBackStack?.destination?.route == Screen.AiPlans.route
                 )
             }
@@ -715,6 +721,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         navController.navigate("check_plan_availability")
                     },
                     onOpenPlan = { planId -> navController.navigate("training_plan/$planId") },
+                    onNavigateToSubscription = { navController.navigate(Screen.Profile.route) },
                     isActiveDestination = currentBackStack?.destination?.route == "coaching_programme"
                 )
             }

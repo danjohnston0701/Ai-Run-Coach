@@ -26,8 +26,8 @@ android {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5          // ← Increment by 1 for every Play Store upload
-        versionName = "1.2.2"   // ← Human-readable version shown in Play Store
+        versionCode = 7          // ← Increment by 1 for every Play Store upload
+        versionName = "1.4.0"   // ← Human-readable version shown in Play Store
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -183,6 +183,9 @@ dependencies {
     // --- Firebase: Cloud Messaging for push notifications ---
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
+
+    // --- Google Play Billing: In-app subscriptions and purchases ---
+    implementation("com.android.billingclient:billing-ktx:7.0.0")
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")

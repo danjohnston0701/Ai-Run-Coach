@@ -267,9 +267,7 @@ fun RunSessionScreen(
                     viewModel.cancelRunSetup()
                     onCancel()
                 },
-                onSimulate = { viewModel.startSimulatedRun() },
-                onSimulateNav = { viewModel.startNavigationSimulatedRun() },
-                hasRouteLoaded = routePolyline != null
+
             )
         }
 
@@ -2243,9 +2241,6 @@ fun ControlButtons(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onCancel: () -> Unit = {},
-    onSimulate: (() -> Unit)? = null,
-    onSimulateNav: (() -> Unit)? = null,
-    hasRouteLoaded: Boolean = false
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2343,54 +2338,7 @@ fun ControlButtons(
                 }
             }
 
-            // Simulate Run button (debug builds only)
-            if (onSimulate != null && live.airuncoach.airuncoach.BuildConfig.DEBUG) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = onSimulate,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.warning
-                    ),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Text(
-                        text = "Simulate 5km Run",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.backgroundRoot
-                    )
-                }
-            }
 
-            // Simulate Navigation Run button (debug builds only)
-            if (onSimulateNav != null && live.airuncoach.airuncoach.BuildConfig.DEBUG) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = onSimulateNav,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF3B82F6) // Blue
-                    ),
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Explore,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (hasRouteLoaded) "Simulate Route Run" else "Simulate Nav Run (Belfast)",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White
-                    )
-                }
-            }
         }
     }
 }

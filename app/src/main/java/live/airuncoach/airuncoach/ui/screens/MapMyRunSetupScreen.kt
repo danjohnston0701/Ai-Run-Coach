@@ -51,6 +51,7 @@ fun MapMyRunSetupScreen(
     initialHours: Int = 0,
     initialMinutes: Int = 0,
     initialSeconds: Int = 0,
+    initialAiCoachEnabled: Boolean = false,
     onNavigateBack: () -> Unit = {},
     onGenerateRoute: (
         distance: Float,
@@ -92,7 +93,7 @@ fun MapMyRunSetupScreen(
     // Social toggles
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
     var isGroupRunEnabled by remember { mutableStateOf(false) } // visual toggle only for now
-    var isAiCoachEnabled by remember { mutableStateOf(false) } // Default off - user can opt in
+    var isAiCoachEnabled by remember { mutableStateOf(initialAiCoachEnabled) } // Initialize from dashboard preference
 
     // GPS State
     var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
@@ -160,7 +161,7 @@ fun MapMyRunSetupScreen(
     }
 
     // Header copy by mode
-    val title = if (mode != "route") "MAP MY RUN SETUP" else "RUN SETUP"
+    val title = if (mode == "route") "MAP MY RUN SETUP" else "CONFIGURE YOUR RUN"
     val subtitle = if (mode == "route") "Configure your route preferences" else "Set your run details"
 
     // Button enablement
@@ -253,7 +254,8 @@ fun MapMyRunSetupScreen(
             item {
                 AiCoachToggleSection(
                     enabled = isAiCoachEnabled,
-                    onToggle = { isAiCoachEnabled = it }
+                    onToggle = { isAiCoachEnabled = it },
+                    mode = mode
                 )
             }
 
@@ -919,7 +921,8 @@ private fun TimeField(
 @Composable
 private fun AiCoachToggleSection(
     enabled: Boolean,
-    onToggle: (Boolean) -> Unit
+    onToggle: (Boolean) -> Unit,
+    mode: String = "route"
 ) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Text(
@@ -966,7 +969,11 @@ private fun AiCoachToggleSection(
                         color = Colors.textPrimary
                     )
                     Text(
-                        text = if (enabled) "Coach will guide your run" else "Off – run without coaching",
+                        text = if (enabled) {
+                            if (mode == "no_route") "AI feedback during your run" else "Coach will guide your run"
+                        } else {
+                            "Off – run without coaching"
+                        },
                         style = AppTextStyles.small,
                         color = Colors.textMuted
                     )

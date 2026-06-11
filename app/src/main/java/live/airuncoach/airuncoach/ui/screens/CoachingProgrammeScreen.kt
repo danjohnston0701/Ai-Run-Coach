@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +44,7 @@ import live.airuncoach.airuncoach.util.WorkoutPlanContext
 import live.airuncoach.airuncoach.viewmodel.PlanDetailState
 import live.airuncoach.airuncoach.viewmodel.PlansListState
 import live.airuncoach.airuncoach.viewmodel.TrainingPlanViewModel
+import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level entry: list of the user's plans, or empty state with CTA
@@ -53,25 +56,27 @@ fun CoachingProgrammeScreen(
     onNavigateBack: () -> Unit,
     onCreatePlan: () -> Unit,
     onOpenPlan: (String) -> Unit,  // planId
+    onNavigateToSubscription: () -> Unit = {},  // For upgrading subscription
     isActiveDestination: Boolean = true  // true when this route is the current nav destination
 ) {
-    val viewModel: TrainingPlanViewModel = hiltViewModel()
-    val state by viewModel.plansListState.collectAsState()
-    val selectedTab by viewModel.selectedTab.collectAsState()
+    val trainingPlanViewModel: TrainingPlanViewModel = hiltViewModel()
+    val subscriptionViewModel: SubscriptionViewModel = hiltViewModel()
+    val state by trainingPlanViewModel.plansListState.collectAsState()
+    val selectedTab by trainingPlanViewModel.selectedTab.collectAsState()
+    val subscriptionTier = subscriptionViewModel.getSubscriptionTier()
+    val isFreeTier = subscriptionTier == "free"
 
     // Reload the plans list whenever this screen becomes the active destination.
     // Using LaunchedEffect(isActiveDestination) is more reliable than a lifecycle
     // observer in Compose Navigation — it fires every time the value flips true
     // (i.e. when we pop back from training_plan or any child screen).
-    // Reload whichever tab is currently selected so the user sees fresh data
-    // after a cancel action (not always the "active" tab).
-    // When returning from a newly created plan, always show the active tab first
+    // For free users, skip loading plans entirely to avoid unnecessary API calls
     val tabStatusMap = mapOf(0 to "active", 1 to "completed", 2 to "cancelled")
     LaunchedEffect(isActiveDestination) {
-        if (isActiveDestination) {
+        if (isActiveDestination && !isFreeTier) {
             // Always select the "active" tab (tab 0) when returning to this screen
             // This ensures newly created plans are shown immediately
-            viewModel.selectTab(0)
+            trainingPlanViewModel.selectTab(0)
         }
     }
 
@@ -93,88 +98,165 @@ fun CoachingProgrammeScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onCreatePlan, containerColor = Colors.primary) {
-                Icon(painterResource(R.drawable.icon_plus_vector), "New plan", tint = Colors.buttonText)
+            // Hide FAB for free tier users
+            if (!isFreeTier) {
+                FloatingActionButton(onClick = onCreatePlan, containerColor = Colors.primary) {
+                    Icon(painterResource(R.drawable.icon_plus_vector), "New plan", tint = Colors.buttonText)
+                }
             }
         },
         containerColor = Colors.backgroundRoot,
         contentWindowInsets = WindowInsets(0)
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
-            // Tab Row: Active / Completed / Abandoned
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Colors.backgroundRoot,
-                contentColor = Colors.primary,
-                indicator = { tabPositions ->
-                    if (selectedTab < tabPositions.size) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .wrapContentSize(Alignment.BottomStart)
-                                .offset(x = tabPositions[selectedTab].left)
-                                .width(tabPositions[selectedTab].width)
-                                .padding(horizontal = Spacing.lg)
-                                .height(3.dp)
-                                .background(Colors.primary)
-                        )
-                    }
-                },
-                divider = { HorizontalDivider(color = Colors.backgroundSecondary, thickness = 1.dp) }
-            ) {
-                val tabs = listOf("Active", "Completed", "Cancelled")
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { viewModel.selectTab(index) },
-                        selectedContentColor = Colors.primary,
-                        unselectedContentColor = Colors.textMuted
-                    ) {
-                        Text(
-                            text = title,
-                            style = AppTextStyles.body.copy(
-                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+        // Show locked state for free tier users
+        if (isFreeTier) {
+            FreeUserCoachingPlanPlaceholder(onUpgradeClick = onNavigateToSubscription)
+        } else {
+            Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
+                // Tab Row: Active / Completed / Abandoned
+                TabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = Colors.backgroundRoot,
+                    contentColor = Colors.primary,
+                    indicator = { tabPositions ->
+                        if (selectedTab < tabPositions.size) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .wrapContentSize(Alignment.BottomStart)
+                                    .offset(x = tabPositions[selectedTab].left)
+                                    .width(tabPositions[selectedTab].width)
+                                    .padding(horizontal = Spacing.lg)
+                                    .height(3.dp)
+                                    .background(Colors.primary)
                             )
-                        )
-                    }
-                }
-            }
-
-            Box(modifier = Modifier.fillMaxSize()) {
-            when (val s = state) {
-                is PlansListState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Colors.primary)
-
-                is PlansListState.Empty -> NoPlanState(onCreatePlan)
-
-                is PlansListState.Error -> Column(
-                    modifier = Modifier.align(Alignment.Center).padding(Spacing.xl),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        }
+                    },
+                    divider = { HorizontalDivider(color = Colors.backgroundSecondary, thickness = 1.dp) }
                 ) {
-                    Text(s.message, style = AppTextStyles.body, color = Colors.textSecondary, textAlign = TextAlign.Center)
-                    Spacer(modifier = Modifier.height(Spacing.md))
-                    Button(onClick = { viewModel.loadUserPlans() }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
-                        Text("Retry", color = Colors.buttonText)
+                    val tabs = listOf("Active", "Completed", "Cancelled")
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { trainingPlanViewModel.selectTab(index) },
+                            selectedContentColor = Colors.primary,
+                            unselectedContentColor = Colors.textMuted
+                        ) {
+                            Text(
+                                text = title,
+                                style = AppTextStyles.body.copy(
+                                    fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                                )
+                            )
+                        }
                     }
                 }
 
-                is PlansListState.Success -> LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(Spacing.lg),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.md)
-                ) {
-                    item {
-                        Text("Active Plans", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                        Spacer(modifier = Modifier.height(Spacing.sm))
+                Box(modifier = Modifier.fillMaxSize()) {
+                when (val s = state) {
+                    is PlansListState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Colors.primary)
+
+                    is PlansListState.Empty -> NoPlanState(onCreatePlan)
+
+                    is PlansListState.Error -> Column(
+                        modifier = Modifier.align(Alignment.Center).padding(Spacing.xl),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(s.message, style = AppTextStyles.body, color = Colors.textSecondary, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                        Button(onClick = { trainingPlanViewModel.loadUserPlans() }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
+                            Text("Retry", color = Colors.buttonText)
+                        }
                     }
-                    items(s.plans) { plan ->
-                        PlanSummaryCard(
-                            plan = plan,
-                            onClick = { onOpenPlan(plan.id) }
-                        )
+
+                    is PlansListState.Success -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(Spacing.lg),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                    ) {
+                        item {
+                            Text("Active Plans", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                            Spacer(modifier = Modifier.height(Spacing.sm))
+                        }
+                        items(s.plans) { plan ->
+                            PlanSummaryCard(
+                                plan = plan,
+                                onClick = { onOpenPlan(plan.id) }
+                            )
+                        }
                     }
                 }
+                }
             }
-            }
+        }
+    }
+}
+
+/**
+ * Locked placeholder shown to Free tier users.
+ * Displays a lock icon with explanation and upgrade button.
+ */
+@Composable
+fun FreeUserCoachingPlanPlaceholder(onUpgradeClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(Spacing.xl),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Lock Icon
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .background(
+                    brush = Brush.radialGradient(listOf(Colors.primary.copy(alpha = 0.2f), Colors.primary.copy(alpha = 0f))),
+                    shape = RoundedCornerShape(50.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = "Locked",
+                tint = Colors.primary,
+                modifier = Modifier.size(52.dp)
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(Spacing.lg))
+        
+        // Heading
+        Text(
+            "Paid Feature",
+            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+            color = Colors.textPrimary,
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(Spacing.sm))
+        
+        // Description
+        Text(
+            "AI Coaching Plans are only available on paid subscriptions. Upgrade to Lite or Standard to unlock personalized training programs designed around your goals.",
+            style = AppTextStyles.body,
+            color = Colors.textSecondary,
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(Spacing.xl))
+        
+        // Upgrade Button
+        Button(
+            onClick = onUpgradeClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Icon(painterResource(R.drawable.icon_crown_vector), null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Text("Upgrade Subscription", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
         }
     }
 }

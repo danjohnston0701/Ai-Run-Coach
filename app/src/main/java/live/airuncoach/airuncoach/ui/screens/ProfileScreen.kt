@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -106,7 +107,7 @@ fun ProfileScreen(
     val cameraUri = remember { mutableStateOf<Uri?>(null) }
     
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
+        contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri: Uri? ->
             uri?.let { viewModel.uploadProfilePicture(it) }
         }
@@ -201,7 +202,9 @@ fun ProfileScreen(
             dismissButton = {
                 TextButton(onClick = {
                     showImagePickerDialog = false
-                    galleryLauncher.launch("image/*")
+                    galleryLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
                 }) {
                     Text("Choose from Gallery", color = Colors.primary)
                 }
