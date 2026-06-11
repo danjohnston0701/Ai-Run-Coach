@@ -160,6 +160,10 @@ fun RunSummaryScreenFlagship(
     val isLoadingDebrief by viewModel.isLoadingDebrief.collectAsState()
     val hasGroupRun = linkedGroupRunId != null
     val groupRunTabOffset = if (hasGroupRun) 1 else 0
+    // Dynamics tab is injected between Graphs and Data when Garmin data is available.
+    // dynamicsTabOffset shifts Data/Badges indices by 1 when the Dynamics tab is present.
+    val hasDynamicsTab = runSession?.hasGarminData == true
+    val dynamicsTabOffset = if (hasDynamicsTab) 1 else 0
 
     // Race Predictor
     val racePredictions by viewModel.racePredictions.collectAsState()
@@ -334,7 +338,16 @@ fun RunSummaryScreenFlagship(
                             hasGroupRun = hasGroupRun,
                         )
 
-                        selectedTab == 3 + groupRunTabOffset -> DataTabFlagship(
+                        // Dynamics tab — only shown when run has Garmin watch data
+                        hasDynamicsTab && selectedTab == 3 + groupRunTabOffset -> DynamicsTabContent(
+                            run = session!!,
+                            onDelete = { showDeleteConfirm = true },
+                            selectedTab = selectedTab,
+                            onTabSelected = { selectedTab = it },
+                            hasGroupRun = hasGroupRun,
+                        )
+
+                        selectedTab == 3 + groupRunTabOffset + dynamicsTabOffset -> DataTabFlagship(
                             run = session!!,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
@@ -343,7 +356,7 @@ fun RunSummaryScreenFlagship(
                             racePredictions = racePredictions,
                             isLoadingRacePredictions = isLoadingRacePredictions,
                         )
-                        selectedTab == 4 + groupRunTabOffset -> AchievementsTabFlagship(
+                        selectedTab == 4 + groupRunTabOffset + dynamicsTabOffset -> AchievementsTabFlagship(
                             run = session!!,
                             analysisState = analysisState,
                             onDelete = { showDeleteConfirm = true },
@@ -701,13 +714,19 @@ private fun DifficultyPillFlagship(label: String) {
 }
 
 @Composable
-private fun RunTabsFlagship(selected: Int, onSelected: (Int) -> Unit, hasGroupRun: Boolean = false) {
-    val labels = remember(hasGroupRun) {
+private fun RunTabsFlagship(
+    selected: Int,
+    onSelected: (Int) -> Unit,
+    hasGroupRun: Boolean = false,
+    hasGarminData: Boolean = false
+) {
+    val labels = remember(hasGroupRun, hasGarminData) {
         buildList {
             add("Ai Insights")
             if (hasGroupRun) add("Group Run")
             add("Summary")
             add("Graphs")
+            if (hasGarminData) add("Dynamics")
             add("Data")
             add("Badges")
         }
@@ -779,7 +798,7 @@ private fun GroupRunLeaderboardTab(
     ) {
         // Tab bar (sticky navigation — same pattern as every other tab)
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
         }
 
         // ── Group run name header ──────────────────────────────────────────────
@@ -1115,7 +1134,7 @@ private fun AiInsightsTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
         }
 
         // ── Garmin attribution — REQUIRED by Garmin API Brand Guidelines ──────
@@ -1396,7 +1415,7 @@ private fun SummaryTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
         }
 
         // Personal Best banner — always visible when this run holds any PBs
@@ -1490,7 +1509,7 @@ private fun GraphsTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -1528,51 +1547,10 @@ private fun GraphsTabContent(
                 item { GarminDataDisclosure(disclosureType = "chart") }
             }
 
-            item { HeartRateZonesVisualCard(heartRateData = run.heartRateData) }
+            item { HeartRateZonesVisualCard(heartRateData = run.heartRateData, run = run) }
 
             // Intensity Distribution Donut
             item { IntensityDistributionCard(run = run) }
-        }
-
-        // ═══════════════════════════════════════════════════════════════════════
-        // RUNNING DYNAMICS SECTION (only when Garmin data available)
-        // (Non-expandable section header if data exists)
-        // ═══════════════════════════════════════════════════════════════════════
-        
-        if (run.hasGarminData) {
-            stickyHeader {
-                // Just show title as header — no expandable toggle
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = Spacing.md)
-                ) {
-                    Text(
-                        "Running Dynamics",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.textPrimary
-                    )
-                }
-            }
-
-            // Always display running dynamics content when data exists
-            // Running dynamics cards will be added here in Phase 2
-            // Placeholder for now
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Colors.backgroundSecondary
-                    )
-                ) {
-                    Text(
-                        "Ground Contact Time, Vertical Oscillation, and Stride data will appear here",
-                        modifier = Modifier.padding(Spacing.md),
-                        style = AppTextStyles.body,
-                        color = Colors.textSecondary
-                    )
-                }
-            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -3253,8 +3231,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
             }
         }
 
-        val elevationSeries = remember(run.routePoints, mode) {
-            buildElevationSeries(run.routePoints, mode)
+        val elevationSeries = remember(run.routePoints, run.altitudeData, mode) {
+            buildElevationSeries(run, mode)
         }
 
         if (elevationSeries.y.size >= 2) {
@@ -3392,6 +3370,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                 )
             }
         }
+
     }
 }
 
@@ -4009,12 +3988,71 @@ private fun paceFromSplits(kmSplits: List<KmSplit>, mode: ChartMode): LabeledSer
     return LabeledSeries(xOut, yOut, labels)
 }
 
-private fun buildElevationSeries(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
+/**
+ * Builds the elevation series for the chart.
+ *
+ * Source priority:
+ *  1. run.altitudeData  — Garmin barometric altimeter time-series (most accurate, matches Garmin Connect)
+ *  2. routePoints.altitude — phone GPS altitude (noisier, prone to spikes at lock-on)
+ *
+ * Both paths apply a median filter before averaging to remove GPS lock-on spikes and brief
+ * sensor dropouts (this is the main reason our chart looked different from Garmin Connect).
+ */
+private fun buildElevationSeries(run: RunSession, mode: ChartMode): LabeledSeries {
+    // ── Path 1: Garmin barometric altitude data ──────────────────────────────
+    val altData = run.altitudeData
+    if (!altData.isNullOrEmpty() && altData.size >= 2) {
+        return buildElevationFromAltitudeData(altData, run, mode)
+    }
+    // ── Path 2: GPS altitude embedded in routePoints ─────────────────────────
+    return buildElevationFromRoutePoints(run.routePoints, mode)
+}
+
+/** Builds elevation series from the Garmin barometric [altitudeData] time-series. */
+private fun buildElevationFromAltitudeData(
+    altData: List<Float>,
+    run: RunSession,
+    mode: ChartMode
+): LabeledSeries {
+    // Total run distance/time for evenly spacing the x-axis
+    val totalDistanceM = run.distance.coerceAtLeast(1.0)
+    val totalSeconds   = (run.elapsedTime ?: (run.duration / 1000L)).toDouble().coerceAtLeast(1.0)
+
+    val step = (altData.size / 260f).coerceAtLeast(1f).toInt()
+
+    // Apply median filter first (window=5) to kill barometric glitches / lock-on spikes,
+    // then apply averaging smooth for a clean curve.
+    val filtered = medianFilter(altData.map { it.toDouble() }, window = 5)
+    val smoothed = smoothY(filtered, window = 9)
+
+    val xOut    = mutableListOf<Double>()
+    val yOut    = mutableListOf<Double>()
+    val labels  = mutableListOf<String>()
+
+    var i = 0
+    while (i < smoothed.size) {
+        val fraction = i.toDouble() / (smoothed.size - 1).coerceAtLeast(1)
+        val xLabel = if (mode == ChartMode.Time) {
+            String.format(java.util.Locale.US, "%.0f", fraction * totalSeconds / 60.0)
+        } else {
+            String.format(java.util.Locale.US, "%.1f", fraction * totalDistanceM / 1000.0)
+        }
+        xOut.add(xOut.size.toDouble())
+        yOut.add(smoothed[i])
+        labels.add(xLabel)
+        i += step
+    }
+
+    return LabeledSeries(x = xOut, y = yOut, labels = labels)
+}
+
+/** Builds elevation series from GPS altitude embedded in [LocationPoint] list. */
+private fun buildElevationFromRoutePoints(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
     if (points.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
     val valid = points.filter { it.latitude != 0.0 && it.longitude != 0.0 && it.altitude != null }
     if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
 
-    // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
+    // Pre-compute cumulative distance
     val cumulativeDist = DoubleArray(valid.size)
     for (j in 1 until valid.size) {
         cumulativeDist[j] = cumulativeDist[j - 1] +
@@ -4022,9 +4060,14 @@ private fun buildElevationSeries(points: List<LocationPoint>, mode: ChartMode): 
                     valid[j].latitude, valid[j].longitude)
     }
 
-    val xOut = mutableListOf<Double>()
-    val yOut = mutableListOf<Double>()
-    val labels = mutableListOf<String>()
+    // Extract raw altitude values, then apply median+smooth pipeline to remove GPS spikes
+    val rawAltitudes = valid.map { it.altitude!!.toDouble() }
+    val filtered = medianFilter(rawAltitudes, window = 7)
+    val smoothed = smoothY(filtered, window = 11)
+
+    val xOut    = mutableListOf<Double>()
+    val yOut    = mutableListOf<Double>()
+    val labels  = mutableListOf<String>()
 
     val startTs = valid.first().timestamp
     val step = (valid.size / 260f).coerceAtLeast(1f).toInt()
@@ -4032,9 +4075,6 @@ private fun buildElevationSeries(points: List<LocationPoint>, mode: ChartMode): 
     var i = 0
     while (i < valid.size) {
         val curr = valid[i]
-
-        val alt = curr.altitude ?: run { i += step; continue }
-
         val xLabel = if (mode == ChartMode.Time) {
             val minutes = ((curr.timestamp - startTs) / 1000.0 / 60.0)
             String.format(java.util.Locale.US, "%.0f", minutes)
@@ -4042,19 +4082,16 @@ private fun buildElevationSeries(points: List<LocationPoint>, mode: ChartMode): 
             val km = cumulativeDist[i] / 1000.0
             String.format(java.util.Locale.US, "%.1f", km)
         }
-
         xOut.add(xOut.size.toDouble())
-        yOut.add(alt.toDouble())
+        yOut.add(smoothed[i])
         labels.add(xLabel)
-
         i += step
     }
 
-    val smoothedY = smoothY(yOut, window = 11)
     return LabeledSeries(
         x = xOut,
-        y = smoothedY,
-        labels = labels.ifEmpty { List(smoothedY.size) { it.toString() } }
+        y = yOut,
+        labels = labels.ifEmpty { List(yOut.size) { it.toString() } }
     )
 }
 
@@ -4224,6 +4261,92 @@ private fun buildCadenceSeries(
     return LabeledSeries(xOut, smoothY(yOut, 11), labels)
 }
 
+/* -------------------- GARMIN WATCH TIME-SERIES BUILDERS -------------------- */
+
+/**
+ * Generic builder for Garmin watch time-series data (GCT, VO, stride, power, respiration).
+ * These are sampled at ~2-second intervals and stored as a flat array without timestamps.
+ * We interpolate the x-axis from total distance / time.
+ *
+ * @param rawData   The watch time-series list (e.g. verticalOscillationData)
+ * @param run       The RunSession (for total distance/time to build x axis)
+ * @param mode      Time or Distance axis
+ * @param smoothWindow  Smoothing window (larger = smoother curve, 1 = no smoothing)
+ * @param medianWindow  Median filter window for spike removal (1 = no filter)
+ * @param validator     Optional predicate — samples failing this are excluded (e.g. zero GCT)
+ */
+private fun buildWatchTimeSeries(
+    rawData: List<Float>,
+    run: RunSession,
+    mode: ChartMode,
+    smoothWindow: Int = 7,
+    medianWindow: Int = 5,
+    validator: (Float) -> Boolean = { it > 0f }
+): LabeledSeries {
+    if (rawData.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    val totalDistanceKm = (run.distance / 1000.0).coerceAtLeast(0.01)
+    val totalMinutes    = ((run.elapsedTime ?: (run.duration / 1000L)) / 60.0).coerceAtLeast(0.1)
+
+    val filtered = rawData.filter { validator(it) }
+    if (filtered.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    val raw = filtered.map { it.toDouble() }
+    val processed = smoothY(medianFilter(raw, medianWindow), smoothWindow)
+
+    val step = (processed.size / 200f).coerceAtLeast(1f).toInt()
+    val xOut   = mutableListOf<Double>()
+    val yOut   = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+
+    var i = 0
+    while (i < processed.size) {
+        val fraction = i.toDouble() / (processed.size - 1).coerceAtLeast(1)
+        val label = if (mode == ChartMode.Time) {
+            String.format(java.util.Locale.US, "%.0f", fraction * totalMinutes)
+        } else {
+            String.format(java.util.Locale.US, "%.1f", fraction * totalDistanceKm)
+        }
+        xOut.add(xOut.size.toDouble())
+        yOut.add(processed[i])
+        labels.add(label)
+        i += step
+    }
+
+    return LabeledSeries(x = xOut, y = yOut, labels = labels)
+}
+
+/** Builds the Vertical Oscillation (cm) series — optimal 6–8 cm for efficient runners. */
+private fun buildVerticalOscillationSeries(run: RunSession, mode: ChartMode): LabeledSeries {
+    val data = run.verticalOscillationData ?: return LabeledSeries(emptyList(), emptyList(), emptyList())
+    return buildWatchTimeSeries(data, run, mode, smoothWindow = 9, medianWindow = 5, validator = { it in 1f..30f })
+}
+
+/** Builds the Ground Contact Time (ms) series — optimal 200–270 ms. */
+private fun buildGroundContactTimeSeries(run: RunSession, mode: ChartMode): LabeledSeries {
+    val data = run.groundContactTimeData ?: return LabeledSeries(emptyList(), emptyList(), emptyList())
+    return buildWatchTimeSeries(data, run, mode, smoothWindow = 9, medianWindow = 5, validator = { it in 100f..500f })
+}
+
+/** Builds the Stride Length (m) series. */
+private fun buildStrideLengthSeries(run: RunSession, mode: ChartMode): LabeledSeries {
+    val data = run.strideLengthData ?: return LabeledSeries(emptyList(), emptyList(), emptyList())
+    return buildWatchTimeSeries(data, run, mode, smoothWindow = 9, medianWindow = 5, validator = { it in 0.3f..3.0f })
+}
+
+/** Builds the Running Power (W) series — Garmin Running Power accessory. */
+private fun buildRunningPowerSeries(run: RunSession, mode: ChartMode): LabeledSeries {
+    val data = run.runningPowerData?.map { it.toFloat() }
+        ?: return LabeledSeries(emptyList(), emptyList(), emptyList())
+    return buildWatchTimeSeries(data, run, mode, smoothWindow = 9, medianWindow = 5, validator = { it in 50f..800f })
+}
+
+/** Builds the Respiration Rate (breaths/min) series — Fenix 7 / FR965 with respiration sensor. */
+private fun buildRespirationRateSeries(run: RunSession, mode: ChartMode): LabeledSeries {
+    val data = run.respirationRateData ?: return LabeledSeries(emptyList(), emptyList(), emptyList())
+    return buildWatchTimeSeries(data, run, mode, smoothWindow = 7, medianWindow = 3, validator = { it in 8f..60f })
+}
+
 /* -------------------- DUAL-AXIS SERIES DATA -------------------- */
 
 private data class DualSeriesData(
@@ -4282,7 +4405,7 @@ private fun buildPaceElevationDualSeries(
 
     return DualSeriesData(
         paceY = smoothY(medianFilter(paceOut, 5), 15),
-        elevY = smoothY(elevOut, 11),
+        elevY = smoothY(medianFilter(elevOut, 7), 11),
         labels = labels
     )
 }
@@ -4342,7 +4465,7 @@ private fun buildCadenceElevationDualSeries(
 
     return DualSeriesData(
         paceY = smoothY(cadOut, 11),
-        elevY = smoothY(elevOut, 11),
+        elevY = smoothY(medianFilter(elevOut, 7), 11),
         labels = labels
     )
 }
@@ -5352,43 +5475,178 @@ private fun calculateEffortScore(run: RunSession): EffortResult {
 
 /* --------------------- HEART RATE ZONES (VISUAL BARS) --------------------- */
 
+/**
+ * A compact stats grid showing the key scalar Running Dynamics averages from the Garmin watch.
+ * Displayed in the "Running Dynamics" section header below the Charts tab.
+ */
 @Composable
-private fun HeartRateZonesVisualCard(heartRateData: List<Int>?) {
-    val hr = heartRateData?.filter { it > 0 }.orEmpty()
-    if (hr.isEmpty()) return
+private fun RunningDynamicsStatsRow(run: RunSession) {
+    data class DynStat(val label: String, val value: String, val ideal: String, val color: Color)
 
-    val maxObserved = hr.maxOrNull() ?: 0
-    val maxHr = maxObserved.coerceAtLeast(160)
+    val stats = buildList {
+        run.avgGroundContactTime?.let { gct ->
+            val color = when {
+                gct < 200f -> Colors.success
+                gct < 270f -> Colors.success
+                gct < 300f -> Color(0xFFF97316)
+                else        -> Colors.error
+            }
+            add(DynStat("Ground Contact", "${gct.roundToInt()} ms", "Ideal: 200–270 ms", color))
+        }
+        run.avgVerticalOscillation?.let { vo ->
+            val color = when {
+                vo in 6f..8f -> Colors.success
+                vo < 6f || vo <= 10f -> Color(0xFFF97316)
+                else -> Colors.error
+            }
+            add(DynStat("Vertical Osc.", "${String.format(java.util.Locale.US, "%.1f", vo)} cm", "Ideal: 6–8 cm", color))
+        }
+        run.avgGroundContactBalance?.let { bal ->
+            val deviation = kotlin.math.abs(bal - 50f)
+            val color = when {
+                deviation <= 1f -> Colors.success
+                deviation <= 3f -> Color(0xFFF97316)
+                else -> Colors.error
+            }
+            add(DynStat("L/R Balance", "${String.format(java.util.Locale.US, "%.1f", bal)}%", "Ideal: ~50%", color))
+        }
+        run.avgVerticalRatio?.let { vr ->
+            val color = when {
+                vr <= 8f -> Colors.success
+                vr <= 10f -> Color(0xFFF97316)
+                else -> Colors.error
+            }
+            add(DynStat("Vertical Ratio", "${String.format(java.util.Locale.US, "%.1f", vr)}%", "Ideal: ≤ 8%", color))
+        }
+        run.avgStrideLength?.let { sl ->
+            add(DynStat("Stride Length", "${String.format(java.util.Locale.US, "%.2f", sl)} m", "", Colors.primary))
+        }
+        run.aerobicTrainingEffect?.let { te ->
+            val color = when {
+                te >= 3.0f -> Colors.success
+                te >= 1.0f -> Color(0xFFF97316)
+                else -> Colors.textSecondary
+            }
+            add(DynStat("Aerobic TE", String.format(java.util.Locale.US, "%.1f", te), "0–5 scale", color))
+        }
+        run.recoveryTimeMinutes?.let { rt ->
+            val hours = rt / 60
+            val mins = rt % 60
+            val label = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+            add(DynStat("Recovery Time", label, "Until fully recovered", Colors.primary))
+        }
+        run.vo2MaxEstimate?.let { vo2 ->
+            add(DynStat("VO₂ Max Est.", String.format(java.util.Locale.US, "%.0f", vo2), "ml/kg/min", Colors.primary))
+        }
+        run.avgRunningPower?.let { pwr ->
+            add(DynStat("Avg Power", "$pwr W", "Running power", Color(0xFFEAB308)))
+        }
+        run.avgRespirationRate?.let { rr ->
+            add(DynStat("Respiration", "${String.format(java.util.Locale.US, "%.0f", rr)} br/min", "Breaths per minute", Color(0xFF8B5CF6)))
+        }
+    }
 
+    if (stats.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        // 2-column grid of stat tiles
+        stats.chunked(2).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                row.forEach { stat ->
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = stat.label,
+                                style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                                color = Colors.textSecondary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = stat.value,
+                                style = AppTextStyles.body.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                ),
+                                color = stat.color
+                            )
+                            if (stat.ideal.isNotEmpty()) {
+                                Text(
+                                    text = stat.ideal,
+                                    style = AppTextStyles.caption.copy(fontSize = 10.sp),
+                                    color = Colors.textSecondary.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                    }
+                }
+                // If only one item in the last row, add an invisible spacer to keep grid aligned
+                if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession? = null) {
     data class ZoneInfo(
-        val name: String,
-        val label: String,
-        val color: Color,
-        val range: IntRange,
-        val percent: Int,
-        val timeSeconds: Long
+        val name: String, val label: String, val color: Color,
+        val range: IntRange, val percent: Int, val timeSeconds: Long
     )
 
-    val totalSamples = hr.size
-    val z2 = (0.60 * maxHr).toInt()
-    val z3 = (0.70 * maxHr).toInt()
-    val z4 = (0.80 * maxHr).toInt()
-    val z5 = (0.90 * maxHr).toInt()
+    // Source 1: pre-computed zone seconds from server (most accurate)
+    val hasPrecomputed = run != null &&
+        listOf(run.timeInZone1, run.timeInZone2, run.timeInZone3, run.timeInZone4, run.timeInZone5)
+            .any { (it ?: 0) > 0 }
 
-    // Estimate time per sample (roughly 1-2 sec per HR reading)
-    val estimatedSecPerSample = 2L
+    val maxHr: Int
+    val zones: List<ZoneInfo>
+    val sourceLabel: String
 
-    val zones = listOf(
-        Triple("Zone 5", "Maximum", Color(0xFFE53935)) to (z5..maxHr),
-        Triple("Zone 4", "Threshold", Color(0xFFFF9800)) to (z4 until z5),
-        Triple("Zone 3", "Aerobic", Color(0xFFFFC107)) to (z3 until z4),
-        Triple("Zone 2", "Easy", Color(0xFF4CAF50)) to (z2 until z3),
-        Triple("Zone 1", "Warm Up", Color(0xFF42A5F5)) to (0 until z2),
-    ).map { (info, range) ->
-        val count = hr.count { it in range }
-        val pct = ((count.toDouble() / totalSamples) * 100).roundToInt()
-        val timeSec = count * estimatedSecPerSample
-        ZoneInfo(info.first, info.second, info.third, range, pct, timeSec)
+    if (hasPrecomputed && run != null) {
+        val t1 = (run.timeInZone1 ?: 0).toLong()
+        val t2 = (run.timeInZone2 ?: 0).toLong()
+        val t3 = (run.timeInZone3 ?: 0).toLong()
+        val t4 = (run.timeInZone4 ?: 0).toLong()
+        val t5 = (run.timeInZone5 ?: 0).toLong()
+        val total = (t1 + t2 + t3 + t4 + t5).coerceAtLeast(1)
+        maxHr = run.heartRateData?.filter { it > 0 }?.maxOrNull()?.coerceAtLeast(160) ?: 180
+        val z2 = (0.60 * maxHr).toInt(); val z3 = (0.70 * maxHr).toInt()
+        val z4 = (0.80 * maxHr).toInt(); val z5 = (0.90 * maxHr).toInt()
+        zones = listOf(
+            ZoneInfo("Zone 5","Maximum",  Color(0xFFE53935), z5..maxHr,   ((t5*100)/total).toInt(), t5),
+            ZoneInfo("Zone 4","Threshold",Color(0xFFFF9800), z4 until z5, ((t4*100)/total).toInt(), t4),
+            ZoneInfo("Zone 3","Aerobic",  Color(0xFFFFC107), z3 until z4, ((t3*100)/total).toInt(), t3),
+            ZoneInfo("Zone 2","Easy",     Color(0xFF4CAF50), z2 until z3, ((t2*100)/total).toInt(), t2),
+            ZoneInfo("Zone 1","Warm Up",  Color(0xFF42A5F5), 0 until z2,  ((t1*100)/total).toInt(), t1),
+        )
+        sourceLabel = "Server-computed zones"
+    } else {
+        // Fallback: derive from HR time-series
+        val hr = heartRateData?.filter { it > 0 }.orEmpty()
+        if (hr.isEmpty()) return
+        maxHr = (hr.maxOrNull() ?: 0).coerceAtLeast(160)
+        val z2 = (0.60 * maxHr).toInt(); val z3 = (0.70 * maxHr).toInt()
+        val z4 = (0.80 * maxHr).toInt(); val z5 = (0.90 * maxHr).toInt()
+        val total = hr.size
+        zones = listOf(
+            Triple("Zone 5","Maximum",  Color(0xFFE53935)) to (z5..maxHr),
+            Triple("Zone 4","Threshold",Color(0xFFFF9800)) to (z4 until z5),
+            Triple("Zone 3","Aerobic",  Color(0xFFFFC107)) to (z3 until z4),
+            Triple("Zone 2","Easy",     Color(0xFF4CAF50)) to (z2 until z3),
+            Triple("Zone 1","Warm Up",  Color(0xFF42A5F5)) to (0 until z2),
+        ).map { (info, range) ->
+            val count = hr.count { it in range }
+            ZoneInfo(info.first, info.second, info.third, range,
+                     ((count.toDouble() / total) * 100).roundToInt(), count * 2L)
+        }
+        sourceLabel = "Estimated from HR data"
     }
 
     Card(
@@ -5397,75 +5655,27 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?) {
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text(
-                "Heart Rate Zones",
-                style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
-                color = Colors.textPrimary
-            )
-
-            Text(
-                "Based on est. max HR: $maxHr bpm",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted
-            )
-
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Heart Rate Zones", style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold), color = Colors.textPrimary)
+            Text("$sourceLabel · max HR $maxHr bpm", style = AppTextStyles.caption, color = Colors.textMuted)
             zones.forEach { zone ->
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "${zone.name} • ${zone.label}",
-                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
-                            color = Colors.textPrimary
-                        )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("${zone.name} • ${zone.label}", style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                formatSecondsToHMS(zone.timeSeconds),
-                                style = AppTextStyles.caption,
-                                color = Colors.textSecondary
-                            )
-                            Text(
-                                "${zone.percent}%",
-                                style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                                color = zone.color
-                            )
+                            Text(formatSecondsToHMS(zone.timeSeconds), style = AppTextStyles.caption, color = Colors.textSecondary)
+                            Text("${zone.percent}%", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = zone.color)
                         }
                     }
-
-                    // Horizontal bar
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(10.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(Colors.backgroundTertiary.copy(alpha = 0.3f))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth((zone.percent / 100f).coerceIn(0f, 1f))
-                                .clip(RoundedCornerShape(5.dp))
-                                .background(zone.color)
-                        )
+                    Box(modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Colors.backgroundTertiary.copy(alpha = 0.3f))) {
+                        Box(modifier = Modifier.fillMaxHeight().fillMaxWidth((zone.percent / 100f).coerceIn(0f, 1f)).clip(RoundedCornerShape(5.dp)).background(zone.color))
                     }
-
-                    Text(
-                        "${zone.range.first}-${zone.range.last} bpm",
-                        style = AppTextStyles.caption.copy(fontSize = 9.sp),
-                        color = Colors.textMuted
-                    )
+                    Text("${zone.range.first}-${zone.range.last} bpm", style = AppTextStyles.caption.copy(fontSize = 9.sp), color = Colors.textMuted)
                 }
             }
         }
     }
 }
-
 /* ------------------- INTENSITY DISTRIBUTION DONUT ------------------- */
 
 @Composable
@@ -6275,6 +6485,288 @@ private fun WeatherPerformanceCard(weather: WeatherData) {
     }
 }
 
+/* -------------------------------- TAB: DYNAMICS -------------------------------- */
+
+/**
+ * Dynamics tab — only shown when the run has Garmin watch data (run.hasGarminData == true).
+ *
+ * Contains:
+ *  • Key running-dynamics scalar averages (GCT, VO, balance, vertical ratio, stride, TE, recovery)
+ *  • Time-series charts from the Garmin watch: VO, GCT, Stride Length, Running Power, Respiration Rate
+ *
+ * Charts in the Graphs tab (Pace, Elevation, HR, Cadence) remain there — Dynamics is purely
+ * for the biomechanical / physiological data that only a Garmin watch can provide.
+ */
+@Composable
+private fun DynamicsTabContent(
+    run: RunSession,
+    onDelete: () -> Unit = {},
+    selectedTab: Int = 0,
+    onTabSelected: (Int) -> Unit = {},
+    hasGroupRun: Boolean = false,
+) {
+    var chartMode by remember { mutableStateOf(ChartMode.Time) }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = Spacing.lg),
+        contentPadding = PaddingValues(bottom = Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.lg)
+    ) {
+        item {
+            RunTabsFlagship(
+                selected = selectedTab,
+                onSelected = onTabSelected,
+                hasGroupRun = hasGroupRun,
+                hasGarminData = run.hasGarminData
+            )
+        }
+
+        // ── Scalar Stats Grid ──────────────────────────────────────────────────
+        item {
+            Text(
+                "Running Dynamics",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+        }
+        item { RunningDynamicsStatsRow(run = run) }
+
+        // ── Time/Distance axis toggle ──────────────────────────────────────────
+        item {
+            Text(
+                "Biometric Charts",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            ChartModeToggleFlagship(mode = chartMode, onMode = { chartMode = it })
+        }
+
+        // ── Vertical Oscillation ───────────────────────────────────────────────
+        item {
+            val voSeries = buildVerticalOscillationSeries(run, chartMode)
+            if (voSeries.y.size >= 2) {
+                val avgVo = voSeries.y.average()
+                val maxVo = voSeries.y.maxOrNull() ?: 0.0
+                LineChartCardFlagship(
+                    title = "Vertical Oscillation",
+                    subtitleLeft = "Avg: ${String.format(java.util.Locale.US, "%.1f", avgVo)} cm",
+                    subtitleRight = "Max: ${String.format(java.util.Locale.US, "%.1f", maxVo)} cm",
+                    accent = Color(0xFF06B6D4)
+                ) {
+                    RunLineChartCanvas(
+                        series = voSeries,
+                        lineColor = Color(0xFF06B6D4),
+                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        yFormatter = { v -> String.format(java.util.Locale.US, "%.1f", v) },
+                        yUnitHint = "cm"
+                    )
+                }
+            } else if (run.avgVerticalOscillation != null) {
+                // No time-series but we have an average — show a stat tile instead
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                ) {
+                    Column(modifier = Modifier.padding(Spacing.md)) {
+                        Text("Vertical Oscillation", style = AppTextStyles.caption, color = Colors.textSecondary)
+                        Text(
+                            "${String.format(java.util.Locale.US, "%.1f", run.avgVerticalOscillation)} cm avg",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                            color = Color(0xFF06B6D4)
+                        )
+                        Text("Ideal: 6–8 cm for efficient running", style = AppTextStyles.caption, color = Colors.textSecondary)
+                    }
+                }
+            }
+        }
+
+        // ── Ground Contact Time ────────────────────────────────────────────────
+        item {
+            val gctSeries = buildGroundContactTimeSeries(run, chartMode)
+            if (gctSeries.y.size >= 2) {
+                val avgGct = gctSeries.y.average().roundToInt()
+                val minGct = gctSeries.y.minOrNull()?.roundToInt() ?: 0
+                LineChartCardFlagship(
+                    title = "Ground Contact Time",
+                    subtitleLeft = "Avg: $avgGct ms",
+                    subtitleRight = "Best: $minGct ms",
+                    accent = Color(0xFFF97316)
+                ) {
+                    RunLineChartCanvas(
+                        series = gctSeries,
+                        lineColor = Color(0xFFF97316),
+                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        yFormatter = { v -> "${v.roundToInt()}" },
+                        yUnitHint = "ms"
+                    )
+                }
+            } else if (run.avgGroundContactTime != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                ) {
+                    Column(modifier = Modifier.padding(Spacing.md)) {
+                        Text("Ground Contact Time", style = AppTextStyles.caption, color = Colors.textSecondary)
+                        Text(
+                            "${run.avgGroundContactTime.roundToInt()} ms avg",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                            color = Color(0xFFF97316)
+                        )
+                        Text("Ideal: 200–270 ms. Lower = faster turnover", style = AppTextStyles.caption, color = Colors.textSecondary)
+                    }
+                }
+            }
+        }
+
+        // ── Stride Length ──────────────────────────────────────────────────────
+        item {
+            val strideSeries = buildStrideLengthSeries(run, chartMode)
+            if (strideSeries.y.size >= 2) {
+                val avgStride = strideSeries.y.average()
+                val maxStride = strideSeries.y.maxOrNull() ?: 0.0
+                LineChartCardFlagship(
+                    title = "Stride Length",
+                    subtitleLeft = "Avg: ${String.format(java.util.Locale.US, "%.2f", avgStride)} m",
+                    subtitleRight = "Max: ${String.format(java.util.Locale.US, "%.2f", maxStride)} m",
+                    accent = Color(0xFF10B981)
+                ) {
+                    RunLineChartCanvas(
+                        series = strideSeries,
+                        lineColor = Color(0xFF10B981),
+                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        yFormatter = { v -> String.format(java.util.Locale.US, "%.2f", v) },
+                        yUnitHint = "m"
+                    )
+                }
+            } else if (run.avgStrideLength != null && run.avgStrideLength > 0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                ) {
+                    Column(modifier = Modifier.padding(Spacing.md)) {
+                        Text("Stride Length", style = AppTextStyles.caption, color = Colors.textSecondary)
+                        Text(
+                            "${String.format(java.util.Locale.US, "%.2f", run.avgStrideLength)} m avg",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                            color = Color(0xFF10B981)
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── L/R Ground Contact Balance ─────────────────────────────────────────
+        if (run.avgGroundContactBalance != null) {
+            item {
+                val bal = run.avgGroundContactBalance
+                val leftPct = bal
+                val rightPct = 100f - bal
+                val deviation = kotlin.math.abs(bal - 50f)
+                val balColor = when {
+                    deviation <= 1f -> Colors.success
+                    deviation <= 3f -> Color(0xFFF97316)
+                    else -> Colors.error
+                }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                ) {
+                    Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("L/R Ground Contact Balance", style = AppTextStyles.caption, color = Colors.textSecondary)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Left ${String.format(java.util.Locale.US, "%.1f", leftPct)}%",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = if (leftPct >= 50f) Colors.primary else Colors.textPrimary)
+                            Text("Right ${String.format(java.util.Locale.US, "%.1f", rightPct)}%",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = if (rightPct >= 50f) Colors.primary else Colors.textPrimary)
+                        }
+                        // Visual balance bar
+                        Box(modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))
+                            .background(Colors.backgroundRoot)) {
+                            Box(modifier = Modifier
+                                .fillMaxWidth(leftPct / 100f)
+                                .fillMaxHeight()
+                                .background(balColor))
+                        }
+                        Text(
+                            if (deviation <= 1f) "✅ Excellent symmetry" else if (deviation <= 3f) "⚠️ Minor imbalance" else "❗ Notable imbalance — may indicate fatigue or injury risk",
+                            style = AppTextStyles.caption,
+                            color = balColor
+                        )
+                    }
+                }
+            }
+        }
+
+        // ── Running Power ──────────────────────────────────────────────────────
+        item {
+            val powerSeries = buildRunningPowerSeries(run, chartMode)
+            if (powerSeries.y.size >= 2) {
+                val avgPwr = powerSeries.y.average().roundToInt()
+                val maxPwr = powerSeries.y.maxOrNull()?.roundToInt() ?: 0
+                LineChartCardFlagship(
+                    title = "Running Power",
+                    subtitleLeft = "Avg: $avgPwr W",
+                    subtitleRight = "Max: $maxPwr W",
+                    accent = Color(0xFFEAB308)
+                ) {
+                    RunLineChartCanvas(
+                        series = powerSeries,
+                        lineColor = Color(0xFFEAB308),
+                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        yFormatter = { v -> "${v.roundToInt()}" },
+                        yUnitHint = "W"
+                    )
+                }
+            }
+        }
+
+        // ── Respiration Rate ───────────────────────────────────────────────────
+        item {
+            val respSeries = buildRespirationRateSeries(run, chartMode)
+            if (respSeries.y.size >= 2) {
+                val avgResp = respSeries.y.average()
+                val maxResp = respSeries.y.maxOrNull() ?: 0.0
+                LineChartCardFlagship(
+                    title = "Respiration Rate",
+                    subtitleLeft = "Avg: ${String.format(java.util.Locale.US, "%.0f", avgResp)} br/min",
+                    subtitleRight = "Max: ${String.format(java.util.Locale.US, "%.0f", maxResp)} br/min",
+                    accent = Color(0xFF8B5CF6)
+                ) {
+                    RunLineChartCanvas(
+                        series = respSeries,
+                        lineColor = Color(0xFF8B5CF6),
+                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        yFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
+                        yUnitHint = "br/min"
+                    )
+                }
+            }
+        }
+
+        // Delete button
+        item {
+            Spacer(modifier = Modifier.height(Spacing.md))
+            OutlinedButton(
+                onClick = onDelete,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.error),
+                border = ButtonDefaults.outlinedButtonBorder.copy(brush = SolidColor(Colors.error))
+            ) {
+                Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Delete Run", fontWeight = FontWeight.Medium)
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(Spacing.sm)) }
+    }
+}
+
 /* -------------------------------- TAB: DATA -------------------------------- */
 
 @Composable
@@ -6296,7 +6788,7 @@ private fun DataTabFlagship(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
         }
 
         // ==================== PACE SECTION ====================
@@ -6457,17 +6949,38 @@ private fun DataTabFlagship(
 
         // ==================== STEPS SECTION ====================
         item {
+            // Total steps: prefer the stored sensor value, then derive from cadence × time.
+            // Cadence is steps/min, duration is milliseconds → steps = cadence × (durationMs / 60000)
+            val derivedSteps: Int? = run.totalSteps
+                ?.takeIf { it > 0 }
+                ?: run.cadenceData
+                    ?.filter { it > 0 }
+                    ?.average()
+                    ?.takeIf { it > 0 }
+                    ?.let { avgCadence ->
+                        val durationMin = run.duration / 60_000.0
+                        (avgCadence * durationMin).toInt().takeIf { it > 0 }
+                    }
+                ?: run.cadence
+                    .takeIf { it > 0 }
+                    ?.let { avgCadence ->
+                        val durationMin = run.duration / 60_000.0
+                        (avgCadence * durationMin).toInt().takeIf { it > 0 }
+                    }
+
             DataSectionCard(
                 title = "Steps",
                 icon = "👟",
                 metrics = buildList {
-                    run.totalSteps?.let { 
-                        add("Total Steps" to "$it steps")
-                        // Estimate calories from steps (roughly 0.04 kcal per step for running)
-                        val estimatedCalories = (it * 0.04).toInt()
+                    if (derivedSteps != null && derivedSteps > 0) {
+                        val isEstimate = (run.totalSteps == null || run.totalSteps == 0)
+                        add("Total Steps" to "${"%,d".format(derivedSteps)} steps${if (isEstimate) " (est.)" else ""}")
+                        val estimatedCalories = (derivedSteps * 0.04).toInt()
                         add("Est. Calories" to "$estimatedCalories kcal")
-                    }
-                    if (run.totalSteps == null || run.totalSteps == 0) {
+                        if (run.avgStrideLength != null && run.avgStrideLength > 0) {
+                            add("Avg Stride" to "${String.format(java.util.Locale.US, "%.2f", run.avgStrideLength)} m")
+                        }
+                    } else {
                         add("Total Steps" to "-- steps")
                     }
                 }
@@ -6849,7 +7362,7 @@ private fun AchievementsTabFlagship(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
         }
 
         item {

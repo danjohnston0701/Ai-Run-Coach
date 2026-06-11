@@ -118,13 +118,14 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
                 val voices = tts.voices
                 val selectedVoice = voices?.find { voice ->
+                    val n = voice.name.lowercase()
                     when (gender.lowercase()) {
-                        "female" -> voice.name.lowercase().contains("female") || 
-                                  voice.name.lowercase().contains("woman") ||
-                                  voice.name.lowercase().contains("queen")
-                        "male" -> voice.name.lowercase().contains("male") || 
-                                voice.name.lowercase().contains("man") ||
-                                voice.name.lowercase().contains("king")
+                        "female" -> n.contains("female") || n.contains("woman") || n.contains("queen")
+                        // IMPORTANT: "female" contains the substring "male", so we must explicitly
+                        // exclude female voices when searching for male ones.
+                        "male" -> (n.contains("male") && !n.contains("female")) ||
+                                  (n.contains("man") && !n.contains("woman")) ||
+                                  n.contains("king")
                         else -> false
                     }
                 }
@@ -140,9 +141,10 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
         }
         
         // Fallback: pitch adjustment for gender (male = lower pitch, female = higher pitch)
+        // Note: no named voice was found — adjust pitch so the voice at least sounds gender-appropriate
         val pitch = when (gender.lowercase()) {
-            "female" -> 1.5f
-            "male" -> 0.8f
+            "female" -> 1.2f
+            "male" -> 0.75f   // Lower is more distinctly male-sounding
             else -> 1.0f
         }
         tts.setPitch(pitch)

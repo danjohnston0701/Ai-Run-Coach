@@ -124,6 +124,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private val routePoints = mutableListOf<LocationPoint>()
     private val kmSplits = mutableListOf<KmSplit>()
     private var lastKmSplit = 0
+    // Pending km split that was skipped because the global cooldown was active exactly at the
+    // km crossing.  Retried on subsequent location updates until the cooldown clears.
+    private var pendingKmSplitCoaching: KmSplit? = null
     private var startTime: Long = 0
     private var lastSplitTime: Long = 0
     private var totalDistance: Double = 0.0
@@ -636,7 +639,8 @@ class RunTrackingService : Service(), SensorEventListener {
                             serviceScope.launch {
                                 val token = sessionManager.getAuthToken()
                                 val name  = currentUser?.name ?: ""
-                                if (token != null) garminWatchManager?.sendAuth(token, name)
+                                val age   = currentUser?.age
+                                if (token != null) garminWatchManager?.sendAuth(token, name, age)
                             }
                         }
                         "sessionReady" -> {
@@ -672,9 +676,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     serviceScope.launch {
                         val token = sessionManager.getAuthToken()
                         val name  = currentUser?.name ?: ""
+                        val age   = currentUser?.age
                         if (token != null) {
-                            Log.d("RunTrackingService", "Sending auth to watch for user: $name")
-                            garminWatchManager?.sendAuth(token, name)
+                            Log.d("RunTrackingService", "Sending auth to watch for user: $name (age=$age)")
+                            garminWatchManager?.sendAuth(token, name, age)
                         } else {
                             Log.w("RunTrackingService", "Watch ready but no auth token available — user may not be logged in")
                         }
@@ -867,6 +872,7 @@ class RunTrackingService : Service(), SensorEventListener {
         routePoints.clear()
         kmSplits.clear()
         lastKmSplit = 0
+        pendingKmSplitCoaching = null  // Clear any deferred split from previous run
         last500mMilestone = 0  // Reset for new run
         lastPhase = null        // Reset for new run - allow first phase change to trigger
         lastCoachingTime = 0   // Reset cooldown for new run
@@ -2352,6 +2358,18 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun checkForKmSplit() {
         val currentKm = (totalDistance / 1000).toInt()
+
+        // ── Retry any pending split from a previous tick where cooldown blocked it ──
+        val pending = pendingKmSplitCoaching
+        if (pending != null && !hasCoachingFiredThisTick && canFireCoaching() && !isInFinalStretch()) {
+            Log.d("RunTrackingService", "Retrying pending km split coaching at ${pending.km}km")
+            pendingKmSplitCoaching = null
+            hasCoachingFiredThisTick = true
+            recordCoachingFired()
+            triggerKmSplitCoaching(pending)
+            return
+        }
+
         if (currentKm > lastKmSplit) {
             val now = System.currentTimeMillis()
             val splitTime = (now - lastSplitTime) - splitPausedMs  // Exclude paused time from this split
@@ -2374,11 +2392,17 @@ class RunTrackingService : Service(), SensorEventListener {
             // Only trigger AI coaching at the user's chosen interval (1km, 2km, 3km, 5km, 10km)
             // Suppress split coaching in the final 500m — only motivation allowed
             val interval = coachingFeaturePrefs.kmSplitIntervalKm
-            if (currentKm % interval == 0 && canFireCoaching() && !isInFinalStretch()) {
-                Log.d("RunTrackingService", "Triggering split coaching at ${currentKm}km (interval: every ${interval}km)")
-                hasCoachingFiredThisTick = true
-                recordCoachingFired()
-                triggerKmSplitCoaching(split)
+            if (currentKm % interval == 0 && !isInFinalStretch()) {
+                if (!hasCoachingFiredThisTick && canFireCoaching()) {
+                    Log.d("RunTrackingService", "Triggering split coaching at ${currentKm}km (interval: every ${interval}km)")
+                    hasCoachingFiredThisTick = true
+                    recordCoachingFired()
+                    triggerKmSplitCoaching(split)
+                } else {
+                    // Cooldown active at the exact km crossing — store and retry next tick
+                    Log.d("RunTrackingService", "Km split at ${currentKm}km deferred (cooldown active) — will retry")
+                    pendingKmSplitCoaching = split
+                }
             }
         }
     }
@@ -4050,11 +4074,19 @@ class RunTrackingService : Service(), SensorEventListener {
 
         serviceScope.launch {
             try {
+                // Derive the target pace string from the stored pace (seconds/km)
+                val cadenceTargetPaceStr = if (targetPaceSecondsPerKm > 0) {
+                    formatPace(targetPaceSecondsPerKm)
+                } else null
+
                 val request = CadenceCoachingRequest(
                     cadence = stride.cadence,
                     strideLength = stride.strideLength,
                     strideZone = stride.strideZone,
                     currentPace = currentPace,
+                    targetPace = cadenceTargetPaceStr,
+                    targetTime = targetTime?.let { it / 1000 },  // Convert ms to seconds
+                    optimalCadenceTarget = stride.optimalCadenceTarget,
                     speed = if (routePoints.size >= 2) {
                         val last = routePoints.last()
                         val prev = routePoints[routePoints.size - 2]
@@ -4504,7 +4536,7 @@ class RunTrackingService : Service(), SensorEventListener {
             totalElevationGain = totalElevationGain,
             totalElevationLoss = totalElevationLoss,
             targetTime = targetTime?.let { it / 1000 },
-            targetPace = null, // TODO: pass if user has set one
+            targetPace = if (targetPaceSecondsPerKm > 0) formatPace(targetPaceSecondsPerKm) else null,
             kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) },
             remainingDistanceFormatted = remainingFormatted,
             distanceCompletedFormatted = distanceCompletedFormatted,

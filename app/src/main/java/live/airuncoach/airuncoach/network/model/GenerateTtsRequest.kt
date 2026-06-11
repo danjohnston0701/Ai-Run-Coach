@@ -3,7 +3,9 @@ package live.airuncoach.airuncoach.network.model
 import com.google.gson.annotations.SerializedName
 
 data class GenerateTtsRequest(
-    @SerializedName("text") val text: String
+    @SerializedName("text") val text: String,
+    @SerializedName("coachGender") val coachGender: String? = null,
+    @SerializedName("coachAccent") val coachAccent: String? = null
 )
 
 data class GenerateTtsResponse(

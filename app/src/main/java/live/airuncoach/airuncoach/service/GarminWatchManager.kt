@@ -200,6 +200,7 @@ class GarminWatchManager(private val context: Context) {
     // (e.g. the user opens the watch app while the phone app is idle on the home screen).
     private var cachedAuthToken: String? = null
     private var cachedRunnerName: String = ""
+    private var cachedUserMaxHr: Int = 185  // Default; updated from user profile on sendAuth
 
     // ── Private SDK handles ───────────────────────────────────────────────────
     private var connectIQ: ConnectIQ? = null
@@ -247,15 +248,26 @@ class GarminWatchManager(private val context: Context) {
 
     // ── Phone → Watch ─────────────────────────────────────────────────────────
 
-    fun sendAuth(authToken: String, runnerName: String) {
+    /**
+     * Sends authentication and user profile to the watch.
+     * @param userAge Optional user age — used to compute personalised max HR for on-watch
+     *                HR zone display using the Tanaka formula (208 − 0.7 × age).
+     *                Defaults to 185 bpm if not provided.
+     */
+    fun sendAuth(authToken: String, runnerName: String, userAge: Int? = null) {
         // Cache credentials so we can auto-respond to future "watchReady" messages
         // without requiring a ViewModel to be active.
         cachedAuthToken = authToken
         cachedRunnerName = runnerName
+        // Tanaka formula for max HR: more accurate than 220-age for active adults
+        if (userAge != null && userAge > 0) {
+            cachedUserMaxHr = (208 - (0.7 * userAge).toInt()).coerceIn(155, 210)
+        }
         sendToWatch(mapOf(
             "type"       to "auth",
             "authToken"  to authToken,
-            "runnerName" to runnerName
+            "runnerName" to runnerName,
+            "maxHr"      to cachedUserMaxHr
         ))
     }
 

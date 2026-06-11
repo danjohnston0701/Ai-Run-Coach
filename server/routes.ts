@@ -959,6 +959,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Helper function to transform database run to Android format
+  /**
+   * Full transform — used for GET /api/runs/:id (single run detail).
+   * Includes all Garmin scalar fields AND all time-series arrays.
+   */
   function transformRunForAndroid(run: any) {
 
   function normalizeNumericSeries(series: any): number[] {
@@ -1025,11 +1029,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       duration: durationMs,
       distance: normalizeDistanceMeters(run),
       averageSpeed: normalizeDistanceMeters(run) && run.duration ? (normalizeDistanceMeters(run) / (run.duration / 1000)) : 0,
-      maxSpeed: 0, // Calculate from gpsTrack if needed
+      maxSpeed: run.maxSpeed ?? null,
       averagePace: run.avgPace || "0'00\"/km",
       calories: run.calories || 0,
       cadence: run.cadence || 0,
-      maxCadence: run.maxCadence || null,
+      maxCadence: run.maxCadence ?? null,
       heartRate: run.avgHeartRate || 0,
       routePoints: (() => {
         // Normalise gpsTrack to a routePoints array regardless of storage format.
@@ -1101,7 +1105,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       workoutType: run.workoutType || null,
       workoutIntensity: run.workoutIntensity || null,
       workoutDescription: run.workoutDescription || null,
+
+      // ── Extended scalars (always included — these are tiny) ──────────────────
+      avgSpeed:        run.avgSpeed        ?? null,
+      movingTime:      run.movingTime      ?? null,
+      elapsedTime:     run.elapsedTime     ?? null,
+      avgStrideLength: run.avgStrideLength ?? null,
+      minElevation:    run.minElevation    ?? null,
+      maxElevation:    run.maxElevation    ?? null,
+      steepestIncline: run.steepestIncline ?? null,
+      steepestDecline: run.steepestDecline ?? null,
+      totalSteps:      run.totalSteps      ?? null,
+      activeCalories:  run.activeCalories  ?? null,
+      restingCalories: run.restingCalories ?? null,
+      estSweatLoss:    run.estSweatLoss    ?? null,
+      minHeartRate:    run.minHeartRate    ?? null,
+
+      // ── Garmin flag (critical — iOS/Android charts gate on this) ────────────
+      hasGarminData:    run.hasGarminData    ?? false,
+      garminDeviceName: run.garminDeviceName ?? null,
+
+      // ── Running Dynamics scalars (from Garmin watch) ─────────────────────────
+      avgGroundContactTime:    run.avgGroundContactTime    ?? null,
+      minGroundContactTime:    run.minGroundContactTime    ?? null,
+      maxGroundContactTime:    run.maxGroundContactTime    ?? null,
+      avgGroundContactBalance: run.avgGroundContactBalance ?? null,
+      avgVerticalOscillation:  run.avgVerticalOscillation  ?? null,
+      maxVerticalOscillation:  run.maxVerticalOscillation  ?? null,
+      avgVerticalRatio:        run.avgVerticalRatio        ?? null,
+      minStrideLength:         run.minStrideLength         ?? null,
+      maxStrideLength:         run.maxStrideLength         ?? null,
+
+      // ── Training Effect & Recovery ───────────────────────────────────────────
+      aerobicTrainingEffect:   run.aerobicTrainingEffect   ?? null,
+      anaerobicTrainingEffect: run.anaerobicTrainingEffect ?? null,
+      trainingEffectLabel:     run.trainingEffectLabel     ?? null,
+      recoveryTimeMinutes:     run.recoveryTimeMinutes     ?? null,
+      vo2MaxEstimate:          run.vo2MaxEstimate          ?? null,
+
+      // ── Power & Respiration ──────────────────────────────────────────────────
+      avgRunningPower:   run.avgRunningPower   ?? null,
+      maxRunningPower:   run.maxRunningPower   ?? null,
+      avgRespirationRate: run.avgRespirationRate ?? null,
+
+      // ── Environmental ────────────────────────────────────────────────────────
+      avgAmbientPressure: run.avgAmbientPressure ?? null,
+
+      // ── HR Zone breakdown ────────────────────────────────────────────────────
+      avgHeartRateZone: run.avgHeartRateZone ?? null,
+      timeInZone1: run.timeInZone1 ?? null,
+      timeInZone2: run.timeInZone2 ?? null,
+      timeInZone3: run.timeInZone3 ?? null,
+      timeInZone4: run.timeInZone4 ?? null,
+      timeInZone5: run.timeInZone5 ?? null,
+
+      // ── Time-series arrays (for graphs) ──────────────────────────────────────
+      // Each is a flat number[] or null. normalizeNumericSeries handles the
+      // various storage formats (plain arrays, {value:n} objects, etc.).
+      cadenceData:             normalizeNumericSeries(run.cadenceData),
+      altitudeData:            normalizeNumericSeries(run.altitudeData),
+      groundContactTimeData:   normalizeNumericSeries(run.groundContactTimeData),
+      groundContactBalanceData: normalizeNumericSeries(run.groundContactBalanceData),
+      verticalOscillationData: normalizeNumericSeries(run.verticalOscillationData),
+      verticalRatioData:       normalizeNumericSeries(run.verticalRatioData),
+      strideLengthData:        normalizeNumericSeries(run.strideLengthData),
+      runningPowerData:        normalizeNumericSeries(run.runningPowerData),
+      respirationRateData:     normalizeNumericSeries(run.respirationRateData),
+      bearingData:             normalizeNumericSeries(run.bearingData),
     };
+  }
+
+  /**
+   * Lightweight transform — used for list endpoints (GET /api/users/:userId/runs).
+   * Omits large time-series arrays to keep list payloads small (~50 runs × arrays
+   * could be hundreds of KB). The full arrays are fetched on-demand via GET /api/runs/:id.
+   * Still includes all scalar fields so the history list has complete summary stats.
+   */
+  function transformRunForAndroidList(run: any) {
+    const full = transformRunForAndroid(run);
+    // Drop the potentially large time-series arrays
+    const {
+      cadenceData, altitudeData,
+      groundContactTimeData, groundContactBalanceData,
+      verticalOscillationData, verticalRatioData,
+      strideLengthData, runningPowerData,
+      respirationRateData, bearingData,
+      routePoints, // also skip routePoints in list — saves massive bandwidth
+      paceData,
+      heartRateData,
+      ...summary
+    } = full;
+    return summary;
   }
 
   app.get("/api/runs/user/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -1110,7 +1204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string), 200) : 50;
       const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
       const runs = await storage.getUserRuns(req.params.userId, { limit, offset });
-      const transformedRuns = runs.map(transformRunForAndroid);
+      const transformedRuns = runs.map(transformRunForAndroidList);
       res.json(transformedRuns);
     } catch (error: any) {
       console.error("Get user runs error:", error);
@@ -1133,7 +1227,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
       const runs = await storage.getUserRuns(requestedUserId, { limit, offset });
 
-      const transformedRuns = runs.map(transformRunForAndroid);
+      const transformedRuns = runs.map(transformRunForAndroidList);
       res.json(transformedRuns);
     } catch (error: any) {
       console.error("Get user runs error:", error);

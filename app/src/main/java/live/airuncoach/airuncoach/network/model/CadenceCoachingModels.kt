@@ -7,6 +7,9 @@ data class CadenceCoachingRequest(
     @SerializedName("strideLength") val strideLength: Double,
     @SerializedName("strideZone") val strideZone: String, // "OVERSTRIDING", "UNDERSTRIDING", "OPTIMAL"
     @SerializedName("currentPace") val currentPace: String,
+    @SerializedName("targetPace") val targetPace: String?,       // User's goal pace for this run (e.g. "5:15")
+    @SerializedName("targetTime") val targetTime: Long?,          // User's goal time in seconds
+    @SerializedName("optimalCadenceTarget") val optimalCadenceTarget: Int, // Biomechanics-computed ideal spm at current speed
     @SerializedName("speed") val speed: Double, // m/s
     @SerializedName("distance") val distance: Double, // km
     @SerializedName("elapsedTime") val elapsedTime: Long,

@@ -137,6 +137,14 @@ data class RunSession(
     val runningPowerData: List<Int>? = null,           // running power per 2s sample
     val respirationRateData: List<Float>? = null,      // respiration rate per 2s sample
 
+    // ── Heart Rate Zone breakdown (pre-computed by server, more accurate than derived) ──
+    val avgHeartRateZone: Int? = null,       // 1-5 average HR zone for the run
+    val timeInZone1: Int? = null,            // seconds in Zone 1 (< 60% maxHR)
+    val timeInZone2: Int? = null,            // seconds in Zone 2 (60-70% maxHR)
+    val timeInZone3: Int? = null,            // seconds in Zone 3 (70-80% maxHR)
+    val timeInZone4: Int? = null,            // seconds in Zone 4 (80-90% maxHR)
+    val timeInZone5: Int? = null,            // seconds in Zone 5 (≥ 90% maxHR)
+
     // Run achievements and milestones
     val achievements: List<RunAchievement> = emptyList() // Personal bests and milestone badges
 ) {

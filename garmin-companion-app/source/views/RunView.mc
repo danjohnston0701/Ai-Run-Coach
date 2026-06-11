@@ -33,6 +33,8 @@ class RunView extends Ui.View {
     private var _isConnected     = false;
     private var _overlayState    = OVERLAY_READY;
     private var _dotCount        = 0;
+    // Personalised max HR from phone (Tanaka formula). Default 185 until auth received.
+    private var _maxHr           = 185;
     // Grace period before showing "OFFLINE" label (lets auth message arrive first)
     private var _connectWaitTicks = 0;
     private const CONNECT_WAIT_MAX = 32; // 32 x 250ms = 8 seconds
@@ -461,6 +463,9 @@ class RunView extends Ui.View {
                 _isAuthenticated  = true;
                 _isConnected      = true;
                 _connectWaitTicks = CONNECT_WAIT_MAX; // Mark grace period done
+                // Update personalised max HR for on-watch zone display
+                var mhr = data.get("maxHr");
+                if (mhr != null && mhr > 0) { _maxHr = mhr.toNumber(); }
                 // Refresh DataStreamer token in case the old one expired mid-session
                 if (_dataStreamer != null) { _dataStreamer.setAuthToken(tok); }
                 if (!_isRunning) {
@@ -938,7 +943,9 @@ class RunView extends Ui.View {
 
     private function _drawBattery(dc, cx, cy, ringR, circR) {
         if (!(Sys has :getSystemStats)) { return; }
-        var bat = Sys.getSystemStats().battery.toNumber();
+        var stats = Sys.getSystemStats();
+        if (stats == null) { return; }
+        var bat = stats.battery.toNumber();
         if (bat < 0)   { bat = 0; }
         if (bat > 100) { bat = 100; }
 
@@ -1114,8 +1121,11 @@ class RunView extends Ui.View {
         return (mn * 60 + sc).toFloat();
     }
 
+    // HR zone using personalised max HR (standard 5-zone model matching Garmin/Polar):
+    //   Zone 1 <60%, Zone 2 60-70%, Zone 3 70-80%, Zone 4 80-90%, Zone 5 >=90%
     private function _hrZone(hr) {
-        var pct = (hr.toFloat() / 185.0) * 100.0;
+        if (_maxHr <= 0 || hr <= 0) { return 1; }
+        var pct = (hr.toFloat() / _maxHr.toFloat()) * 100.0;
         if (pct < 60) { return 1; }
         if (pct < 70) { return 2; }
         if (pct < 80) { return 3; }

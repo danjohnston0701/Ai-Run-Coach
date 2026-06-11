@@ -105,46 +105,57 @@ class RunningMetricsConfig(context: Context) {
         }
     }
 
-    // ── HEART RATE ZONES (% of max HR) ─────────────────────────��──────────────────
+    // ── HEART RATE ZONES (% of max HR) ────────────────────────────────────────────
     /**
      * Get personalized HR zone thresholds based on user's actual max HR.
      * Uses historical data (from tests or estimated from runs).
+     *
+     * Standard 5-zone model (aligns with Garmin, Polar, and most coaching platforms):
+     *   Zone 1: < 60%   — Recovery / easy aerobic
+     *   Zone 2: 60-70%  — Base aerobic / fat-burning
+     *   Zone 3: 70-80%  — Aerobic / tempo
+     *   Zone 4: 80-90%  — Threshold / hard
+     *   Zone 5: 90-100% — VO2 Max / maximum effort
+     *
+     * For a 35-year-old (Tanaka HRmax ≈ 184):
+     *   Zone 1 < 110, Zone 2 < 129, Zone 3 < 147, Zone 4 < 166, Zone 5 ≥ 166
      */
     fun getHeartRateZoneThresholds(userAge: Int): HeartRateZoneThresholds {
         // Try to get user's actual max HR from testing or calculation
         val actualMaxHr = prefs.getInt("user_actual_max_hr", -1)
-        
+
         val maxHr = if (actualMaxHr > 0) {
             actualMaxHr
         } else {
-            // Fallback: use Karvonen formula (220 - age)
-            (220 - userAge).coerceIn(170, 200)
+            // Tanaka formula (2001): more accurate than "220 - age" for active adults
+            // HRmax = 208 − (0.7 × age)
+            (208 - (0.7 * userAge).toInt()).coerceIn(155, 210)
         }
-        
+
         return HeartRateZoneThresholds(
             maxHr = maxHr,
-            zone1Upper = (maxHr * 0.50).toInt(),      // Zone 1: 0-50%
-            zone2Upper = (maxHr * 0.60).toInt(),      // Zone 2: 50-60%
-            zone3Upper = (maxHr * 0.70).toInt(),      // Zone 3: 60-70%
-            zone4Upper = (maxHr * 0.85).toInt(),      // Zone 4: 70-85%
-            zone5Upper = maxHr                         // Zone 5: 85-100%
+            zone1Upper = (maxHr * 0.60).toInt(),   // Zone 1: < 60% (recovery)
+            zone2Upper = (maxHr * 0.70).toInt(),   // Zone 2: 60-70% (base aerobic)
+            zone3Upper = (maxHr * 0.80).toInt(),   // Zone 3: 70-80% (aerobic/tempo)
+            zone4Upper = (maxHr * 0.90).toInt(),   // Zone 4: 80-90% (threshold)
+            zone5Upper = maxHr                      // Zone 5: 90-100% (VO2 max)
         )
     }
 
     /**
      * Calculate HR zone (1-5) for a given heart rate and user age.
+     * Returns null if inputs are invalid.
      */
     fun calculateHeartRateZone(currentHeartRate: Int, userAge: Int): Int? {
         if (currentHeartRate <= 0 || userAge <= 0) return null
-        
+
         val thresholds = getHeartRateZoneThresholds(userAge)
         return when {
             currentHeartRate < thresholds.zone1Upper -> 1
             currentHeartRate < thresholds.zone2Upper -> 2
             currentHeartRate < thresholds.zone3Upper -> 3
             currentHeartRate < thresholds.zone4Upper -> 4
-            currentHeartRate <= thresholds.zone5Upper -> 5
-            else -> null
+            else -> 5   // 90%+ of max HR (VO2 max zone)
         }
     }
 
