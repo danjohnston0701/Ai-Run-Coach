@@ -591,27 +591,259 @@ Prefer `timeInZone1`–`timeInZone5` (seconds) over computing zones from `heartR
 
 ---
 
+---
+
+## Bug 8 — Heart Rate Not Stored Per GPS Point
+
+### Root Cause
+When a GPS location update fires, a new `LocationPoint` is appended to the route. The `heartRate` field on each point was hardcoded to `nil` — so even though the watch was sending HR every ~2 seconds and `currentHeartRate` was being updated correctly, no HR was being stored in the GPS track. This meant `heart_rate_data` was always `null` in the database even though `avg_heart_rate` was correct.
+
+### Fix — `RunTrackingService.swift` (or `RunTrackingViewModel.swift`)
+
+When building each `LocationPoint` in the GPS update callback, embed the current heart rate:
+
+```swift
+// ❌ Before
+let point = LocationPoint(
+    latitude: location.coordinate.latitude,
+    longitude: location.coordinate.longitude,
+    altitude: location.altitude,
+    timestamp: location.timestamp.timeIntervalSince1970,
+    speed: location.speed,
+    cadence: currentCadence,
+    heartRate: nil  // ← hardcoded nil
+)
+
+// ✅ After — embed last-known HR from watch
+let point = LocationPoint(
+    latitude: location.coordinate.latitude,
+    longitude: location.coordinate.longitude,
+    altitude: location.altitude,
+    timestamp: location.timestamp.timeIntervalSince1970,
+    speed: location.speed,
+    cadence: currentCadence,
+    heartRate: currentHeartRate > 0 ? currentHeartRate : nil  // ← embed live HR
+)
+```
+
+This means every GPS track point now carries HR, which the server's `deriveFromGpsTrack(gpsTrack, 'heartRate')` function can extract into the `heart_rate_data` column, enabling the HR graph on the run summary screen.
+
+---
+
+## Bug 9 — Garmin Sensor Time-Series Arrays Not Collected During Run
+
+### Root Cause
+The iOS run tracking service updated scalar accumulators (e.g. `watchHrSum += frame.heartRate`) but **never accumulated the per-frame arrays** needed to produce graphs. `UploadRunRequest.heartRateData`, `cadenceData`, `altitudeData`, `groundContactTimeData`, etc. were always uploaded as `nil`.
+
+### Fix — Add time-series lists and populate per biometric frame
+
+In your Garmin biometric frame handler (the equivalent of `updateWatchSensorData`):
+
+```swift
+// Add these mutable arrays as stored properties:
+private var watchHrSeries: [Int] = []
+private var watchCadenceSeries: [Int] = []
+private var watchAltSeries: [Float] = []           // barometric preferred
+private var watchGctSeries: [Float] = []           // ground contact time
+private var watchGcbSeries: [Float] = []           // ground contact balance
+private var watchVoSeries: [Float] = []            // vertical oscillation
+private var watchVrSeries: [Float] = []            // vertical ratio
+private var watchSlSeries: [Float] = []            // stride length
+private var watchPwrSeries: [Int] = []             // running power
+private var watchRespSeries: [Float] = []          // respiration rate
+
+// Reset them in resetForNewRun():
+func resetForNewRun() {
+    watchHrSeries.removeAll()
+    watchCadenceSeries.removeAll()
+    watchAltSeries.removeAll()
+    watchGctSeries.removeAll()
+    watchGcbSeries.removeAll()
+    watchVoSeries.removeAll()
+    watchVrSeries.removeAll()
+    watchSlSeries.removeAll()
+    watchPwrSeries.removeAll()
+    watchRespSeries.removeAll()
+    // ... other resets ...
+}
+
+// In updateWatchSensorData(frame:) — append to arrays:
+func updateWatchSensorData(_ frame: WatchBiometricFrame) {
+    guard isTracking else { return }
+
+    if frame.heartRate > 0 {
+        watchHrSeries.append(frame.heartRate)
+        // also update scalar accumulators as before
+    }
+    if frame.cadence > 0        { watchCadenceSeries.append(frame.cadence) }
+    if let baroAlt = frame.baroAltitude, baroAlt > 0 {
+        watchAltSeries.append(Float(baroAlt))   // prefer barometric
+    } else if let gpsAlt = frame.altMetres, gpsAlt > 0 {
+        watchAltSeries.append(Float(gpsAlt))    // GPS fallback
+    }
+    if frame.groundContactTime > 0  { watchGctSeries.append(frame.groundContactTime) }
+    if frame.groundContactBalance > 0 { watchGcbSeries.append(frame.groundContactBalance) }
+    if frame.verticalOscillation > 0 { watchVoSeries.append(frame.verticalOscillation) }
+    if frame.verticalRatio > 0      { watchVrSeries.append(frame.verticalRatio) }
+    if frame.strideLength > 0       { watchSlSeries.append(frame.strideLength) }
+    if frame.runningPower > 0       { watchPwrSeries.append(frame.runningPower) }
+    if frame.respirationRate > 0    { watchRespSeries.append(frame.respirationRate) }
+
+    // Set flag so hasGarminData = true on upload
+    hasGarminData = true
+}
+```
+
+### Include arrays in `UploadRunRequest`
+
+```swift
+UploadRunRequest(
+    // ... existing fields ...
+    hasGarminData:            hasGarminData,
+    garminDeviceName:         garminDeviceName,
+    heartRateData:            watchHrSeries.isEmpty ? nil : watchHrSeries,
+    cadenceData:              watchCadenceSeries.isEmpty ? nil : watchCadenceSeries,
+    altitudeData:             watchAltSeries.isEmpty ? nil : watchAltSeries,
+    groundContactTimeData:    watchGctSeries.isEmpty ? nil : watchGctSeries,
+    groundContactBalanceData: watchGcbSeries.isEmpty ? nil : watchGcbSeries,
+    verticalOscillationData:  watchVoSeries.isEmpty ? nil : watchVoSeries,
+    verticalRatioData:        watchVrSeries.isEmpty ? nil : watchVrSeries,
+    strideLengthData:         watchSlSeries.isEmpty ? nil : watchSlSeries,
+    runningPowerData:         watchPwrSeries.isEmpty ? nil : watchPwrSeries,
+    respirationRateData:      watchRespSeries.isEmpty ? nil : watchRespSeries
+)
+```
+
+Also add these fields to your `UploadRunRequest` Swift struct if not already present:
+
+```swift
+struct UploadRunRequest: Codable {
+    // ... existing fields ...
+    let hasGarminData: Bool
+    let garminDeviceName: String?
+    let heartRateData: [Int]?
+    let cadenceData: [Int]?
+    let altitudeData: [Float]?
+    let groundContactTimeData: [Float]?
+    let groundContactBalanceData: [Float]?
+    let verticalOscillationData: [Float]?
+    let verticalRatioData: [Float]?
+    let strideLengthData: [Float]?
+    let runningPowerData: [Int]?
+    let respirationRateData: [Float]?
+    let bearingData: [Float]?
+}
+```
+
+---
+
+## Bug 10 — Talk to Coach: Duplicate API Calls on Every Interaction
+
+### Root Cause
+Each call to `startListening()` launched a new observer/subscriber on the speech recognition state that was never cancelled. After 5 talk-to-coach interactions during a run, 5 simultaneous listeners would all fire `sendMessageToCoach()` on the next speech result — sending 5 duplicate coaching API calls.
+
+### Fix — Cancel the previous listener before starting a new one
+
+```swift
+// Add a cancellable token stored property:
+private var speechListenCancellable: AnyCancellable? = nil
+
+// In startListening():
+func startListening() {
+    // Cancel any previous observation before starting a new one
+    speechListenCancellable?.cancel()
+    speechListenCancellable = nil
+
+    speechRecognizerHelper.startListening()
+
+    speechListenCancellable = speechRecognizerHelper.statePublisher
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .result(let text):
+                // Guard: only fire once per listening session
+                self.speechListenCancellable?.cancel()
+                self.speechListenCancellable = nil
+                self.sendMessageToCoach(text)
+            case .idle, .timedOut, .error:
+                // Terminal — cancel the listener
+                self.speechListenCancellable?.cancel()
+                self.speechListenCancellable = nil
+            default:
+                break
+            }
+        }
+}
+```
+
+Also cancel in `stopRun()` / `resetForNewRun()`:
+
+```swift
+func resetForNewRun() {
+    speechListenCancellable?.cancel()
+    speechListenCancellable = nil
+    // ... other resets ...
+}
+```
+
+---
+
+## Bug 11 — Watch Sends `baroAlt` Field — Parse It
+
+The updated Garmin watch app (v2.5.2) now sends a `baroAlt` key in the biometric data message — this is the continuous barometric altitude from `Sensor.SensorInfo.altitude`, independent of GPS lock. Prefer this over `altMetres` (which comes from GPS) for altitude graphs, since GPS altitude can spike 50+ metres before lock is acquired.
+
+### Fix — Parse `baroAlt` in your watch message handler
+
+```swift
+// In your ConnectIQ message receive handler (GarminWatchManager.swift):
+func receiveMessage(_ message: [AnyHashable: Any]) {
+    // ... existing parsing ...
+    if let type = message["type"] as? String, type == "biometrics" {
+        let hr      = message["heartRate"] as? Int ?? 0
+        let cadence = message["cadence"] as? Int ?? 0
+        let gpsAlt  = message["alt"] as? Double        // GPS altitude
+        let baroAlt = message["baroAlt"] as? Double    // NEW — barometric altitude
+
+        let frame = WatchBiometricFrame(
+            heartRate:       hr,
+            cadence:         cadence,
+            altMetres:       gpsAlt,
+            baroAltitude:    baroAlt,   // NEW field
+            // ... other fields ...
+        )
+        updateWatchSensorData(frame)
+    }
+}
+```
+
+Add `baroAltitude: Double?` to your `WatchBiometricFrame` model if not already present.
+
+---
+
 ## Summary of Files to Update in Xcode
 
 | File | Change |
 |---|---|
-| `GarminWatchManager.swift` | `sendAuth()` → add `userAge` param, send `maxHr` to watch |
-| `RunSessionViewModel.swift` (or equivalent) | `preWarmYesAudio()` → new text + voice gender/accent; `onWakeWordDetected()` → pass gender to TTS fallback |
+| `GarminWatchManager.swift` | `sendAuth()` → add `userAge` param, send `maxHr` to watch; parse `baroAlt` in biometric messages |
+| `RunSessionViewModel.swift` (or equivalent) | `preWarmYesAudio()` → new text + voice gender/accent; `onWakeWordDetected()` → pass gender to TTS fallback; fix duplicate listener (Bug 10) |
 | `GenerateTtsRequest.swift` (network model) | Add `coachGender: String?` and `coachAccent: String?` fields |
 | `CadenceCoachingRequest.swift` (network model) | Add `targetPace`, `targetTime`, `optimalCadenceTarget` fields |
 | `EliteCoachingRequest.swift` (network model) | Replace `targetPace: nil` with computed value from `targetPaceSecondsPerKm` |
 | `RunningMetricsConfig.swift` (or `HRZoneCalculator.swift`) | Tanaka formula + standard 5-zone boundaries |
 | `TextToSpeechHelper.swift` (or `AVSpeechHelper.swift`) | Fix male voice selection — exclude female voices from male search |
-| `RunTrackingService.swift` | `checkForKmSplit()` → add `pendingKmSplitCoaching` retry; `resetForNewRun()` → clear pending |
+| `RunTrackingService.swift` | `checkForKmSplit()` → add `pendingKmSplitCoaching` retry; embed `currentHeartRate` into each `LocationPoint` (Bug 8); collect time-series arrays (Bug 9) |
+| `WatchBiometricFrame.swift` | Add `baroAltitude: Double?` field |
+| `UploadRunRequest.swift` | Add all time-series + Garmin scalar fields (see Bug 9) |
 | Any run screen `onWatchAppReady` / `watchReady` handler | Pass `userAge` to `sendAuth()` |
-| **`RunSession.swift` (network/domain model)** | **Add all new fields listed in Bug 7 above** |
+| **`RunSession.swift` (network/domain model)** | **Add all new fields listed in Bug 7 + `avgBearing: Double?`** |
 | **Run summary/detail view controllers** | **Use `timeInZone*` for HR zones chart; use time-series arrays for all graphs** |
 
 ---
 
 ## Watch App Rebuild Required
 
-After these changes, the Garmin watch app also has fixes (null-safe `_drawBattery`, personalised `_maxHr` from phone). Rebuild the `.iq` file and submit to the Connect IQ Store:
+The Garmin watch app has been updated to **v2.5.2**. Rebuild the `.iq` file and submit to the Connect IQ Store:
 
 ```bash
 cd garmin-companion-app
@@ -619,3 +851,9 @@ cd garmin-companion-app
 ```
 
 The new build should be submitted as an update — both iOS and Android users share the same `.iq` file from the Connect IQ Store, so one build covers both platforms.
+
+**v2.5.2 includes:**
+- `baroAlt` sent per biometric frame (from `Sensor.SensorInfo.altitude`)
+- Null-safe `_drawBattery()` — fixes mid-run blank screen / IQ error on some Fenix firmware
+- Personalised `_maxHr` from the phone auth message — correct HR zone display on watch
+- Tanaka formula (208 − 0.7 × age) for `_hrZone()` function
