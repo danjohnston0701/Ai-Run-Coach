@@ -2173,7 +2173,7 @@ class RunTrackingService : Service(), SensorEventListener {
             timestamp = location.time,
             speed = location.speed.takeIf { it > 0 }, // Store speed if positive (works for both real GPS and simulation)
             altitude = location.altitude.takeIf { location.hasAltitude() },
-            heartRate = null,
+            heartRate = currentHeartRate.takeIf { it > 0 },
             bearing = location.bearing.takeIf { location.hasBearing() },
             cadence = currentCadence.takeIf { it > 0 },
             inclineDegrees = inclineDegrees
