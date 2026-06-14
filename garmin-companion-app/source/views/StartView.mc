@@ -11,8 +11,12 @@ using Toybox.Timer as Timer;
 using Toybox.WatchUi as Ui;
 using Toybox.System as Sys;
 using Toybox.Communications as Comm;
+using Toybox.Attention as Attention;
 
 class StartView extends Ui.View {
+
+    // Phone link
+    private var _phoneLink = null;
 
     // Auth state
     private var _isAuthenticated = false;
@@ -38,6 +42,7 @@ class StartView extends Ui.View {
 
     function initialize() {
         View.initialize();
+        _phoneLink = new PhoneLink();
         var token = App.Storage.getValue("authToken");
         _isAuthenticated = (token != null && token.length() > 0);
         var name = App.Storage.getValue("runnerName");
@@ -50,7 +55,10 @@ class StartView extends Ui.View {
         var name = App.Storage.getValue("runnerName");
         _runnerName = (name != null) ? name : "";
 
-        Comm.registerForPhoneAppMessages(method(:onPhoneMessage));
+        // Register and immediately announce we are open so the phone can
+        // push back any pending prepared run regardless of order.
+        _phoneLink.register(method(:onPhoneMessage));
+        _phoneLink.sendCommand("watchReady");
 
         _timer = new Timer.Timer();
         _timer.start(method(:onTick), 500, true);
@@ -66,9 +74,8 @@ class StartView extends Ui.View {
     }
 
     // -- Phone message handler -----------------------------------------------
-    function onPhoneMessage(msg as Comm.PhoneAppMessage) as Void {
-        if (msg == null) { return; }
-        var data = msg.data;
+    // PhoneLink passes msg.data directly as a Dictionary.
+    function onPhoneMessage(data) as Void {
         if (data == null) { return; }
         var msgType = data["type"];
 
@@ -105,6 +112,8 @@ class StartView extends Ui.View {
             if (id   != null) { _prepIntervalDist = id.toFloat(); }
             if (idr  != null) { _prepIntervalDur  = idr.toNumber(); }
             Sys.println("preparedRun received: " + _prepRunType);
+            // Two-pulse haptic so user knows the run is ready on their wrist
+            _vibePrepared();
             Ui.requestUpdate();
 
         } else if (msgType != null && msgType.equals("startRun")) {
@@ -302,6 +311,18 @@ class StartView extends Ui.View {
     // -- Public accessors for delegate ---------------------------------------
     function isAuthenticated() { return _isAuthenticated; }
     function launchRunView()   { _launchRunView(false); }
+
+
+    // Two short pulses: distinct "run ready" haptic cue
+    private function _vibePrepared() {
+        if (Toybox.Attention has :vibrate) {
+            Toybox.Attention.vibrate([
+                new Toybox.Attention.VibeProfile(70, 150),
+                new Toybox.Attention.VibeProfile(0,  80),
+                new Toybox.Attention.VibeProfile(70, 150)
+            ]);
+        }
+    }
 
     // Clear prepared run (e.g. after finishing a coached run)
     function clearPreparedRun() {

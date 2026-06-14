@@ -45,14 +45,17 @@ fun HeartRateZonePaceChart(
         val paceList = run.paceData
         if (hrList.isNullOrEmpty()) return@remember emptyList()
 
-        // Determine HR zone boundaries from the observed max in this run
-        val maxHr = hrList.maxOrNull() ?: 180
+        // Use observed peak as a lower bound, clamped to at least 185 bpm so that
+        // easy runs (where peak is e.g. 148 bpm) don't compress all zone thresholds
+        // to nonsensical values. Standard 5-zone model: Z1<60%, Z2 60-70%,
+        // Z3 70-80%, Z4 80-90%, Z5 ≥90% of max HR (matches RunningMetricsConfig).
+        val maxHr = (hrList.maxOrNull() ?: 185).coerceAtLeast(185)
         fun hrToZone(hr: Int): Int = when {
-            hr <= maxHr * 0.50f -> 1
-            hr <= maxHr * 0.60f -> 2
-            hr <= maxHr * 0.75f -> 3
-            hr <= maxHr * 0.85f -> 4
-            else                -> 5
+            hr < maxHr * 0.60f -> 1
+            hr < maxHr * 0.70f -> 2
+            hr < maxHr * 0.80f -> 3
+            hr < maxHr * 0.90f -> 4
+            else               -> 5
         }
 
         hrList.mapIndexed { idx, hr ->

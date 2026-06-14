@@ -174,12 +174,18 @@ data class RunSession(
         // elevationPerKm = metres gained per km of running
         val elevationPerKm = totalElevationGain / (distance / 1000.0)
 
+        // Calibrated for road/trail running using real-world reference points:
+        //   flat    < 8 m/km  — marathon courses, towpaths, park runs
+        //   rolling 8–20 m/km — gentle undulations, Surrey Hills road loop
+        //   hilly   20–40 m/km — noticeable hills, typical fell-race approach
+        //   steep   40–70 m/km — challenging terrain, Snowdon via Pyg Track (~60 m/km)
+        //   extreme > 70 m/km — mountain/technical trail, race-standard ascent
         return when {
-            elevationPerKm < 8.0 -> "flat"         // < 8 m/km  - essentially flat
-            elevationPerKm < 18.0 -> "rolling"     // 8–18 m/km - gentle undulations
-            elevationPerKm < 30.0 -> "hilly"       // 18–30 m/km - noticeable hills
-            elevationPerKm < 45.0 -> "steep"       // 30–45 m/km - challenging terrain
-            else -> "extreme"                      // > 45 m/km  - very steep
+            elevationPerKm < 8.0  -> "flat"
+            elevationPerKm < 20.0 -> "rolling"
+            elevationPerKm < 40.0 -> "hilly"
+            elevationPerKm < 70.0 -> "steep"
+            else                  -> "extreme"
         }
     }
     

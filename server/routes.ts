@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { eq, and, or, gte, lt, desc, lte, count } from "drizzle-orm";
+import { eq, and, or, gte, lt, desc, lte, count, isNull } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
@@ -1586,10 +1586,12 @@ function transformRunForAndroid(run: any) {
         completedAt: parseDate(runData.completedAt),
         startTime: parseDate(runData.startTime || runData.start_time),
         endTime: parseDate(runData.endTime || runData.end_time),
-        // Convert aiCoachingNotes timestamps if present
+        // aiCoachingNotes.time is elapsed ms since run start (not a calendar date).
+        // Do NOT run it through parseDate() — that would multiply it by 1000 treating
+        // it as seconds-since-epoch and corrupt the value.  Pass it through unchanged.
         aiCoachingNotes: runData.aiCoachingNotes?.map((note: any) => ({
           ...note,
-          time: parseDate(note.time),
+          time: typeof note.time === 'number' ? note.time : 0,
         })),
         // Convert strugglePoints timestamps if present
         strugglePoints: runData.strugglePoints?.map((sp: any) => ({
@@ -9643,6 +9645,33 @@ function transformRunForAndroid(run: any) {
 
         // Only save if there's meaningful data (at least 100m and 30s)
         if (distanceKm >= 0.1 && durationSecs >= 30) {
+          // ── Dedup guard ─────────────────────────────────────────────────────
+          // The phone may have also tracked this run (it received the watch's
+          // "start" command early via BT) and already uploaded a record via
+          // POST /api/runs.  Check for a phone-uploaded run within the last
+          // 2 hours with a similar distance (±10%) — if found, link the session
+          // to it and skip creating a second record.
+          const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+          const existingPhoneRuns = await db
+            .select({ id: runs.id, distance: runs.distance })
+            .from(runs)
+            .where(and(
+              eq(runs.userId, userId),
+              gte(runs.createdAt, twoHoursAgo),
+              isNull(runs.externalId),          // phone uploads have no externalId
+            ))
+            .limit(10);
+          const phoneMatchedRun = existingPhoneRuns.find(r =>
+            Math.abs((r.distance ?? 0) - distanceKm) / Math.max(distanceKm, 0.1) < 0.1
+          );
+          if (phoneMatchedRun) {
+            console.log(`[Companion] session/end — phone run ${phoneMatchedRun.id} already exists for this session, linking instead of duplicating`);
+            await db.update(garminCompanionSessions)
+              .set({ linkedRunId: phoneMatchedRun.id } as any)
+              .where(eq(garminCompanionSessions.sessionId, sessionId));
+            newRunId = phoneMatchedRun.id;
+          } else {
+
           // Format avg pace as mm:ss string
           let avgPaceStr: string | null = null;
           if (stats.avgPace && stats.avgPace > 0) {
@@ -9737,6 +9766,7 @@ function transformRunForAndroid(run: any) {
             .where(eq(garminCompanionSessions.sessionId, sessionId));
 
           console.log(`[Companion] Created run record ${newRunId} from standalone Garmin session ${sessionId} (${distanceKm.toFixed(2)}km)`);
+          } // end else (no phone run found)
         } else {
           console.log(`[Companion] Session ${sessionId} too short to save as run (${distanceKm.toFixed(3)}km, ${durationSecs}s)`);
         }
@@ -9882,7 +9912,8 @@ function transformRunForAndroid(run: any) {
       await db.update(runs).set(updatePayload).where(eq(runs.id, existingRun.id));
 
       console.log(`[Offline Batch] Session ${sessionId}: ${points.length} pts → GPS:${gpsTrack.length} HR:${heartRateData.length} pace:${paceData.length} alt:${altitudeData.length} splits:${kmSplits.length}`);
-      res.json({ success: true, points: points.length, gpsPoints: gpsTrack.length, splits: kmSplits.length });
+      // Include runId so the watch can forward it to the phone app for the sync notification deep link
+      res.json({ success: true, runId: existingRun.id, points: points.length, gpsPoints: gpsTrack.length, splits: kmSplits.length });
 
     } catch (error: any) {
       console.error("[Offline Batch] Error:", error);

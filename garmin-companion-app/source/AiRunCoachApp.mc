@@ -64,4 +64,12 @@ class AiRunCoachApp extends App.AppBase {
             _runView.onHttpFailure();
         }
     }
+
+    // Called by DataStreamer.onBatchUploaded() when an offline batch syncs successfully.
+    // Forwards to RunView so it can notify the phone via PhoneLink.
+    function onBatchUploaded(sessionId, runId) {
+        if (_runView != null) {
+            _runView.onBatchUploaded(sessionId, runId);
+        }
+    }
 }

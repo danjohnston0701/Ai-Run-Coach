@@ -14,6 +14,7 @@ class DataStreamer {
     private var _longitude = null;
     private var _altitude = null;
     private var _pendingRequests = 0;
+    private var _pendingBatchSessionId = null;  // set when uploadOfflineBatch() starts
     
     function initialize() {
         // Load auth token from storage — do NOT make any Comm.makeWebRequest calls here.
@@ -117,12 +118,12 @@ class DataStreamer {
         
         _pendingRequests++;
         
-        Comm.makeWebRequest(
-            url,
-            payload,
-            options,
-            method(:onDataSent)
-        );
+        try {
+            Comm.makeWebRequest(url, payload, options, method(:onDataSent));
+        } catch (e) {
+            _pendingRequests--;
+            Sys.println("DataStreamer.sendData: makeWebRequest threw — " + e.toString());
+        }
     }
     
     // Callback when data is sent
@@ -185,15 +186,14 @@ class DataStreamer {
             :responseType => Comm.HTTP_RESPONSE_CONTENT_TYPE_JSON
         };
         
-        Comm.makeWebRequest(
-            url,
-            payload,
-            options,
-            method(:onSessionStarted)
-        );
+        try {
+            Comm.makeWebRequest(url, payload, options, method(:onSessionStarted));
+        } catch (e) {
+            Sys.println("DataStreamer.startSession: makeWebRequest threw — " + e.toString());
+        }
     }
     
-    private function onSessionStarted(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
+    function onSessionStarted(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
         if (responseCode == 200) {
             Sys.println("Session started on backend");
         } else {
@@ -246,7 +246,11 @@ class DataStreamer {
             :responseType => Comm.HTTP_RESPONSE_CONTENT_TYPE_JSON
         };
 
-        Comm.makeWebRequest(url, payload, options, method(:onSessionEnded));
+        try {
+            Comm.makeWebRequest(url, payload, options, method(:onSessionEnded));
+        } catch (e) {
+            Sys.println("DataStreamer.endSession: makeWebRequest threw — " + e.toString());
+        }
 
         // Clear session so next run gets a fresh session
         App.Storage.deleteValue("sessionId");
@@ -269,6 +273,7 @@ class DataStreamer {
     // durationSec  : total elapsed time in seconds
     // totalAscent  : total ascent in metres
     function uploadOfflineBatch(sessionId, points, distanceM, durationSec, totalAscent) {
+        _pendingBatchSessionId = sessionId;
         if (_authToken == null) {
             Sys.println("DataStreamer.uploadOfflineBatch: no auth token");
             return;
@@ -293,13 +298,25 @@ class DataStreamer {
             },
             :responseType => Comm.HTTP_RESPONSE_CONTENT_TYPE_JSON
         };
-        Comm.makeWebRequest(url, payload, options, method(:onBatchUploaded));
+        try {
+            Comm.makeWebRequest(url, payload, options, method(:onBatchUploaded));
+        } catch (e) {
+            Sys.println("DataStreamer.uploadOfflineBatch: makeWebRequest threw — " + e.toString());
+        }
         Sys.println("DataStreamer: uploading offline batch (" + points.size() + " pts, session=" + sessionId + ")");
     }
 
     function onBatchUploaded(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
         if (responseCode == 200) {
             Sys.println("DataStreamer: offline batch upload success");
+            // Notify the app so it can tell the phone to show a sync notification.
+            // The server returns { success: true, runId: <int>, ... } so we can deep-link.
+            var runId = (data != null && data instanceof Lang.Dictionary) ? data.get("runId") : null;
+            var app = Application.getApp();
+            if (app != null && (app has :onBatchUploaded)) {
+                app.onBatchUploaded(_pendingBatchSessionId, runId);
+            }
+            _pendingBatchSessionId = null;
         } else {
             Sys.println("DataStreamer: offline batch upload failed: " + responseCode);
         }

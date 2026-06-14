@@ -115,12 +115,15 @@ class RunView extends Ui.View {
     private var _ate   = 0.0;   // Aerobic training effect (0-5)
     private var _anate = 0.0;   // Anaerobic training effect (0-5)
 
-    // 5-second pace smoothing buffer (20 ticks x 250ms = 5s)
-    // Circular buffer: writes in-place once full, avoiding repeated Array.slice()
-    // allocations every 250ms that cause GC pressure and IQ crashes on memory-limited watches.
+    // 8-second pace smoothing buffer (circular, 1 sample per tick = 1 per second).
+    // Shorter than the old 20-sample window so pace changes register in ~8 s,
+    // while still smoothing single-tick GPS jitter.  Upper-bound speed rejection
+    // (see onTick) stops spikes ever entering the buffer.
     private var _paceHistory    = [];
-    private var _paceHistoryMax = 20;
+    private var _paceHistoryMax = 8;
     private var _paceHistoryIdx = 0;   // write head for circular buffer
+    // Consecutive ticks with no valid speed reading — used to decide when to snap to "--"
+    private var _stoppedTicks   = 0;
 
     // ── Run summary accumulators (for endSession summary sent to backend) ──────
     private var _sumHR      = 0;     // Heart rate sum
@@ -257,13 +260,20 @@ class RunView extends Ui.View {
             setStatusMessage("No relay: offline buffer active");
         }
     }
+    // Called by AiRunCoachApp when DataStreamer finishes uploading an offline batch.
+    // Notifies the phone so it can show a push notification with a deep link to the run.
+    function onBatchUploaded(sessionId, runId) {
+        Sys.println("RunView: offline batch synced — notifying phone (runId=" + runId + ")");
+        _phoneLink.sendSyncComplete(sessionId, runId);
+    }
 
     function startRun() {
+        Sys.println(">>> startRun() entry — connected=" + _isConnected + " gpsQ=" + _gpsQuality + " auth=" + _isAuthenticated);
         if (_isRunning) { return; }
         // GPS quality gate: require "Usable" (>=3) for standalone, but allow "Last known"
         // (>=2) when phone is connected since phone GPS will be authoritative for the run.
         var minGpsQ = _isConnected ? 2 : 3;
-        if (_gpsQuality < minGpsQ) { _vibeShort(); return; }
+        if (_gpsQuality < minGpsQ) { _vibeShort(); Sys.println(">>> startRun() blocked — gps too low (" + _gpsQuality + " < " + minGpsQ + ")"); return; }
         _isRunning     = true;
         _isPaused      = false;
         _elapsedMs     = 0;
@@ -278,6 +288,7 @@ class RunView extends Ui.View {
         _dispPace = 0.0;
         _paceHistory = [];    // Clear history so stale readings do not bias the new run
         _paceHistoryIdx = 0;  // Reset circular buffer write head
+        _stoppedTicks   = 0;  // Reset stopped-tick counter
 
         // Only register GPS if not already listening — avoids duplicate registration
         // which can cause IQ errors on some Garmin devices.
@@ -292,7 +303,7 @@ class RunView extends Ui.View {
         _sumHR = 0; _maxHR = 0; _sumCadence = 0; _sumPace = 0.0;
         _sumGct = 0.0; _sumVo = 0.0; _sumVr = 0.0; _sumSl = 0.0;
         _sumGcb = 0.0; _sumPower = 0; _sumResp = 0.0; _sampleN = 0;
-        _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null;
+        _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null; _baroAlt = null;
 
         // Reset offline buffer and HTTP health counter
         _offlineBuffer          = [];
@@ -306,12 +317,15 @@ class RunView extends Ui.View {
         // Prepare backend session ONLY in standalone mode (Scenario C - no phone).
         // When phone IS connected (Scenario B), it owns the backend session via RunTrackingService.
         // Calling prepareSession() here in Scenario B creates orphaned duplicate sessions.
+        Sys.println(">>> startRun() — about to prepareSession (connected=" + _isConnected + ")");
         if (!_isConnected && _dataStreamer != null) { _dataStreamer.prepareSession(); }
 
         // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
+        Sys.println(">>> startRun() — about to _startSession()");
         _startSession();
+        Sys.println(">>> startRun() — about to sendCommand start");
         _phoneLink.sendCommand("start");
-        Sys.println(">>> startRun() — session prepared, start command sent to phone");
+        Sys.println(">>> startRun() — complete, session live");
         _vibeShort();
         Ui.requestUpdate();
     }
@@ -479,7 +493,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("2.5.0");
+                _phoneLink.sendHello("3.0.0");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -489,19 +503,25 @@ class RunView extends Ui.View {
             if (rname != null) { App.Storage.setValue("runnerName", rname); }
 
                 // ── Upload any pending offline batch from a previous phone-less run ──
+                // DEFENSIVE: pendingPts MUST be a Lang.Array — stale data from an old
+                // store version may have been serialised as another type.  Calling
+                // .size() on a non-Array raises "Failed invoking <symbol>" (IQ crash).
+                // Always clear keys first so corrupt data is never retried on next auth.
                 var pendingSid = App.Storage.getValue("offlineBatchSessionId");
                 var pendingPts = App.Storage.getValue("offlineBatchPoints");
-                if (pendingSid != null && pendingPts != null && pendingPts.size() > 0) {
+                App.Storage.deleteValue("offlineBatchSessionId");
+                App.Storage.deleteValue("offlineBatchPoints");
+                App.Storage.deleteValue("offlineBatchDistance");
+                App.Storage.deleteValue("offlineBatchDuration");
+                App.Storage.deleteValue("offlineBatchAscent");
+                if (pendingSid != null && (pendingPts instanceof Lang.Array) && pendingPts.size() > 0) {
                     Sys.println("Pending offline batch: " + pendingPts.size() + " pts for " + pendingSid);
                     var pendingDist = App.Storage.getValue("offlineBatchDistance");
                     var pendingDur  = App.Storage.getValue("offlineBatchDuration");
                     var pendingAsc  = App.Storage.getValue("offlineBatchAscent");
                     _dataStreamer.uploadOfflineBatch(pendingSid, pendingPts, pendingDist, pendingDur, pendingAsc);
-                    App.Storage.deleteValue("offlineBatchSessionId");
-                    App.Storage.deleteValue("offlineBatchPoints");
-                    App.Storage.deleteValue("offlineBatchDistance");
-                    App.Storage.deleteValue("offlineBatchDuration");
-                    App.Storage.deleteValue("offlineBatchAscent");
+                } else if (pendingSid != null) {
+                    Sys.println("Discarded corrupt offline batch (wrong type) — keys cleared");
                 }
             Ui.requestUpdate();
 
@@ -595,6 +615,7 @@ class RunView extends Ui.View {
     // ── Timer tick (250 ms) ───────────────────────────────────────────────────
 
     function onTick() as Void {
+        try {
         _dotCount = (_dotCount + 1) % 4;
         // Grace period: count up for first 8s so UI does not flash OFFLINE before auth arrives
         if (_connectWaitTicks < CONNECT_WAIT_MAX) { _connectWaitTicks += 1; }
@@ -611,9 +632,12 @@ class RunView extends Ui.View {
                     _distance = actInfo.elapsedDistance.toFloat();
                 }
                 // Pace (sec/km) — derived from Garmin's Kalman-filtered speed.
-                // Use a 0.3 m/s minimum (approx 1 km/h) to avoid GPS noise when
-                // near-stationary generating false high-speed readings.
-                if (actInfo.currentSpeed != null && actInfo.currentSpeed > 0.3) {
+                // Lower bound  0.3 m/s (~1 km/h)  rejects near-stationary GPS noise.
+                // Upper bound  5.5 m/s (~3:02/km) rejects spike artefacts at startup
+                // and during GPS re-acquisition that would otherwise bias the buffer.
+                if (actInfo.currentSpeed != null
+                        && actInfo.currentSpeed > 0.3
+                        && actInfo.currentSpeed <= 5.5) {
                     _pace = 1000.0 / actInfo.currentSpeed.toFloat();
                 } else if (!_isPaused) {
                     _pace = 0.0;
@@ -672,6 +696,13 @@ class RunView extends Ui.View {
         // allowed brief noise readings (e.g. actInfo.currentSpeed = 8 m/s when
         // near-stationary) to show as absurdly fast pace like "2.04 min/km".
         if (_pace > 0.0) {
+            // Resuming after a stop: flush stale buffer entries so old pre-stop
+            // readings don't bias the average for the new effort.
+            if (_stoppedTicks >= 3) {
+                _paceHistory = [];
+                _paceHistoryIdx = 0;
+            }
+            _stoppedTicks = 0;
             // Circular buffer: avoid Array.slice() allocation every tick
             if (_paceHistory.size() < _paceHistoryMax) {
                 _paceHistory.add(_pace);
@@ -681,7 +712,15 @@ class RunView extends Ui.View {
             }
             _dispPace = _smoothedPace();
         } else {
-            _dispPace = _dispPace * 0.80;
+            // Stopped / GPS lost.
+            // Hold the last displayed pace for 2 ticks (brief natural fade),
+            // then snap to 0.0 so the display shows "--" instead of counting
+            // down through decreasing pace values towards zero.
+            _stoppedTicks += 1;
+            if (_stoppedTicks > 2) {
+                _dispPace = 0.0;
+            }
+            // else: _dispPace is held unchanged — shows last valid reading briefly
         }
         _dispDistance = _dispDistance + (_distance - _dispDistance) * 0.20;
         _dispHR       = (_dispHR + (_heartRate - _dispHR) * 0.30).toNumber();
@@ -709,14 +748,24 @@ class RunView extends Ui.View {
             if (_gcb > 0.0)     { _sumGcb     += _gcb; }
             if (_power > 0)     { _sumPower   += _power; }
             if (_respRate > 0.0){ _sumResp    += _respRate; }
-            // Elevation gain/loss tracking
-            if (_lastGpsAlt != null) {
+            // Elevation gain/loss tracking.
+            // Prefer barometric altitude (_baroAlt) over GPS altitude (_lastGpsAlt):
+            //   - GPS altitude accuracy is typically +/-5-10 m -- tiny positive spikes
+            //     accumulate into massive false elevation gain over a run.
+            //   - Barometric altimeter (if present) is accurate to ~1 m and uses
+            //     sensor fusion, giving far more reliable cumulative ascent figures.
+            // Noise thresholds:
+            //   - Baro: 1.5 m  -- filters sensor noise while capturing real hills.
+            //   - GPS fallback: 5.0 m -- filters GPS altitude noise.
+            var altSrc       = (_baroAlt != null) ? _baroAlt : _lastGpsAlt;
+            var altThreshold = (_baroAlt != null) ? 1.5 : 5.0;
+            if (altSrc != null) {
                 if (_lastAlt != null) {
-                    var delta = _lastGpsAlt - _lastAlt;
-                    if (delta > 0.1) { _totalAscent  += delta; }
-                    if (delta < -0.1){ _totalDescent -= delta; }
+                    var altDelta = altSrc - _lastAlt;
+                    if (altDelta >  altThreshold) { _totalAscent  += altDelta; }
+                    if (altDelta < -altThreshold) { _totalDescent -= altDelta; }
                 }
-                _lastAlt = _lastGpsAlt;
+                _lastAlt = altSrc;
             }
 
             // ── Offline buffer capture (every 15 s, truly phone-less runs only) ─
@@ -811,6 +860,9 @@ class RunView extends Ui.View {
         }
 
         Ui.requestUpdate();
+        } catch (e) {
+            Sys.println("onTick ERR: " + e.toString());
+        }
     }
 
     private function _smoothedPace() {
@@ -1159,18 +1211,37 @@ class RunView extends Ui.View {
         // Defensive: ensure no stale session is left open before creating a new one.
         // A double-open can cause an IQ error on some devices.
         if (_session != null) {
-            if (_session.isRecording()) { _session.stop(); }
-            _session.save();
+            try {
+                if (_session.isRecording()) { _session.stop(); }
+                _session.save();
+            } catch (e) {
+                Sys.println("_startSession: stale session close error");
+            }
             _session = null;
         }
-        _session = Record.createSession({ :name => "AI Run Coach", :sport => Record.SPORT_RUNNING });
-        _session.start();
+        // createSession() can return null on some devices/firmware (another activity already open,
+        // low memory, etc.). Guard against null to prevent an unhandled exception / IQ crash.
+        try {
+            _session = Record.createSession({ :name => "AI Run Coach", :sport => Record.SPORT_RUNNING });
+            if (_session == null) {
+                Sys.println("_startSession: createSession() returned null — running without FIT recording");
+                return;
+            }
+            _session.start();
+        } catch (e) {
+            Sys.println("_startSession: createSession/start failed");
+            _session = null;
+        }
     }
 
     private function _stopSession() {
         if (_session != null) {
-            if (_session.isRecording()) { _session.stop(); }
-            _session.save();
+            try {
+                if (_session.isRecording()) { _session.stop(); }
+                _session.save();
+            } catch (e) {
+                Sys.println("_stopSession: save failed — " + e.toString());
+            }
             _session = null;
         }
     }

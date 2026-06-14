@@ -66,6 +66,20 @@ class PhoneLink {
         Sys.println("PhoneLink tx hello: v" + appVersion);
     }
 
+    // ── Notify phone that an offline run batch has been synced to the server ──
+    // runId: the backend run record ID returned by the upload-batch endpoint.
+    // The phone uses this to show a notification that deep-links to that run.
+    function sendSyncComplete(sessionId, runId) {
+        var msg = {
+            "type"      => "command",
+            "action"    => "syncComplete",
+            "sessionId" => sessionId
+        };
+        if (runId != null) { msg.put("runId", runId); }
+        _transmit(msg);
+        Sys.println("PhoneLink tx syncComplete: session=" + sessionId + " runId=" + runId);
+    }
+
     // ── Send run data to phone (Scenario B — watch streams GPS + biometrics) ──
     // Builds a new dictionary so the caller's data dict is never mutated.
     function sendRunData(data) {
@@ -81,7 +95,14 @@ class PhoneLink {
     // ── Internal ──────────────────────────────────────────────────────────────
 
     function _transmit(payload) {
-        Comm.transmit(payload, null, new TransmitListener(method(:_onTransmitDone)));
+        // Comm.transmit() throws (e.g. BLE_ERROR, CONNECTION_UNAVAILABLE) when the
+        // companion phone app is not running — catch so the watch never crashes.
+        try {
+            Comm.transmit(payload, null, new TransmitListener(method(:_onTransmitDone)));
+        } catch (e) {
+            _lastSendOk = false;
+            Sys.println("PhoneLink: transmit exception (no phone?) — " + e.toString());
+        }
     }
 
     // Raw message from Comm — forward to registered callback

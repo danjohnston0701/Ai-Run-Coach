@@ -62,15 +62,19 @@ fun RunSession.getHeartRateZoneDistribution(): Map<String, Float> {
         return mapOf("Z1" to 0f, "Z2" to 0f, "Z3" to 0f, "Z4" to 0f, "Z5" to 0f)
     }
     
-    // Get max heart rate from run (or estimate)
-    val maxHr = heartRateData.maxOrNull() ?: 180
-    val minHr = heartRateData.minOrNull() ?: 120
-    
-    // Standard zone percentages of max
-    val z1Max = maxHr * 0.50f
-    val z2Max = maxHr * 0.60f
-    val z3Max = maxHr * 0.75f
-    val z4Max = maxHr * 0.85f
+    // Use observed peak as a lower bound, but clamp to at least 185 bpm so that
+    // an easy/Zone-2 run (where you never exceed ~145 bpm) doesn't compress all
+    // zone thresholds down to physiologically nonsensical values.
+    // 185 bpm is the Tanaka-formula estimate for a ~33-year-old — a reasonable
+    // population default when we don't have the user's age here.
+    val maxHr = (heartRateData.maxOrNull() ?: 185).coerceAtLeast(185)
+
+    // Standard 5-zone model (matches Garmin / Polar / RunningMetricsConfig):
+    // Z1 < 60%,  Z2 60-70%,  Z3 70-80%,  Z4 80-90%,  Z5 >= 90%
+    val z1Max = maxHr * 0.60f
+    val z2Max = maxHr * 0.70f
+    val z3Max = maxHr * 0.80f
+    val z4Max = maxHr * 0.90f
     
     val zoneCounts = mutableMapOf(
         "Z1" to 0, "Z2" to 0, "Z3" to 0, "Z4" to 0, "Z5" to 0

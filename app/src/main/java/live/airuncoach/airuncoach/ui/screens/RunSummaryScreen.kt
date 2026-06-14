@@ -94,8 +94,6 @@ import live.airuncoach.airuncoach.network.model.RacePrediction
 import live.airuncoach.airuncoach.network.model.RacePredictionsResponse
 import live.airuncoach.airuncoach.network.model.TechnicalAnalysis
 import live.airuncoach.airuncoach.ui.components.CoachingPlanBadge
-import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
-import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
 import live.airuncoach.airuncoach.ui.components.TrainingLoadCard
 import live.airuncoach.airuncoach.analytics.calculateTrainingLoad
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
@@ -253,13 +251,6 @@ fun RunSummaryScreenFlagship(
                         .fillMaxSize()
                         .padding(padding)
                 ) {
-                    // Pinned Garmin attribution header (always visible)
-                    if (session?.hasGarminData == true && !session.garminDeviceName.isNullOrBlank()) {
-                        GarminAttributionHeader(
-                            deviceName = session.garminDeviceName ?: "Garmin Device"
-                        )
-                    }
-
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -625,62 +616,12 @@ private fun StravaAttributionBanner(stravaActivityId: String) {
  */
 @Composable
 private fun GarminAttributionHeader(deviceName: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Colors.backgroundSecondary)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.ic_garmin_tag),
-            contentDescription = "Garmin",
-            modifier = Modifier.height(22.dp),
-            contentScale = ContentScale.Fit
-        )
-        Text(
-            text = deviceName,
-            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-            color = Colors.textPrimary
-        )
-    }
+    // Attribution hidden
 }
 
-/**
- * Garmin data disclosure message shown under insights/graphs that use Garmin-provided data
- */
 @Composable
-private fun GarminDataDisclosure(
-    disclosureType: String = "chart" // "chart" or "insights"
-) {
-    val disclosureText = when (disclosureType) {
-        "chart" -> "This chart was created using data provided by Garmin devices."
-        "insights" -> "Insights derived in part from Garmin device-sourced data."
-        else -> "This data was provided by Garmin devices."
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Colors.backgroundSecondary, RoundedCornerShape(8.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Icon(
-            painter = painterResource(id = R.drawable.ic_garmin_logo),
-            contentDescription = null,
-            tint = Color(0xFF8E9BAE),
-            modifier = Modifier.size(16.dp)
-        )
-        Text(
-            text = disclosureText,
-            style = AppTextStyles.caption.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
-            color = Colors.textSecondary,
-            modifier = Modifier.weight(1f)
-        )
-    }
+private fun GarminDataDisclosure(disclosureType: String = "chart") {
+    // Attribution hidden
 }
 
 /** Format terrain label for display */
@@ -1135,19 +1076,6 @@ private fun AiInsightsTabContent(
         // Tabs for navigation
         item {
             RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
-        }
-
-        // ── Garmin attribution — REQUIRED by Garmin API Brand Guidelines ──────
-        // Must appear above the fold, directly below the primary heading,
-        // on every screen showing Garmin device-sourced data.
-        // Show whenever: Garmin is connected, OR the run originated from Garmin.
-        if (isGarminConnected || run.externalSource == "garmin" || run.hasGarminData == true) {
-            item {
-                GarminAttributionBadge(
-                    modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
-                    style = GarminBadgeStyle.HEADER,
-                )
-            }
         }
 
         // ── Strava attribution — REQUIRED by Strava API Brand Guidelines ──────
@@ -2634,6 +2562,10 @@ private fun ComprehensiveAnalysisFlagship(analysis: ComprehensiveRunAnalysis) {
             SectionCardFlagship("Wellness Impact", analysis.wellnessImpact, tag = "GARMIN")
         }
 
+        if (!analysis.weatherImpact.isNullOrBlank()) {
+            WeatherImpactInsightCard(analysis.weatherImpact!!)
+        }
+
         analysis.technicalAnalysis?.let { TechnicalAnalysisCardsFlagship(it) }
         analysis.garminInsights?.let { GarminInsightsCardsFlagship(it) }
     }
@@ -2656,6 +2588,39 @@ private fun BasicAnalysisFlagship(insights: BasicRunInsights) {
         if (!insights.tips.isNullOrEmpty()) {
             PillHeaderFlagship("Coach Tips", Colors.primary)
             ParagraphListFlagship(insights.tips)
+        }
+    }
+}
+
+@Composable
+private fun WeatherImpactInsightCard(weatherImpact: String) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("🌤", style = AppTextStyles.h4, modifier = Modifier.padding(end = 8.dp))
+                Text(
+                    "WEATHER IMPACT",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+            }
+            Text(
+                text = weatherImpact,
+                style = AppTextStyles.body,
+                color = Colors.textSecondary,
+                lineHeight = 22.sp
+            )
         }
     }
 }
@@ -4901,8 +4866,7 @@ private fun HeartRateZonesCardFlagship(heartRateData: List<Int>?) {
                     return@Column
                 }
 
-                val maxObserved = hr.maxOrNull() ?: 0
-                val maxHr = maxObserved.coerceAtLeast(160)
+                val maxHr = (hr.maxOrNull() ?: 185).coerceAtLeast(185)
                 val z2 = 0.60 * maxHr
                 val z3 = 0.70 * maxHr
                 val z4 = 0.80 * maxHr
@@ -5645,7 +5609,9 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
         val t4 = (run.timeInZone4 ?: 0).toLong()
         val t5 = (run.timeInZone5 ?: 0).toLong()
         val total = (t1 + t2 + t3 + t4 + t5).coerceAtLeast(1)
-        maxHr = run.heartRateData?.filter { it > 0 }?.maxOrNull()?.coerceAtLeast(160) ?: 180
+        // Use observed peak as a lower bound, but clamp to ≥185 bpm so that
+        // a Zone-2 run (peak ~145 bpm) doesn't compress all zone thresholds downward.
+        maxHr = run.heartRateData?.filter { it > 0 }?.maxOrNull()?.coerceAtLeast(185) ?: 185
         val z2 = (0.60 * maxHr).toInt(); val z3 = (0.70 * maxHr).toInt()
         val z4 = (0.80 * maxHr).toInt(); val z5 = (0.90 * maxHr).toInt()
         zones = listOf(
@@ -5660,7 +5626,7 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
         // Fallback: derive from HR time-series
         val hr = heartRateData?.filter { it > 0 }.orEmpty()
         if (hr.isEmpty()) return
-        maxHr = (hr.maxOrNull() ?: 0).coerceAtLeast(160)
+        maxHr = (hr.maxOrNull() ?: 185).coerceAtLeast(185)
         val z2 = (0.60 * maxHr).toInt(); val z3 = (0.70 * maxHr).toInt()
         val z4 = (0.80 * maxHr).toInt(); val z5 = (0.90 * maxHr).toInt()
         val total = hr.size
@@ -5712,7 +5678,7 @@ private fun IntensityDistributionCard(run: RunSession) {
     val hr = run.heartRateData?.filter { it > 0 }.orEmpty()
     if (hr.size < 10) return
 
-    val maxHr = (hr.maxOrNull() ?: 160).coerceAtLeast(160)
+    val maxHr = (hr.maxOrNull() ?: 185).coerceAtLeast(185)
 
     data class IntensityZone(val name: String, val color: Color, val percent: Float)
 
@@ -6370,65 +6336,28 @@ private fun RaceTimePredictorCard(run: RunSession) {
 
 @Composable
 private fun WeatherPerformanceCard(weather: WeatherData) {
-    // Calculate weather impact score
-    data class WeatherFactor(val name: String, val impact: String, val penalty: Double, val color: Color)
+    // iOS-style Weather Performance Index (WPI) calculation
+    // Optimal temp = 12°C, WPI = max(0, 100 - |temp - 12| × 3.5)
+    val temp = weather.temperature
+    val optimalTemp = 12.0
+    val tempDiff = kotlin.math.abs(temp - optimalTemp)
+    val wpi = kotlin.math.max(0.0, 100.0 - tempDiff * 3.5)
 
-    val factors = remember(weather) {
-        buildList {
-            // Temperature impact
-            val temp = weather.temperature
-            val tempPenalty = when {
-                temp < 5 -> abs(temp - 12) * 0.3  // Cold penalty
-                temp in 5.0..15.0 -> 0.0           // Optimal
-                temp in 15.0..20.0 -> (temp - 15) * 0.5
-                temp in 20.0..25.0 -> (temp - 15) * 0.8
-                temp in 25.0..30.0 -> (temp - 15) * 1.2
-                else -> (temp - 15) * 1.5          // Hot
-            }
-            val tempLabel = when {
-                temp < 5 -> "Cold"
-                temp in 5.0..15.0 -> "Optimal"
-                temp in 15.0..25.0 -> "Warm"
-                else -> "Hot"
-            }
-            val tempColor = when {
-                temp < 5 -> Color(0xFF42A5F5)
-                temp in 5.0..15.0 -> Color(0xFF4CAF50)
-                temp in 15.0..25.0 -> Color(0xFFFFC107)
-                else -> Colors.error
-            }
-            add(WeatherFactor("Temperature", "${temp.toInt()}°C ($tempLabel)", tempPenalty, tempColor))
-
-            // Humidity impact
-            val humidity = weather.humidity
-            val humidityPenalty = when {
-                humidity < 40 -> 0.0
-                humidity in 40.0..60.0 -> (humidity - 40) * 0.1
-                humidity in 60.0..80.0 -> (humidity - 40) * 0.2
-                else -> (humidity - 40) * 0.3
-            }
-            val humColor = if (humidity > 70) Color(0xFFFF9800) else Color(0xFF4CAF50)
-            add(WeatherFactor("Humidity", "${humidity.toInt()}%", humidityPenalty, humColor))
-
-            // Wind impact
-            val wind = weather.windSpeed
-            val windPenalty = when {
-                wind < 10 -> 0.0
-                wind in 10.0..20.0 -> (wind - 10) * 0.3
-                else -> (wind - 10) * 0.5
-            }
-            val windColor = if (wind > 20) Colors.error else if (wind > 10) Color(0xFFFFC107) else Color(0xFF4CAF50)
-            add(WeatherFactor("Wind", "${wind.toInt()} km/h", windPenalty, windColor))
-        }
+    // WPI band rating
+    val (ratingText, ratingColor) = when {
+        wpi >= 80 -> "Ideal conditions" to Color(0xFF4CAF50)      // Green
+        wpi >= 60 -> "Good conditions" to Color(0xFF8BC34A)       // Lime
+        wpi >= 40 -> "Moderate conditions" to Color(0xFFFFC107)   // Amber
+        else -> "Challenging conditions" to Color(0xFFFF9800)      // Orange
     }
 
-    val totalPenalty = factors.sumOf { it.penalty }
-    val performancePercent = (100 - totalPenalty).coerceIn(70.0, 100.0)
-    val overallColor = when {
-        performancePercent >= 95 -> Color(0xFF4CAF50)
-        performancePercent >= 85 -> Color(0xFF8BC34A)
-        performancePercent >= 75 -> Color(0xFFFFC107)
-        else -> Color(0xFFFF9800)
+    // Temperature label
+    val tempLabel = when {
+        temp < 5 -> "Cold"
+        temp < 12 -> "Cool"
+        temp <= 18 -> "Ideal"
+        temp < 25 -> "Warm"
+        else -> "Hot"
     }
 
     Card(
@@ -6439,77 +6368,128 @@ private fun WeatherPerformanceCard(weather: WeatherData) {
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Header: Title + WPI Score
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Weather Performance",
+                        "🌤 Weather Performance Index",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
                         color = Colors.textPrimary
                     )
                     Text(
-                        "How conditions affected your run",
+                        "Impact of weather on your run",
                         style = AppTextStyles.caption,
                         color = Colors.textSecondary
                     )
                 }
-                // Performance percentage
+                // Large WPI score display
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
-                        .background(overallColor.copy(alpha = 0.15f), CircleShape)
-                        .border(2.dp, overallColor.copy(alpha = 0.5f), CircleShape),
+                        .size(56.dp)
+                        .background(ratingColor.copy(alpha = 0.15f), CircleShape)
+                        .border(2.dp, ratingColor.copy(alpha = 0.4f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "${performancePercent.roundToInt()}%",
-                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.ExtraBold),
-                        color = overallColor
+                        wpi.roundToInt().toString(),
+                        style = AppTextStyles.h3.copy(fontWeight = FontWeight.ExtraBold),
+                        color = ratingColor
                     )
                 }
             }
 
-            factors.forEach { factor ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(factor.name, style = AppTextStyles.caption, color = Colors.textMuted, modifier = Modifier.width(90.dp))
-                    Text(
-                        factor.impact,
-                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
-                        color = factor.color
-                    )
-                    if (factor.penalty > 0.5) {
-                        Text(
-                            "-${String.format(Locale.US, "%.0f", factor.penalty)}%",
-                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.error
-                        )
-                    } else {
-                        Text(
-                            "Optimal",
-                            style = AppTextStyles.caption,
-                            color = Color(0xFF4CAF50)
-                        )
-                    }
-                }
-            }
+            HorizontalDivider(color = Colors.border.copy(alpha = 0.2f), thickness = 1.dp)
 
-            val desc = weather.condition ?: weather.description
-            if (desc.isNotBlank()) {
+            // Temperature row with score bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
-                    "Conditions: $desc",
-                    style = AppTextStyles.small,
-                    color = Colors.textMuted
+                    "🌡",
+                    style = AppTextStyles.h4
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Temperature",
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted
+                    )
+                    Text(
+                        "${temp.toInt()}°C — $tempLabel",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary
+                    )
+                }
+            }
+
+            // WPI Score Bar (60px wide, filled based on WPI percentage)
+            val barWidthDp = 60.dp
+            val filledRatio = (wpi / 100.0).coerceIn(0.0, 1.0)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .background(Colors.backgroundTertiary, RoundedCornerShape(4.dp))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(filledRatio.toFloat())
+                        .background(ratingColor, RoundedCornerShape(4.dp))
                 )
             }
+
+            // Weather condition (optional, if available)
+            if (!weather.condition.isNullOrBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("☁", style = AppTextStyles.h4)
+                    Text(
+                        weather.condition!!,
+                        style = AppTextStyles.body,
+                        color = Colors.textPrimary
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Colors.border.copy(alpha = 0.2f), thickness = 1.dp)
+
+            // Rating Pill/Badge
+            Box(
+                modifier = Modifier
+                    .background(ratingColor.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
+                    .border(1.dp, ratingColor.copy(alpha = 0.28f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    ratingText,
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                    color = ratingColor
+                )
+            }
+
+            // Footnote
+            Text(
+                "Optimal running temperature is ~12°C. Performance typically decreases in extreme heat or cold.",
+                style = AppTextStyles.caption.copy(fontSize = 10.sp),
+                color = Colors.textMuted,
+                lineHeight = 14.sp
+            )
         }
     }
 }
@@ -7346,28 +7326,31 @@ private fun WeatherCardFlagship(weather: WeatherData) {
         modifier = Modifier.fillMaxWidth(),
         border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Weather Conditions", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("WEATHER", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                WeatherMetricFlagship("Temp", "${weather.temperature.toInt()}°C")
-                WeatherMetricFlagship("Humidity", "${weather.humidity.toInt()}%")
-                WeatherMetricFlagship("Wind", "${weather.windSpeed.toInt()} km/h")
+            // Condition row (optional)
+            if (!weather.condition.isNullOrBlank()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Condition", style = AppTextStyles.body, color = Colors.textSecondary)
+                    Text(weather.condition!!, style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
+                }
             }
 
-            val desc = weather.condition ?: weather.description
-            if (!desc.isNullOrBlank()) {
-                Text(desc, style = AppTextStyles.body, color = Colors.textSecondary)
+            // Temperature row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Temperature", style = AppTextStyles.body, color = Colors.textSecondary)
+                Text("${weather.temperature.toInt()}°C", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
             }
         }
-    }
-}
-
-@Composable
-private fun WeatherMetricFlagship(label: String, value: String) {
-    Column {
-        Text(label, style = AppTextStyles.caption, color = Colors.textMuted)
-        Text(value, style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
     }
 }
 

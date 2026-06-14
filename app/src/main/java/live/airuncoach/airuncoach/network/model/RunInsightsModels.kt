@@ -35,6 +35,7 @@ data class ComprehensiveRunAnalysis(
     @SerializedName("recoveryAdvice") val recoveryAdvice: String? = null,
     @SerializedName("nextRunSuggestion") val nextRunSuggestion: String? = null,
     @SerializedName("wellnessImpact") val wellnessImpact: String? = null,
+    @SerializedName("weatherImpact") val weatherImpact: String? = null,
     @SerializedName("technicalAnalysis") val technicalAnalysis: TechnicalAnalysis? = null,
     @SerializedName("garminInsights") val garminInsights: GarminInsights? = null
 )

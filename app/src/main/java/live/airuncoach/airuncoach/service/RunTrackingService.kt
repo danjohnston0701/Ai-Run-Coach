@@ -47,8 +47,10 @@ import live.airuncoach.airuncoach.domain.model.TurnInstruction
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
 import live.airuncoach.airuncoach.util.NavigationRouteHolder
+import live.airuncoach.airuncoach.di.GarminWatchManagerEntryPoint
 import com.google.maps.android.PolyUtil
 import com.google.maps.android.SphericalUtil
+import dagger.hilt.android.EntryPointAccessors
 import retrofit2.HttpException
 import java.security.MessageDigest
 import java.util.*
@@ -502,6 +504,22 @@ class RunTrackingService : Service(), SensorEventListener {
         const val ACTION_RESUME_TRACKING = "ACTION_RESUME_TRACKING"
         const val ACTION_START_SIMULATION = "ACTION_START_SIMULATION"
         const val ACTION_START_NAV_SIMULATION = "ACTION_START_NAV_SIMULATION"
+        /**
+         * Pre-start the service while the phone app is in the foreground (i.e. while the user is
+         * on the "Prepare Run" screen tapping "Send to Watch").  The service enters a lightweight
+         * standby state: it shows a foreground notification and registers the watch-command handler
+         * on the shared GarminWatchManager singleton so that, when the user later presses START on
+         * their watch (phone in pocket / screen off), the service can call startTracking() directly
+         * without needing to call startForegroundService() from the background — which is blocked
+         * on Android 12+ (targetSdk ≥ 31) and causes a silent ForegroundServiceStartNotAllowedException.
+         */
+        const val ACTION_PREPARE_FOR_WATCH = "ACTION_PREPARE_FOR_WATCH"
+        /**
+         * Cancel a pending [ACTION_PREPARE_FOR_WATCH] standby.  The service stops itself if
+         * it has not yet started active tracking (i.e. the user tapped Cancel before pressing
+         * START on the watch).  Ignored if the run is already in progress.
+         */
+        const val ACTION_CANCEL_PREPARE_FOR_WATCH = "ACTION_CANCEL_PREPARE_FOR_WATCH"
         const val EXTRA_TARGET_DISTANCE = "EXTRA_TARGET_DISTANCE"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
@@ -626,11 +644,18 @@ class RunTrackingService : Service(), SensorEventListener {
         acquireWakeLock()
         setupLocationCallback()
 
-        // Initialise Garmin watch bridge — wraps ConnectIQ SDK, no-ops gracefully if unavailable
+        // Attach to the application-scoped GarminWatchManager singleton (provided by Hilt).
+        // IMPORTANT: Do NOT create a new GarminWatchManager here and do NOT call initialize().
+        // MainActivity already called initialize() once at startup.  Creating a second instance
+        // would call ConnectIQ.initialize() a second time, which resets the SDK and invalidates
+        // the existing registerForAppEvents() subscription — causing the watch to show an IQ/alert
+        // error icon and dropping any in-flight ConnectIQ messages (including the "start" command).
         try {
-            garminWatchManager = GarminWatchManager(this)
-            // Set up handlers BEFORE initialization to prevent race condition
-            // where SDK fires callbacks before handlers are assigned
+            val hiltEntry = EntryPointAccessors.fromApplication(
+                applicationContext,
+                GarminWatchManagerEntryPoint::class.java
+            )
+            garminWatchManager = hiltEntry.garminWatchManager()
             garminWatchManager?.let { manager ->
                 manager.onWatchCommand = { action ->
                     Log.d("RunTrackingService", "⌚ Watch command received: $action")
@@ -701,11 +726,13 @@ class RunTrackingService : Service(), SensorEventListener {
                     }
                 }
 
-                // NOW initialize the SDK (after handlers are set up)
-                manager.initialize()
+                // DO NOT call manager.initialize() here — the SDK was already initialized by
+                // MainActivity.initGarminWatchBridge() at app startup.  Calling it again would
+                // reset the SDK and break the existing ConnectIQ event subscription.
+                Log.d("RunTrackingService", "✅ Attached to shared GarminWatchManager singleton (no re-init)")
             }
         } catch (e: Exception) {
-            Log.w("RunTrackingService", "GarminWatchManager init failed (non-fatal): ${e.message}")
+            Log.w("RunTrackingService", "GarminWatchManager attach failed (non-fatal): ${e.message}")
             garminWatchManager = null
         }
     }
@@ -837,6 +864,17 @@ class RunTrackingService : Service(), SensorEventListener {
             ACTION_RESUME_TRACKING -> resumeTracking()
             ACTION_START_SIMULATION -> startSimulation()
             ACTION_START_NAV_SIMULATION -> startNavigationSimulation()
+            ACTION_PREPARE_FOR_WATCH -> prepareForWatch()
+            ACTION_CANCEL_PREPARE_FOR_WATCH -> {
+                // Only honour the cancel if tracking has not yet started (standby state).
+                // If the user already pressed START on the watch we must not interrupt the run.
+                if (!isTracking) {
+                    Log.d("RunTrackingService", "⌚ Watch prepare cancelled — leaving standby")
+                    stopSelf()
+                } else {
+                    Log.d("RunTrackingService", "⌚ Cancel-prepare ignored — run already in progress")
+                }
+            }
         }
         return START_STICKY
     }
@@ -849,6 +887,37 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun setupLocationCallback() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) { locationResult.lastLocation?.let { onNewLocation(it) } }
+        }
+    }
+
+    /**
+     * Enter a lightweight standby state: start a foreground notification (so Android does not
+     * kill the service when the phone screen turns off) and wait for the watch to send "start".
+     *
+     * This is called from [ACTION_PREPARE_FOR_WATCH] while the phone app is still in the
+     * foreground (the user just tapped "Send to Watch").  Because the service is already running
+     * as a foreground service by the time the user presses START on the watch, the subsequent
+     * call to startTracking() from the watch-command handler happens inside the already-running
+     * foreground service — no new startForegroundService() call is needed from the background.
+     *
+     * All run-config extras (target distance, workout type, etc.) are already parsed from the
+     * ACTION_PREPARE_FOR_WATCH intent in onStartCommand() so they are available when tracking
+     * actually begins.
+     */
+    private fun prepareForWatch() {
+        if (isTracking) {
+            Log.d("RunTrackingService", "prepareForWatch: tracking already active, ignoring")
+            return
+        }
+        try {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification("Watch Ready", "Press START on your watch to begin")
+            )
+            Log.d("RunTrackingService", "⌚ Service in standby — foreground started, waiting for watch START")
+        } catch (e: Exception) {
+            Log.e("RunTrackingService", "prepareForWatch: startForeground failed: $e")
+            stopSelf()
         }
     }
 
@@ -2885,6 +2954,13 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun stopTracking() {
         isTracking = false
         isSimulating = false
+        // Snapshot BEFORE resetting — used below to decide whether to skip the phone upload.
+        // The watch calls session/end (creating a run record) only when it was disconnected at
+        // run end.  If the watch was connected, the phone's upload is the sole record.
+        // If the watch was disconnected, the phone may have also been tracking (the "start"
+        // command was delivered early), which would produce a duplicate — the snapshot lets us
+        // avoid that.
+        val watchInitiatedRun = wasRunStartedByWatch
         wasRunStartedByWatch = false   // Reset for next run
         lastWatchGpsMs = 0L            // Reset so phone GPS works normally after session ends
         _isServiceRunning.value = false
@@ -2922,9 +2998,25 @@ class RunTrackingService : Service(), SensorEventListener {
                             isActive = false
                         )
                         _currentRunSession.value = finalSession
-                        
-                        // Upload run to backend (this will set _uploadComplete when done)
-                        uploadRunToBackend(finalSession)
+
+                        // Duplicate-prevention: the watch calls session/end (creating its own
+                        // run record) ONLY when it was disconnected from the phone at run end.
+                        // That same disconnected state means the watch's "start" command may
+                        // have been delivered early — causing the phone to also track the run.
+                        // In that race-condition scenario (watchInitiatedRun=true AND watch now
+                        // disconnected) we skip the phone upload; the watch record is authoritative.
+                        // When watchInitiatedRun=true but the watch IS still connected, the watch
+                        // did NOT call session/end, so the phone upload is the sole record and
+                        // must proceed.
+                        val watchIsNowConnected = garminWatchManager?.isWatchConnected?.value == true
+                        if (watchInitiatedRun && !watchIsNowConnected) {
+                            Log.d("RunTrackingService", "⌚ Watch-initiated run, watch disconnected at stop — watch owns record, skipping phone upload")
+                            _uploadComplete.value = finalSession.id
+                        } else {
+                            // Phone owns the record: either phone-initiated OR watch still connected
+                            // (meaning watch did NOT call session/end).
+                            uploadRunToBackend(finalSession)
+                        }
                     }
                 } finally {
                     // Only stop the service after upload completes or fails

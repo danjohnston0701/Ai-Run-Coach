@@ -130,7 +130,31 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
  */
 export function sanitizeForTTS(text: string): string {
   return text
-    .replace(/,/g, '')                    // Remove all commas
+    // ── Unit abbreviations → spoken form ─────────────────────────────────────
+    // Pace notation "M:SS/km" or "M:SS per km" → "M minutes and SS seconds per kilometer"
+    .replace(/(\d+):(\d{2})\s*(?:\/km|per\s*km)\b/gi, (_, m, s) => {
+      const min = parseInt(m, 10);
+      const sec = parseInt(s, 10);
+      if (sec === 0) return `${min} minutes per kilometer`;
+      return `${min} minutes and ${sec} seconds per kilometer`;
+    })
+    // Bare pace "M:SS" that looks like a pace value (preceded by @ or "pace" or "at")
+    .replace(/(?<=\b(?:at|pace|running|target|goal)\s+)(\d+):(\d{2})\b/gi, (_, m, s) => {
+      const min = parseInt(m, 10);
+      const sec = parseInt(s, 10);
+      if (sec === 0) return `${min} minutes per kilometer`;
+      return `${min} minutes and ${sec} seconds per kilometer`;
+    })
+    // "bpm" → "beats per minute"
+    .replace(/(\d+)\s*bpm\b/gi, '$1 beats per minute')
+    // "spm" → "steps per minute"
+    .replace(/(\d+)\s*spm\b/gi, '$1 steps per minute')
+    // "Xkm" or "X km" distances → "X kilometres" (keep decimals natural, e.g. "0.57km")
+    .replace(/(\d+(?:\.\d+)?)\s*km\b/gi, (_, n) => {
+      const val = parseFloat(n);
+      return `${n} ${val === 1 ? 'kilometre' : 'kilometres'}`;
+    })
+    // ── Punctuation cleanup ───────────────────────────────────────────────────
     .replace(/;/g, '.')                   // Semicolon → period
     .replace(/\s*—\s*/g, ' ')            // Em-dash → space
     .replace(/\.\.\./g, '.')             // Ellipsis → single period

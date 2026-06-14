@@ -97,7 +97,8 @@ class GarminWatchManager(private val context: Context) {
         private const val PREFS_NAME = "garmin_watch_prefs"
         // Notification IDs / channel for watch-initiated (Scenario 3) passive monitoring
         private const val NOTIF_CHANNEL_ID  = "garmin_watch_run"
-        private const val NOTIF_ID_WATCH_RUN = 9001
+        private const val NOTIF_ID_WATCH_RUN    = 9001
+        private const val NOTIF_ID_SYNC_COMPLETE = 9002
     }
 
     // ── Scenario 3: passive notification for watch-initiated runs ────────────
@@ -109,6 +110,55 @@ class GarminWatchManager(private val context: Context) {
      * notification just lets the user know so they can open the app after their
      * run to see their summary.
      */
+    /**
+     * Show a notification when an offline Garmin run batch has been synced to the server.
+     * Tapping the notification navigates directly to that run's summary screen via the
+     * existing [deeplink_run_id] Intent extra mechanism in MainActivity.
+     */
+    private fun showOfflineSyncNotification(runId: String?) {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    NOTIF_CHANNEL_ID,
+                    "Watch Run",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply { description = "Garmin watch run notifications" }
+                nm.createNotificationChannel(channel)
+            }
+
+            val mainClass = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                ?: Intent()
+            mainClass.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (runId != null) {
+                mainClass.putExtra("deeplink_run_id", runId)
+            }
+            val tapIntent = PendingIntent.getActivity(
+                context, NOTIF_ID_SYNC_COMPLETE,
+                mainClass,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setContentTitle("Garmin run synced!")
+                .setContentText("Your offline run has been saved. Tap to view your summary.")
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .setContentIntent(tapIntent)
+                .build()
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                NotificationManagerCompat.from(context).notify(NOTIF_ID_SYNC_COMPLETE, notif)
+            }
+            Log.d(TAG, "Offline sync notification shown (runId=$runId)")
+        } catch (e: Exception) {
+            Log.w(TAG, "showOfflineSyncNotification failed: ${e.message}")
+        }
+    }
+
     private fun showWatchRunNotification() {
         try {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -206,6 +256,12 @@ class GarminWatchManager(private val context: Context) {
     private var cachedAuthToken: String? = null
     private var cachedRunnerName: String = ""
     private var cachedUserMaxHr: Int = 185  // Default; updated from user profile on sendAuth
+
+    // ── Cached prepared-run payload ───────────────────────────────────────────
+    // Set by sendPreparedRun(); cleared by clearPendingPreparedRun() when the
+    // run starts or is cancelled. Resent automatically whenever "watchReady"
+    // arrives so the user can open phone/watch in any order.
+    private var cachedPreparedRunPayload: Map<String, Any>? = null
 
     // ── Private SDK handles ───────────────────────────────────────────────────
     private var connectIQ: ConnectIQ? = null
@@ -345,7 +401,17 @@ class GarminWatchManager(private val context: Context) {
         intervalDurSecs?.let  { payload["intervalDurSecs"] = it }
 
         Log.d(TAG, "Sending preparedRun to watch: type=$runType dist=${distanceKm}km workout=$workoutType")
+        cachedPreparedRunPayload = payload
         sendToWatch(payload)
+    }
+
+    /**
+     * Clears the cached prepared-run so it is not re-pushed after the run has
+     * started or been cancelled.  Call from the ViewModel on startRun() and cancelRunSetup().
+     */
+    fun clearPendingPreparedRun() {
+        cachedPreparedRunPayload = null
+        Log.d(TAG, "Pending prepared-run cache cleared")
     }
 
     fun sendSessionEnded() {
@@ -416,9 +482,22 @@ class GarminWatchManager(private val context: Context) {
                     }
                 }
             )
-            // Watch app is now resolved and listening — notify so caller can push auth
-            Log.d(TAG, "Watch app ready — firing onWatchAppReady")
-            onWatchAppReady?.invoke()
+            // Watch app is now resolved and listening.
+            // Proactively push cached auth so the watch can trigger an offline sync
+            // immediately — even if the user hasn't opened the watch app manually.
+            // If the watch app IS already open on the start screen, it will receive
+            // this auth message and fire the offline batch upload automatically.
+            val token = cachedAuthToken
+            if (token != null) {
+                Log.d(TAG, "Watch reconnected — auto-pushing cached auth to wake offline sync")
+                sendAuth(token, cachedRunnerName)
+                // Also resend any pending prepared run in case they were mid-setup
+                cachedPreparedRunPayload?.let { sendToWatch(it) }
+            } else {
+                // No cached credentials yet — fall back to external handler
+                Log.d(TAG, "Watch app ready — firing onWatchAppReady (no cached auth)")
+                onWatchAppReady?.invoke()
+            }
         } catch (e: InvalidStateException) {
             Log.w(TAG, "registerForMessages: ${e.message}")
         }
@@ -448,6 +527,14 @@ class GarminWatchManager(private val context: Context) {
                     // Immediately send auth so the watch shows "Connected" instead of the
                     // "OFFLINE - 90min charts" warning — this must happen regardless of
                     // whether a ViewModel has registered onWatchCommand.
+                    if (action == "syncComplete") {
+                        val runId    = map["runId"]?.toString()
+                        val session  = map["sessionId"] as? String
+                        Log.d(TAG, "syncComplete received — runId=$runId session=$session")
+                        showOfflineSyncNotification(runId)
+                        return
+                    }
+
                     if (action == "watchReady") {
                         val token = cachedAuthToken
                         if (token != null) {
@@ -458,9 +545,22 @@ class GarminWatchManager(private val context: Context) {
                             Log.d(TAG, "watchReady received — no cached auth, firing onWatchAppReady")
                             onWatchAppReady?.invoke()
                         }
-                        // Also notify any active ViewModel so it can react (e.g. push preparedRun)
+                        // Resend any pending prepared-run so the watch coached screen
+                        // appears regardless of which was opened first (phone or watch).
+                        cachedPreparedRunPayload?.let { payload ->
+                            Log.d(TAG, "watchReady received — resending cached preparedRun to watch")
+                            sendToWatch(payload)
+                        }
+                        // Also notify any active ViewModel so it can react
                         onWatchCommand?.invoke(action)
                         return
+                    }
+
+                    // When the watch starts a run, clear the cached prepared-run payload
+                    // so it isn't re-sent to the watch on the NEXT watchReady / reconnect.
+                    if (action == "start") {
+                        cachedPreparedRunPayload = null
+                        Log.d(TAG, "Watch START received — cleared cached preparedRun payload")
                     }
 
                     // For all other commands: if no ViewModel is listening, show a passive

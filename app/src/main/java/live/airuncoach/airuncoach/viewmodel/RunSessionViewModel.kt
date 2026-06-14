@@ -261,9 +261,95 @@ class RunSessionViewModel @Inject constructor(
         coachingGeneratedForWorkoutId = null
     }
 
+    // ── Watch standby flag ───────────────────────────────────────────────────
+    // Set to true after prepareServiceForWatch() starts the service in standby.
+    // Used by cancelRunSetup() to send ACTION_CANCEL_PREPARE_FOR_WATCH when the user
+    // backs out before pressing START on the watch.
+    private var isServicePreparedForWatch = false
+
+    /**
+     * Pre-start [RunTrackingService] in a lightweight standby state while the phone app is still
+     * in the foreground.
+     *
+     * **Why this exists:**
+     * On Android 12+ (our targetSdk = 36) apps cannot call startForegroundService() while running
+     * in the background (phone screen off / app not visible).  ConnectIQ callbacks from the Garmin
+     * watch are delivered via the Garmin Connect relay while the phone is in the user's pocket —
+     * i.e. the app is in the background.  Without this pre-start, the watch "start" command
+     * triggers the ViewModel's onWatchCommand handler which tries to call startForegroundService(),
+     * receives a ForegroundServiceStartNotAllowedException (silently caught), and the run never
+     * starts on the phone side.
+     *
+     * By calling this while the user is still looking at the phone (before they put it in their
+     * pocket), the service is already running as a foreground service.  When the watch sends
+     * "start" the service receives it via its own onWatchCommand handler and calls startTracking()
+     * directly — no new foreground-service start is required.
+     */
+    private fun prepareServiceForWatch() {
+        try {
+            // Pass route navigation data via static holder (too large for Intent extras)
+            runConfig?.route?.let { route ->
+                NavigationRouteHolder.set(route.polyline, route.turnInstructions)
+            }
+
+            val intent = Intent(context, RunTrackingService::class.java).apply {
+                action = RunTrackingService.ACTION_PREPARE_FOR_WATCH
+                // Mirror the same extras as startRun() so tracking config is ready when watch starts
+                runConfig?.let { cfg ->
+                    cfg.targetDistance?.let { dist ->
+                        putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, dist.toDouble())
+                    }
+                    if (cfg.hasTargetTime) {
+                        val targetTimeMs = (cfg.targetHours * 3600000L) +
+                            (cfg.targetMinutes * 60000L) + (cfg.targetSeconds * 1000L)
+                        putExtra(RunTrackingService.EXTRA_TARGET_TIME, targetTimeMs)
+                    }
+                    putExtra(RunTrackingService.EXTRA_HAS_ROUTE, cfg.route != null)
+                    cfg.trainingPlanId?.let { id -> putExtra(RunTrackingService.EXTRA_TRAINING_PLAN_ID, id) }
+                    cfg.workoutId?.let      { id -> putExtra(RunTrackingService.EXTRA_WORKOUT_ID, id) }
+                    cfg.workoutType?.let    { t  -> putExtra(RunTrackingService.EXTRA_WORKOUT_TYPE, t) }
+                    cfg.workoutIntensity?.let { i -> putExtra(RunTrackingService.EXTRA_WORKOUT_INTENSITY, i) }
+                    cfg.workoutDescription?.let { d -> putExtra(RunTrackingService.EXTRA_WORKOUT_DESCRIPTION, d) }
+                    cfg.planGoalType?.let   { g  -> putExtra(RunTrackingService.EXTRA_PLAN_GOAL_TYPE, g) }
+                    cfg.planWeekNumber?.let { w  -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
+                    cfg.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
+                }
+                sessionInstructions?.let { instructions ->
+                    try {
+                        putExtra(RunTrackingService.EXTRA_SESSION_INSTRUCTIONS_JSON, gson.toJson(instructions))
+                    } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "prepareServiceForWatch: could not serialize session instructions")
+                    }
+                }
+                activeSessionCoachingPlan?.let { plan ->
+                    try {
+                        putExtra(RunTrackingService.EXTRA_DYNAMIC_COACHING_PLAN_JSON, gson.toJson(plan))
+                    } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "prepareServiceForWatch: could not serialize coaching plan")
+                    }
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            isServicePreparedForWatch = true
+            Log.d("RunSessionViewModel", "⌚ Service pre-started in standby (Android ${Build.VERSION.SDK_INT}) — waiting for watch START")
+        } catch (e: Exception) {
+            // Non-fatal: run can still be started by the watch via the ViewModel's onWatchCommand
+            // handler on older Android versions where the background restriction does not apply.
+            Log.w("RunSessionViewModel", "prepareServiceForWatch failed (non-fatal): $e")
+        }
+    }
+
     /**
      * Send the prepared run configuration to the watch over ConnectIQ BT.
      * The watch will switch from idle to "Coached Run Ready ▶" mode.
+     *
+     * Also pre-starts [RunTrackingService] in standby so it can respond to the watch "start"
+     * command even when the phone screen is off (Android 12+ background restriction workaround).
      */
     fun prepareRunOnWatch(
         distanceKm: Float,
@@ -290,6 +376,7 @@ class RunSessionViewModel @Inject constructor(
             intervalDurSecs   = intervalDurSecs
         )
         Log.d("RunSessionViewModel", "prepareRunOnWatch sent: type=$runType dist=${distanceKm}km")
+        prepareServiceForWatch()
     }
 
     /**
@@ -328,6 +415,8 @@ class RunSessionViewModel @Inject constructor(
 
         _watchSendState.value = live.airuncoach.airuncoach.ui.components.WatchSendState.SENT
         Log.d("RunSessionViewModel", "prepareRunOnWatchWithCoaching sent: workout=$workoutId type=$workoutType, coachingReady=${activeSessionCoachingPlan != null}")
+        // Pre-start service in standby so it can handle the watch "start" command from background
+        prepareServiceForWatch()
     }
 
     /** The active dynamic coaching plan, set when prepareRunOnWatchWithCoaching() succeeds. */
@@ -1071,6 +1160,9 @@ class RunSessionViewModel @Inject constructor(
     }
 
     fun startRun() {
+        // Clear the standby flag and the cached prepared-run — run is now live
+        isServicePreparedForWatch = false
+        garminWatchManager.clearPendingPreparedRun()
         // Reset route recognition state for this new run
         _knownRouteMatch.value = null
         routeIntelligenceContext = null
@@ -1465,6 +1557,22 @@ class RunSessionViewModel @Inject constructor(
         isPrepareRunInProgress = false
         // Clear any pending run configuration
         runConfig = null
+        // If the service was pre-started in standby (ACTION_PREPARE_FOR_WATCH) and the run has
+        // not yet begun, tell it to stop.  The service will ignore this if tracking is already
+        // active (i.e. the user pressed START on the watch before tapping Cancel here).
+        if (isServicePreparedForWatch) {
+            try {
+                val cancelIntent = Intent(context, RunTrackingService::class.java).apply {
+                    action = RunTrackingService.ACTION_CANCEL_PREPARE_FOR_WATCH
+                }
+                context.startService(cancelIntent)
+                Log.d("RunSessionViewModel", "⌚ Sent ACTION_CANCEL_PREPARE_FOR_WATCH to service")
+            } catch (e: Exception) {
+                Log.w("RunSessionViewModel", "Could not send cancel-prepare to service: $e")
+            }
+            isServicePreparedForWatch = false
+        }
+        garminWatchManager.clearPendingPreparedRun()
     }
 
     /**
