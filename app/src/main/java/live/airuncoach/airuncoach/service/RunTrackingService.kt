@@ -428,6 +428,7 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val CHANNEL_ID = "run_tracking_channel"
         private const val NOTIFICATION_ID = 1001
         private const val NOTIF_ID_WATCH_SESSION_READY = 1002
+        private const val NOTIF_ID_WATCH_RUN_STARTED = 1003
         private const val LOCATION_UPDATE_INTERVAL = 1000L  // Request GPS every 1 second (matches Garmin frequency)
         private const val LOCATION_FASTEST_INTERVAL = 500L   // Accept updates as fast as 500ms
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
@@ -1085,6 +1086,12 @@ class RunTrackingService : Service(), SensorEventListener {
             }
             startTimer()  // Start independent timer
             Log.d("RunTrackingService", "Tracking: ${if (isSimulating) "simulation mode (no real GPS)" else "GPS, sensors,"} and timer started")
+
+            // If the run was initiated from the watch while the phone was in the user's pocket,
+            // post a heads-up notification so the user is aware the run is recording.
+            if (wasRunStartedByWatch) {
+                postWatchRunStartedNotification()
+            }
         } catch (e: Exception) {
             Log.e("RunTrackingService", "Failed to start sensors", e)
         }
@@ -3309,6 +3316,55 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "⌚ Session ready notification posted")
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Failed to post session ready notification: ${e.message}")
+        }
+    }
+
+    /**
+     * Posts a heads-up notification confirming that the phone has started recording in response
+     * to a watch "start" command.  This lets the user know the phone is actively tracking even
+     * when the screen is locked and the AI Run Coach app is not visible.
+     */
+    private fun postWatchRunStartedNotification() {
+        try {
+            val channelId = "garmin_run_started"
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+            if (nm.getNotificationChannel(channelId) == null) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel(
+                        channelId,
+                        "Watch Run Started",
+                        android.app.NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Confirms the phone started recording when your watch started a run"
+                        enableVibration(true)
+                    }
+                )
+            }
+
+            val tapIntent = android.content.Intent(this, live.airuncoach.airuncoach.MainActivity::class.java).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                NOTIF_ID_WATCH_RUN_STARTED,
+                tapIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                .setContentTitle("🏃 Run Started")
+                .setContentText("Your phone is recording. Enjoy your run!")
+                .setSmallIcon(R.drawable.android_icon_monochrome)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            nm.notify(NOTIF_ID_WATCH_RUN_STARTED, notification)
+            Log.d("RunTrackingService", "⌚ Run started notification posted")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to post run started notification: ${e.message}")
         }
     }
 

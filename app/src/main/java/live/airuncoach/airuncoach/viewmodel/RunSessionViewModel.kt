@@ -1230,8 +1230,14 @@ class RunSessionViewModel @Inject constructor(
                 }
             }
             
-            // Start service in foreground mode (Android O+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // If the service is already running in standby (pre-started for watch), just send
+            // ACTION_START_TRACKING via startService(). The service is already a foreground
+            // service, so startService() always works even from background — no need for
+            // startForegroundService() and no risk of ForegroundServiceStartNotAllowedException.
+            if (isServicePreparedForWatch) {
+                Log.d("RunSessionViewModel", "⌚ Service already in standby — using startService() to trigger ACTION_START_TRACKING")
+                context.startService(intent)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
