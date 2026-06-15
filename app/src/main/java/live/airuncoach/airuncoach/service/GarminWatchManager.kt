@@ -545,6 +545,15 @@ class GarminWatchManager(private val context: Context) {
                         return
                     }
 
+                    // Watch notifies phone immediately after saving an offline run batch,
+                    // and also when the background service fails to upload (retry signal).
+                    // Shows "Open the watch app to sync" banner on the dashboard.
+                    if (action == "pendingSync") {
+                        Log.d(TAG, "pendingSync received — watch has an offline run ready to upload")
+                        _hasPendingWatchSync.value = true
+                        return
+                    }
+
                     if (action == "watchReady") {
                         // Read the hasPendingSync flag the watch now includes
                         val hasPending = map["hasPendingSync"] as? Boolean ?: false

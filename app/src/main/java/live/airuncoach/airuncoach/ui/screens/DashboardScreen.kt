@@ -257,13 +257,13 @@ fun WatchSyncBanner() {
             Spacer(modifier = Modifier.width(Spacing.sm))
             Column {
                 Text(
-                    text = "Syncing offline run from watch",
+                    text = "Offline run detected from watch",
                     color = Colors.primary,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 13.sp
                 )
                 Text(
-                    text = "Your run will appear in history shortly",
+                    text = "Open the AI Run Coach watch app to sync your run",
                     color = Colors.textSecondary,
                     fontSize = 11.sp
                 )

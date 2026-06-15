@@ -119,6 +119,13 @@ class BackgroundService extends Bg.ServiceDelegate {
         } else {
             // Upload failed — leave storage intact for retry on next temporal event.
             Sys.println("BgService: upload failed (HTTP " + responseCode + ") — will retry in 20 min");
+            // Nudge the phone to show "Open the watch app to sync" banner so the user
+            // has a manual fallback if BT/wifi stays unavailable.
+            try {
+                Comm.transmit({ "type" => "command", "action" => "pendingSync" }, null, null);
+            } catch (ex) {
+                Sys.println("BgService: pendingSync transmit failed — " + ex.toString());
+            }
         }
 
         Bg.exit(null);

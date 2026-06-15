@@ -388,6 +388,10 @@ class RunView extends Ui.View {
                 App.Storage.setValue("offlineBatchDuration",  _elapsedTime);
                 App.Storage.setValue("offlineBatchAscent",    _totalAscent);
                 Sys.println("Offline batch saved: " + _offlineBuffer.size() + " pts, session=" + sid);
+                // Notify phone immediately — even with no active relay the Garmin
+                // Connect BT stack may deliver this, letting the phone banner show
+                // without waiting for the 20-minute background service trigger.
+                try { _phoneLink.sendPendingSync(); } catch (ex) {}
             }
         }
 

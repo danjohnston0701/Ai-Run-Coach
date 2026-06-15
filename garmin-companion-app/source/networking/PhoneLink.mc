@@ -55,6 +55,15 @@ class PhoneLink {
         Sys.println("PhoneLink tx command: " + action);
     }
 
+    // ── Notify phone that an offline run batch is waiting in watch storage ────────
+    // Sent immediately after the offline batch is written so the phone can show a
+    // "Open the watch app to sync" prompt without waiting for the next temporal event.
+    // Also sent by BackgroundService when an HTTP upload attempt fails (retry signal).
+    function sendPendingSync() {
+        _transmit({ "type" => "command", "action" => "pendingSync" });
+        Sys.println("PhoneLink tx pendingSync");
+    }
+
     // ── Send watchReady with pending-sync flag ─────────────────────────────────
     // hasPendingSync: true when App.Storage contains a buffered offline run batch.
     // Phone uses this to show a subtle "syncing your offline run" indicator on
