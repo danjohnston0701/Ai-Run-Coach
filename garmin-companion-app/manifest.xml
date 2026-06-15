@@ -44,7 +44,7 @@
         <!-- without the user needing to open the watch app.                             -->
         <iq:background>
             <iq:triggers>
-                <iq:onTemporalEvent after="1200"/>
+                <iq:onTemporalEvent after="300"/>
             </iq:triggers>
         </iq:background>
 
