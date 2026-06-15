@@ -99,6 +99,7 @@ class GarminWatchManager(private val context: Context) {
         private const val NOTIF_CHANNEL_ID  = "garmin_watch_run"
         private const val NOTIF_ID_WATCH_RUN    = 9001
         private const val NOTIF_ID_SYNC_COMPLETE = 9002
+        private const val NOTIF_ID_PENDING_SYNC  = 9003   // "open watch app to sync" prompt
     }
 
     // ── Scenario 3: passive notification for watch-initiated runs ────────────
@@ -156,6 +157,69 @@ class GarminWatchManager(private val context: Context) {
             Log.d(TAG, "Offline sync notification shown (runId=$runId)")
         } catch (e: Exception) {
             Log.w(TAG, "showOfflineSyncNotification failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Shows a high-priority heads-up notification when the watch reports that an offline
+     * run is waiting to be synced. Tapping opens the AI Run Coach app so the user can
+     * open the watch app from there to trigger the sync.
+     *
+     * Uses [NotificationCompat.FLAG_ONLY_ALERT_ONCE] so repeated `pendingSync` messages
+     * from the background-service retry loop don't keep buzzing the user — the notification
+     * updates silently after the first delivery.
+     */
+    private fun showPendingSyncNotification() {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    NOTIF_CHANNEL_ID,
+                    "Watch Run",
+                    NotificationManager.IMPORTANCE_HIGH       // heads-up on first delivery
+                ).apply { description = "Garmin watch run notifications" }
+                nm.createNotificationChannel(channel)
+            }
+
+            // Tapping opens the main app — user can then open the watch app from the dashboard
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                ?: Intent()
+            launchIntent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            val tapIntent = PendingIntent.getActivity(
+                context, NOTIF_ID_PENDING_SYNC,
+                launchIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setContentTitle("Offline run detected from your watch")
+                .setContentText("Open the AI Run Coach watch app to sync your run")
+                .setStyle(NotificationCompat.BigTextStyle()
+                    .bigText("You completed a run on your Garmin watch. Open the AI Run Coach watch app to sync it to your history."))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(false)          // stays until the sync completes
+                .setOnlyAlertOnce(true)        // silent update on background-service retries
+                .setContentIntent(tapIntent)
+                .build()
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                NotificationManagerCompat.from(context).notify(NOTIF_ID_PENDING_SYNC, notif)
+            }
+            Log.d(TAG, "Pending sync notification shown")
+        } catch (e: Exception) {
+            Log.w(TAG, "showPendingSyncNotification failed: ${e.message}")
+        }
+    }
+
+    /** Dismiss the pending-sync notification once the run has been successfully uploaded. */
+    private fun dismissPendingSyncNotification() {
+        try {
+            NotificationManagerCompat.from(context).cancel(NOTIF_ID_PENDING_SYNC)
+        } catch (e: Exception) {
+            Log.w(TAG, "dismissPendingSyncNotification failed: ${e.message}")
         }
     }
 
@@ -540,17 +604,19 @@ class GarminWatchManager(private val context: Context) {
                         val runId    = map["runId"]?.toString()
                         val session  = map["sessionId"] as? String
                         Log.d(TAG, "syncComplete received — runId=$runId session=$session")
-                        _hasPendingWatchSync.value = false   // sync done — clear banner
+                        _hasPendingWatchSync.value = false   // clear dashboard banner
+                        dismissPendingSyncNotification()     // replace prompt with success notif
                         showOfflineSyncNotification(runId)
                         return
                     }
 
                     // Watch notifies phone immediately after saving an offline run batch,
                     // and also when the background service fails to upload (retry signal).
-                    // Shows "Open the watch app to sync" banner on the dashboard.
+                    // Shows dashboard banner + heads-up push notification.
                     if (action == "pendingSync") {
                         Log.d(TAG, "pendingSync received — watch has an offline run ready to upload")
                         _hasPendingWatchSync.value = true
+                        showPendingSyncNotification()
                         return
                     }
 
