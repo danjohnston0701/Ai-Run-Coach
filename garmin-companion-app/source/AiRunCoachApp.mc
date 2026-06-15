@@ -5,6 +5,7 @@
 using Toybox.Application as App;
 using Toybox.WatchUi as Ui;
 using Toybox.System as Sys;
+using Toybox.Background as Bg;
 
 class AiRunCoachApp extends App.AppBase {
 
@@ -31,6 +32,14 @@ class AiRunCoachApp extends App.AppBase {
         var delegate = new RunDelegate();
         delegate.setView(_runView);
         return [_runView, delegate];
+    }
+
+    // ── Background service entry point ────────────────────────────────────────
+    // Connect IQ calls this to get the ServiceDelegate for background tasks.
+    // Tagged (:background) so it is included in the background build slice only.
+    (:background)
+    function getServiceDelegate() {
+        return new BackgroundService();
     }
 
     // Handle settings changes (e.g. from Garmin Connect app)

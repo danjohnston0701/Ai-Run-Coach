@@ -55,6 +55,20 @@ class PhoneLink {
         Sys.println("PhoneLink tx command: " + action);
     }
 
+    // ── Send watchReady with pending-sync flag ─────────────────────────────────
+    // hasPendingSync: true when App.Storage contains a buffered offline run batch.
+    // Phone uses this to show a subtle "syncing your offline run" indicator on
+    // the dashboard — it's already handled automatically but the user gets feedback.
+    function sendWatchReady(hasPendingSync) {
+        var msg = {
+            "type"           => "command",
+            "action"         => "watchReady",
+            "hasPendingSync" => hasPendingSync
+        };
+        _transmit(msg);
+        Sys.println("PhoneLink tx watchReady (hasPendingSync=" + hasPendingSync + ")");
+    }
+
     // ── Send app version to phone on first connect ────────────────────────────
     // The phone stores this so the Watch Update notification screen can show
     // "Installed: X.Y.Z → New: A.B.C" to the user.

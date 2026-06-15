@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -99,6 +100,7 @@ fun DashboardScreen(
     val isAiCoachEnabled by viewModel.isAiCoachEnabled.collectAsState()
     val activeRunSession by viewModel.activeRunSession.collectAsState()
     val trainingLoad by viewModel.trainingLoad.collectAsState()
+    val hasPendingWatchSync by viewModel.hasPendingWatchSync.collectAsState()
 
     // Optimize: Only load data once when screen is first shown
     LaunchedEffect(Unit) {
@@ -132,6 +134,15 @@ fun DashboardScreen(
             item { Spacer(modifier = Modifier.height(Spacing.md)) }
         }
         
+        // Offline watch run sync banner — only shown when the watch reports a
+        // pending offline batch. Disappears automatically once sync completes.
+        if (hasPendingWatchSync) {
+            item {
+                WatchSyncBanner()
+                Spacer(modifier = Modifier.height(Spacing.sm))
+            }
+        }
+
         item { 
             WelcomeSection(
                 userName = user?.name,
@@ -212,6 +223,52 @@ fun DashboardScreen(
             )
         }
         item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
+    }
+}
+
+/**
+ * Subtle banner shown while an offline watch run is being synced to the server.
+ * Appears only when [DashboardViewModel.hasPendingWatchSync] is true; disappears
+ * automatically when the watch confirms upload via "syncComplete".
+ */
+@Composable
+fun WatchSyncBanner() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.primary.copy(alpha = 0.15f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Watch,
+                contentDescription = "Syncing",
+                tint = Colors.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Column {
+                Text(
+                    text = "Syncing offline run from watch",
+                    color = Colors.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "Your run will appear in history shortly",
+                    color = Colors.textSecondary,
+                    fontSize = 11.sp
+                )
+            }
+        }
     }
 }
 

@@ -220,6 +220,15 @@ class GarminWatchManager(private val context: Context) {
     private val _isCompanionAppInstalled = MutableStateFlow(false)
     val isCompanionAppInstalled: StateFlow<Boolean> = _isCompanionAppInstalled
 
+    /**
+     * True from the moment the watch reports a pending offline run batch (via
+     * [hasPendingSync] in the "watchReady" message) until the watch confirms the
+     * upload completed (via "syncComplete").  Used to show a brief indicator on
+     * the dashboard — clears itself automatically, never shown unless relevant.
+     */
+    private val _hasPendingWatchSync = MutableStateFlow(false)
+    val hasPendingWatchSync: StateFlow<Boolean> = _hasPendingWatchSync
+
     /** Invoked when a command message arrives from the watch. */
     var onWatchCommand: ((action: String) -> Unit)? = null
 
@@ -531,11 +540,18 @@ class GarminWatchManager(private val context: Context) {
                         val runId    = map["runId"]?.toString()
                         val session  = map["sessionId"] as? String
                         Log.d(TAG, "syncComplete received — runId=$runId session=$session")
+                        _hasPendingWatchSync.value = false   // sync done — clear banner
                         showOfflineSyncNotification(runId)
                         return
                     }
 
                     if (action == "watchReady") {
+                        // Read the hasPendingSync flag the watch now includes
+                        val hasPending = map["hasPendingSync"] as? Boolean ?: false
+                        if (hasPending) {
+                            Log.d(TAG, "watchReady: watch has pending offline run — showing sync indicator")
+                            _hasPendingWatchSync.value = true
+                        }
                         val token = cachedAuthToken
                         if (token != null) {
                             Log.d(TAG, "watchReady received — auto-sending cached auth to watch")

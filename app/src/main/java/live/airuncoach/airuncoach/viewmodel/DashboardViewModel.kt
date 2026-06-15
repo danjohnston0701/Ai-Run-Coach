@@ -25,6 +25,7 @@ import kotlinx.coroutines.tasks.await
 import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
+import live.airuncoach.airuncoach.di.GarminWatchManagerEntryPoint
 import live.airuncoach.airuncoach.domain.model.GarminConnection
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.RunSession
@@ -33,6 +34,7 @@ import live.airuncoach.airuncoach.domain.model.WeatherData
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.WeatherRetrofitClient
 import live.airuncoach.airuncoach.service.RunTrackingService
+import dagger.hilt.android.EntryPointAccessors
 import retrofit2.HttpException
 import java.text.SimpleDateFormat
 import java.util.*
@@ -92,6 +94,20 @@ class DashboardViewModel @Inject constructor(
     // Track active run session
     val activeRunSession: StateFlow<RunSession?> = 
         RunTrackingService.currentRunSession
+
+    // True while the watch has a pending offline run batch being synced.
+    // Sourced directly from GarminWatchManager — cleared automatically on syncComplete.
+    val hasPendingWatchSync: StateFlow<Boolean> by lazy {
+        try {
+            val entry = EntryPointAccessors.fromApplication(
+                context,
+                GarminWatchManagerEntryPoint::class.java
+            )
+            entry.garminWatchManager().hasPendingWatchSync
+        } catch (e: Exception) {
+            MutableStateFlow(false)
+        }
+    }
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()

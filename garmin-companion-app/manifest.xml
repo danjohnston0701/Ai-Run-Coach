@@ -37,7 +37,16 @@
             <iq:uses-permission id="PersistedContent"/>
             <iq:uses-permission id="Fit"/>
             <iq:uses-permission id="UserProfile"/>
+            <iq:uses-permission id="Background"/>
         </iq:permissions>
+
+        <!-- Background service: uploads offline run batches automatically every 20 min -->
+        <!-- without the user needing to open the watch app.                             -->
+        <iq:background>
+            <iq:triggers>
+                <iq:onTemporalEvent after="1200"/>
+            </iq:triggers>
+        </iq:background>
 
         <iq:languages>
             <iq:language>eng</iq:language>

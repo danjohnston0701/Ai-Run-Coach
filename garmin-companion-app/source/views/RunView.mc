@@ -429,7 +429,8 @@ class RunView extends Ui.View {
 
     function onShow() {
         _phoneLink.register(method(:onPhoneMessage));
-        _phoneLink.sendCommand("watchReady");
+        // Include hasPendingSync so phone dashboard shows a sync indicator
+        _phoneLink.sendWatchReady(_hasPendingOfflineBatch());
         if (!_phoneControlled && _isRunning) {
             // Restore after view was hidden (system menu etc).
             // Guard against session re-creation which would split the Garmin activity.
@@ -1150,6 +1151,14 @@ class RunView extends Ui.View {
     // ==========================================================================
     // HELPERS
     // ==========================================================================
+
+    // Returns true when App.Storage contains a buffered offline run batch.
+    // Used by sendWatchReady() so the phone can show a sync indicator.
+    private function _hasPendingOfflineBatch() {
+        var sid = App.Storage.getValue("offlineBatchSessionId");
+        var pts = App.Storage.getValue("offlineBatchPoints");
+        return (sid != null && (pts instanceof Lang.Array) && pts.size() > 0);
+    }
 
     private function _fmtClock() {
         var ct = Sys.getClockTime();
