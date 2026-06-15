@@ -9803,15 +9803,65 @@ function transformRunForAndroid(run: any) {
         return res.status(400).json({ error: "No points provided" });
       }
 
-      // Find the existing run record created by session/end
-      const [existingRun] = await db
+      // Find the existing run record created by session/end.
+      // For truly phone-less runs session/end never reaches the server, so
+      // no record will exist — create one now from the batch summary data.
+      let [existingRun] = await db
         .select()
         .from(runs)
         .where(and(eq(runs.userId, userId), eq(runs.externalId, sessionId)));
 
       if (!existingRun) {
-        console.warn(`[Offline Batch] No run found for session ${sessionId} — batch discarded`);
-        return res.status(404).json({ error: "Run not found for this session" });
+        console.log(`[Offline Batch] No run found for session ${sessionId} — creating run from batch (phone-less run)`);
+
+        // Derive basic summary from batch data if not provided in body
+        const distKm   = distanceM  ? distanceM  / 1000 : 0;
+        const durSec   = durationSec || 0;
+
+        if (distKm < 0.1 || durSec < 30) {
+          console.warn(`[Offline Batch] Batch too small to create run (${distKm.toFixed(3)}km, ${durSec}s) — discarding`);
+          return res.status(400).json({ error: "Batch data too small to create a run" });
+        }
+
+        // Average pace, HR, cadence from raw points
+        const hrPts  = (points as number[][]).filter((p: number[]) => p[4] > 0);
+        const cadPts = (points as number[][]).filter((p: number[]) => p[5] > 0);
+        const pacePts = (points as number[][]).filter((p: number[]) => p[6] > 0 && p[6] / 10 < 1200);
+
+        const avgHR  = hrPts.length  > 0 ? Math.round(hrPts.reduce((s: number, p: number[])  => s + p[4], 0) / hrPts.length)  : null;
+        const maxHR  = hrPts.length  > 0 ? Math.max(...hrPts.map((p: number[])  => p[4]))  : null;
+        const avgCad = cadPts.length > 0 ? Math.round(cadPts.reduce((s: number, p: number[]) => s + p[5], 0) / cadPts.length) : null;
+        const avgPaceRaw = pacePts.length > 0 ? pacePts.reduce((s: number, p: number[]) => s + p[6] / 10, 0) / pacePts.length : null;
+        let avgPaceStr: string | null = null;
+        if (avgPaceRaw && avgPaceRaw > 0) {
+          const mins = Math.floor(avgPaceRaw / 60);
+          const secs = Math.round(avgPaceRaw % 60);
+          avgPaceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        const now = new Date();
+        const [created] = await db.insert(runs).values({
+          userId,
+          distance:       distKm,
+          duration:       durSec,
+          avgPace:        avgPaceStr,
+          avgHeartRate:   avgHR,
+          maxHeartRate:   maxHR,
+          cadence:        avgCad,
+          elevationGain:  totalAscent ?? null,
+          elevation:      totalAscent ?? null,
+          name:           'Garmin Watch Run',
+          runDate:        now.toISOString().split('T')[0],
+          runTime:        now.toTimeString().split(' ')[0].slice(0, 5),
+          completedAt:    now,
+          externalId:     sessionId,
+          externalSource: 'garmin_companion',
+          hasGarminData:  true,
+          difficulty:     'moderate',
+          isPublic:       false,
+        }).returning();
+        existingRun = created;
+        console.log(`[Offline Batch] Created new run record ${existingRun.id} for phone-less session ${sessionId} (${distKm.toFixed(2)}km)`);
       }
 
       // ── Decode compact points into chart series ──────────────────────────
