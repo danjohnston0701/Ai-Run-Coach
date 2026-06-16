@@ -20,12 +20,12 @@ fun localProp(key: String): String =
 
 android {
     namespace = "live.airuncoach.airuncoach"
-    compileSdk = 36
+    compileSdk = 36          // Must be 36 for Health Connect library
 
     defaultConfig {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 33          // Target 33 to avoid Play Core 1.10.3 broadcast receiver incompatibility
         versionCode = 10          // ← Increment by 1 for every Play Store upload
         versionName = "1.4.3"   // ← Human-readable version shown in Play Store
 
