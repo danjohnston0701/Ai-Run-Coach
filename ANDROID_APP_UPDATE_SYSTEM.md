@@ -74,7 +74,7 @@ This is the same key used for Garmin watch app updates.
 {
   "version": "1.4.3",
   "title": "Critical Update",
-  "releaseNote": "Please update to fix login issues",
+  "releaseNote": "Update available. Please update app",
   "dryRun": false
 }
 ```
