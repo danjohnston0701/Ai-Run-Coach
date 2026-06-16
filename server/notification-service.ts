@@ -417,3 +417,103 @@ export async function sendCoachingPlanReminder(
     return results;
   }
 }
+
+// ── Android App Update Broadcast ─────────────────────────────────────────────
+
+/**
+ * Broadcast an Android app update notification to all users.
+ * Uses Firebase Cloud Messaging to deliver the notification.
+ *
+ * @param version       - New version string (e.g. "1.4.3")
+ * @param title         - Notification title (e.g. "Critical Update")
+ * @param releaseNote   - Short description of what's new or why they should update
+ * @returns Summary of sent/failed counts
+ */
+export async function broadcastAndroidAppUpdate(
+  version: string,
+  title: string,
+  releaseNote: string
+): Promise<{ targeted: number; inAppSent: number; pushSent: number; pushFailed: number }> {
+  const results = { targeted: 0, inAppSent: 0, pushSent: 0, pushFailed: 0 };
+
+  // Fetch all users
+  const allUsers = await db
+    .select({ id: users.id, fcmToken: users.fcmToken })
+    .from(users);
+
+  results.targeted = allUsers.length;
+
+  if (allUsers.length === 0) {
+    console.log("[AndroidAppUpdate] No users found — nothing to send");
+    return results;
+  }
+
+  const notificationTitle = `📱 AI Run Coach v${version}`;
+  const notificationBody = releaseNote;
+  const notificationData: Record<string, string> = {
+    type: "app_update",
+    version,
+    releaseNote,
+    action: "open_play_store",
+    timestamp: new Date().toISOString(),
+  };
+
+  console.log(`[AndroidAppUpdate] Broadcasting v${version} update to ${allUsers.length} users...`);
+
+  for (const user of allUsers) {
+    try {
+      // In-app notification (always)
+      await storage.createNotification({
+        userId: user.id,
+        title: notificationTitle,
+        message: notificationBody,
+        type: "app_update",
+        data: notificationData,
+        read: false,
+      });
+      results.inAppSent++;
+
+      // Firebase push (only if FCM token exists)
+      if (user.fcmToken) {
+        const app = await getFirebaseApp();
+        if (app) {
+          try {
+            const message: any = {
+              token: user.fcmToken,
+              data: {
+                ...notificationData,
+                title: notificationTitle,
+                body: notificationBody,
+              },
+              android: {
+                priority: "high",
+                notification: {
+                  channelId: "app_updates",
+                  sound: "default",
+                  clickAction: "OPEN_PLAY_STORE",
+                },
+              },
+            };
+            const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
+            await messaging.send(message);
+            results.pushSent++;
+          } catch (pushErr: any) {
+            if (pushErr?.code === "messaging/registration-token-not-registered") {
+              console.warn(`[AndroidAppUpdate] Stale token for user ${user.id} — clearing`);
+              await db.update(users).set({ fcmToken: null }).where(eq(users.id, user.id));
+            }
+            results.pushFailed++;
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`[AndroidAppUpdate] Failed for user ${user.id}:`, err);
+      results.pushFailed++;
+    }
+  }
+
+  console.log(
+    `[AndroidAppUpdate] Done — in-app: ${results.inAppSent}, push sent: ${results.pushSent}, push failed: ${results.pushFailed}`
+  );
+  return results;
+}

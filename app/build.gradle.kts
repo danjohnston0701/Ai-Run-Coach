@@ -26,8 +26,8 @@ android {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7          // ← Increment by 1 for every Play Store upload
-        versionName = "1.4.0"   // ← Human-readable version shown in Play Store
+        versionCode = 10          // ← Increment by 1 for every Play Store upload
+        versionName = "1.4.3"   // ← Human-readable version shown in Play Store
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -186,6 +186,9 @@ dependencies {
 
     // --- Google Play Billing: In-app subscriptions and purchases ---
     implementation("com.android.billingclient:billing-ktx:7.0.0")
+    
+    // --- Google Play In-App Updates ---
+    implementation("com.google.android.play:core:1.10.3")
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")

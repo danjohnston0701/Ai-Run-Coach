@@ -10173,6 +10173,99 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  /**
+   * POST /api/admin/app-update/broadcast
+   *
+   * Sends an app update notification to all Android users.
+   * Uses Firebase Cloud Messaging to deliver push notifications + in-app messages.
+   *
+   * Security: requires ADMIN_API_KEY (via X-Admin-Key header or admin_key param)
+   *
+   * Body:
+   *   version      (required) e.g. "1.4.3"
+   *   title        (required) e.g. "Critical Update"
+   *   releaseNote  (required) e.g. "Please update to fix login issues"
+   *   dryRun       (optional, boolean) if true, just returns target count
+   */
+  app.post("/api/admin/app-update/broadcast", async (req: Request, res: Response) => {
+    try {
+      // ── Admin authentication ─────────────────────────────────��───────────────
+      const adminKey = process.env.ADMIN_API_KEY;
+      if (!adminKey) {
+        return res.status(503).json({ error: "Admin API not configured on this server" });
+      }
+
+      const providedKey =
+        req.headers["x-admin-key"] ||
+        req.query["admin_key"] ||
+        req.body?.adminKey;
+
+      if (providedKey !== adminKey) {
+        console.warn("[Admin] Unauthorized app-update broadcast attempt from", req.ip);
+        return res.status(401).json({ error: "Unauthorized — invalid admin key" });
+      }
+
+      // ── Payload ──────────────────────────────────────────────────────────────
+      const {
+        version,
+        title,
+        releaseNote,
+        dryRun = false,
+      } = req.body;
+
+      if (!version) {
+        return res.status(400).json({ error: "version is required (e.g. '1.4.3')" });
+      }
+      if (!title) {
+        return res.status(400).json({ error: "title is required (e.g. 'Critical Update')" });
+      }
+      if (!releaseNote) {
+        return res.status(400).json({ error: "releaseNote is required (e.g. 'Please update to fix login issues')" });
+      }
+
+      // ── Dry-run: just return who would be targeted ───────────────────────────
+      if (dryRun) {
+        const allUsers = await db
+          .select({ id: users.id, email: users.email, hasFcm: users.fcmToken })
+          .from(users);
+
+        return res.json({
+          dryRun: true,
+          version,
+          title,
+          releaseNote,
+          targeted: allUsers.length,
+          withFcmToken: allUsers.filter((u) => !!u.hasFcm).length,
+          withoutFcmToken: allUsers.filter((u) => !u.hasFcm).length,
+        });
+      }
+
+      // ── Live broadcast ──────────────���─────────────────────────────────────────
+      const { broadcastAndroidAppUpdate } = await import("./notification-service");
+      const results = await broadcastAndroidAppUpdate(version, title, releaseNote);
+
+      console.log(
+        `[Admin] Android app update broadcast v${version} complete — ` +
+        `targeted: ${results.targeted}, push sent: ${results.pushSent}, in-app: ${results.inAppSent}`
+      );
+
+      res.json({
+        success: true,
+        version,
+        title,
+        releaseNote,
+        targeted: results.targeted,
+        pushSent: results.pushSent,
+        pushFailed: results.pushFailed,
+        inAppSent: results.inAppSent,
+        message: `Broadcast sent to ${results.targeted} Android users (${results.pushSent} push, ${results.inAppSent} in-app)`,
+      });
+    } catch (error: any) {
+      console.error("[Admin] App update broadcast error:", error);
+      res.status(500).json({ error: "Broadcast failed", details: error?.message });
+    }
+  });
+
   // ==================== ANDROID V2 ENDPOINTS ====================
 
   // Update coach settings

@@ -2,6 +2,7 @@ package live.airuncoach.airuncoach.network.model
 
 import com.google.gson.annotations.SerializedName
 import live.airuncoach.airuncoach.domain.model.User
+import live.airuncoach.airuncoach.domain.model.Injury
 
 /**
  * Response from login/register endpoints
@@ -61,10 +62,75 @@ data class AuthResponse(
     val coachTone: String? = null,
     
     @SerializedName("profilePic")
-    val profilePic: String? = null
+    val profilePic: String? = null,
+    
+    // Additional User fields that might be returned by backend
+    @SerializedName("shortUserId")
+    val shortUserId: String? = null,
+    
+    @SerializedName("location")
+    val location: String? = null,
+    
+    @SerializedName("age")
+    val age: Int? = null,
+    
+    @SerializedName("nicknameStyle")
+    val nicknameStyle: String? = null,
+    
+    @SerializedName("distanceMinKm")
+    val distanceMinKm: Float? = null,
+    
+    @SerializedName("distanceMaxKm")
+    val distanceMaxKm: Float? = null,
+    
+    @SerializedName("distanceDecimalsEnabled")
+    val distanceDecimalsEnabled: Boolean? = null,
+    
+    @SerializedName("subscriptionTier")
+    val subscriptionTier: String? = null,
+    
+    @SerializedName("subscriptionStatus")
+    val subscriptionStatus: String? = null,
+    
+    @SerializedName("distanceScale")
+    val distanceScale: String? = null,
+    
+    @SerializedName("coachPaceEnabled")
+    val coachPaceEnabled: Boolean? = null,
+    
+    @SerializedName("coachNavigationEnabled")
+    val coachNavigationEnabled: Boolean? = null,
+    
+    @SerializedName("coachElevationEnabled")
+    val coachElevationEnabled: Boolean? = null,
+    
+    @SerializedName("coachHeartRateEnabled")
+    val coachHeartRateEnabled: Boolean? = null,
+    
+    @SerializedName("coachCadenceStrideEnabled")
+    val coachCadenceStrideEnabled: Boolean? = null,
+    
+    @SerializedName("coachKmSplitsEnabled")
+    val coachKmSplitsEnabled: Boolean? = null,
+    
+    @SerializedName("coachStruggleEnabled")
+    val coachStruggleEnabled: Boolean? = null,
+    
+    @SerializedName("coachMotivationalEnabled")
+    val coachMotivationalEnabled: Boolean? = null,
+    
+    @SerializedName("coachHalfKmCheckInEnabled")
+    val coachHalfKmCheckInEnabled: Boolean? = null,
+    
+    @SerializedName("coachKmSplitIntervalKm")
+    val coachKmSplitIntervalKm: Int? = null,
+    
+    @SerializedName("injuries")
+    val injuries: List<Injury>? = null
 ) {
     /**
      * Extract the actual User object, whether it's wrapped or flattened
+     * Handles both full User objects and flattened field responses
      */
     fun extractUser(): User? {
         return user ?: if (id != null && email != null && name != null) {
@@ -72,6 +138,9 @@ data class AuthResponse(
                 id = id,
                 email = email,
                 name = name,
+                shortUserId = shortUserId,
+                location = location,
+                age = age,
                 dob = dob,
                 gender = gender,
                 height = height?.toDoubleOrNull(),
@@ -82,7 +151,25 @@ data class AuthResponse(
                 coachGender = coachGender ?: "male",
                 coachAccent = coachAccent ?: "british",
                 coachTone = coachTone ?: "energetic",
-                profilePic = profilePic
+                nicknameStyle = nicknameStyle,
+                profilePic = profilePic,
+                distanceMinKm = distanceMinKm ?: 0f,
+                distanceMaxKm = distanceMaxKm ?: 50f,
+                distanceDecimalsEnabled = distanceDecimalsEnabled ?: false,
+                subscriptionTier = subscriptionTier,
+                subscriptionStatus = subscriptionStatus,
+                distanceScale = distanceScale,
+                coachPaceEnabled = coachPaceEnabled,
+                coachNavigationEnabled = coachNavigationEnabled,
+                coachElevationEnabled = coachElevationEnabled,
+                coachHeartRateEnabled = coachHeartRateEnabled,
+                coachCadenceStrideEnabled = coachCadenceStrideEnabled,
+                coachKmSplitsEnabled = coachKmSplitsEnabled,
+                coachStruggleEnabled = coachStruggleEnabled,
+                coachMotivationalEnabled = coachMotivationalEnabled,
+                coachHalfKmCheckInEnabled = coachHalfKmCheckInEnabled,
+                coachKmSplitIntervalKm = coachKmSplitIntervalKm,
+                injuries = injuries
             )
         } else {
             null

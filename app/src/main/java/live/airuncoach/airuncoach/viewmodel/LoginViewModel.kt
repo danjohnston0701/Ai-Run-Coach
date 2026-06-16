@@ -166,6 +166,9 @@ class LoginViewModel @Inject constructor(
 
                 // Upload FCM token now that we're authenticated
                 uploadFcmToken()
+                
+                // Check for app updates (silently in background)
+                checkForAppUpdates()
             } catch (e: retrofit2.HttpException) {
                 val errorBody = e.response()?.errorBody()?.string()
                 android.util.Log.e("LoginViewModel", "❌ HTTP Error ${e.code()}: $errorBody", e)
@@ -193,8 +196,16 @@ class LoginViewModel @Inject constructor(
             } catch (e: java.net.UnknownHostException) {
                 android.util.Log.e("LoginViewModel", "❌ Network error: Cannot reach server", e)
                 _loginState.update { it.copy(isLoading = false, error = "Cannot reach server. Check your internet connection.") }
+            } catch (e: com.google.gson.JsonSyntaxException) {
+                android.util.Log.e("LoginViewModel", "❌ JSON parsing error (malformed response): ${e.message}", e)
+                _loginState.update { it.copy(isLoading = false, error = "Server sent invalid data. Please try again.") }
+            } catch (e: java.lang.ClassCastException) {
+                android.util.Log.e("LoginViewModel", "❌ Type mismatch in response data (Gson deserialization failed): ${e.message}", e)
+                android.util.Log.e("LoginViewModel", "Stack trace:", e)
+                _loginState.update { it.copy(isLoading = false, error = "Error processing user data. Contact support if this persists.") }
             } catch (e: Exception) {
                 android.util.Log.e("LoginViewModel", "❌ Login failed: ${e.javaClass.simpleName} - ${e.message}", e)
+                e.printStackTrace()
                 _loginState.update { it.copy(isLoading = false, error = e.message ?: "Login failed") }
             }
         }
@@ -387,6 +398,29 @@ class LoginViewModel @Inject constructor(
         } catch (e: Exception) {
             android.util.Log.e("LoginViewModel", "❌ Token validation failed: ${e.message}")
             throw e
+        }
+    }
+
+    /**
+     * Check for available app updates (runs silently in background after login)
+     */
+    private fun checkForAppUpdates() {
+        viewModelScope.launch {
+            try {
+                val appVersion = apiService.getAppVersion()
+                Log.d("LoginViewModel", "📱 App version check: current=${appVersion.currentVersionCode}, available=${appVersion.currentVersionCode}")
+                
+                // Check if update is required or recommended
+                if (appVersion.updateRequired) {
+                    Log.d("LoginViewModel", "⚠️ REQUIRED update available - version ${appVersion.currentVersion}")
+                    // App Update notification/handling will be done in MainActivity
+                } else {
+                    Log.d("LoginViewModel", "✅ Update available - version ${appVersion.currentVersion}")
+                }
+            } catch (e: Exception) {
+                // Silently fail - update checks shouldn't crash the login flow
+                Log.d("LoginViewModel", "App version check failed (non-critical): ${e.message}")
+            }
         }
     }
 }
