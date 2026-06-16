@@ -25,7 +25,7 @@ android {
     defaultConfig {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
-        targetSdk = 33          // Target 33 to avoid Play Core 1.10.3 broadcast receiver incompatibility
+        targetSdk = 35          // Google Play requires 35+ minimum as of June 2026
         versionCode = 10          // ← Increment by 1 for every Play Store upload
         versionName = "1.4.3"   // ← Human-readable version shown in Play Store
 
@@ -186,9 +186,6 @@ dependencies {
 
     // --- Google Play Billing: In-app subscriptions and purchases ---
     implementation("com.android.billingclient:billing-ktx:7.0.0")
-    
-    // --- Google Play In-App Updates ---
-    implementation("com.google.android.play:core:1.10.3")
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")

@@ -166,9 +166,6 @@ class LoginViewModel @Inject constructor(
 
                 // Upload FCM token now that we're authenticated
                 uploadFcmToken()
-                
-                // Check for app updates (silently in background)
-                checkForAppUpdates()
             } catch (e: retrofit2.HttpException) {
                 val errorBody = e.response()?.errorBody()?.string()
                 android.util.Log.e("LoginViewModel", "❌ HTTP Error ${e.code()}: $errorBody", e)
@@ -401,26 +398,4 @@ class LoginViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Check for available app updates (runs silently in background after login)
-     */
-    private fun checkForAppUpdates() {
-        viewModelScope.launch {
-            try {
-                val appVersion = apiService.getAppVersion()
-                Log.d("LoginViewModel", "📱 App version check: current=${appVersion.currentVersionCode}, available=${appVersion.currentVersionCode}")
-                
-                // Check if update is required or recommended
-                if (appVersion.updateRequired) {
-                    Log.d("LoginViewModel", "⚠️ REQUIRED update available - version ${appVersion.currentVersion}")
-                    // App Update notification/handling will be done in MainActivity
-                } else {
-                    Log.d("LoginViewModel", "✅ Update available - version ${appVersion.currentVersion}")
-                }
-            } catch (e: Exception) {
-                // Silently fail - update checks shouldn't crash the login flow
-                Log.d("LoginViewModel", "App version check failed (non-critical): ${e.message}")
-            }
-        }
-    }
 }

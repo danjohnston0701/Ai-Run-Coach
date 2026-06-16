@@ -42,9 +42,6 @@ interface ApiService {
     @POST("/api/users/me/fcm-token")
     suspend fun saveFcmToken(@Body body: Map<String, String>): retrofit2.Response<Unit>
 
-    @GET("/api/app/version")
-    suspend fun getAppVersion(): AppVersionResponse
-
     @PUT("/api/users/{id}")
     suspend fun updateUser(@Path("id") userId: String, @Body request: UpdateUserRequest): User
 
