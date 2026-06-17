@@ -53,6 +53,8 @@ export interface InjuryInput {
   status: string; // "active" | "recovering" | "healed"
   notes?: string;
   injuryDate?: string; // ISO date string (e.g. "2026-05-08") — used to calculate weeks since injury
+  isProstheticOrAFO?: boolean; // true if this is a prosthetic or orthotic device
+  prostheticType?: string; // e.g., "carbon fiber AFO", "full prosthetic leg", etc.
 }
 
 /**
@@ -810,6 +812,19 @@ ${regularSessions.map(s => {
   return `- "${s.name}": ${dayNames[s.dayOfWeek]} at ${time}, ${s.distanceKm}km — ${s.countsTowardWeeklyTotal ? `counts toward the ${daysPerWeek} sessions/week total (integrate a coached session on this day that matches its intensity/goal)` : `BLOCKED DAY — do NOT schedule any coached session on this day; this prevents double-running`}`;
 }).join("\n")}
 ` : ""}
+━━━ ATHLETE'S SESSION TYPE PREFERENCE ━━━━━━━━━━━━━━━━━━━━━━━━���
+
+${user?.[0]?.defaultSessionType ? (() => {
+  const prefType = user[0].defaultSessionType.toLowerCase();
+  if (prefType === 'walk') {
+    return `This athlete prefers WALKING as their primary session type. Design the plan with walking-dominant sessions in early weeks, then gradually introduce walk/run intervals and easy jogging only as fitness and recovery allow. Bias toward walking-based progressions throughout, especially in the foundation and base-building phases.`;
+  } else if (prefType === 'interval') {
+    return `This athlete prefers INTERVAL and speed-focused training. Integrate intervals and tempo work progressively, but always ensure adequate easy aerobic base weeks before introducing intensity.`;
+  } else {
+    return `This athlete prefers RUNNING as their primary session type (standard running focus).`;
+  }
+})() : 'No specific session type preference recorded.'}
+
 ━━━ HEALTH & INJURY CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${injuries && injuries.length > 0 ? (() => {
@@ -833,8 +848,13 @@ ${injuries && injuries.length > 0 ? (() => {
         : ` — injured ${days} day${days !== 1 ? 's' : ''} ago (${new Date(i.injuryDate).toDateString()})`;
     }
 
-    return `- ${i.bodyPart}: ${statusLabel}${weeksSince}${i.notes ? `\n  Athlete notes: "${i.notes}"` : ''}`;
+    const prostheticNote = i.isProstheticOrAFO && i.prostheticType ? `\n  PROSTHETIC/ORTHOTIC: ${i.prostheticType}` : '';
+    return `- ${i.bodyPart}: ${statusLabel}${weeksSince}${i.notes ? `\n  Athlete notes: "${i.notes}"` : ''}${prostheticNote}`;
   }).join('\n');
+
+  // Check if any injuries involve prosthetics/AFOs
+  const hasProsthetic = injuries.some(i => i.isProstheticOrAFO === true);
+  const prostheticInjuries = injuries.filter(i => i.isProstheticOrAFO === true);
 
   const targetTimeStr = targetTime
     ? `${Math.floor(targetTime / 60)}:${String(Math.round(targetTime % 60)).padStart(2, '0')}`
@@ -884,6 +904,35 @@ For each injury, consider these dimensions when designing each week:
 5. REGRESSION RULE — What symptoms or outcomes indicate the athlete should repeat or step back rather than progress?
 
 Every session's "instructions" field must include: acceptable discomfort level during the run, symptoms that mean stop immediately, and expected next-day response. Keep this brief and specific.` : `This injury is healed or in late-stage recovery. Apply gradual progressive loading — prioritise confidence and tissue resilience before targeting performance metrics.`}
+
+${hasProsthetic ? `
+
+━━━ PROSTHETIC / ORTHOTIC DEVICE CONTEXT ━━━━━━━━━━
+
+This athlete uses ${prostheticInjuries.map(i => i.prostheticType || 'a prosthetic/orthotic device').join(' and ')}.
+
+COACHING CONTEXT — Apply Your Expertise:
+
+Prosthetic and orthotic devices introduce unique biomechanical and physiological considerations:
+
+• TERRAIN IMPACT — Surface type significantly affects prosthetic control, energy expenditure, and proprioceptive load. Smooth, predictable surfaces (pavement, track) are typically easier to manage than variable terrain. Apply your coaching knowledge to determine appropriate terrain progression based on this athlete's fitness level, confidence, and device type.
+
+• ASYMMETRICAL LOADING — The non-prosthetic limb typically compensates and may fatigue differently than in typically-abled athletes. This fatigue can be proprioceptive, neuromuscular, or structural—not purely aerobic. When designing sessions, account for this asymmetry in your intensity distribution and recovery planning.
+
+• PROSTHETIC-SPECIFIC FATIGUE — Sessions that are aerobically manageable may be neuromuscularly demanding due to prosthetic control. Consider this in your progression logic and session structure. The athlete's subjective recovery may not align with traditional training load metrics.
+
+• SESSION MONITORING — Include practical monitoring cues in session instructions: awareness of fit/comfort, skin integrity, contralateral limb response, and proprioceptive control loss. These are coaching signals specific to prosthetic use.
+
+• CONSERVATIVE INITIAL PROGRESSION — Prosthetic users typically benefit from slower initial progressions to establish confidence and allow neuromuscular adaptation. Apply your training science expertise to determine the appropriate conservative ramp-up for this athlete, considering their fitness level, device type, and recovery stage.
+
+⚠️ SAFETY PRIORITY: Safety and prosthetic confidence must override performance targets in early plan phases. The athlete's goal (${goalType.toUpperCase()} in ${targetTimeStr}) is the eventual target—it must not drive early progression decisions.
+
+Your coaching expertise should determine:
+— What session types and structures best serve prosthetic users
+— How to progress intensity and duration appropriately
+— When terrain can be more variable
+— How to balance performance goals with prosthetic adaptation
+— What monitoring cues and safety parameters are most relevant` : ''}
 
 ⚠️ MANDATORY JSON OUTPUT: Include a "safetyDisclaimer" object (see output spec). The disclaimer text must explicitly state this plan is AI-generated training guidance, not medical advice.`;
 })() : `No current injuries or health limitations reported.`}
@@ -1158,6 +1207,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
         generatedThroughWeek: weeksToGenerate,  // how many weeks are actually in the DB now
         nextBlockAt,                             // when to generate the next block (null if full plan already generated)
         safetyDisclaimer: safetyDisclaimerJson,  // AI-generated safety/medical disclaimer for injured athletes
+        injuriesAtCreation: injuries.length > 0 ? JSON.stringify(injuries) : null,  // Store injuries used at plan creation
       })
       .returning();
 
@@ -1886,6 +1936,13 @@ export async function adaptTrainingPlan(
     // Get current fitness
     const fitness = await getCurrentFitness(userId);
 
+    // Get user profile for prosthetic context
+    const userProfile = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
     // Get completed workouts
     const completedWorkouts = await db
       .select()
@@ -1943,7 +2000,21 @@ ${upcomingWorkouts.map((w, i) => `${i + 1}. ID="${w.id}" | ${w.workoutType} | ${
 
     const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
 
-    const prompt = `As an expert running coach, adapt this training plan based on real session performance data.
+    // Check if runner has prosthetic/AFO
+    const hasProsthetic = userProfile?.[0]?.injuryHistory && Array.isArray(userProfile[0].injuryHistory) && 
+      userProfile[0].injuryHistory.some((i: any) => i.isProstheticOrAFO === true);
+    const prostheticAdaptContext = hasProsthetic ? `
+⚠️ PROSTHETIC/ORTHOTIC DEVICE CONTEXT: This athlete uses a prosthetic or orthotic device. 
+When suggesting adjustments:
+• Respect conservative progression principles specific to prosthetic users
+• Consider prosthetic-specific fatigue (may differ from standard aerobic fatigue)
+• Monitor non-prosthetic limb compensation patterns
+• Maintain safety and confidence as primary priorities in progression decisions` : '';
+
+    const sessionTypeAdaptContext = userProfile?.[0]?.defaultSessionType ? `
+✓ ATHLETE PREFERENCE: This runner prefers ${userProfile[0].defaultSessionType} sessions. Maintain this preference in adaptations.` : '';
+
+    const prompt = `As an expert running coach, adapt this training plan based on real session performance data.${prostheticAdaptContext}${sessionTypeAdaptContext}
 
 REASON FOR ADAPTATION: ${reason}
 ${options?.fullAssessment?.recommendation ? `INITIAL ASSESSMENT: ${options.fullAssessment.recommendation}` : ""}
@@ -2167,8 +2238,34 @@ SESSION COACHING DATA (from live AI coaching during the run):
 - Total coaching cues delivered: ${sessionEvents.length}`
           : "\nNo in-session coaching data available for this run.";
 
+        // Check if runner has prosthetic/AFO in injury history
+        const hasProsthetic = userProfile?.injuryHistory && Array.isArray(userProfile.injuryHistory) && 
+          userProfile.injuryHistory.some((i: any) => i.isProstheticOrAFO === true);
+        const prostheticContext = hasProsthetic ? `
+⚠️ PROSTHETIC/ORTHOTIC DEVICE CONTEXT: This athlete uses a prosthetic or orthotic device. 
+When evaluating plan adjustments, remember:
+• Prosthetic-specific fatigue may differ from standard aerobic fatigue
+• Non-prosthetic limb compensation patterns inform progression decisions
+• Terrain and surface considerations are important for prosthetic users
+• Conservative progression may be more appropriate than standard plans` : '';
+
+        // Check for new injuries added since plan creation
+        const planInjuries = plan.injuriesAtCreation ? JSON.parse(plan.injuriesAtCreation) : [];
+        const currentInjuries = userProfile?.injuryHistory || [];
+        const newInjuries = currentInjuries.filter((current: any) =>
+          !planInjuries.some((orig: any) => orig.bodyPart === current.bodyPart)
+        );
+        const newInjuryContext = newInjuries.length > 0 ? `
+⚠️ NEW INJURIES SINCE PLAN CREATION:
+${newInjuries.map((i: any) => `• ${i.bodyPart}${i.isProstheticOrAFO ? ` (${i.prostheticType})` : ''}`).join('\n')}
+These are NEW constraints not considered in the original plan. When adjusting, prioritize managing these new injuries.` : '';
+
+        // Check for session type preference
+        const sessionTypeContext = userProfile?.defaultSessionType ? `
+✓ ATHLETE PREFERENCE: This runner prefers ${userProfile.defaultSessionType} sessions. Maintain this preference in any plan adjustments.` : '';
+
         // Build AI prompt for plan reassessment
-        const prompt = `As an expert running coach, reassess this training plan based on real session performance data including live coaching signals from the run.
+        const prompt = `As an expert running coach, reassess this training plan based on real session performance data including live coaching signals from the run.${prostheticContext}${newInjuryContext}${sessionTypeContext}
 
 TRAINING PLAN DETAILS:
 - Goal: ${plan.goalType}

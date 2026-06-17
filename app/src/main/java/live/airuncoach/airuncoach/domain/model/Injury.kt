@@ -10,6 +10,8 @@ data class Injury(
     val status: InjuryStatus,       // recovering, healed, chronic
     val notes: String? = null,      // optional details about the injury
     val injuryDate: String? = null, // ISO date string e.g. "2026-05-08" — when the injury occurred (helps AI calculate recovery stage)
+    val isProstheticOrAFO: Boolean = false, // true if this condition involves a prosthetic device, AFO, or orthotic
+    val prostheticType: String? = null,    // e.g., "carbon fiber AFO", "full prosthetic leg", "knee brace", etc.
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -43,4 +45,18 @@ val BODY_PARTS = listOf(
     "Achilles",
     "Plantar Fascia",
     "Other"
+)
+
+/**
+ * Types of prosthetics and orthotic devices
+ */
+val PROSTHETIC_TYPES = listOf(
+    "Carbon fiber AFO (ankle-foot orthotic)",
+    "Plastic AFO",
+    "Full prosthetic leg",
+    "Partial foot prosthetic",
+    "Knee brace / ortho",
+    "Ankle brace / ankle support",
+    "Compression sleeve",
+    "Other orthotic device"
 )

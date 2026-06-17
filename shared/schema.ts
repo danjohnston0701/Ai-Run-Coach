@@ -1246,6 +1246,8 @@ export const trainingPlans = pgTable("training_plans", {
   // Injury/safety — populated by AI when active injuries are present at plan creation time.
   // Stored as a JSON string: { medicalClearanceRequired, prerequisiteChecks, stopCriteria, progressionGates, disclaimer }
   safetyDisclaimer: text("safety_disclaimer"),
+  // Injuries used at plan creation — stored for reference during adaptation
+  injuriesAtCreation: text("injuries_at_creation"), // JSON stringified array of InjuryInput objects
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });
