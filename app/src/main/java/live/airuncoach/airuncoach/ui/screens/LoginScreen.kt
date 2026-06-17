@@ -42,6 +42,8 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
 import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -228,6 +230,10 @@ fun LoginScreen(
                         modifier = Modifier.size(20.dp)
                     )
                 },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = KeyboardType.Email,
+                    imeAction = ImeAction.Next
+                ),
                 textStyle = AppTextStyles.body,
                 shape = RoundedCornerShape(BorderRadius.md),
                 colors = TextFieldDefaults.outlinedTextFieldColors(
@@ -293,6 +299,10 @@ fun LoginScreen(
                         )
                     }
                 },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done
+                ),
                 visualTransformation = if (passwordVisible) VisualTransformation.None
                 else PasswordVisualTransformation(),
                 textStyle = AppTextStyles.body,
