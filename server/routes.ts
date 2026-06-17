@@ -10165,6 +10165,7 @@ function transformRunForAndroid(run: any) {
       // ── Payload ──────────────────────────────────────────────────────────────
       const {
         version,
+        title = `🚀 AI Run Coach v${version} Available`,
         releaseNote,
         dryRun = false,
       } = req.body;
@@ -10191,7 +10192,7 @@ function transformRunForAndroid(run: any) {
 
       // ── Live broadcast ────────────────────────────────────────────────────────
       const { broadcastAndroidAppUpdate } = await import("./notification-service");
-      const results = await broadcastAndroidAppUpdate(version, releaseNote || "");
+      const results = await broadcastAndroidAppUpdate(version, title, releaseNote || "");
 
       console.log(
         `[Admin] Android app broadcast v${version} complete — ` +
@@ -10201,6 +10202,7 @@ function transformRunForAndroid(run: any) {
       res.json({
         success: true,
         version,
+        title,
         targeted: results.targeted,
         pushSent: results.pushSent,
         pushFailed: results.pushFailed,
