@@ -10132,6 +10132,88 @@ function transformRunForAndroid(run: any) {
   });
 
   /**
+   * POST /api/admin/android-app/broadcast-update
+   *
+   * Sends a push notification + in-app message to all Android app users,
+   * directing them to update from the Google Play Store.
+   *
+   * Security: requires ADMIN_API_KEY via X-Admin-Key header.
+   *
+   * Body:
+   *   version      (required) e.g. "1.4.3"
+   *   releaseNote  (optional) what's new in this version
+   *   dryRun       (optional, boolean) if true, returns the target list without sending
+   */
+  app.post("/api/admin/android-app/broadcast-update", async (req: Request, res: Response) => {
+    try {
+      // ── Admin authentication ─────────────────────────────────────────────────
+      const adminKey = process.env.ADMIN_API_KEY;
+      if (!adminKey) {
+        return res.status(503).json({ error: "Admin API not configured on this server" });
+      }
+
+      const providedKey =
+        req.headers["x-admin-key"] ||
+        req.query["admin_key"] ||
+        req.body?.adminKey;
+
+      if (providedKey !== adminKey) {
+        console.warn("[Admin] Unauthorized android-app broadcast-update attempt from", req.ip);
+        return res.status(401).json({ error: "Unauthorized — invalid admin key" });
+      }
+
+      // ── Payload ──────────────────────────────────────────────────────────────
+      const {
+        version,
+        releaseNote,
+        dryRun = false,
+      } = req.body;
+
+      if (!version) {
+        return res.status(400).json({ error: "version is required (e.g. '1.4.3')" });
+      }
+
+      // ── Dry-run: just return who would be targeted ───────────────────────────
+      if (dryRun) {
+        const targets = await db
+          .select({ id: users.id, email: users.email, hasFcm: users.fcmToken })
+          .from(users)
+          .where(users.fcmToken);
+
+        return res.json({
+          dryRun: true,
+          version,
+          targeted: targets.length,
+          withFcmToken: targets.filter((u) => !!u.hasFcm).length,
+          users: targets.map((u) => ({ id: u.id, email: u.email, hasFcm: !!u.hasFcm })),
+        });
+      }
+
+      // ── Live broadcast ────────────────────────────────────────────────────────
+      const { broadcastAndroidAppUpdate } = await import("./notification-service");
+      const results = await broadcastAndroidAppUpdate(version, releaseNote || "");
+
+      console.log(
+        `[Admin] Android app broadcast v${version} complete — ` +
+        `targeted: ${results.targeted}, push sent: ${results.pushSent}, in-app: ${results.inAppSent}`
+      );
+
+      res.json({
+        success: true,
+        version,
+        targeted: results.targeted,
+        pushSent: results.pushSent,
+        pushFailed: results.pushFailed,
+        inAppSent: results.inAppSent,
+        message: `Broadcast sent to ${results.targeted} Android app users (${results.pushSent} push, ${results.inAppSent} in-app)`,
+      });
+    } catch (error: any) {
+      console.error("[Admin] Android app broadcast-update error:", error);
+      res.status(500).json({ error: "Broadcast failed", details: error?.message });
+    }
+  });
+
+  /**
    * GET /api/admin/garmin-watch-app/users
    * Returns all users who have the Garmin watch app installed.
    */
