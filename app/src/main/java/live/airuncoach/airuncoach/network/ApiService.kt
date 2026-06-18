@@ -91,6 +91,20 @@ interface ApiService {
     @POST("/api/friend-requests/{id}/withdraw")
     suspend fun withdrawFriendRequest(@Path("id") requestId: String)
 
+    // ==================== INJURY MANAGEMENT ====================
+
+    @GET("/api/user/injuries")
+    suspend fun getInjuries(): InjuriesResponse
+
+    @POST("/api/user/injuries")
+    suspend fun addInjury(@Body injury: Injury): Injury
+
+    @PUT("/api/user/injuries/{injuryId}")
+    suspend fun updateInjury(@Path("injuryId") injuryId: String, @Body injury: Injury): Injury
+
+    @DELETE("/api/user/injuries/{injuryId}")
+    suspend fun deleteInjury(@Path("injuryId") injuryId: String): Response<Unit>
+
     @POST("/api/coaching/pace-update")
     suspend fun getPaceUpdate(@Body request: PaceUpdate): PaceUpdateResponse
 

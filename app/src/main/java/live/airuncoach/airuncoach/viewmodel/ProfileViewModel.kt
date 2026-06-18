@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
+import live.airuncoach.airuncoach.domain.model.Injury
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.UploadProfilePictureRequest
 import java.io.ByteArrayOutputStream
@@ -230,5 +231,57 @@ class ProfileViewModel @Inject constructor(
         sharedPrefs.edit().remove("user").apply()
         _user.value = null
         _friendCount.value = 0
+    }
+
+    // ==================== INJURY MANAGEMENT ====================
+
+    /**
+     * Add a new injury to the user's injury history
+     */
+    fun addInjury(injury: Injury) {
+        viewModelScope.launch {
+            try {
+                apiService.addInjury(injury)
+                // Refresh user data to update injuryHistory
+                refreshUserFromApi()
+                Log.d("ProfileViewModel", "✅ Injury added: ${injury.bodyPart}")
+            } catch (e: Exception) {
+                Log.e("ProfileViewModel", "❌ Failed to add injury: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Update an existing injury
+     */
+    fun updateInjury(injury: Injury) {
+        viewModelScope.launch {
+            try {
+                if (injury.id != null) {
+                    apiService.updateInjury(injury.id!!, injury)
+                    // Refresh user data to update injuryHistory
+                    refreshUserFromApi()
+                    Log.d("ProfileViewModel", "✅ Injury updated: ${injury.bodyPart}")
+                }
+            } catch (e: Exception) {
+                Log.e("ProfileViewModel", "❌ Failed to update injury: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Delete an injury from the user's history
+     */
+    fun deleteInjury(injuryId: String) {
+        viewModelScope.launch {
+            try {
+                apiService.deleteInjury(injuryId)
+                // Refresh user data to update injuryHistory
+                refreshUserFromApi()
+                Log.d("ProfileViewModel", "✅ Injury deleted")
+            } catch (e: Exception) {
+                Log.e("ProfileViewModel", "❌ Failed to delete injury: ${e.message}")
+            }
+        }
     }
 }

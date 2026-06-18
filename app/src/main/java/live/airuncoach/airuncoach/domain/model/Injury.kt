@@ -3,17 +3,32 @@ package live.airuncoach.airuncoach.domain.model
 /**
  * Represents an injury or condition that the user is managing.
  * Used to help the AI design appropriate training plans that avoid aggravating recovering injuries.
+ *
+ * Comprehensive injury tracking with recovery timeline and severity assessment.
  */
 data class Injury(
     val id: String? = null,
-    val bodyPart: String,           // "knee", "ankle", "shin", "hip", "back", "foot", "calf", "hamstring", "quad", "groin", "other"
-    val status: InjuryStatus,       // recovering, healed, chronic
-    val notes: String? = null,      // optional details about the injury
-    val injuryDate: String? = null, // ISO date string e.g. "2026-05-08" — when the injury occurred (helps AI calculate recovery stage)
-    val isProstheticOrAFO: Boolean = false, // true if this condition involves a prosthetic device, AFO, or orthotic
-    val prostheticType: String? = null,    // e.g., "carbon fiber AFO", "full prosthetic leg", "knee brace", etc.
-    val createdAt: Long = System.currentTimeMillis()
+    val bodyPart: String,                           // "knee", "ankle", "shin", "hip", "back", etc.
+    val status: InjuryStatus,                       // RECOVERING, HEALED, CHRONIC
+    val severity: InjurySeverity = InjurySeverity.MODERATE, // MILD, MODERATE, SEVERE
+    val notes: String? = null,                      // Detailed injury description and context
+    val injuryDate: String? = null,                 // ISO date string "2026-05-08" — when injury occurred
+    val estimatedRecoveryWeeks: Int? = null,        // Expected recovery duration (helps AI calculate expected heal date)
+    val recoveryDate: String? = null,               // ISO date string — when marked as healed (only populated when status = HEALED)
+    val updatedAt: Long = System.currentTimeMillis(), // Last time injury status was changed
+    val isProstheticOrAFO: Boolean = false,         // true if involves prosthetic/orthotic device
+    val prostheticType: String? = null,             // "carbon fiber AFO", "full prosthetic leg", etc.
+    val createdAt: Long = System.currentTimeMillis() // When injury record was created
 )
+
+/**
+ * Severity level of injury (affects coaching constraints)
+ */
+enum class InjurySeverity {
+    MILD,       // Minor discomfort, minimal activity restriction
+    MODERATE,   // Noticeable pain, moderate activity restriction
+    SEVERE      // Significant pain, major activity restriction or medical attention needed
+}
 
 /**
  * Status of an injury

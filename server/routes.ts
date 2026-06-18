@@ -804,6 +804,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==================== INJURY MANAGEMENT ENDPOINTS ====================
+
+  /**
+   * GET /api/user/injuries
+   * Get all injuries for the authenticated user, organized by status
+   */
+  app.get("/api/user/injuries", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const injuries = user.injuryHistory || [];
+      
+      // Separate by status
+      const active = injuries.filter((i: any) => 
+        ['RECOVERING','ACTIVE'].includes(i.status?.toUpperCase())
+      );
+      const chronic = injuries.filter((i: any) => 
+        i.status?.toUpperCase() === 'CHRONIC'
+      );
+      const healed = injuries.filter((i: any) => 
+        i.status?.toUpperCase() === 'HEALED'
+      );
+
+      res.json({ active, chronic, healed, all: injuries });
+    } catch (error: any) {
+      console.error("[GET /api/user/injuries] Error:", error);
+      res.status(500).json({ error: "Failed to fetch injuries" });
+    }
+  });
+
+  /**
+   * POST /api/user/injuries
+   * Add a new injury to the user's history
+   */
+  app.post("/api/user/injuries", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const newInjury = {
+        id: Math.random().toString(36).substr(2, 9),
+        ...req.body,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      const injuries = user.injuryHistory || [];
+      injuries.push(newInjury);
+
+      await storage.updateUser(userId, { injuryHistory: injuries });
+      
+      res.status(201).json(newInjury);
+    } catch (error: any) {
+      console.error("[POST /api/user/injuries] Error:", error);
+      res.status(500).json({ error: "Failed to add injury" });
+    }
+  });
+
+  /**
+   * PUT /api/user/injuries/:injuryId
+   * Update an existing injury (status, notes, recovery date, etc.)
+   */
+  app.put("/api/user/injuries/:injuryId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { injuryId } = req.params;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const injuries = user.injuryHistory || [];
+      const injuryIndex = injuries.findIndex((i: any) => i.id === injuryId);
+
+      if (injuryIndex === -1) {
+        return res.status(404).json({ error: "Injury not found" });
+      }
+
+      // Update injury with new data
+      injuries[injuryIndex] = {
+        ...injuries[injuryIndex],
+        ...req.body,
+        updatedAt: Date.now()  // Always update timestamp
+      };
+
+      await storage.updateUser(userId, { injuryHistory: injuries });
+      
+      res.json(injuries[injuryIndex]);
+    } catch (error: any) {
+      console.error("[PUT /api/user/injuries/:injuryId] Error:", error);
+      res.status(500).json({ error: "Failed to update injury" });
+    }
+  });
+
+  /**
+   * DELETE /api/user/injuries/:injuryId
+   * Delete a healed or chronic injury from the user's history
+   */
+  app.delete("/api/user/injuries/:injuryId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { injuryId } = req.params;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const injuries = user.injuryHistory || [];
+      const injury = injuries.find((i: any) => i.id === injuryId);
+
+      // Only allow deleting HEALED or CHRONIC injuries
+      if (injury && !['HEALED', 'CHRONIC'].includes(injury.status?.toUpperCase())) {
+        return res.status(400).json({ 
+          error: "Cannot delete active/recovering injuries. Mark as healed first." 
+        });
+      }
+
+      if (!injury) {
+        return res.status(404).json({ error: "Injury not found" });
+      }
+
+      const updatedInjuries = injuries.filter((i: any) => i.id !== injuryId);
+      await storage.updateUser(userId, { injuryHistory: updatedInjuries });
+
+      res.json({ message: "Injury deleted successfully" });
+    } catch (error: any) {
+      console.error("[DELETE /api/user/injuries/:injuryId] Error:", error);
+      res.status(500).json({ error: "Failed to delete injury" });
+    }
+  });
+
   // ==================== FRIENDS ENDPOINTS ====================
 
   // GET /api/friends/:userId — Android app primary friends endpoint
