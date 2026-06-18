@@ -627,7 +627,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { password: _, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
+      // Map injuryHistory → injuries so Android model (which uses 'injuries') deserializes correctly
+      const response = {
+        ...userWithoutPassword,
+        injuries: userWithoutPassword.injuryHistory ?? [],
+      };
+      res.json(response);
     } catch (error: any) {
       console.error("Get current user error:", error);
       res.status(500).json({ error: "Failed to get current user" });
@@ -846,14 +851,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
+      const { bodyPart, status, severity, notes, injuryDate, estimatedRecoveryWeeks, isProstheticOrAFO, prostheticType } = req.body;
+      if (!bodyPart || !status) {
+        return res.status(400).json({ error: "bodyPart and status are required" });
+      }
       const newInjury = {
-        id: Math.random().toString(36).substr(2, 9),
-        ...req.body,
+        id: Math.random().toString(36).substring(2, 11),
+        bodyPart,
+        status,
+        severity: severity ?? "MODERATE",
+        notes: notes ?? null,
+        injuryDate: injuryDate ?? null,
+        estimatedRecoveryWeeks: estimatedRecoveryWeeks ?? null,
+        isProstheticOrAFO: isProstheticOrAFO ?? false,
+        prostheticType: prostheticType ?? null,
+        recoveryDate: null,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
 
-      const injuries = user.injuryHistory || [];
+      const injuries = (user.injuryHistory || []) as any[];
       injuries.push(newInjury);
 
       await storage.updateUser(userId, { injuryHistory: injuries });
@@ -913,15 +930,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const injuries = user.injuryHistory || [];
       const injury = injuries.find((i: any) => i.id === injuryId);
 
+      if (!injury) {
+        return res.status(404).json({ error: "Injury not found" });
+      }
+
       // Only allow deleting HEALED or CHRONIC injuries
-      if (injury && !['HEALED', 'CHRONIC'].includes(injury.status?.toUpperCase())) {
+      if (!['HEALED', 'CHRONIC'].includes(injury.status?.toUpperCase())) {
         return res.status(400).json({ 
           error: "Cannot delete active/recovering injuries. Mark as healed first." 
         });
-      }
-
-      if (!injury) {
-        return res.status(404).json({ error: "Injury not found" });
       }
 
       const updatedInjuries = injuries.filter((i: any) => i.id !== injuryId);

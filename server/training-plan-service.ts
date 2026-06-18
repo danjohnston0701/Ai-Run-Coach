@@ -828,11 +828,20 @@ ${user?.[0]?.defaultSessionType ? (() => {
 ━━━ HEALTH & INJURY CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${injuries && injuries.length > 0 ? (() => {
-  const hasActiveOrRecovering = injuries.some(i =>
+  // Only include active/recovering/chronic injuries — healed injuries should not constrain the plan
+  const activeInjuries = injuries.filter(i =>
+    !['healed','HEALED'].includes(i.status)
+  );
+
+  if (activeInjuries.length === 0) {
+    return 'No current injuries or health limitations reported.';
+  }
+
+  const hasActiveOrRecovering = activeInjuries.some(i =>
     ['active','recovering','ACTIVE','RECOVERING','chronic','CHRONIC'].includes(i.status)
   );
 
-  const injuryLines = injuries.map(i => {
+  const injuryLines = activeInjuries.map(i => {
     const statusLabel = i.status === 'recovering' || i.status === 'RECOVERING' ? 'Recovering' :
                        i.status === 'healed'     || i.status === 'HEALED'     ? 'Healed (recent)' :
                        i.status === 'chronic'    || i.status === 'CHRONIC'    ? 'Chronic/ongoing' :
@@ -852,9 +861,9 @@ ${injuries && injuries.length > 0 ? (() => {
     return `- ${i.bodyPart}: ${statusLabel}${weeksSince}${i.notes ? `\n  Athlete notes: "${i.notes}"` : ''}${prostheticNote}`;
   }).join('\n');
 
-  // Check if any injuries involve prosthetics/AFOs
-  const hasProsthetic = injuries.some(i => i.isProstheticOrAFO === true);
-  const prostheticInjuries = injuries.filter(i => i.isProstheticOrAFO === true);
+  // Check if any active injuries involve prosthetics/AFOs
+  const hasProsthetic = activeInjuries.some(i => i.isProstheticOrAFO === true);
+  const prostheticInjuries = activeInjuries.filter(i => i.isProstheticOrAFO === true);
 
   const targetTimeStr = targetTime
     ? `${Math.floor(targetTime / 60)}:${String(Math.round(targetTime % 60)).padStart(2, '0')}`
@@ -2250,15 +2259,22 @@ When evaluating plan adjustments, remember:
 • Conservative progression may be more appropriate than standard plans` : '';
 
         // Check for new injuries added since plan creation
-        const planInjuries = plan.injuriesAtCreation ? JSON.parse(plan.injuriesAtCreation) : [];
-        const currentInjuries = userProfile?.injuryHistory || [];
-        const newInjuries = currentInjuries.filter((current: any) =>
-          !planInjuries.some((orig: any) => orig.bodyPart === current.bodyPart)
-        );
+        // Match on id first (most accurate), fall back to bodyPart for legacy records without id
+        const planInjuries: any[] = plan.injuriesAtCreation ? JSON.parse(plan.injuriesAtCreation) : [];
+        const currentInjuries: any[] = userProfile?.injuryHistory || [];
+        const planInjuryIds = new Set(planInjuries.map((i: any) => i.id).filter(Boolean));
+        const planInjuryBodyParts = new Set(planInjuries.filter((i: any) => !i.id).map((i: any) => i.bodyPart));
+        const newInjuries = currentInjuries.filter((current: any) => {
+          // Skip healed injuries — they are not active constraints
+          if (['healed','HEALED'].includes(current.status)) return false;
+          if (current.id && planInjuryIds.has(current.id)) return false;
+          if (!current.id && planInjuryBodyParts.has(current.bodyPart)) return false;
+          return true;
+        });
         const newInjuryContext = newInjuries.length > 0 ? `
 ⚠️ NEW INJURIES SINCE PLAN CREATION:
-${newInjuries.map((i: any) => `• ${i.bodyPart}${i.isProstheticOrAFO ? ` (${i.prostheticType})` : ''}`).join('\n')}
-These are NEW constraints not considered in the original plan. When adjusting, prioritize managing these new injuries.` : '';
+${newInjuries.map((i: any) => `• ${i.bodyPart}${i.isProstheticOrAFO ? ` (${i.prostheticType})` : ''} — ${i.status}`).join('\n')}
+These are NEW constraints not present in the original plan. Prioritise managing these.` : '';
 
         // Check for session type preference
         const sessionTypeContext = userProfile?.defaultSessionType ? `
@@ -2280,7 +2296,14 @@ RUNNER PROFILE:
 - Fitness Level: ${userProfile?.fitnessLevel || 'Not specified'}
 - Current CTL (Fitness): ${fitness?.ctl || 'N/A'}
 - Training Status: ${fitness?.status || 'N/A'}
-${userProfile?.injuryHistory ? `- Injury History: ${JSON.stringify(userProfile.injuryHistory)}` : ''}
+${(() => {
+  const activeInjuriesForPrompt = (userProfile?.injuryHistory || []).filter((i: any) =>
+    !['healed','HEALED'].includes(i.status)
+  );
+  return activeInjuriesForPrompt.length > 0
+    ? `- Active Injuries: ${activeInjuriesForPrompt.map((i: any) => `${i.bodyPart} (${i.status}${i.severity ? ', ' + i.severity : ''})`).join('; ')}`
+    : '';
+})()}
 
 RECENT RUN (Just Completed):
 - Workout Type: ${run.workoutType || 'general run'}

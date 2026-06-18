@@ -452,7 +452,7 @@ class GeneratePlanViewModel @Inject constructor(
     fun updateInjury(injuryId: String, bodyPart: String, status: InjuryStatus, notes: String?, injuryDate: String? = null) {
         _injuries.value = _injuries.value.map { injury ->
             if (injury.id == injuryId) {
-                injury.copy(bodyPart = bodyPart, status = status, notes = notes, injuryDate = injuryDate)
+                injury.copy(bodyPart = bodyPart, status = status, notes = notes, injuryDate = injuryDate, updatedAt = System.currentTimeMillis())
             } else {
                 injury
             }

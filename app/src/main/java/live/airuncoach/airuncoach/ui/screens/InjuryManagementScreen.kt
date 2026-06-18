@@ -1,7 +1,5 @@
 package live.airuncoach.airuncoach.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -43,12 +41,7 @@ fun InjuryManagementScreen(
     var showAddInjuryDialog by remember { mutableStateOf(false) }
     var editingInjury by remember { mutableStateOf<Injury?>(null) }
 
-    @Suppress("UNCHECKED_CAST", "KotlinConstantConditions")
-    val allInjuries: List<Injury> = try {
-        (user?.injuryHistory as? List<Injury>) ?: emptyList()
-    } catch (e: Exception) {
-        emptyList()
-    }
+    val allInjuries: List<Injury> = user?.injuries ?: emptyList()
 
     Scaffold(
         topBar = {
@@ -65,7 +58,8 @@ fun InjuryManagementScreen(
                     }
                 }
             )
-        }
+        },
+        contentWindowInsets = WindowInsets(0) // outer Scaffold already applies nav bar insets
     ) { padding ->
         if (allInjuries.isEmpty()) {
             Box(
@@ -94,16 +88,15 @@ fun InjuryManagementScreen(
                 items(allInjuries) { injury ->
                     InjuryCard(
                         injury = injury,
-                        onMarkHealed = {
-                            injury.id?.let {
-                                val updated = injury.copy(
-                                    status = InjuryStatus.HEALED,
-                                    recoveryDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
-                                    updatedAt = System.currentTimeMillis()
-                                )
-                                viewModel.updateInjury(updated)
-                            }
-                        },
+                        // Only RECOVERING injuries can be marked healed — CHRONIC ones are managed differently
+                        onMarkHealed = if (injury.status == InjuryStatus.RECOVERING) ({
+                            val updated = injury.copy(
+                                status = InjuryStatus.HEALED,
+                                recoveryDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
+                                updatedAt = System.currentTimeMillis()
+                            )
+                            viewModel.updateInjury(updated)
+                        }) else null,
                         onEdit = { editingInjury = injury },
                         onDelete = { injury.id?.let { viewModel.deleteInjury(it) } }
                     )
@@ -149,7 +142,6 @@ fun InjuryCard(
                 InjuryStatus.RECOVERING -> Color(0xFFFFF3E0)
                 InjuryStatus.CHRONIC -> Color(0xFFF3E5F5)
                 InjuryStatus.HEALED -> Color(0xFFE8F5E9)
-                else -> Color.White
             }
         )
     ) {
@@ -170,7 +162,6 @@ fun InjuryCard(
                         InjuryStatus.RECOVERING -> Color(0xFFE65100)
                         InjuryStatus.CHRONIC -> Color(0xFF7B1FA2)
                         InjuryStatus.HEALED -> Color(0xFF2E7D32)
-                        else -> Color.Gray
                     },
                     shape = RoundedCornerShape(4.dp)
                 ) {
@@ -278,6 +269,8 @@ fun AddEditInjuryDialog(
     var estimatedRecoveryWeeks by remember { mutableStateOf(injury?.estimatedRecoveryWeeks?.toString() ?: "") }
     var isProsthetic by remember { mutableStateOf(injury?.isProstheticOrAFO ?: false) }
     var prostheticType by remember { mutableStateOf(injury?.prostheticType ?: "") }
+    var bodyPartMenuExpanded by remember { mutableStateOf(false) }
+    var prostheticMenuExpanded by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -286,14 +279,30 @@ fun AddEditInjuryDialog(
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
                 item {
                     Text("Body Part", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                    OutlinedTextField(
-                        value = bodyPart,
-                        onValueChange = { bodyPart = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Spacing.sm),
-                        placeholder = { Text("e.g., Knee, Ankle") }
-                    )
+                    Box(modifier = Modifier.padding(top = Spacing.sm)) {
+                        OutlinedTextField(
+                            value = bodyPart,
+                            onValueChange = { bodyPart = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Select or type body part") },
+                            trailingIcon = {
+                                IconButton(onClick = { bodyPartMenuExpanded = true }) {
+                                    Icon(Icons.Filled.Add, null)
+                                }
+                            }
+                        )
+                        DropdownMenu(
+                            expanded = bodyPartMenuExpanded,
+                            onDismissRequest = { bodyPartMenuExpanded = false }
+                        ) {
+                            BODY_PARTS.forEach { part ->
+                                DropdownMenuItem(
+                                    text = { Text(part) },
+                                    onClick = { bodyPart = part; bodyPartMenuExpanded = false }
+                                )
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -408,14 +417,30 @@ fun AddEditInjuryDialog(
                     }
 
                     if (isProsthetic) {
-                        OutlinedTextField(
-                            value = prostheticType,
-                            onValueChange = { prostheticType = it },
-                            label = { Text("e.g., Carbon fiber AFO") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = Spacing.sm)
-                        )
+                        Box(modifier = Modifier.padding(top = Spacing.sm)) {
+                            OutlinedTextField(
+                                value = prostheticType,
+                                onValueChange = { prostheticType = it },
+                                label = { Text("Device type") },
+                                modifier = Modifier.fillMaxWidth(),
+                                trailingIcon = {
+                                    IconButton(onClick = { prostheticMenuExpanded = true }) {
+                                        Icon(Icons.Filled.Add, null)
+                                    }
+                                }
+                            )
+                            DropdownMenu(
+                                expanded = prostheticMenuExpanded,
+                                onDismissRequest = { prostheticMenuExpanded = false }
+                            ) {
+                                PROSTHETIC_TYPES.forEach { type ->
+                                    DropdownMenuItem(
+                                        text = { Text(type) },
+                                        onClick = { prostheticType = type; prostheticMenuExpanded = false }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
