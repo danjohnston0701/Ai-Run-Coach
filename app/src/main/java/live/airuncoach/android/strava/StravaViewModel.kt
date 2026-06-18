@@ -133,38 +133,16 @@ class StravaViewModel @Inject constructor(
     }
 
     /**
-     * Publish a run to Strava
+     * Publish a run to Strava — DISABLED: Awaiting Strava write approval
      */
     fun publishToStrava(runId: String) {
         viewModelScope.launch {
-            try {
-                _isLoading.value = true
-                _publishResult.value = null
-                
-                val response = apiService.publishRunToStrava(runId)
-                
-                _publishResult.value = StravaPublishResult(
-                    success = response.success,
-                    activityId = response.activityId,
-                    stravaUrl = response.stravaUrl,
-                    error = response.error
-                )
-                _error.value = null
-                
-                // Refresh activities list after a delay to allow Strava to process
-                if (response.success) {
-                    kotlinx.coroutines.delay(3000)
-                    fetchStravaActivities()
-                }
-            } catch (e: Exception) {
-                _publishResult.value = StravaPublishResult(
-                    success = false,
-                    error = "Failed to publish run: ${e.message}"
-                )
-                _error.value = "Failed to publish run: ${e.message}"
-            } finally {
-                _isLoading.value = false
-            }
+            // Publishing is disabled pending Strava approval
+            _publishResult.value = StravaPublishResult(
+                success = false,
+                error = "Strava publishing is currently disabled while we await approval from Strava. This feature will be available soon."
+            )
+            _error.value = "Strava publishing is disabled pending approval"
         }
     }
 
