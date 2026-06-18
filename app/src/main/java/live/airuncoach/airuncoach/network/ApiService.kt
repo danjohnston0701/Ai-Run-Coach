@@ -626,13 +626,15 @@ interface ApiService {
     @POST("/api/strava/disconnect")
     suspend fun disconnectStrava(): Response<Unit>
 
-    @POST("/api/runs/{runId}/publish-strava")
-    suspend fun publishRunToStrava(@Path("runId") runId: String): StravaPublishResponse
+    // DISABLED: Awaiting Strava write approval — publishing disabled temporarily
+    // @POST("/api/runs/{runId}/publish-strava")
+    // suspend fun publishRunToStrava(@Path("runId") runId: String): StravaPublishResponse
 
     @GET("/api/strava/activities")
     suspend fun getStravaActivities(): StravaActivitiesResponse
 
-    @POST("/api/strava/import-history")
+    // DISABLED: Strava read access not permitted — import functionality removed
+    // @POST("/api/strava/import-history")
     suspend fun importStravaHistory(): StravaImportHistoryResponse
 
     /**

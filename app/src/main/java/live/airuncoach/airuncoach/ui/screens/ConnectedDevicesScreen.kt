@@ -177,6 +177,8 @@ fun ConnectedDevicesScreen(
             }
 
             // ── Section: Strava Integration ───────────────────────────────────
+            // HIDDEN: Awaiting Strava approval for write permissions. Uncomment to re-enable.
+            /*
             item {
                 SectionHeader(
                     title = "Strava",
@@ -197,6 +199,7 @@ fun ConnectedDevicesScreen(
                     onClearImportStatus = { viewModel.clearStravaImportStatus() }
                 )
             }
+            */
 
             // ── Section: Garmin Connect (COMMENTED OUT) ───────────────────────
             // This integration is disabled because Garmin Connect data cannot be

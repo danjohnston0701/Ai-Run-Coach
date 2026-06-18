@@ -11195,9 +11195,24 @@ function transformRunForAndroid(run: any) {
 
   /**
    * POST /api/runs/:runId/publish-strava
-   * Publish a completed run to Strava with GPS track
+   * DISABLED: Awaiting write approval from Strava before enabling publishing.
+   * Currently only polling reads are disabled (no longer reading Strava data).
+   * Writing/publishing will be enabled once approval is obtained.
    */
   app.post("/api/runs/:runId/publish-strava", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    // Temporarily disabled until Strava approves write permissions
+    return res.status(403).json({
+      error: "Strava integration temporarily disabled",
+      message: "We are awaiting Strava approval for write permissions. This feature will be available soon.",
+      status: "pending_approval"
+    });
+  });
+
+  /**
+   * Legacy implementation — commented out pending Strava write approval
+   */
+  /*
+  app.post("/api/runs/:runId/publish-strava-legacy", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { runId } = req.params;
       const userId = req.user!.userId;
@@ -11333,6 +11348,7 @@ function transformRunForAndroid(run: any) {
       );
     }
   }
+  */
 
   /**
    * GET /api/strava/connection-status
