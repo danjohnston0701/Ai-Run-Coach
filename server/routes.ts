@@ -11208,10 +11208,8 @@ function transformRunForAndroid(run: any) {
     });
   });
 
-  /**
-   * Legacy implementation — commented out pending Strava write approval
-   */
   /*
+  // Legacy implementation — commented out pending Strava write approval
   app.post("/api/runs/:runId/publish-strava-legacy", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { runId } = req.params;
@@ -11318,10 +11316,8 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  /**
-   * Helper: Poll upload status and save activity ID
-   * Run this asynchronously in background
-   */
+  // Helper: Poll upload status and save activity ID
+  // Run this asynchronously in background
   async function pollUploadAndSaveActivity(
     uploadId: number,
     accessToken: string,
@@ -11350,13 +11346,9 @@ function transformRunForAndroid(run: any) {
   }
   */
 
-  /**
-   * GET /api/strava/connection-status
-   * Check Strava connection status for current user
-   * 
-   * Auto-refreshes token if expired (Strava tokens last 6 hours)
-   * so users stay connected without manual reconnection
-   */
+  // GET /api/strava/connection-status — DISABLED: awaiting write approval
+  // Auto-refreshes token if expired (Strava tokens last 6 hours)
+  // so users stay connected without manual reconnection
   app.get(
     "/api/strava/connection-status",
     authMiddleware,
