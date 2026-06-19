@@ -109,7 +109,9 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -3554,25 +3556,40 @@ private fun calculateYAxisBounds(
             Pair(minBound, maxBound)
         }
         isElevation -> {
-            // Elevation: minimum 100m variance on Y-axis.
-            // IMPORTANT: the upper bound must always exceed actualMax — without this
-            // the chart line renders above the top axis label (e.g. max elev = 110 m
-            // but axis was hardcoded to 100 when dataRange < 100).
-            if (dataRange < 100.0) {
-                // Small variation run: anchor axis to at least 100 m of range,
-                // but raise the ceiling so actualMax always fits with headroom.
-                val maxBound = (actualMax + 20.0).coerceAtLeast(100.0)
-                val minBound = (maxBound - 100.0).coerceAtLeast(0.0)
-                Pair(minBound, maxBound)
-            } else if (actualMax >= 100.0) {
-                // Elevation > 100 m: use (min − 100 m) to (max + 12%)
-                val minBound = (actualMin - 100.0).coerceAtLeast(0.0)
-                val maxBound = actualMax * 1.12  // +12% headroom on top
-                Pair(minBound, maxBound)
-            } else {
-                // Fallback for edge cases
-                Pair(actualMin - 100.0, actualMax + (dataRange * 0.15))
+            // Garmin-style elevation axis: zoom in on actual elevation range rather
+            // than anchoring to 0 with a fixed 100m window.
+            //
+            // Algorithm:
+            //  1. Pick a "nice" tick interval based on the data range.
+            //  2. Round the minimum DOWN to the nearest tick  (e.g. 38m → 35m).
+            //  3. Round the maximum UP to the nearest tick, then add extra ticks of
+            //     headroom on top so the line never touches the ceiling.
+            //
+            // Example (user's run: min=38m, max=66m, range=28m):
+            //   tickInterval=5, minBound=35, maxBound=ceil(66/5)*5 + 3*5 = 85
+            //   → matches Garmin Connect exactly.
+
+            val tickInterval = when {
+                dataRange <= 10.0  -> 2.0
+                dataRange <= 50.0  -> 5.0
+                dataRange <= 100.0 -> 10.0
+                dataRange <= 300.0 -> 20.0
+                dataRange <= 600.0 -> 50.0
+                else               -> 100.0
             }
+
+            // More headroom on small/medium ranges so the line has breathing room;
+            // reduce to 1 extra tick for large alpine ranges.
+            val topExtraTicks = when {
+                dataRange <= 50.0  -> 3
+                dataRange <= 150.0 -> 2
+                else               -> 1
+            }
+
+            val minBound = (floor(actualMin / tickInterval) * tickInterval).coerceAtLeast(0.0)
+            val maxBound = ceil(actualMax / tickInterval) * tickInterval + topExtraTicks * tickInterval
+
+            Pair(minBound, maxBound)
         }
         isCadence -> {
             // Cadence: similar to elevation, but different thresholds
@@ -4555,19 +4572,24 @@ private fun DualAxisChartCanvas(
             val secActualMax = secondaryY.take(n).maxOrNull() ?: 0.0
             
             val (secMin, secMax) = run {
+                // Garmin-style: zoom in on actual elevation range with nice tick rounding
                 val secRange = (secActualMax - secActualMin).coerceAtLeast(1.0)
-                if (secRange < 100.0) {
-                    // Range too small: use 0 to 100m
-                    Pair(0.0, 100.0)
-                } else if (secActualMax >= 100.0) {
-                    // Elevation > 100m: use (min - 100m) to (max + 10%)
-                    val minBound = (secActualMin - 100.0).coerceAtLeast(0.0)
-                    val maxBound = secActualMax * 1.10  // +10% buffer on top
-                    Pair(minBound, maxBound)
-                } else {
-                    // Fallback for edge cases
-                    Pair(secActualMin - 100.0, secActualMax + (secRange * 0.10))
+                val tickInterval = when {
+                    secRange <= 10.0  -> 2.0
+                    secRange <= 50.0  -> 5.0
+                    secRange <= 100.0 -> 10.0
+                    secRange <= 300.0 -> 20.0
+                    secRange <= 600.0 -> 50.0
+                    else              -> 100.0
                 }
+                val topExtraTicks = when {
+                    secRange <= 50.0  -> 3
+                    secRange <= 150.0 -> 2
+                    else              -> 1
+                }
+                val minBound = (floor(secActualMin / tickInterval) * tickInterval).coerceAtLeast(0.0)
+                val maxBound = ceil(secActualMax / tickInterval) * tickInterval + topExtraTicks * tickInterval
+                Pair(minBound, maxBound)
             }
 
             val secRange = (secMax - secMin).takeIf { it > 1e-9 } ?: 1.0

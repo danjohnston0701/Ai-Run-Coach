@@ -3032,24 +3032,18 @@ class RunTrackingService : Service(), SensorEventListener {
                         )
                         _currentRunSession.value = finalSession
 
-                        // Duplicate-prevention: the watch calls session/end (creating its own
-                        // run record) ONLY when it was disconnected from the phone at run end.
-                        // That same disconnected state means the watch's "start" command may
-                        // have been delivered early — causing the phone to also track the run.
-                        // In that race-condition scenario (watchInitiatedRun=true AND watch now
-                        // disconnected) we skip the phone upload; the watch record is authoritative.
-                        // When watchInitiatedRun=true but the watch IS still connected, the watch
-                        // did NOT call session/end, so the phone upload is the sole record and
-                        // must proceed.
-                        val watchIsNowConnected = garminWatchManager?.isWatchConnected?.value == true
-                        if (watchInitiatedRun && !watchIsNowConnected) {
-                            Log.d("RunTrackingService", "⌚ Watch-initiated run, watch disconnected at stop — watch owns record, skipping phone upload")
-                            _uploadComplete.value = finalSession.id
-                        } else {
-                            // Phone owns the record: either phone-initiated OR watch still connected
-                            // (meaning watch did NOT call session/end).
-                            uploadRunToBackend(finalSession)
-                        }
+                        // Always upload from the phone.  The previous logic skipped the phone
+                        // upload when (watchInitiatedRun && watch now disconnected), assuming the
+                        // watch had called session/end and owned the record.  This was WRONG when
+                        // the watch battery died mid-run — the watch never called session/end, so
+                        // the phone's skip left the run with NO record in the database.
+                        //
+                        // The server's POST /api/runs endpoint now has a deduplication guard that
+                        // catches any legitimate duplicate created by the Garmin companion
+                        // session/end path: it checks for an existing Garmin-companion run for
+                        // this user with a similar distance and returns it rather than inserting
+                        // a second record.  The server is therefore the authoritative dedup layer.
+                        uploadRunToBackend(finalSession)
                     }
                 } finally {
                     // Only stop the service after upload completes or fails

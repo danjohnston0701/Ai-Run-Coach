@@ -1775,42 +1775,57 @@ function transformRunForAndroid(run: any) {
       console.log(`[POST /api/runs] Date fields — startedAt: ${processedRunData.startTime}, completedAt: ${processedRunData.completedAt}`);
 
       // ── Deduplication guard ──────────────────────────────────────────────────
-      // The Android app's exponential-backoff retry and background SyncWorker can
-      // both fire within milliseconds of each other on the same run.  Check for an
-      // identical run (same user + startedAt + distance rounded to 10m) created in
-      // the last 30 seconds and return it rather than inserting a duplicate.
-      if (startedAt) {
+      // Two cases to catch:
+      //
+      // 1. Rapid retries (Android exponential-backoff / SyncWorker): same user +
+      //    same distance created within the last 30 seconds.
+      //
+      // 2. Watch-battery-died fallback: the phone now always uploads after a
+      //    watch-initiated run (even when the watch was disconnected at stop) so
+      //    that a run is never lost when the watch dies mid-run.  On the rare
+      //    occasion the watch DID successfully call session/end before disconnecting
+      //    (normal out-of-range scenario), the server deduplicates here: look for
+      //    an existing Garmin-companion run for this user with a similar distance
+      //    (±10 %) created within the last 3 hours.
+      const distanceRounded  = Math.round(distance * 100) / 100; // round to 10m
+      try {
+        // Case 1 — rapid retry window (30 s)
         const thirtySecondsAgo = new Date(Date.now() - 30_000);
-        const distanceRounded  = Math.round(distance * 100) / 100; // round to 10m
-        try {
-          const existing = await db.select({ id: runs.id })
-            .from(runs)
-            .where(and(
-              eq(runs.userId, userId),
-              gte(runs.createdAt, thirtySecondsAgo),
-            ))
-            .limit(5);
-          const dup = existing.find(async () => true); // we check distance below
-          // Fetch the full candidate run to check distance match
-          if (existing.length > 0) {
-            const candidates = await db.select()
-              .from(runs)
-              .where(and(
-                eq(runs.userId, userId),
-                gte(runs.createdAt, thirtySecondsAgo),
-              ))
-              .limit(5);
-            const dupRun = candidates.find(r =>
-              Math.abs((r as any).distance - distanceRounded) < 0.05
-            );
-            if (dupRun) {
-              console.log(`[POST /api/runs] Duplicate detected — returning existing run ${dupRun.id}`);
-              return res.status(200).json(transformRunForAndroid(dupRun));
-            }
-          }
-        } catch (dupErr) {
-          console.warn('[POST /api/runs] Dedup check failed (non-fatal):', dupErr);
+        const recentCandidates = await db.select()
+          .from(runs)
+          .where(and(
+            eq(runs.userId, userId),
+            gte(runs.createdAt, thirtySecondsAgo),
+          ))
+          .limit(5);
+        const rapidDup = recentCandidates.find(r =>
+          Math.abs((r as any).distance - distanceRounded) < 0.05
+        );
+        if (rapidDup) {
+          console.log(`[POST /api/runs] Rapid-retry duplicate detected — returning existing run ${rapidDup.id}`);
+          return res.status(200).json(transformRunForAndroid(rapidDup));
         }
+
+        // Case 2 — Garmin companion run created in the last 3 hours with similar distance
+        const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+        const garminCandidates = await db.select()
+          .from(runs)
+          .where(and(
+            eq(runs.userId, userId),
+            gte(runs.createdAt, threeHoursAgo),
+            eq(runs.externalSource, 'garmin_companion'),
+          ))
+          .limit(10);
+        const garminDup = garminCandidates.find(r => {
+          const rDist = (r as any).distance ?? 0;
+          return rDist > 0 && Math.abs(rDist - distanceRounded) / Math.max(rDist, 0.1) < 0.1;
+        });
+        if (garminDup) {
+          console.log(`[POST /api/runs] Garmin-companion duplicate detected — phone run matches watch run ${garminDup.id}, returning watch record`);
+          return res.status(200).json(transformRunForAndroid(garminDup));
+        }
+      } catch (dupErr) {
+        console.warn('[POST /api/runs] Dedup check failed (non-fatal):', dupErr);
       }
 
       // Create run with TSS and calculated steps
