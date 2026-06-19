@@ -1,11 +1,10 @@
 // AI Run Coach - Garmin Connect IQ Companion App
 // Main Application Entry Point
-// Now uses RunView as the default screen with overlay messaging for auth flow.
+// RunView is the default screen with overlay messaging for auth flow.
 
 using Toybox.Application as App;
 using Toybox.WatchUi as Ui;
 using Toybox.System as Sys;
-using Toybox.Background as Bg;
 
 class AiRunCoachApp extends App.AppBase {
 
@@ -15,12 +14,10 @@ class AiRunCoachApp extends App.AppBase {
         AppBase.initialize();
     }
 
-    // Called when the app is launched
     function onStart(state) {
         Sys.println("AI Run Coach started");
     }
 
-    // Called when the app is stopped
     function onStop(state) {
         Sys.println("AI Run Coach stopped");
     }
@@ -34,14 +31,6 @@ class AiRunCoachApp extends App.AppBase {
         return [_runView, delegate];
     }
 
-    // ── Background service entry point ────────────────────────────────────────
-    // Connect IQ calls this to get the ServiceDelegate for background tasks.
-    // Tagged (:background) so it is included in the background build slice only.
-    (:background)
-    function getServiceDelegate() {
-        return new BackgroundService();
-    }
-
     // Handle settings changes (e.g. from Garmin Connect app)
     function onSettingsChanged() {
         Ui.requestUpdate();
@@ -52,13 +41,11 @@ class AiRunCoachApp extends App.AppBase {
     function onCoachingCue(cueText) {
         if (_runView != null) {
             _runView.setCoachingCue(cueText);
-            // No Ui.requestUpdate() needed — no text to render on screen.
         }
     }
 
     // Called by DataStreamer when an HTTP data POST receives a 200 response.
-    // Resets the HTTP failure counter so the offline buffer stays dormant when
-    // Scenario 3 applies (watch-initiated run, phone in pocket via Garmin relay).
+    // Resets the HTTP failure counter so the offline buffer stays dormant when online.
     function onHttpSuccess() {
         if (_runView != null) {
             _runView.onHttpSuccess();
@@ -66,8 +53,7 @@ class AiRunCoachApp extends App.AppBase {
     }
 
     // Called by DataStreamer when an HTTP data POST fails (non-200 / network error).
-    // After HTTP_FAIL_THRESHOLD consecutive failures RunView activates the offline
-    // buffer — this only happens when the phone is genuinely out of range.
+    // After HTTP_FAIL_THRESHOLD consecutive failures RunView activates the offline buffer.
     function onHttpFailure() {
         if (_runView != null) {
             _runView.onHttpFailure();

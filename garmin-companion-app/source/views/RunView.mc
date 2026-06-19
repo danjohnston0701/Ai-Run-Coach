@@ -23,6 +23,7 @@ using Toybox.Activity;
 using Toybox.Application as App;
 using Toybox.Communications as Comm;
 
+(:gui)
 class RunView extends Ui.View {
 
     // Overlay / prompt state
@@ -264,7 +265,21 @@ class RunView extends Ui.View {
     // Notifies the phone so it can show a push notification with a deep link to the run.
     function onBatchUploaded(sessionId, runId) {
         Sys.println("RunView: offline batch synced — notifying phone (runId=" + runId + ")");
+        // Upload confirmed (HTTP 200) -- safe to clear the buffered batch now.
+        // Until this point the batch stays in storage so a failed upload can be
+        // retried by the 20-min BackgroundService instead of being lost forever.
+        _clearOfflineBatchStorage();
         _phoneLink.sendSyncComplete(sessionId, runId);
+    }
+
+    // Clears the buffered offline-run batch from persistent storage. Called only
+    // after a confirmed successful upload, or when stored data is detected corrupt.
+    private function _clearOfflineBatchStorage() {
+        App.Storage.deleteValue("offlineBatchSessionId");
+        App.Storage.deleteValue("offlineBatchPoints");
+        App.Storage.deleteValue("offlineBatchDistance");
+        App.Storage.deleteValue("offlineBatchDuration");
+        App.Storage.deleteValue("offlineBatchAscent");
     }
 
     function startRun() {
@@ -314,11 +329,18 @@ class RunView extends Ui.View {
         // relay even when the phone app hasn't opened. We show the notice only once
         // HTTP has actually failed enough times to confirm the relay is unavailable.
 
-        // Prepare backend session ONLY in standalone mode (Scenario C - no phone).
-        // When phone IS connected (Scenario B), it owns the backend session via RunTrackingService.
-        // Calling prepareSession() here in Scenario B creates orphaned duplicate sessions.
-        Sys.println(">>> startRun() — about to prepareSession (connected=" + _isConnected + ")");
-        if (!_isConnected && _dataStreamer != null) { _dataStreamer.prepareSession(); }
+        // ALWAYS prepare a backend session for any non-phone-controlled run.
+        //
+        // The old !_isConnected guard was broken: _isConnected stays TRUE forever once auth
+        // arrives — the phone never sends a BT disconnect message.  So any standalone run
+        // after the user had EVER opened the phone app would skip prepareSession(), skip the
+        // offline buffer, and silently lose the run.
+        //
+        // Now we always call prepareSession() for non-phone-controlled runs.
+        // If the phone is ALSO tracking (Scenario 2 success), upload-batch dedup logic
+        // links the watch batch to the phone run instead of creating a duplicate.
+        Sys.println(">>> startRun() — prepareSession (connected=" + _isConnected + ")");
+        if (!_phoneControlled && _dataStreamer != null) { _dataStreamer.prepareSession(); }
 
         // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
         Sys.println(">>> startRun() — about to _startSession()");
@@ -378,8 +400,11 @@ class RunView extends Ui.View {
         _stopSession();
 
         // ── Save offline buffer so it uploads when phone reconnects ──────────
-        // Read sessionId BEFORE endSession() clears it from App.Storage
-        if (!_isConnected && _offlineBuffer.size() > 0) {
+        // Read sessionId BEFORE endSession() clears it from App.Storage.
+        // Guard is now !_phoneControlled (not !_isConnected) because _isConnected stays
+        // TRUE after any auth.  We save the batch for ALL non-phone-controlled runs as a
+        // backup — the backend upload-batch endpoint deduplicates against phone runs.
+        if (!_phoneControlled && _offlineBuffer.size() > 0) {
             var sid = App.Storage.getValue("sessionId");
             if (sid != null) {
                 App.Storage.setValue("offlineBatchSessionId", sid);
@@ -511,14 +536,13 @@ class RunView extends Ui.View {
                 // DEFENSIVE: pendingPts MUST be a Lang.Array — stale data from an old
                 // store version may have been serialised as another type.  Calling
                 // .size() on a non-Array raises "Failed invoking <symbol>" (IQ crash).
-                // Always clear keys first so corrupt data is never retried on next auth.
+                // CRITICAL: do NOT clear the batch before the upload confirms success.
+                // The upload is async and often fails on the first reconnect (relay
+                // settling, token just refreshed). Clearing up-front would lose the run
+                // with no chance for the 20-min BackgroundService retry. Storage is now
+                // cleared only after a confirmed 200 (see onBatchUploaded()).
                 var pendingSid = App.Storage.getValue("offlineBatchSessionId");
                 var pendingPts = App.Storage.getValue("offlineBatchPoints");
-                App.Storage.deleteValue("offlineBatchSessionId");
-                App.Storage.deleteValue("offlineBatchPoints");
-                App.Storage.deleteValue("offlineBatchDistance");
-                App.Storage.deleteValue("offlineBatchDuration");
-                App.Storage.deleteValue("offlineBatchAscent");
                 if (pendingSid != null && (pendingPts instanceof Lang.Array) && pendingPts.size() > 0) {
                     Sys.println("Pending offline batch: " + pendingPts.size() + " pts for " + pendingSid);
                     var pendingDist = App.Storage.getValue("offlineBatchDistance");
@@ -527,6 +551,7 @@ class RunView extends Ui.View {
                     _dataStreamer.uploadOfflineBatch(pendingSid, pendingPts, pendingDist, pendingDur, pendingAsc);
                 } else if (pendingSid != null) {
                     Sys.println("Discarded corrupt offline batch (wrong type) — keys cleared");
+                    _clearOfflineBatchStorage();
                 }
             Ui.requestUpdate();
 
@@ -736,9 +761,14 @@ class RunView extends Ui.View {
             if (_statusTicks <= 0) { _statusMessage = ""; }
         }
 
-        // Scenario C only: accumulate stats + stream to backend.
-        // In Scenario B (phone connected), the phone owns the backend session.
-        if (!_phoneControlled && !_isConnected && _isRunning && !_isPaused) {
+        // Accumulate stats + offline buffer for ALL non-phone-controlled runs.
+        //
+        // Previously guarded by !_isConnected — which was wrong. _isConnected stays
+        // TRUE after any auth, so standalone runs were silently dropped.  We now ALWAYS
+        // accumulate stats and fill the offline buffer when the watch owns the run.
+        // HTTP streaming to backend only happens when offline (!_isConnected), so there
+        // is no double-reporting when the phone is also tracking via BT.
+        if (!_phoneControlled && _isRunning && !_isPaused) {
             _sampleN += 1;
             if (_heartRate > 0) {
                 _sumHR += _heartRate;
@@ -773,13 +803,15 @@ class RunView extends Ui.View {
                 _lastAlt = altSrc;
             }
 
-            // ── Offline buffer capture (every 15 s, truly phone-less runs only) ─
-            // Only activates when HTTP has been failing consistently, meaning the
-            // Garmin Connect relay is genuinely unavailable (no phone in range).
-            // Scenario 3 (phone in pocket, app not open): HTTP works fine via relay,
-            // so _httpConsecutiveFails stays low and buffer never activates.
-            var _httpOfflineMode = (_httpConsecutiveFails >= HTTP_FAIL_THRESHOLD);
-            if (_httpOfflineMode && !_isPaused) {
+            // ── Offline buffer capture (every 15 s, ALL non-phone-controlled runs) ──
+            // Buffer unconditionally — regardless of _isConnected.  This is a safety
+            // net: if the phone's RunTrackingService failed to start (Android 12+ bg
+            // restriction) or BT dropped during the run, the offline batch is the only
+            // record.  The backend's upload-batch endpoint is find-or-create and has
+            // phone-run dedup logic, so this NEVER creates a duplicate when the phone
+            // also tracked the run successfully.
+            // Cost: 1 compact Array per 15 s, max 360 pts = ~10 KB heap. Negligible.
+            if (!_isPaused) {
                 _offlineTicks += 1;
                 if (_offlineTicks >= OFFLINE_TICK_INTERVAL) {
                     _offlineTicks = 0;
@@ -797,6 +829,9 @@ class RunView extends Ui.View {
                 }
             }
 
+            // HTTP stream ONLY when offline. When phone is connected, it receives data
+            // via BT watchData messages — no need to double-report via HTTP relay.
+            if (!_isConnected) {
             _streamAccumMs += _tickMs;
             if (_streamAccumMs >= 1000) {
                 _streamAccumMs = 0;
@@ -828,6 +863,7 @@ class RunView extends Ui.View {
                     });
                 }
             }
+            } // end !_isConnected HTTP stream
         }
 
         if (_isConnected && _isRunning && !_isPaused) { // Stream GPS to phone only when connected (saves BT in Scenario C)
@@ -1290,6 +1326,7 @@ class RunView extends Ui.View {
 // screen-tap events through onSelect(), making it impossible to distinguish
 // between them.  Using onKey() + onTap() gives us clean separation.
 
+(:gui)
 class RunDelegate extends Ui.BehaviorDelegate {
     private var _view;
     function initialize()      { BehaviorDelegate.initialize(); }
@@ -1353,6 +1390,7 @@ class RunDelegate extends Ui.BehaviorDelegate {
     }
 }
 
+(:gui)
 class FinishConfirmDelegate extends Ui.ConfirmationDelegate {
     private var _view;
     function initialize(v) { ConfirmationDelegate.initialize(); _view = v; }

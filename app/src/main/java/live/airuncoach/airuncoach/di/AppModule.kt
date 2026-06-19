@@ -59,8 +59,11 @@ object AppModule {
      */
     @Singleton
     @Provides
-    fun provideGarminWatchManager(@ApplicationContext context: Context): GarminWatchManager {
-        return GarminWatchManager(context)
+    fun provideGarminWatchManager(
+        @ApplicationContext context: Context,
+        runRepository: RunRepository
+    ): GarminWatchManager {
+        return GarminWatchManager(context, runRepository)
     }
 
     @Singleton

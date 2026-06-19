@@ -286,11 +286,17 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToNotifications = { navController.navigate("notification_settings") },
                     onNavigateToConnectedDevices = { navController.navigate("connected_devices") },
                     onNavigateToSubscription = { navController.navigate("subscription") },
-                    onNavigateToCoachingProgramme = { navController.navigate("coaching_programme") }
+                    onNavigateToCoachingProgramme = { navController.navigate("coaching_programme") },
+                    onNavigateToInjuries = { navController.navigate("injuries") }
                 )
             }
             composable("my_data") {
                 MyDataScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable("injuries") {
+                InjuryManagementScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
             }

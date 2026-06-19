@@ -521,6 +521,16 @@ class RunTrackingService : Service(), SensorEventListener {
          * START on the watch).  Ignored if the run is already in progress.
          */
         const val ACTION_CANCEL_PREPARE_FOR_WATCH = "ACTION_CANCEL_PREPARE_FOR_WATCH"
+        /**
+         * Start tracking immediately for a run that was started directly on the Garmin watch
+         * without any prior phone-side preparation (i.e. user did NOT tap "Prepare Run on Watch").
+         *
+         * Sent by [GarminWatchManager] when it receives a watch "start" command and no
+         * ViewModel or service is currently listening (onWatchCommand == null).  Calling this
+         * while the phone app is in the foreground starts the foreground service so it can
+         * track the run and receive the eventual watch "stop" command to save the session.
+         */
+        const val ACTION_START_TRACKING_FROM_WATCH = "ACTION_START_TRACKING_FROM_WATCH"
         const val EXTRA_TARGET_DISTANCE = "EXTRA_TARGET_DISTANCE"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
@@ -866,6 +876,16 @@ class RunTrackingService : Service(), SensorEventListener {
             ACTION_START_SIMULATION -> startSimulation()
             ACTION_START_NAV_SIMULATION -> startNavigationSimulation()
             ACTION_PREPARE_FOR_WATCH -> prepareForWatch()
+            ACTION_START_TRACKING_FROM_WATCH -> {
+                // Watch started a run directly without any phone-side preparation.
+                // Mark as watch-initiated and begin tracking immediately so the session
+                // is captured and the watch "stop" command (which arrives later) can
+                // finalize and upload the run.
+                wasRunStartedByWatch = true
+                lastWatchGpsMs = System.currentTimeMillis()
+                Log.d("RunTrackingService", "⌚ ACTION_START_TRACKING_FROM_WATCH — watch-only run, starting tracking immediately")
+                startTracking()
+            }
             ACTION_CANCEL_PREPARE_FOR_WATCH -> {
                 // Only honour the cancel if tracking has not yet started (standby state).
                 // If the user already pressed START on the watch we must not interrupt the run.
@@ -1893,8 +1913,12 @@ class RunTrackingService : Service(), SensorEventListener {
             optimal = (optimal - adjustment).coerceAtLeast(148)
         }
 
-        val low  = optimal - 8   // Below this is worth a coaching cue
-        val high = optimal + 6   // Above this is excellent
+        // Cadence tolerance buffer: ±5-8 spm is normal variation during a run
+        // Too strict = false positives that frustrate runners (e.g. "3 spm off is not a problem")
+        // Too loose = coaching that could miss real form issues
+        // 5-8 spm represents ~3-5% variation, which is imperceptible to the runner
+        val low  = (optimal * 0.97).toInt()   // ~3% below optimal (tolerance for form variation)
+        val high = (optimal * 1.04).toInt()   // ~4% above optimal (excellent efficiency)
 
         return Triple(low, optimal, high)
     }
@@ -1951,8 +1975,10 @@ class RunTrackingService : Service(), SensorEventListener {
             else -> "OPTIMAL"
         }
 
-        // Fatigue detection: cadence drops > 8 spm from baseline on flat terrain
-        val isFatigued = baselineCadence > 0 && terrain == "flat" && (baselineCadence - currentCadence) > 8
+        // Fatigue detection: cadence drops > 5-6% from baseline indicates form breakdown from fatigue
+        // Use percentage-based threshold so it scales with the runner's natural cadence (e.g. 10 spm drop for 170 spm baseline)
+        val fatigueDropPercent = 0.05  // 5% = ~8-9 spm for typical 170 spm cadence
+        val isFatigued = baselineCadence > 0 && terrain == "flat" && (baselineCadence - currentCadence) > (baselineCadence * fatigueDropPercent).toInt()
 
         // Build baseline from first 2km
         if (totalDistance < 2000 && currentCadence > 0) {
@@ -4247,7 +4273,17 @@ class RunTrackingService : Service(), SensorEventListener {
         if (now - lastHrCoachingTime < HR_COOLDOWN_MS) return
 
         val avgHr = if (hrCount > 0) (hrSum / hrCount).toInt() else currentHeartRate
-        val maxHrValue = maxHr.takeIf { it > 0 } ?: currentHeartRate
+        // Calculate expected max HR from age if available; otherwise use highest recorded HR
+        // IMPORTANT: Don't fall back to currentHeartRate as it's too low early in run!
+        // Tanaka formula: maxHR = 208 - (0.7 × age)
+        val maxHrValue = if (maxHr > 0) {
+            maxHr
+        } else if (currentUser?.age != null && currentUser.age!! > 0) {
+            val calculatedMaxHr = (208 - (0.7 * currentUser.age!!)).toInt()
+            calculatedMaxHr
+        } else {
+            190 // Generic fallback for unknown age
+        }
 
         lastHrCoachingTime = now
         lastHrCoachingMinute = elapsedMinutes

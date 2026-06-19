@@ -109,6 +109,21 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
+    // Emits the timestamp of the latest watch offline-run sync. We observe it to
+    // force-refresh the dashboard's recent run the instant a watch run lands on the
+    // backend (the run cache has already been invalidated by GarminWatchManager).
+    private val runSyncedEvent: StateFlow<Long>? by lazy {
+        try {
+            val entry = EntryPointAccessors.fromApplication(
+                context,
+                GarminWatchManagerEntryPoint::class.java
+            )
+            entry.garminWatchManager().runSyncedEvent
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
     private val fusedLocationClient: FusedLocationProviderClient = 
@@ -161,6 +176,19 @@ class DashboardViewModel @Inject constructor(
                 loadTrainingLoad()
             } catch (e: Exception) {
                 Log.e("DashboardViewModel", "Error loading training load: ${e.message}", e)
+            }
+        }
+
+        // Re-fetch the recent run whenever a watch offline run syncs to the backend,
+        // so it appears on the dashboard without waiting for the run cache to expire.
+        runSyncedEvent?.let { events ->
+            viewModelScope.launch {
+                events.collect { ts ->
+                    if (ts > 0L) {
+                        Log.d("DashboardViewModel", "Watch run synced (ts=$ts) — refreshing recent run")
+                        fetchRecentRun(forceRefresh = true)
+                    }
+                }
             }
         }
     }
@@ -371,13 +399,13 @@ class DashboardViewModel @Inject constructor(
         _targetSeconds.value = seconds
     }
 
-    fun fetchRecentRun() {
+    fun fetchRecentRun(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             try {
                 val userId = _user.value?.id
                 if (userId != null) {
-                    Log.d("DashboardViewModel", "Fetching runs for user: $userId")
-                    val runs = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
+                    Log.d("DashboardViewModel", "Fetching runs for user: $userId (forceRefresh=$forceRefresh)")
+                    val runs = runRepository.getRunsForUser(userId, forceRefresh)  // ⚡ Use repository (cached)
                     _recentRun.value = runs.maxByOrNull { it.startTime }
                     Log.d("DashboardViewModel", "Fetched ${runs.size} runs, most recent: ${_recentRun.value?.id}")
                 } else {

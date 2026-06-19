@@ -5,7 +5,9 @@ project.manifest = manifest.xml
 base.sourcePath = source
 base.resourcePath = resources
 base.lang = eng
-base.excludeAnnotations = debug
+# Exclude :debug and :background from the foreground watch-app build.
+# (:gui) annotated classes (RunView, DataStreamer, PhoneLink) are included in foreground.
+base.excludeAnnotations = debug;background
 
 # All supported devices - must match manifest.xml product list exactly
 fenix6.sourcePath = $(base.sourcePath)

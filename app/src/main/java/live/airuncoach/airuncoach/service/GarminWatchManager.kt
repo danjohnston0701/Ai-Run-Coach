@@ -14,6 +14,7 @@ import com.garmin.android.connectiq.IQApp
 import com.garmin.android.connectiq.IQDevice
 import com.garmin.android.connectiq.exception.InvalidStateException
 import com.garmin.android.connectiq.exception.ServiceUnavailableException
+import live.airuncoach.airuncoach.data.repository.RunRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -86,7 +87,16 @@ data class WatchBiometricFrame(
     val baroAltitude: Float = 0f,     // metres, barometric
 )
 
-class GarminWatchManager(private val context: Context) {
+class GarminWatchManager(
+    private val context: Context,
+    /**
+     * Shared run cache.  Injected so that when the watch reports a freshly-synced
+     * offline run we can drop the stale (≤5-minute) cached run list — otherwise the
+     * newly uploaded run would not show in run history until the cache expired.
+     * Nullable so the manager still constructs if no repository is wired (tests).
+     */
+    private val runRepository: RunRepository? = null
+) {
 
     companion object {
         private const val TAG = "GarminWatchManager"
@@ -292,6 +302,15 @@ class GarminWatchManager(private val context: Context) {
      */
     private val _hasPendingWatchSync = MutableStateFlow(false)
     val hasPendingWatchSync: StateFlow<Boolean> = _hasPendingWatchSync
+
+    /**
+     * Emits the timestamp of the most recent watch run sync (via "syncComplete").
+     * Starts at 0L (no sync yet).  ViewModels observe this to force-refresh their
+     * run lists the moment an offline watch run lands on the backend, so the user
+     * sees it in history without waiting for the 5-minute run cache to expire.
+     */
+    private val _runSyncedEvent = MutableStateFlow(0L)
+    val runSyncedEvent: StateFlow<Long> = _runSyncedEvent
 
     /** Invoked when a command message arrives from the watch. */
     var onWatchCommand: ((action: String) -> Unit)? = null
@@ -606,6 +625,11 @@ class GarminWatchManager(private val context: Context) {
                         Log.d(TAG, "syncComplete received — runId=$runId session=$session")
                         _hasPendingWatchSync.value = false   // clear dashboard banner
                         dismissPendingSyncNotification()     // replace prompt with success notif
+                        // Drop the stale cached run list so the newly-uploaded run is
+                        // re-fetched from the backend instead of served from the ≤5-min cache,
+                        // then signal observers (dashboard / run history) to refresh now.
+                        runRepository?.clearAllCaches()
+                        _runSyncedEvent.value = System.currentTimeMillis()
                         showOfflineSyncNotification(runId)
                         return
                     }
@@ -654,11 +678,34 @@ class GarminWatchManager(private val context: Context) {
                         Log.d(TAG, "Watch START received — cleared cached preparedRun payload")
                     }
 
-                    // For all other commands: if no ViewModel is listening, show a passive
-                    // notification when a watch-initiated run starts/stops.
+                    // For all other commands: if no ViewModel or service is listening,
+                    // we need to bootstrap RunTrackingService ourselves so the watch run
+                    // is actually tracked and can be saved when the watch sends "stop".
                     if (onWatchCommand == null) {
                         when (action) {
-                            "start" -> showWatchRunNotification()
+                            "start" -> {
+                                // Show the "run in progress" notification so the user sees feedback.
+                                showWatchRunNotification()
+                                // Also start RunTrackingService so it registers onWatchCommand and
+                                // can receive the eventual "stop" command to save the run.
+                                // This handles the case where the user starts a run on the watch
+                                // without first preparing it on the phone (no ViewModel active,
+                                // no service pre-started).  Requires the app to be in the foreground
+                                // (Android 12+ blocks startForegroundService() from background).
+                                try {
+                                    val intent = Intent(context, RunTrackingService::class.java).apply {
+                                        this.action = RunTrackingService.ACTION_START_TRACKING_FROM_WATCH
+                                    }
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        context.startForegroundService(intent)
+                                    } else {
+                                        context.startService(intent)
+                                    }
+                                    Log.d(TAG, "⌚ Watch-only run started — bootstrapped RunTrackingService (ACTION_START_TRACKING_FROM_WATCH)")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "⌚ Could not start RunTrackingService for watch-only run: ${e.message}")
+                                }
+                            }
                             "stop"  -> cancelWatchRunNotification()
                         }
                     } else {

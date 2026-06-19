@@ -14,6 +14,7 @@ using Toybox.System as Sys;
 using Toybox.WatchUi as Ui;
 
 // ─────────────────────────────────────────────────────────────────────────────
+(:gui)
 class PhoneLink {
 
     // Callback invoked when a message arrives from the phone.
@@ -149,6 +150,7 @@ class PhoneLink {
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal transmit-result listener
 // ─────────────────────────────────────────────────────────────────────────────
+(:gui)
 class TransmitListener extends Comm.ConnectionListener {
 
     private var _callback;

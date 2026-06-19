@@ -84,10 +84,20 @@ const accentDirective = (accent?: string): string => {
   }
 };
 
+// Helper to format distance for coaching feedback
+// - Whole numbers: "5km" (0 decimals)
+// - With decimals: "3.6km" (1 decimal max, never 2+ decimals)
+const formatDistanceForCoaching = (km: number | undefined): string => {
+  if (km === undefined) return '?';
+  if (km === Math.floor(km)) {
+    return `${Math.floor(km)}km`; // Whole numbers: "5km"
+  }
+  return `${km.toFixed(1)}km`; // With decimals: "3.6km" (1 decimal)
+};
+
 // Helper to format distance for TTS - no decimals when whole number
 const formatDistanceForTTS = (km: number | undefined): string => {
-  if (km === undefined) return '?';
-  return km === Math.floor(km) ? `${Math.floor(km)}km` : `${km.toFixed(1)}km`;
+  return formatDistanceForCoaching(km);
 };
 
 // Helper to format pace for TTS - converts "4:32" to "4 minutes and 32 seconds per kilometer"
@@ -798,7 +808,7 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
 The runner just completed kilometer ${splitKm} with a split pace of ${spokenSplitPace}.
-- Overall progress: ${distance.toFixed(1)}km of ${targetDistance ? `${targetDistance.toFixed(1)}km (${progress}%)` : '?km'}
+- Overall progress: ${formatDistanceForCoaching(distance)} of ${targetDistance ? `${formatDistanceForCoaching(targetDistance)} (${progress}%)` : '?'}
 - Time elapsed: ${timeFormatted}
 - Overall average pace: ${spokenCurrentPace}
 - This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}
@@ -813,12 +823,12 @@ Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the rou
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
-500m check-in: Runner is at ${distance.toFixed(2)}km, pace ${spokenCurrentPace}, ${timeFormatted} elapsed.
+500m check-in: Runner is at ${formatDistanceForCoaching(distance)}, pace ${spokenCurrentPace}, ${timeFormatted} elapsed.
 ${terrainContext}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${varietySeed}
-Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenCurrentPace}) and distance (${distance.toFixed(1)}km). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenCurrentPace}) and distance (${formatDistanceForCoaching(distance)}). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
   }
 
   const completion = await openai.chat.completions.create({
@@ -1058,7 +1068,7 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
 The runner is following a mapped route and needs a navigation direction:
 Navigation instruction: "${navigationInstruction}"
 ${distContext}
-Runner context: ${distance.toFixed(1)}km into their run, pace ${currentPace || 'unknown'}.
+Runner context: ${formatDistanceForCoaching(distance)} into their run, pace ${currentPace || 'unknown'}.
 
 Deliver this navigation direction naturally in your coaching voice. Keep it to 1 SHORT sentence (max 15 words). 
 You MUST include the actual direction (left, right, straight, etc.) and street name if given. 
@@ -1340,7 +1350,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "He
 
 ${is500mCheckin ? 'TRIGGER: First 500m check-in' : `Phase: ${phaseDescriptions[phase]}`}
 Runner Status:
-- Distance covered: ${distance.toFixed(2)}km${targetDistance ? ` of ${formatDistanceForTTS(targetDistance)} target (${progress}%)` : ''}
+- Distance covered: ${formatDistanceForCoaching(distance)}${targetDistance ? ` of ${formatDistanceForCoaching(targetDistance)} target (${progress}%)` : ''}
 - Time elapsed: ${timeFormatted}
 ${currentPace ? `- Current pace: ${spokenPhasePace}` : ''}
 ${paceComparisonInfo}
@@ -1594,7 +1604,7 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
     }
     if (runHistory.avgDistanceKm) {
       const distDiff = distance - runHistory.avgDistanceKm;
-      if (distDiff > 0.5) struggleRunnerContext += `They're already further than their recent average of ${runHistory.avgDistanceKm.toFixed(1)}km — this is new territory. `;
+      if (distDiff > 0.5) struggleRunnerContext += `They're already further than their recent average of ${formatDistanceForCoaching(runHistory.avgDistanceKm)} — this is new territory. `;
     }
     if (runHistory.consistencyTrend === 'improving') {
       struggleRunnerContext += `Their recent runs show an improving trend — they have the fitness to push through. `;
@@ -1613,7 +1623,7 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
 ${struggleRunnerContext ? `\nRunner context: ${struggleRunnerContext}` : ''}
 The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}% from their baseline.
 - Current pace: ${spokenCurrentPaceStruggle} (baseline was ${spokenBaselinePace})
-- Distance: ${distance.toFixed(2)}km
+- Distance: ${formatDistanceForCoaching(distance)}
 - Time: ${timeMin} minutes
 ${terrainContext}
 ${trainingStruggleContext}
@@ -1722,6 +1732,12 @@ export async function generateCadenceCoaching(params: {
   if (userAge) physicalContext += `Age: ${userAge}. `;
   physicalContext += `Personalised optimal cadence for this runner at this pace: ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm). This is specific to their height, age, and current pace — not a generic target.`;
   
+  // Tolerance buffer for cadence coaching: ±3% is normal variation (imperceptible to runner)
+  // e.g. at 167 spm target: ±5 spm is within acceptable tolerance
+  const cadenceTolerance = Math.max(3, Math.round(dynOptimalCadenceTarget * 0.03));
+  const cadenceDiff = Math.abs(cadence - dynOptimalCadenceTarget);
+  const isWithinTolerance = cadenceDiff <= cadenceTolerance;
+
   let zoneAnalysis = '';
   if (strideZone === 'OVERSTRIDING') {
     zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their foot is landing ahead of their centre of mass, creating a braking force with each step.
@@ -1732,14 +1748,16 @@ Key context:
 - The correction: shorten stride, move foot strike closer to beneath the hips
 
 Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment. You know how to coach overstriding — pick what will resonate.`;
-  } else if (strideZone === 'UNDERSTRIDING') {
+  } else if (strideZone === 'UNDERSTRIDING' && !isWithinTolerance) {
+    // Only flag as understriding if meaningfully below target (beyond tolerance buffer)
     zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm — ${cadenceDeficit} spm below their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm), calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}.
 
 This is NOT a generic "everyone should hit 180" situation — this is their specific efficient range. A low turnover stride reduces propulsion and increases vertical oscillation.
 
 Use your coaching expertise to choose the 1-2 most effective, actionable cues to increase their cadence. Arms, mental imagery, foot placement, rhythm — whatever you judge will land best for this runner right now.`;
   } else {
-    zoneAnalysis = `Cadence ${cadence} spm with stride ${strideCm}cm is in the optimal zone. Brief positive reinforcement.`;
+    // Within tolerance or optimal
+    zoneAnalysis = `Cadence ${cadence} spm with stride ${strideCm}cm is in the optimal zone${isWithinTolerance && strideZone === 'UNDERSTRIDING' ? ` (${cadenceDiff} spm off target is normal form variation)` : ''}. Brief positive reinforcement.`;
   }
   
   const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -1751,7 +1769,7 @@ Runner Data:
 - Personal optimal cadence: ${dynOptimalCadenceTarget} spm (${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm range)
 - Stride length: ${strideCm}cm (optimal stride range: ${optMinCm}-${optMaxCm}cm)
 - Current pace: ${formatPaceForTTS(currentPace)}
-- Distance: ${distance.toFixed(1)}km, time: ${timeFormatted}
+- Distance: ${formatDistanceForCoaching(distance)}, time: ${timeFormatted}
 ${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
 ${physicalContext}
 
@@ -1848,7 +1866,7 @@ export async function getElevationCoaching(params: {
   const coachTone = params.coachTone || 'energetic';
   const grade = params.currentGrade ?? params.grade ?? 0;
   const eventType = params.eventType || params.change || 'uphill';
-  const distanceKm = params.distance?.toFixed(2) || '?';
+  const distanceKm = formatDistanceForCoaching(params.distance);
   const segmentM = params.segmentDistanceMeters ? Math.round(params.segmentDistanceMeters) : null;
 
   // Don't give terrain coaching for no-route runs — return empty so no TTS is triggered
@@ -1950,11 +1968,11 @@ ${isFinish ? '- This is the final descent — maximum motivation. "The finish li
 - If their pace is much faster than average: great, but caution about quad fatigue from braking
 - If cadence is low on the descent: "pick up your turnover — short quick steps protect your knees on downhills"`;
   } else {
-    coachingInstructions = `TERRAIN UPDATE — The runner is on ${eventType} terrain at ${distanceKm}km.
+    coachingInstructions = `TERRAIN UPDATE — The runner is on ${eventType} terrain at ${distanceKm}.
 Give terrain-specific coaching based on their current metrics and split data.`;
   }
 
-  const prompt = `The runner is at ${distanceKm}km into their run.
+  const prompt = `The runner is at ${distanceKm} into their run.
 ${terrainOverview}
 ${metricsStatus}
 ${splitAnalysis}
@@ -2040,7 +2058,7 @@ export async function generateEmotionalCoaching(params: {
   const emotionalPrompts: Record<string, string> = {
     positive_self_talk: `You are ${coachName}, an AI running coach with a ${coachTone} style.
 
-The runner is struggling with negative self-talk. They are ${progress}% through their run at ${distance.toFixed(1)}km.
+The runner is struggling with negative self-talk. They are ${progress}% through their run at ${formatDistanceForCoaching(distance)}.
 They need help replacing doubt with empowerment.
 
 Generate 2-3 sentences of positive self-talk coaching that:
@@ -2050,12 +2068,12 @@ Generate 2-3 sentences of positive self-talk coaching that:
 4. Is delivered in your natural ${coachTone} coach voice
 
 Focus on: "You CAN do this", "You're stronger than this moment", "Every difficult moment builds your resilience"
-Do NOT be generic — reference their actual data (pace: ${currentPace}, distance: ${distance.toFixed(1)}km).
+Do NOT be generic — reference their actual data (pace: ${currentPace}, distance: ${formatDistanceForCoaching(distance)}).
 Make it personal and genuine.`,
 
     motivation_resilience: `You are ${coachName}, an AI running coach with a ${coachTone} style.
 
-The runner is facing a challenge — they're ${progress}% through their run, ${distance.toFixed(1)}km in, in the ${phase} phase.
+The runner is facing a challenge — they're ${progress}% through their run, ${formatDistanceForCoaching(distance)} in, in the ${phase} phase.
 This is where mental toughness separates champions from others.
 
 Generate 2-3 sentences that:
@@ -2321,10 +2339,10 @@ IMPORTANT: You are a fully qualified running coach with deep sports science know
   prompt += `\n\nCURRENT PHASE: ${currentPhase.toUpperCase()}`;
   
   if (context.distance !== undefined) {
-    prompt += ` (Runner is at ${context.distance.toFixed(2)}km`;
+    prompt += ` (Runner is at ${formatDistanceForCoaching(context.distance)}`;
     if (context.totalDistance) {
       const percent = (context.distance / context.totalDistance) * 100;
-      prompt += ` of ${context.totalDistance.toFixed(1)}km total, ${percent.toFixed(0)}% complete`;
+      prompt += ` of ${formatDistanceForCoaching(context.totalDistance)} total, ${percent.toFixed(0)}% complete`;
     }
     prompt += ')';
   }
@@ -3168,7 +3186,9 @@ export async function generateHeartRateCoaching(params: {
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
 
-  // Use age-adjusted max HR — more accurate than whatever device reported
+  // Use age-adjusted max HR (Tanaka formula: 208 - 0.7×age) — more accurate than device-reported max
+  // This prevents incorrect zone assessment early in runs when actual max HR hasn't been reached yet.
+  // If age is available, ALWAYS use age-calculated max. Only fall back to device max if age is unknown.
   const effectiveMaxHR = runnerAge ? calcMaxHR(runnerAge) : maxHR;
   const currentZone = getHeartRateZoneNumber(currentHR, effectiveMaxHR);
   const percentMax = Math.round((currentHR / effectiveMaxHR) * 100);
@@ -3701,9 +3721,9 @@ Think of yourself analyzing a training session you coached in person - you'd und
 ## RUN DATA:
 - Distance: ${
   (runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters)
-    ? ((runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters || 0) / 1000).toFixed(2)
+    ? formatDistanceForCoaching((runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters || 0) / 1000)
     : '?'
-}km
+}
 - Duration: ${runData.duration ? Math.floor(runData.duration / 60) : garminActivity?.durationInSeconds ? Math.floor(garminActivity.durationInSeconds / 60) : '?'} minutes
 - Average Pace: ${runData.avgPace || (garminActivity?.averagePace ? `${Math.floor(garminActivity.averagePace)}:${Math.floor((garminActivity.averagePace % 1) * 60).toString().padStart(2, '0')}` : 'N/A')}/km
 - Activity Type: ${runData.activityType || garminActivity?.activityType || 'Running'}
@@ -4041,7 +4061,7 @@ Acknowledge how weather conditions impacted performance in your analysis.
 Use this to identify patterns in their running - pace trends, consistency, pacing strategy, heart rate patterns, etc.
 `;
     previousRuns.slice(0, 10).forEach((run, i) => {
-      prompt += `${i + 1}. ${run.distance?.toFixed(1) || '?'}km at ${run.avgPace || 'N/A'}/km`;
+      prompt += `${i + 1}. ${run.distance ? formatDistanceForCoaching(run.distance) : '?'} at ${run.avgPace || 'N/A'}/km`;
       if (run.avgHeartRate) prompt += `, ${run.avgHeartRate}bpm`;
       if (run.wasChallenging) prompt += ` [challenging]`;
       if (run.wasEasy) prompt += ` [easy]`;
@@ -4066,11 +4086,11 @@ PATTERN ANALYSIS GUIDANCE:
 These are real pace drops the runner confirmed as genuine difficulties — not stops like traffic lights or shoe tying.
 `;
     strugglePoints.forEach((sp: any, i: number) => {
-      const distKm = sp.distanceMeters != null ? (sp.distanceMeters / 1000).toFixed(2) : '?';
+      const distKm = sp.distanceMeters != null ? formatDistanceForCoaching(sp.distanceMeters / 1000) : '?';
       const drop = sp.paceDropPercent != null ? `${Math.round(sp.paceDropPercent)}% pace drop` : '';
       const hr = sp.heartRate != null ? `, HR ${sp.heartRate}bpm` : '';
       const grade = sp.currentGrade != null ? `, grade ${sp.currentGrade.toFixed(1)}%` : '';
-      prompt += `${i + 1}. At ${distKm}km — pace dropped from ${sp.baselinePace || '?'}/km to ${sp.paceAtStruggle || '?'}/km (${drop}${hr}${grade})`;
+      prompt += `${i + 1}. At ${distKm} — pace dropped from ${sp.baselinePace || '?'}/km to ${sp.paceAtStruggle || '?'}/km (${drop}${hr}${grade})`;
       if (sp.userComment) {
         prompt += `\n   Runner's note: "${sp.userComment}"`;
       }
@@ -4488,7 +4508,7 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
 
   const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
-  const remaining = targetDistance ? (targetDistance - distance).toFixed(1) : '?';
+  const remaining = targetDistance ? formatDistanceForCoaching(targetDistance - distance) : '?';
   const spokenPace = formatPaceForTTS(currentPace);
   const spokenAvgPace = formatPaceForTTS(averagePace);
   const spokenTargetPace = formatPaceForTTS(targetPace);
@@ -4498,7 +4518,7 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
 
   // Build runner status block (shared across all types)
   let status = `Runner Status:
-- Distance: ${distance.toFixed(2)}km${targetDistance ? ` of ${targetDistance}km (${progress}%)` : ''} — ${remaining}km remaining
+- Distance: ${formatDistanceForCoaching(distance)}${targetDistance ? ` of ${formatDistanceForCoaching(targetDistance)} (${progress}%)` : ''} — ${remaining} remaining
 - Time: ${timeMin} minutes
 - Current pace: ${spokenPace}
 - Average pace: ${spokenAvgPace}`;
@@ -4580,7 +4600,7 @@ ${noTerrainRule}
 ${aerobicMilestoneContext}
 
 Give a celebratory, motivating message (2-3 sentences):
-1. Acknowledge the milestone (${milestonePercent}% done, ${distance.toFixed(1)}km covered)
+1. Acknowledge the milestone (${milestonePercent}% done, ${formatDistanceForCoaching(distance)} covered)
 2. Reinforce what they've done well so far (reference their actual pace, consistency, or effort)
 3. Set the tone for the next phase:
 ${milestonePercent && milestonePercent <= 25 ? '   - Quarter way: "Great start, settle into your rhythm, lots of running ahead"' :
@@ -5039,7 +5059,7 @@ Runner Profile:
   const recentRunsContext = recentRuns.slice(0, 3).length > 0
     ? `\nRecent Runs (last ${recentRuns.slice(0, 3).length}):\n` +
       recentRuns.slice(0, 3).map((r, i) =>
-        `  Run ${i + 1}: ${r.distanceKm.toFixed(1)}km in ${r.durationMinutes}min ` +
+        `  Run ${i + 1}: ${formatDistanceForCoaching(r.distanceKm)} in ${r.durationMinutes}min ` +
         `@ ${formatPaceForPrompt(r.avgPaceSecPerKm)}${r.avgHR ? ` / ${r.avgHR}bpm avg HR` : ""}`
       ).join("\n")
     : "\nRecent Runs: No data available";

@@ -4,77 +4,63 @@ import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.android.billingclient.api.ProductDetails
-import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.theme.Colors
+import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 
-/**
- * Subscription/Premium features screen.
- * Displays available subscription options and allows users to purchase.
- */
 @Composable
 fun SubscriptionScreen(
     viewModel: SubscriptionViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit = {},
-    onNavigateToLogin: () -> Unit = {},
-    onBackClick: () -> Unit = {}
+    @Suppress("UNUSED_PARAMETER") onNavigateToLogin: () -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") onBackClick: () -> Unit = {}
 ) {
     val subscriptions by viewModel.subscriptions.collectAsState()
     val billingConnectionState by viewModel.billingConnectionState.collectAsState()
     val context = LocalContext.current
     val activity = context as? Activity
-
     val isPremium = viewModel.isPremiumUser()
+    
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Plans, 1 = Usage
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
     ) {
-        // Top Bar with Back Button
+        // Navigation Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .background(Colors.backgroundDefault)
+                .padding(horizontal = Spacing.lg, vertical = Spacing.lg),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -87,461 +73,854 @@ fun SubscriptionScreen(
                 tint = Colors.textPrimary
             )
             Text(
-                text = "Premium Subscription",
+                text = "Account Management",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = Colors.textPrimary
             )
-            Spacer(modifier = Modifier.width(24.dp)) // Spacer for balance
+            Spacer(modifier = Modifier.width(24.dp))
         }
 
+        // Tab Bar
+        CustomTabBar(selectedTab = selectedTab) { selectedTab = it }
+
+        // Content
         if (billingConnectionState) {
-            LazyColumn(
+            when (selectedTab) {
+                0 -> PlansTabContent(subscriptions, isPremium, activity, viewModel)
+                1 -> UsageTabContent(viewModel)
+            }
+        } else {
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Colors.backgroundRoot),
-                contentPadding = PaddingValues(16.dp)
+                    .background(Colors.backgroundDefault),
+                contentAlignment = Alignment.Center
             ) {
-                // Header
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "Choose Your Plan",
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Colors.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Select a plan to unlock AI coaching and personalized training",
-                            fontSize = 14.sp,
-                            color = Colors.textSecondary,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
+                CircularProgressIndicator(color = Colors.primary)
+            }
+        }
+    }
+}
 
-                // Features Comparison
-                item {
-                    SubscriptionFeaturesComparison()
-                }
-
-                // Organize subscriptions by tier
-                val liteSubscriptions = subscriptions.filter { sub ->
-                    sub.productId.startsWith("lite_")
-                }.sortedBy { it.productId }
-                
-                val standardSubscriptions = subscriptions.filter { sub ->
-                    sub.productId.startsWith("standard_")
-                }.sortedBy { it.productId }
-
-                // Lite Tier Section
-                if (liteSubscriptions.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "Lite Plan",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Colors.textPrimary,
-                            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-                        )
-                    }
-                    
-                    item {
-                        Text(
-                            text = "Essential AI coaching features",
-                            fontSize = 13.sp,
-                            color = Colors.textSecondary,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                    }
-                    
-                    items(liteSubscriptions.size) { index ->
-                        SubscriptionCard(
-                            productDetails = liteSubscriptions[index],
-                            isPurchased = isPremium,
-                            tier = "Lite",
-                            onPurchaseClick = {
-                                if (activity != null) {
-                                    viewModel.purchaseSubscription(activity, liteSubscriptions[index])
-                                }
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-                }
-
-                // Standard Tier Section
-                if (standardSubscriptions.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "Standard Plan",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Colors.textPrimary,
-                            modifier = Modifier.padding(top = 20.dp, bottom = 8.dp)
-                        )
-                    }
-                    
-                    item {
-                        Text(
-                            text = "Full suite of AI coaching and analytics",
-                            fontSize = 13.sp,
-                            color = Colors.textSecondary,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                    }
-                    
-                    items(standardSubscriptions.size) { index ->
-                        SubscriptionCard(
-                            productDetails = standardSubscriptions[index],
-                            isPurchased = isPremium,
-                            tier = "Standard",
-                            onPurchaseClick = {
-                                if (activity != null) {
-                                    viewModel.purchaseSubscription(activity, standardSubscriptions[index])
-                                }
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-                }
-
-                // Current Subscription Status
-                if (isPremium) {
-                    item {
-                        CurrentSubscriptionStatusCard(viewModel = viewModel)
-                    }
-                }
-
-                // Footer
-                item {
-                    Spacer(modifier = Modifier.height(32.dp))
+@Composable
+private fun CustomTabBar(
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundDefault)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Colors.backgroundSecondary)
+                .padding(horizontal = Spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            listOf("Plans", "Usage").forEachIndexed { index, label ->
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onTabSelected(index) }
+                        .padding(vertical = Spacing.lg),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
-                        text = "Subscriptions renew automatically. Cancel anytime in your Google Play settings.",
-                        fontSize = 12.sp,
-                        color = Colors.textMuted,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
+                        text = label,
+                        fontSize = 16.sp,
+                        fontWeight = if (selectedTab == index) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selectedTab == index) Colors.textPrimary else Colors.textSecondary
                     )
                 }
             }
-        } else {
-            Column(
+        }
+        
+        // Animated indicator
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .background(Colors.backgroundSecondary)
+        ) {
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(16.dp))
+                    .fillMaxWidth(0.5f)
+                    .height(2.dp)
+                    .background(Colors.primary)
+                    .align(if (selectedTab == 0) Alignment.TopStart else Alignment.TopEnd)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlansTabContent(
+    subscriptions: List<ProductDetails>,
+    isPremium: Boolean,
+    activity: Activity?,
+    viewModel: SubscriptionViewModel
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Colors.backgroundDefault),
+        contentPadding = PaddingValues(vertical = Spacing.lg)
+    ) {
+        // Subtitle
+        item {
+            Text(
+                text = "Choose a plan that fits your running",
+                fontSize = 16.sp,
+                color = Colors.textSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.xl, vertical = Spacing.lg)
+            )
+        }
+
+        // Billing Period Toggle
+        item {
+            BillingPeriodToggle()
+        }
+
+        // Plan Cards
+        val freeTier = PlanData.FREE
+        val liteTier = PlanData.LITE
+        val standardTier = PlanData.STANDARD
+
+        item {
+            PlanCard(
+                plan = freeTier,
+                isCurrent = !isPremium,
+                onUpgradeClick = {}
+            )
+            Spacer(modifier = Modifier.height(Spacing.lg))
+        }
+
+        item {
+            PlanCard(
+                plan = liteTier,
+                isCurrent = false,
+                onUpgradeClick = {
+                    activity?.let {
+                        val liteProduct = subscriptions.find { sub ->
+                            sub.productId.startsWith("lite_")
+                        }
+                        if (liteProduct != null) {
+                            viewModel.purchaseSubscription(it, liteProduct)
+                        }
+                    }
+                }
+            )
+            Spacer(modifier = Modifier.height(Spacing.lg))
+        }
+
+        item {
+            PlanCard(
+                plan = standardTier,
+                isCurrent = false,
+                isPopular = true,
+                onUpgradeClick = {
+                    activity?.let {
+                        val standardProduct = subscriptions.find { sub ->
+                            sub.productId.startsWith("standard_")
+                        }
+                        if (standardProduct != null) {
+                            viewModel.purchaseSubscription(it, standardProduct)
+                        }
+                    }
+                }
+            )
+            Spacer(modifier = Modifier.height(Spacing.xxxl))
+        }
+
+        // Manage Subscription Link (Paid users)
+        if (isPremium) {
+            item {
                 Text(
-                    text = "Loading subscription plans...",
-                    color = Colors.textSecondary
+                    text = "Manage Subscription",
+                    fontSize = 14.sp,
+                    color = Colors.primary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.lg)
+                        .clickable { /* Open Google Play subscription management */ }
                 )
             }
         }
-    }
-}
 
-/**
- * Shows features comparison between Lite and Standard tiers.
- */
-@Composable
-fun SubscriptionFeaturesComparison() {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Colors.backgroundSecondary
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        // Footnotes
+        item {
             Text(
-                text = "What's Included",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = Colors.textPrimary,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-            
-            val freeFeatures = listOf(
-                "✗ No AI Training Plans"
-            )
-            
-            val liteFeatures = listOf(
-                "1 AI Training Plan per month",
-                "Basic performance tracking",
-                "Weekly coaching tips",
-                "Mobile app access"
-            )
-            
-            val standardFeatures = listOf(
-                "3 AI Training Plans per month",
-                "Advanced training plan customization",
-                "Real-time performance analytics",
-                "Injury prevention recommendations",
-                "Priority support",
-                "Export training history"
-            )
-            
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Free Tier
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Free",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Colors.textMuted,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    freeFeatures.forEach { feature ->
-                        Text(
-                            text = feature,
-                            fontSize = 11.sp,
-                            color = Colors.textMuted,
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-                
-                // Lite Features
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Lite",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Colors.textPrimary,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    liteFeatures.forEach { feature ->
-                        Row(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Included",
-                                tint = Colors.primary,
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .padding(top = 2.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = feature,
-                                fontSize = 11.sp,
-                                color = Colors.textSecondary,
-                                lineHeight = 14.sp
-                            )
-                        }
-                    }
-                }
-                
-                // Standard Features
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Standard",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Colors.textPrimary,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    standardFeatures.forEach { feature ->
-                        Row(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Included",
-                                tint = Colors.primary,
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .padding(top = 2.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = feature,
-                                fontSize = 11.sp,
-                                color = Colors.textSecondary,
-                                lineHeight = 14.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Individual subscription option card.
- */
-@Composable
-fun SubscriptionCard(
-    productDetails: ProductDetails,
-    isPurchased: Boolean,
-    tier: String = "",
-    onPurchaseClick: () -> Unit
-) {
-    val offerDetails = productDetails.subscriptionOfferDetails?.firstOrNull()
-    val pricingPhase = offerDetails?.pricingPhases?.pricingPhaseList?.firstOrNull()
-    
-    // Determine if this is monthly or annual based on product ID
-    val isMonthly = productDetails.productId.contains("monthly")
-    val billingPeriod = if (isMonthly) "month" else "year"
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Colors.backgroundSecondary
-        ),
-        border = if (isPurchased)
-            BorderStroke(width = 2.dp, color = Colors.primary)
-        else null
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (isMonthly) "Monthly" else "Annual",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    if (!isMonthly) {
-                        Text(
-                            text = "Save 17%",
-                            fontSize = 12.sp,
-                            color = Colors.primary,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-
-                if (isPurchased) {
-                    Surface(
-                        color = Colors.primary,
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = "ACTIVE",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = androidx.compose.ui.graphics.Color.White,
-                            modifier = Modifier.padding(6.dp, 4.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Price
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = pricingPhase?.formattedPrice ?: "Loading...",
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Colors.primary
-                    )
-                    Text(
-                        text = "per $billingPeriod",
-                        fontSize = 12.sp,
-                        color = Colors.textSecondary
-                    )
-                }
-
-                if (!isPurchased) {
-                    Button(
-                        onClick = onPurchaseClick,
-                        modifier = Modifier.height(40.dp)
-                    ) {
-                        Text("Subscribe")
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Shows current subscription status for premium users.
- */
-@Composable
-fun CurrentSubscriptionStatusCard(viewModel: SubscriptionViewModel) {
-    val activeSubscriptionId = viewModel.getActiveSubscriptionId()
-
-    if (activeSubscriptionId != null) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = Colors.backgroundSecondary
-            )
-        ) {
-            Column(
+                text = "Prices shown in your local currency.",
+                fontSize = 12.sp,
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(horizontal = Spacing.xl, vertical = Spacing.sm)
+            )
+        }
+
+        item {
+            Text(
+                text = "Subscriptions auto-renew automatically. Cancel any time in Settings > Google Play > Account.",
+                fontSize = 12.sp,
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.xl, vertical = Spacing.sm)
+            )
+        }
+
+        // Links Section
+        item {
+            Spacer(modifier = Modifier.height(Spacing.xxl))
+            LinksSection()
+            Spacer(modifier = Modifier.height(Spacing.xxl))
+        }
+
+        // Danger Zone
+        item {
+            DeleteAccountSection()
+            Spacer(modifier = Modifier.height(Spacing.xxxl))
+        }
+    }
+}
+
+@Composable
+private fun BillingPeriodToggle() {
+    var isAnnual by remember { mutableStateOf<Boolean>(true) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .background(Colors.backgroundTertiary, RoundedCornerShape(10.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        Button(
+            onClick = { isAnnual = false },
+            modifier = Modifier
+                .weight(1f)
+                .height(38.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (!isAnnual) Colors.backgroundSecondary else Color.Transparent
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = "Monthly",
+                fontSize = 14.sp,
+                fontWeight = if (!isAnnual) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (!isAnnual) Colors.textPrimary else Colors.textSecondary
+            )
+        }
+
+        Box(modifier = Modifier.width(1.dp).height(32.dp).background(Colors.backgroundTertiary))
+
+        Button(
+            onClick = { isAnnual = true },
+            modifier = Modifier
+                .weight(1f)
+                .height(38.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isAnnual) Colors.backgroundSecondary else Color.Transparent
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Your Subscription",
-                    fontSize = 16.sp,
+                    text = "Annual",
+                    fontSize = 14.sp,
+                    fontWeight = if (isAnnual) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isAnnual) Colors.textPrimary else Colors.textSecondary
+                )
+                Spacer(modifier = Modifier.width(Spacing.sm))
+                if (isAnnual) {
+                    Surface(
+                        color = Color(0xFF22C55E),
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.height(20.dp).padding(horizontal = 5.dp)
+                    ) {
+                        Text(
+                            text = "SAVE 17%",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Colors.textPrimary,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanCard(
+    plan: PlanData,
+    isCurrent: Boolean = false,
+    isPopular: Boolean = false,
+    onUpgradeClick: () -> Unit = {}
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .border(
+                width = if (isCurrent) 2.dp else 0.dp,
+                color = if (isCurrent) plan.accentColor else Color.Transparent,
+                shape = RoundedCornerShape(20.dp)
+            ),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg)
+        ) {
+            // Header with name and badges
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = plan.name,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Colors.textPrimary
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isPopular) {
+                        Surface(
+                            color = plan.accentColor,
+                            shape = RoundedCornerShape(999.dp)
+                        ) {
+                            Text(
+                                text = "MOST POPULAR",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Colors.buttonText,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                    
+                    if (isCurrent) {
+                        Surface(
+                            color = plan.accentColor.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(999.dp)
+                        ) {
+                            Text(
+                                text = "CURRENT",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = plan.accentColor,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            // Price
+            Row(
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.Bottom
+            ) {
                 Text(
-                    text = activeSubscriptionId,
-                    fontSize = 14.sp,
-                    color = Colors.textSecondary
+                    text = plan.priceDisplay,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = plan.accentColor,
+                    lineHeight = 24.sp
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                if (plan.priceSuffix.isNotEmpty()) {
+                    Text(
+                        text = plan.priceSuffix,
+                        fontSize = 14.sp,
+                        color = Colors.textMuted,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+            }
+
+            if (plan.monthlyEquivalent.isNotEmpty()) {
                 Text(
-                    text = "Manage your subscription in Google Play Store settings",
+                    text = plan.monthlyEquivalent,
+                    fontSize = 12.sp,
+                    color = Colors.textMuted,
+                    modifier = Modifier.padding(top = Spacing.xs)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.lg))
+
+            // Divider
+            HorizontalDivider(
+                color = Colors.border,
+                thickness = 1.dp,
+                modifier = Modifier.padding(vertical = Spacing.md)
+            )
+
+            // Features
+            plan.features.forEach { feature ->
+                FeatureRow(
+                    icon = if (feature.included) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                    text = feature.text,
+                    isIncluded = feature.included,
+                    accentColor = plan.accentColor
+                )
+                if (feature != plan.features.last()) {
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.lg))
+
+            // Upgrade Button
+            if (!isCurrent) {
+                Button(
+                    onClick = onUpgradeClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = plan.accentColor
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        text = "Upgrade to ${plan.name}",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Colors.buttonText
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeatureRow(
+    icon: ImageVector,
+    text: String,
+    isIncluded: Boolean,
+    accentColor: Color
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = if (isIncluded) accentColor else Colors.textMuted
+        )
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            color = if (isIncluded) Colors.textPrimary else Colors.textMuted
+        )
+    }
+}
+
+@Composable
+private fun LinksSection() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            LinkRow("Change Password", Icons.Default.Lock)
+            HorizontalDivider(color = Colors.border, thickness = 1.dp)
+            LinkRow("Privacy Policy", Icons.Default.Security)
+            HorizontalDivider(color = Colors.border, thickness = 1.dp)
+            LinkRow("Terms of Use", Icons.Default.Description)
+            HorizontalDivider(color = Colors.border, thickness = 1.dp)
+            LinkRow("Get Support", Icons.AutoMirrored.Filled.Help)
+        }
+    }
+}
+
+@Composable
+private fun LinkRow(label: String, icon: ImageVector) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { /* Handle navigation */ }
+            .padding(Spacing.lg),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = Colors.textSecondary
+            )
+            Text(
+                text = label,
+                fontSize = 16.sp,
+                color = Colors.textPrimary
+            )
+        }
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = Colors.textMuted
+        )
+    }
+}
+
+@Composable
+private fun DeleteAccountSection() {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+    ) {
+        Button(
+            onClick = { /* Show delete account bottom sheet */ },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFEF4444).copy(alpha = 0.08f)
+            ),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Text(
+                text = "Delete Account",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFFEF4444)
+            )
+        }
+
+        Text(
+            text = "Permanently removes your account",
+            fontSize = 12.sp,
+            color = Colors.textMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = Spacing.sm)
+        )
+    }
+}
+
+@Composable
+private fun UsageTabContent(@Suppress("UNUSED_PARAMETER") viewModel: SubscriptionViewModel) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Colors.backgroundDefault),
+        contentPadding = PaddingValues(vertical = Spacing.lg)
+    ) {
+        // Current Plan Banner
+        item {
+            CurrentPlanBanner()
+        }
+
+        // Usage Rows
+        item {
+            UsageRowsContainer()
+        }
+
+        // Upgrade CTA (Free users only)
+        item {
+            UpgradeCTA()
+        }
+    }
+}
+
+@Composable
+private fun CurrentPlanBanner() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(top = Spacing.lg),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(
+                    text = "Current Plan",
                     fontSize = 12.sp,
                     color = Colors.textMuted
+                )
+                Text(
+                    text = "Standard",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFA78BFA)
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "Resets",
+                    fontSize = 12.sp,
+                    color = Colors.textMuted
+                )
+                Text(
+                    text = "1 Jul 2026",
+                    fontSize = 14.sp,
+                    color = Colors.textSecondary
                 )
             }
         }
     }
 }
 
-// Helper for border
 @Composable
-fun BorderStroke(width: androidx.compose.ui.unit.Dp, color: androidx.compose.ui.graphics.Color): androidx.compose.foundation.BorderStroke {
-    return androidx.compose.foundation.BorderStroke(width, color)
+private fun UsageRowsContainer() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(top = Spacing.lg),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            UsageRow(
+                icon = Icons.Default.Favorite,
+                title = "AI Coaching",
+                usage = 150,
+                limit = 200,
+                unit = "km",
+                accentColor = Color(0xFF34D399)
+            )
+            HorizontalDivider(color = Colors.border, thickness = 1.dp)
+            UsageRow(
+                icon = Icons.Default.Description,
+                title = "AI Run Summaries",
+                usage = 45,
+                limit = 50,
+                unit = "summaries",
+                accentColor = Color(0xFFF59E0B)
+            )
+            HorizontalDivider(color = Colors.border, thickness = 1.dp)
+            UsageRow(
+                icon = Icons.Default.Place,
+                title = "AI Routes",
+                usage = 25,
+                limit = 30,
+                unit = "routes",
+                accentColor = Colors.primary
+            )
+            HorizontalDivider(color = Colors.border, thickness = 1.dp)
+            UsageRow(
+                icon = Icons.Default.DateRange,
+                title = "AI Training Plans",
+                usage = 2,
+                limit = 3,
+                unit = "plans",
+                accentColor = Color(0xFFA78BFA)
+            )
+        }
+    }
+}
+
+@Composable
+private fun UsageRow(
+    icon: ImageVector,
+    title: String,
+    usage: Int,
+    limit: Int,
+    unit: String,
+    accentColor: Color
+) {
+    val progressValue = (usage.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
+    val barColor = when {
+        usage >= limit -> Color(0xFFFF5252)
+        usage >= (limit * 0.8f) -> Color(0xFFF59E0B)
+        else -> accentColor
+    }
+    val countColor = when {
+        usage >= limit -> Color(0xFFFF5252)
+        usage >= (limit * 0.8f) -> Color(0xFFF59E0B)
+        else -> Colors.textSecondary
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(Spacing.lg)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier.width(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = accentColor
+                    )
+                }
+                Text(
+                    text = title,
+                    fontSize = 16.sp,
+                    color = Colors.textPrimary
+                )
+            }
+            Text(
+                text = "$usage / $limit $unit",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = countColor
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        LinearProgressIndicator(
+            progress = { progressValue },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
+            color = barColor,
+            trackColor = Colors.backgroundTertiary
+        )
+    }
+}
+
+@Composable
+private fun UpgradeCTA() {
+    Button(
+        onClick = { /* Switch to Plans tab */ },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(top = Spacing.xxl)
+            .height(46.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.ArrowUpward,
+            contentDescription = null,
+            modifier = Modifier
+                .size(18.dp)
+                .padding(end = Spacing.sm)
+        )
+        Text(
+            text = "Upgrade for more",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Colors.buttonText
+        )
+    }
+}
+
+// Plan Data Model
+data class PlanFeature(
+    val text: String,
+    val included: Boolean
+)
+
+data class PlanData(
+    val name: String,
+    val priceDisplay: String,
+    val priceSuffix: String = "",
+    val monthlyEquivalent: String = "",
+    val accentColor: Color,
+    val features: List<PlanFeature>
+) {
+    companion object {
+        val FREE = PlanData(
+            name = "Free",
+            priceDisplay = "Free",
+            priceSuffix = "",
+            accentColor = Color(0xFF8E9BAE),
+            features = listOf(
+                PlanFeature("1 AI Run per month", true),
+                PlanFeature("10km of AI Coaching per month", true),
+                PlanFeature("5 AI Post-Run Summaries per month", true),
+                PlanFeature("3 AI Route Generations per month", true),
+                PlanFeature("No AI Training Plans", false)
+            )
+        )
+
+        val LITE = PlanData(
+            name = "Lite",
+            priceDisplay = "$7.99",
+            priceSuffix = "/month",
+            monthlyEquivalent = "$6.67/month",
+            accentColor = Colors.primary,
+            features = listOf(
+                PlanFeature("Unlimited AI Runs", true),
+                PlanFeature("50km of AI Coaching per month", true),
+                PlanFeature("15 AI Post-Run Summaries per month", true),
+                PlanFeature("10 AI Route Generations per month", true),
+                PlanFeature("1 AI Training Plan per month", true)
+            )
+        )
+
+        val STANDARD = PlanData(
+            name = "Standard",
+            priceDisplay = "$14.99",
+            priceSuffix = "/month",
+            monthlyEquivalent = "$12.50/month",
+            accentColor = Color(0xFFA78BFA),
+            features = listOf(
+                PlanFeature("20 AI Runs per month", true),
+                PlanFeature("200km of AI Coaching per month", true),
+                PlanFeature("50 AI Post-Run Summaries per month", true),
+                PlanFeature("30 AI Route Generations per month", true),
+                PlanFeature("3 AI Training Plan generations per month", true)
+            )
+        )
+    }
 }

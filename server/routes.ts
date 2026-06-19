@@ -9959,7 +9959,42 @@ function transformRunForAndroid(run: any) {
         .where(and(eq(runs.userId, userId), eq(runs.externalId, sessionId)));
 
       if (!existingRun) {
-        console.log(`[Offline Batch] No run found for session ${sessionId} — creating run from batch (phone-less run)`);
+        // ── Dedup against phone-uploaded runs ─────────────────────────────────
+        // The watch now ALWAYS fills an offline buffer for non-phone-controlled runs,
+        // even when _isConnected = true (Scenario 2). If the phone ALSO tracked the
+        // run successfully, a run record already exists (externalId = null, no match
+        // above). Check for it here and link the batch as GPS enrichment instead of
+        // creating a duplicate.
+        const distKmCheck = distanceM ? distanceM / 1000 : 0;
+        if (distKmCheck >= 0.1) {
+          const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+          const phoneRuns = await db
+            .select({ id: runs.id, distance: runs.distance })
+            .from(runs)
+            .where(and(
+              eq(runs.userId, userId),
+              gte(runs.createdAt, twoHoursAgo),
+              isNull(runs.externalId),   // phone-uploaded runs have no externalId
+            ))
+            .limit(10);
+          const phoneMatch = phoneRuns.find((r: any) =>
+            Math.abs((r.distance ?? 0) - distKmCheck) / Math.max(distKmCheck, 0.1) < 0.1
+          );
+          if (phoneMatch) {
+            console.log(`[Offline Batch] Phone run ${phoneMatch.id} matches batch (${distKmCheck.toFixed(2)} km) — linking GPS track to phone run, no duplicate created`);
+            // Tag the phone run with the watch session ID + source so future lookups match
+            await db.update(runs).set({
+              externalId:     sessionId,
+              externalSource: 'garmin_companion',
+              hasGarminData:  true,
+            }).where(eq(runs.id, phoneMatch.id));
+            existingRun = phoneMatch as any;
+          }
+        }
+      }
+
+      if (!existingRun) {
+        console.log(`[Offline Batch] No run found for session ${sessionId} — creating run from batch (phone-less or service-failed run)`);
 
         // Derive basic summary from batch data if not provided in body
         const distKm   = distanceM  ? distanceM  / 1000 : 0;

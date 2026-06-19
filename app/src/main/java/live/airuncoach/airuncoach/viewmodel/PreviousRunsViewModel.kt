@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
+import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
+import live.airuncoach.airuncoach.di.GarminWatchManagerEntryPoint
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
@@ -98,7 +100,35 @@ class PreviousRunsViewModel @Inject constructor(
     private val _personalBestRunIds = MutableStateFlow<Set<String>>(emptySet())
     val personalBestRunIds: StateFlow<Set<String>> = _personalBestRunIds.asStateFlow()
 
-    fun fetchRuns() {
+    // Emits the timestamp of the latest watch offline-run sync. We observe it so a
+    // newly-synced watch run shows up in history immediately, even if this screen is
+    // already open (the run cache is invalidated by GarminWatchManager on sync).
+    private val runSyncedEvent: StateFlow<Long>? by lazy {
+        try {
+            val entry = EntryPointAccessors.fromApplication(
+                context,
+                GarminWatchManagerEntryPoint::class.java
+            )
+            entry.garminWatchManager().runSyncedEvent
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    init {
+        runSyncedEvent?.let { events ->
+            viewModelScope.launch {
+                events.collect { ts ->
+                    if (ts > 0L) {
+                        android.util.Log.d("PreviousRunsViewModel", "Watch run synced (ts=$ts) — refreshing run list")
+                        fetchRuns(forceRefresh = true)
+                    }
+                }
+            }
+        }
+    }
+
+    fun fetchRuns(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
@@ -106,8 +136,8 @@ class PreviousRunsViewModel @Inject constructor(
                 android.util.Log.d("PreviousRunsViewModel", "=== FETCH RUNS STARTED ===")
                 val userId = getUserId()
                 if (userId != null) {
-                    android.util.Log.d("PreviousRunsViewModel", "✅ Fetching runs for user: $userId")
-                    val allRuns = runRepository.getRunsForUser(userId)  // ⚡ Use repository (cached)
+                    android.util.Log.d("PreviousRunsViewModel", "✅ Fetching runs for user: $userId (forceRefresh=$forceRefresh)")
+                    val allRuns = runRepository.getRunsForUser(userId, forceRefresh)  // ⚡ Use repository (cached)
                     _allRuns.value = allRuns
                     applyRunFilters()
                     // Check for active Garmin Connect authentication

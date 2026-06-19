@@ -5,6 +5,7 @@ using Toybox.System as Sys;
 using Toybox.Application as App;
 using Toybox.Lang as Lang;
 
+(:gui)
 class DataStreamer {
     
     private var _sessionId = null;

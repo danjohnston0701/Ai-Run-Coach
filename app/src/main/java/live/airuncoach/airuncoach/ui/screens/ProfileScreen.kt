@@ -71,6 +71,7 @@ fun ProfileScreen(
     onNavigateToConnectedDevices: () -> Unit,
     onNavigateToSubscription: () -> Unit,
     onNavigateToCoachingProgramme: () -> Unit = {},
+    onNavigateToInjuries: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val viewModel: ProfileViewModel = hiltViewModel()
@@ -266,6 +267,7 @@ fun ProfileScreen(
         item {
             SettingsSection {
                 SettingsItem(icon = R.drawable.icon_profile_vector, text = "Personal Details", onClick = onNavigateToPersonalDetails)
+                SettingsItem(icon = R.drawable.icon_heart_vector, text = "Health & Injuries", onClick = onNavigateToInjuries)
                 SettingsItem(icon = R.drawable.icon_trophy_vector, text = "My Data", onClick = onNavigateToMyData)
                 SettingsItem(icon = R.drawable.icon_chart_vector, text = "Fitness Level", onClick = onNavigateToFitnessLevel)
                 SettingsItem(icon = R.drawable.icon_target_vector, text = "Goals", onClick = onNavigateToGoals)
