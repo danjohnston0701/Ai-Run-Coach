@@ -1703,12 +1703,12 @@ function transformRunForAndroid(run: any) {
       }
       
       // Calculate totalSteps from cadence if available
-      // Formula: steps = cadence (steps/min) × duration (minutes)
+      // Simple formula: steps = avg_cadence (steps/min) × duration (minutes)
       let totalSteps = runData.totalSteps || 0;
-      if ((totalSteps === 0 || !totalSteps) && runData.cadence && durationInSeconds) {
+      if ((totalSteps === 0 || !totalSteps) && runData.cadence && durationInSeconds > 0) {
         const durationMinutes = durationInSeconds / 60;
         totalSteps = Math.round(runData.cadence * durationMinutes);
-        console.log(`[POST /api/runs] Calculated totalSteps: ${runData.cadence} steps/min × ${durationMinutes.toFixed(1)} min = ${totalSteps} steps`);
+        console.log(`[POST /api/runs] Calculated totalSteps: ${runData.cadence} spm × ${durationMinutes.toFixed(1)} min = ${totalSteps} steps`);
       }
 
       // Helper to safely parse dates - handles both ISO strings and Unix timestamps

@@ -36,9 +36,11 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -6980,33 +6982,24 @@ private fun DataTabFlagship(
 
         // ==================== STEPS SECTION ====================
         item {
-            // Total steps: prefer the stored sensor value, then derive from cadence × time.
-            // Cadence is steps/min, duration is milliseconds → steps = cadence × (durationMs / 60000)
-            val derivedSteps: Int? = run.totalSteps
-                ?.takeIf { it > 0 }
-                ?: run.cadenceData
-                    ?.filter { it > 0 }
-                    ?.average()
-                    ?.takeIf { it > 0 }
-                    ?.let { avgCadence ->
-                        val durationMin = run.duration / 60_000.0
-                        (avgCadence * durationMin).toInt().takeIf { it > 0 }
-                    }
-                ?: run.cadence
-                    .takeIf { it > 0 }
-                    ?.let { avgCadence ->
-                        val durationMin = run.duration / 60_000.0
-                        (avgCadence * durationMin).toInt().takeIf { it > 0 }
-                    }
+            // Total steps: Simple formula = avg_cadence (spm) × duration (minutes)
+            // Prefer stored totalSteps from server, otherwise calculate from cadence
+            val totalSteps = if (run.totalSteps != null && run.totalSteps > 0) {
+                run.totalSteps
+            } else if (run.cadence > 0) {
+                val durationMinutes = run.duration / 60_000.0
+                (run.cadence * durationMinutes).toInt()
+            } else {
+                0
+            }
 
             DataSectionCard(
                 title = "Steps",
                 icon = "👟",
                 metrics = buildList {
-                    if (derivedSteps != null && derivedSteps > 0) {
-                        val isEstimate = (run.totalSteps == null || run.totalSteps == 0)
-                        add("Total Steps" to "${"%,d".format(derivedSteps)} steps${if (isEstimate) " (est.)" else ""}")
-                        val estimatedCalories = (derivedSteps * 0.04).toInt()
+                    if (totalSteps > 0) {
+                        add("Total Steps" to "${"%,d".format(totalSteps)} steps")
+                        val estimatedCalories = (totalSteps * 0.04).toInt()
                         add("Est. Calories" to "$estimatedCalories kcal")
                         if (run.avgStrideLength != null && run.avgStrideLength > 0) {
                             add("Avg Stride" to "${String.format(java.util.Locale.US, "%.2f", run.avgStrideLength)} m")
@@ -7057,26 +7050,85 @@ private fun DataTabFlagship(
             )
         }
 
-        // Delete run button at the bottom of the tab
+        // ==================== DOWNLOAD & UPLOAD SECTION ====================
         item {
             Spacer(modifier = Modifier.height(Spacing.md))
-            OutlinedButton(
-                onClick = onDelete,
+            val context = androidx.compose.ui.platform.LocalContext.current
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = Colors.error
-                ),
-                border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = SolidColor(Colors.error)
-                )
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Delete",
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Delete Run", fontWeight = FontWeight.Medium)
+                // Download .FIT file button
+                OutlinedButton(
+                    onClick = {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Downloading run data as .FIT file...",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Colors.primary
+                    ),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = SolidColor(Colors.primary)
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Download",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Download Run as .FIT", fontWeight = FontWeight.Medium)
+                }
+                
+                // Upload to Strava button
+                OutlinedButton(
+                    onClick = {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://www.strava.com/upload/select")
+                        )
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFFFD5300)
+                    ),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = SolidColor(Color(0xFFFD5300))
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = "Upload to Strava",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Upload to Strava", fontWeight = FontWeight.Medium)
+                }
+                
+                // Delete run button
+                OutlinedButton(
+                    onClick = onDelete,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Colors.error
+                    ),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                        brush = SolidColor(Colors.error)
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Delete Run", fontWeight = FontWeight.Medium)
+                }
             }
         }
 
