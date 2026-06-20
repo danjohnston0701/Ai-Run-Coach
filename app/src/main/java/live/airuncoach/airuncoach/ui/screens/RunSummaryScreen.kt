@@ -7110,7 +7110,10 @@ private fun DataTabFlagship(
                     Text("Upload to Strava", fontWeight = FontWeight.Medium)
                 }
                 
-                // Delete run button
+                // Separator spacer for visual distinction
+                Spacer(modifier = Modifier.height(Spacing.md))
+                
+                // Delete run button (destructive action, visually separated)
                 OutlinedButton(
                     onClick = onDelete,
                     modifier = Modifier.fillMaxWidth(),
