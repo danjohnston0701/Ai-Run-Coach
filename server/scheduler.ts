@@ -265,12 +265,12 @@ async function sendCoachingPlanReminders(): Promise<void> {
 export function startScheduler(): void {
   console.log('[Scheduler] Starting background scheduler (Garmin sync every 6 hours)');
   
-  // Garmin wellness data sync (⚡ Optimized: every hour → every 6 hours, CU reduction)
-  // "0 */6 * * *" = at minute 0, every 6th hour (00:00, 06:00, 12:00, 18:00)
-  cron.schedule('0 */6 * * *', () => {
-    runGarminSync();
-  });
-  console.log('[Scheduler] Garmin wellness sync scheduled (every 6 hours)');
+  // Garmin wellness data sync — DISABLED (Garmin API no longer available)
+  // Previously ran every 6 hours, but the Garmin Connect API is now disabled
+  // cron.schedule('0 */6 * * *', () => {
+  //   runGarminSync();
+  // });
+  console.log('[Scheduler] Garmin wellness sync DISABLED (Garmin API unavailable)');
   
   // Coaching plan reminders (⚡ Optimized: hourly → once daily at 8 AM UTC, respects user timezone)
   cron.schedule('0 8 * * *', () => {
