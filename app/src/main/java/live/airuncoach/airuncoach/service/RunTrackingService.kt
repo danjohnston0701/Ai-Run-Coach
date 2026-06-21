@@ -4270,10 +4270,11 @@ class RunTrackingService : Service(), SensorEventListener {
         // Calculate expected max HR from age if available; otherwise use highest recorded HR
         // IMPORTANT: Don't fall back to currentHeartRate as it's too low early in run!
         // Tanaka formula: maxHR = 208 - (0.7 × age)
+        val userSnapshot = currentUser
         val maxHrValue = if (maxHr > 0) {
             maxHr
-        } else if (currentUser?.age != null && currentUser.age!! > 0) {
-            val calculatedMaxHr = (208 - (0.7 * currentUser.age!!)).toInt()
+        } else if (userSnapshot?.age != null && userSnapshot.age!! > 0) {
+            val calculatedMaxHr = (208 - (0.7 * userSnapshot.age!!)).toInt()
             calculatedMaxHr
         } else {
             190 // Generic fallback for unknown age

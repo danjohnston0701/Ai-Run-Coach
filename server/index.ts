@@ -359,8 +359,6 @@ function setupErrorHandler(app: express.Application) {
     const message = error.message || "Internal Server Error";
 
     res.status(status).json({ message });
-
-    throw err;
   });
 }
 
@@ -372,6 +370,11 @@ function setupErrorHandler(app: express.Application) {
   // ⚡ Add Cache-Control headers to GET responses (30-50% additional bandwidth reduction)
   setupCacheHeaders(app);
   setupRequestLogging(app);
+
+  // Healthcheck endpoint — registered BEFORE routes so Replit's probe always gets 200
+  app.get(["/health", "/api/health"], (_req, res) => {
+    res.json({ status: "ok", service: "AI Run Coach API" });
+  });
 
   // Run schema auto-migrations before anything else touches the DB
   await runAutoMigrations();
