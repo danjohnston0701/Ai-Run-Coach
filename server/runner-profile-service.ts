@@ -135,15 +135,22 @@ export async function refreshRunnerProfile(userId: string): Promise<void> {
 }
 
 /**
- * Read the current runner profile from cache.
- * Returns null if not yet generated.
+ * Read the current runner profile from cache along with its last updated timestamp.
+ * Returns { profile, updatedAt } or { profile: null, updatedAt: null } if not yet generated.
  */
-export async function getRunnerProfile(userId: string): Promise<string | null> {
+export async function getRunnerProfile(userId: string): Promise<{ profile: string | null; updatedAt: string | null }> {
   const [row] = await db
-    .select({ aiRunnerProfile: userStats.aiRunnerProfile })
+    .select({
+      aiRunnerProfile: userStats.aiRunnerProfile,
+      aiRunnerProfileUpdatedAt: userStats.aiRunnerProfileUpdatedAt,
+    })
     .from(userStats)
     .where(eq(userStats.userId, userId));
-  return row?.aiRunnerProfile ?? null;
+  
+  return {
+    profile: row?.aiRunnerProfile ?? null,
+    updatedAt: row?.aiRunnerProfileUpdatedAt ? new Date(row.aiRunnerProfileUpdatedAt).toISOString() : null,
+  };
 }
 
 /**

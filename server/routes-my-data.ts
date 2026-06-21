@@ -187,15 +187,16 @@ router.get('/coaching-summary', authMiddleware, async (req: AuthenticatedRequest
  * GET /api/my-data/runner-profile
  * Return the current AI runner profile ("What I know about you") for the
  * authenticated user.  Returns null if not yet generated.
+ * Also returns the last updated timestamp (ISO 8601 format).
  */
 router.get('/runner-profile', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const profile = await getRunnerProfile(userId);
+    const { profile, updatedAt } = await getRunnerProfile(userId);
 
-    res.json({ success: true, data: { profile } });
+    res.json({ success: true, data: { profile, updatedAt } });
   } catch (error: any) {
     console.error('[RunnerProfile] GET error:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch runner profile', message: error.message });
@@ -206,6 +207,7 @@ router.get('/runner-profile', authMiddleware, async (req: AuthenticatedRequest, 
  * POST /api/my-data/refresh-runner-profile
  * Trigger an immediate (awaited) regeneration of the AI runner profile.
  * Useful after onboarding, goal changes, or injury updates — or for testing.
+ * Also returns the updated timestamp.
  */
 router.post('/refresh-runner-profile', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -213,9 +215,9 @@ router.post('/refresh-runner-profile', authMiddleware, async (req: Authenticated
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     await refreshRunnerProfile(userId);
-    const profile = await getRunnerProfile(userId);
+    const { profile, updatedAt } = await getRunnerProfile(userId);
 
-    res.json({ success: true, data: { profile } });
+    res.json({ success: true, data: { profile, updatedAt } });
   } catch (error: any) {
     console.error('[RunnerProfile] Refresh error:', error);
     res.status(500).json({ success: false, error: 'Failed to refresh runner profile', message: error.message });

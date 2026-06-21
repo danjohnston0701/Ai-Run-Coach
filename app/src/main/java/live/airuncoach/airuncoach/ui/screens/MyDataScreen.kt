@@ -98,6 +98,7 @@ fun MyDataScreen(
     val allTimeStats by viewModel.allTimeStats.collectAsState()
     val coachingSummary by viewModel.coachingSummary.collectAsState()
     val aiCoachReview by viewModel.aiCoachReview.collectAsState()
+    val aiCoachReviewUpdatedAt by viewModel.aiCoachReviewUpdatedAt.collectAsState()
     
     val pullRefreshState = rememberPullRefreshState(
         refreshing = isLoading,
@@ -169,7 +170,10 @@ fun MyDataScreen(
                         // Section 0: AI Coach's Review — living profile summary
                         if (!aiCoachReview.isNullOrBlank()) {
                             item {
-                                AiCoachReviewSection(review = aiCoachReview!!)
+                                AiCoachReviewSection(
+                                    review = aiCoachReview!!,
+                                    updatedAt = aiCoachReviewUpdatedAt
+                                )
                                 Spacer(modifier = Modifier.height(Spacing.lg))
                             }
                         }
@@ -297,13 +301,29 @@ private fun SectionHeader(title: String) {
 }
 
 /**
+ * Format ISO 8601 timestamp to a human-readable "last updated" date.
+ * Example: "2024-06-21T15:30:45.123Z" → "Updated Jun 21, 2024"
+ */
+private fun formatLastUpdatedDate(isoTimestamp: String?): String {
+    if (isoTimestamp.isNullOrBlank()) return ""
+    return try {
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
+        val date = dateFormat.parse(isoTimestamp.take(19))
+        val outputFormat = java.text.SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+        if (date != null) "Updated ${outputFormat.format(date)}" else ""
+    } catch (_: Exception) {
+        ""
+    }
+}
+
+/**
  * AI Coach's Review — displays the living "What I know about you" runner profile.
  * This is the accumulated AI coach intelligence: patterns, tendencies, and
  * observations that have built up from every post-run analysis.
  * Only shown when a profile has been generated (requires at least one completed run).
  */
 @Composable
-private fun AiCoachReviewSection(review: String) {
+private fun AiCoachReviewSection(review: String, updatedAt: String? = null) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -338,6 +358,16 @@ private fun AiCoachReviewSection(review: String) {
                     style = AppTextStyles.caption,
                     color = Colors.textSecondary
                 )
+                // Last updated timestamp — subtle and smaller
+                if (!updatedAt.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = formatLastUpdatedDate(updatedAt),
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        fontSize = 10.sp
+                    )
+                }
             }
         }
 

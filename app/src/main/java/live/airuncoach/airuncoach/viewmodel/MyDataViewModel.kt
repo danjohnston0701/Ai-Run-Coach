@@ -167,6 +167,10 @@ class MyDataViewModel @Inject constructor(
     private val _aiCoachReview = MutableStateFlow<String?>(null)
     val aiCoachReview: StateFlow<String?> = _aiCoachReview.asStateFlow()
     
+    // Timestamp of when the AI Coach's Review was last updated
+    private val _aiCoachReviewUpdatedAt = MutableStateFlow<String?>(null)
+    val aiCoachReviewUpdatedAt: StateFlow<String?> = _aiCoachReviewUpdatedAt.asStateFlow()
+    
     // Cache with TTL (5 minutes)
     private var lastLoadTime = 0L
     private val cacheValidityMs = 5 * 60 * 1000
@@ -381,8 +385,10 @@ class MyDataViewModel @Inject constructor(
             val response = apiService.getMyDataRunnerProfile()
             if (response.isSuccessful) {
                 val profile = response.body()?.data?.get("profile") as? String
+                val updatedAt = response.body()?.data?.get("updatedAt") as? String
                 _aiCoachReview.value = profile
-                Log.d(tag, "Loaded AI coach review (${profile?.length ?: 0} chars)")
+                _aiCoachReviewUpdatedAt.value = updatedAt
+                Log.d(tag, "Loaded AI coach review (${profile?.length ?: 0} chars), updated at: $updatedAt")
             } else {
                 Log.w(tag, "Runner profile response not successful: ${response.code()}")
             }
