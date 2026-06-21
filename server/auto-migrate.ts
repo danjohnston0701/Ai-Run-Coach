@@ -191,7 +191,7 @@ export async function runAutoMigrations(): Promise<void> {
   try {
     const result = await pool.query(`
       UPDATE runs
-      SET "aiCoachingNotes" = (
+      SET "ai_Coaching_Notes" = (
         SELECT jsonb_agg(
           CASE
             WHEN (note->>'time')::bigint > 7200000
@@ -199,17 +199,17 @@ export async function runAutoMigrations(): Promise<void> {
             ELSE note
           END
         )
-        FROM jsonb_array_elements("aiCoachingNotes") AS note
+        FROM jsonb_array_elements("ai_Coaching_Notes") AS note
       )
-      WHERE "aiCoachingNotes" IS NOT NULL
-        AND jsonb_array_length("aiCoachingNotes") > 0
+      WHERE "ai_Coaching_Notes" IS NOT NULL
+        AND jsonb_array_length("ai_Coaching_Notes") > 0
         AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements("aiCoachingNotes") AS note
+          SELECT 1 FROM jsonb_array_elements("ai_Coaching_Notes") AS note
           WHERE (note->>'time')::bigint > 7200000
         )
     `);
     if (result.rowCount && result.rowCount > 0) {
-      console.log(`[AutoMigrate] Fixed aiCoachingNotes timestamps in ${result.rowCount} run(s)`);
+      console.log(`[AutoMigrate] Fixed ai_Coaching_Notes timestamps in ${result.rowCount} run(s)`);
     }
   } catch (err: any) {
     console.warn(`[AutoMigrate] aiCoachingNotes repair (non-fatal): ${err.message}`);
