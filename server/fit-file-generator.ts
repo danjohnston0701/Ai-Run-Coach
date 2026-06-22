@@ -61,12 +61,36 @@ export async function generateFitFile(
       
       // Calculate time for each point
       let pointTime: string;
-      if (point.timestamp) {
-        // If timestamp is relative (seconds since start)
-        const pointDate = new Date(startTime.getTime() + (point.timestamp as number) * 1000);
-        pointTime = pointDate.toISOString();
+      
+      // Try to use point timestamp if available
+      if (point.timestamp && typeof point.timestamp === 'number') {
+        try {
+          // Check if timestamp looks like milliseconds (very large) or seconds (reasonable)
+          let timestampMs: number;
+          if (point.timestamp > 10000000000) {
+            // Looks like milliseconds (e.g., 1687459200000)
+            timestampMs = point.timestamp;
+          } else {
+            // Looks like seconds (e.g., 1687459200)
+            timestampMs = point.timestamp * 1000;
+          }
+          
+          const pointDate = new Date(timestampMs);
+          // Validate the date is reasonable (not before 2000 or after 2100)
+          if (pointDate.getFullYear() >= 2000 && pointDate.getFullYear() <= 2100) {
+            pointTime = pointDate.toISOString();
+          } else {
+            throw new Error('Date out of range');
+          }
+        } catch (e) {
+          // Fall back to relative timestamp calculation
+          const fractionOfRun = index / Math.max(gpsTrack.length - 1, 1);
+          const durationMs = (run.duration || run.elapsedTime || 0) * 1000;
+          const pointDate = new Date(startTime.getTime() + fractionOfRun * durationMs);
+          pointTime = pointDate.toISOString();
+        }
       } else {
-        // Estimate based on position in track
+        // No timestamp available - estimate based on position in track
         const fractionOfRun = index / Math.max(gpsTrack.length - 1, 1);
         const durationMs = (run.duration || run.elapsedTime || 0) * 1000;
         const pointDate = new Date(startTime.getTime() + fractionOfRun * durationMs);
