@@ -603,6 +603,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get current authenticated user — MUST be registered before /api/users/:id
+  // to prevent Express matching "me" as a :id parameter
+  app.get("/api/users/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const { password: _, ...userWithoutPassword } = user;
+      // Map injuryHistory → injuries so Android model (which uses 'injuries') deserializes correctly
+      const response = {
+        ...userWithoutPassword,
+        injuries: userWithoutPassword.injuryHistory ?? [],
+      };
+      res.json(response);
+    } catch (error: any) {
+      console.error("Get current user error:", error);
+      res.status(500).json({ error: "Failed to get current user" });
+    }
+  });
+
   app.get("/api/users/:id", async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.params.id);
@@ -615,33 +638,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Get user error:", error);
       res.status(500).json({ error: "Failed to get user" });
-    }
-  });
-
-  // Get current authenticated user
-  app.get("/api/users/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const userId = req.user!.userId;
-      console.log(`[GET /api/users/me] Fetching user ${userId}`);
-      
-      const user = await storage.getUser(userId);
-      if (!user) {
-        console.error(`[GET /api/users/me] User not found in DB: ${userId}`);
-        return res.status(404).json({ error: "User not found" });
-      }
-      
-      console.log(`[GET /api/users/me] Found user: ${user.name} (${user.id}), injuries: ${(user.injuryHistory || []).length}`);
-      
-      const { password: _, ...userWithoutPassword } = user;
-      // Map injuryHistory → injuries so Android model (which uses 'injuries') deserializes correctly
-      const response = {
-        ...userWithoutPassword,
-        injuries: userWithoutPassword.injuryHistory ?? [],
-      };
-      res.json(response);
-    } catch (error: any) {
-      console.error("Get current user error:", error);
-      res.status(500).json({ error: "Failed to get current user" });
     }
   });
 
