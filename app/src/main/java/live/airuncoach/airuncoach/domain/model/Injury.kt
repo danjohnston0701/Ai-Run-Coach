@@ -9,6 +9,7 @@ package live.airuncoach.airuncoach.domain.model
 data class Injury(
     val id: String? = null,
     val bodyPart: String,                           // "knee", "ankle", "shin", "hip", "back", etc.
+    val injurySide: String? = null,                 // "Left" or "Right" for bilateral body parts (null for non-bilateral)
     val status: InjuryStatus,                       // RECOVERING, HEALED, CHRONIC
     val severity: InjurySeverity = InjurySeverity.MODERATE, // MILD, MODERATE, SEVERE
     val notes: String? = null,                      // Detailed injury description and context

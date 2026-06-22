@@ -207,6 +207,40 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
+    private fun refreshUserFromApiWithRetry(retries: Int = 3) {
+        viewModelScope.launch {
+            var lastException: Exception? = null
+            repeat(retries) { attempt ->
+                try {
+                    val freshUser = apiService.getCurrentUser()
+                    
+                    // Get short user ID
+                    val shortUserId = sessionManager.getShortUserId()
+                    val userWithShortId = freshUser.copy(shortUserId = shortUserId)
+                    
+                    // Save to SharedPreferences
+                    val userJson = gson.toJson(userWithShortId)
+                    sharedPrefs.edit().putString("user", userJson).apply()
+                    
+                    // Update UI state
+                    _user.value = userWithShortId
+                    
+                    Log.d("ProfileViewModel", "🔄 User refreshed from API (attempt ${attempt + 1}): ${freshUser.name}")
+                    return@launch // Success, exit retry loop
+                } catch (e: Exception) {
+                    lastException = e
+                    Log.w("ProfileViewModel", "⚠️ User refresh attempt ${attempt + 1} failed: ${e.message}")
+                    if (attempt < retries - 1) {
+                        kotlinx.coroutines.delay(1000) // Wait 1 second before retry
+                    }
+                }
+            }
+            // All retries failed
+            Log.e("ProfileViewModel", "❌ Failed to refresh user from API after $retries attempts: ${lastException?.message}")
+            loadUser() // Fallback to SharedPreferences
+        }
+    }
+
     private fun loadFriendCount() {
         viewModelScope.launch {
             try {
@@ -242,9 +276,10 @@ class ProfileViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 apiService.addInjury(injury)
-                // Refresh user data to update injuryHistory
-                refreshUserFromApi()
                 Log.d("ProfileViewModel", "✅ Injury added: ${injury.bodyPart}")
+                // Refresh user data to update injuryHistory with a small delay to ensure server consistency
+                kotlinx.coroutines.delay(500)
+                refreshUserFromApiWithRetry()
             } catch (e: Exception) {
                 Log.e("ProfileViewModel", "❌ Failed to add injury: ${e.message}")
             }

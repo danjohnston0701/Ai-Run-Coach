@@ -1,9 +1,12 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -16,6 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -68,14 +73,29 @@ fun InjuryManagementScreen(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No injuries recorded", style = MaterialTheme.typography.headlineSmall)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(Spacing.lg)
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = Color.Gray
+                    )
                     Text(
-                        "Tap + to add injuries",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray,
+                        "No injuries recorded",
+                        style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier.padding(top = Spacing.md)
                     )
+                    Button(
+                        onClick = { showAddInjuryDialog = true },
+                        modifier = Modifier.padding(top = Spacing.lg)
+                    ) {
+                        Icon(Icons.Filled.Add, "Add", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Add Injury or Condition")
+                    }
                 }
             }
         } else {
@@ -152,7 +172,7 @@ fun InjuryCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    injury.bodyPart,
+                    "${injury.bodyPart}${if (!injury.injurySide.isNullOrEmpty()) " (${injury.injurySide})" else ""}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
@@ -163,28 +183,28 @@ fun InjuryCard(
                         InjuryStatus.CHRONIC -> Color(0xFF7B1FA2)
                         InjuryStatus.HEALED -> Color(0xFF2E7D32)
                     },
-                    shape = RoundedCornerShape(4.dp)
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Text(
                         injury.status.name.lowercase().replaceFirstChar { it.uppercase() },
                         color = Color.White,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
             }
 
             if (injury.injuryDate != null) {
                 Text(
-                    "Injured on ${injury.injuryDate}",
+                    "Injured on ${formatDateForDisplay(injury.injuryDate!!)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray,
                     modifier = Modifier.padding(top = Spacing.sm)
                 )
             }
 
-            if (injury.estimatedRecoveryWeeks != null && injury.injuryDate != null) {
+            if (injury.estimatedRecoveryWeeks != null && injury.injuryDate != null && injury.status == InjuryStatus.RECOVERING) {
                 val weeksAgo = calculateWeeksSince(injury.injuryDate!!)
                 val progress = (weeksAgo.toFloat() / injury.estimatedRecoveryWeeks!!).coerceAtMost(1f)
                 Text(
@@ -262,6 +282,7 @@ fun AddEditInjuryDialog(
     onSave: (Injury) -> Unit
 ) {
     var bodyPart by remember { mutableStateOf(injury?.bodyPart ?: "") }
+    var injurySide by remember { mutableStateOf(injury?.injurySide ?: "") }
     var status by remember { mutableStateOf(injury?.status ?: InjuryStatus.RECOVERING) }
     var severity by remember { mutableStateOf(injury?.severity ?: InjurySeverity.MODERATE) }
     var notes by remember { mutableStateOf(injury?.notes ?: "") }
@@ -269,107 +290,162 @@ fun AddEditInjuryDialog(
     var estimatedRecoveryWeeks by remember { mutableStateOf(injury?.estimatedRecoveryWeeks?.toString() ?: "") }
     var isProsthetic by remember { mutableStateOf(injury?.isProstheticOrAFO ?: false) }
     var prostheticType by remember { mutableStateOf(injury?.prostheticType ?: "") }
-    var bodyPartMenuExpanded by remember { mutableStateOf(false) }
-    var prostheticMenuExpanded by remember { mutableStateOf(false) }
+    var bodyPartFilteredSuggestions by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    AlertDialog(
+    // Body parts that support left/right side
+    val bilateralBodyParts = setOf("Knee", "Ankle", "Hip", "Shoulder", "Elbow", "Wrist", "Foot", "Leg", "Arm")
+    val shouldShowSideSelector = bilateralBodyParts.contains(bodyPart)
+
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (injury == null) "Add Injury" else "Edit Injury") },
-        text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                item {
-                    Text("Body Part", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                    Box(modifier = Modifier.padding(top = Spacing.sm)) {
-                        OutlinedTextField(
-                            value = bodyPart,
-                            onValueChange = { bodyPart = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Select or type body part") },
-                            trailingIcon = {
-                                IconButton(onClick = { bodyPartMenuExpanded = true }) {
-                                    Icon(Icons.Filled.Add, null)
-                                }
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .padding(Spacing.lg)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(Spacing.lg)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    if (injury == null) "Add Injury or Condition" else "Edit Injury",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = Spacing.md)
+                )
+
+                // Body Part with autocomplete
+                Text("Body Part", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Box(modifier = Modifier.padding(top = Spacing.sm)) {
+                    OutlinedTextField(
+                        value = bodyPart,
+                        onValueChange = { newValue ->
+                            bodyPart = newValue
+                            // Filter suggestions based on input
+                            bodyPartFilteredSuggestions = if (newValue.isNotEmpty()) {
+                                BODY_PARTS.filter { it.lowercase().contains(newValue.lowercase()) }
+                            } else {
+                                emptyList()
                             }
-                        )
+                            // Reset side when body part changes
+                            if (!shouldShowSideSelector) injurySide = ""
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Type or select (e.g., 'kn' for Knee)") },
+                        singleLine = true
+                    )
+                    if (bodyPartFilteredSuggestions.isNotEmpty()) {
                         DropdownMenu(
-                            expanded = bodyPartMenuExpanded,
-                            onDismissRequest = { bodyPartMenuExpanded = false }
+                            expanded = true,
+                            onDismissRequest = { bodyPartFilteredSuggestions = emptyList() },
+                            modifier = Modifier.fillMaxWidth(0.9f)
                         ) {
-                            BODY_PARTS.forEach { part ->
+                            bodyPartFilteredSuggestions.take(5).forEach { part ->
                                 DropdownMenuItem(
                                     text = { Text(part) },
-                                    onClick = { bodyPart = part; bodyPartMenuExpanded = false }
+                                    onClick = {
+                                        bodyPart = part
+                                        bodyPartFilteredSuggestions = emptyList()
+                                    }
+                                )
+                            }
+                            if (bodyPartFilteredSuggestions.size > 5) {
+                                DropdownMenuItem(
+                                    text = { Text("Custom: \"${bodyPart}\"") },
+                                    onClick = { bodyPartFilteredSuggestions = emptyList() }
                                 )
                             }
                         }
                     }
                 }
 
-                item {
-                    Text(
-                        "Status",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = Spacing.md)
-                    )
+                // Side selector (only for bilateral body parts)
+                if (shouldShowSideSelector) {
+                    Text("Side", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = Spacing.md))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = Spacing.sm),
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                        InjuryStatus.entries.forEach { s ->
+                        listOf("Left", "Right").forEach { side ->
                             FilterChip(
-                                selected = status == s,
-                                onClick = { status = s },
-                                label = { Text(s.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                                selected = injurySide == side,
+                                onClick = { injurySide = side },
+                                label = { Text(side) }
                             )
                         }
                     }
                 }
 
-                item {
-                    Text(
-                        "Severity",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = Spacing.md)
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Spacing.sm),
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                    ) {
-                        InjurySeverity.entries.forEach { s ->
-                            FilterChip(
-                                selected = severity == s,
-                                onClick = { severity = s },
-                                label = { Text(s.name.lowercase().replaceFirstChar { it.uppercase() }) }
-                            )
-                        }
+                // Status
+                Text(
+                    "Status",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = Spacing.md)
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    InjuryStatus.entries.forEach { s ->
+                        FilterChip(
+                            selected = status == s,
+                            onClick = { status = s },
+                            label = { Text(s.name.lowercase().replaceFirstChar { it.uppercase() }, maxLines = 1) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
-                item {
-                    Text(
-                        "Injury Date",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = Spacing.md)
-                    )
-                    OutlinedTextField(
-                        value = injuryDate,
-                        onValueChange = { injuryDate = it },
-                        label = { Text("YYYY-MM-DD") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Spacing.sm),
-                        singleLine = true
-                    )
+                // Severity
+                Text(
+                    "Severity",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = Spacing.md)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    InjurySeverity.entries.forEach { s ->
+                        FilterChip(
+                            selected = severity == s,
+                            onClick = { severity = s },
+                            label = { Text(s.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                        )
+                    }
                 }
 
-                item {
+                // Injury Date
+                Text(
+                    "Injury Date",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = Spacing.md)
+                )
+                OutlinedTextField(
+                    value = injuryDate,
+                    onValueChange = { injuryDate = it },
+                    label = { Text("DD-MM-YYYY") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.sm),
+                    singleLine = true
+                )
+
+                // Expected Recovery (only for RECOVERING status)
+                if (status == InjuryStatus.RECOVERING) {
                     Text(
                         "Expected Recovery (weeks)",
                         style = MaterialTheme.typography.labelSmall,
@@ -387,93 +463,103 @@ fun AddEditInjuryDialog(
                     )
                 }
 
-                item {
-                    Text(
-                        "Notes",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = Spacing.md)
-                    )
-                    OutlinedTextField(
-                        value = notes,
-                        onValueChange = { notes = it },
-                        label = { Text("Details...") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Spacing.sm),
-                        minLines = 3
-                    )
+                // Notes
+                Text(
+                    "Describe your injury/condition",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = Spacing.md)
+                )
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Details...") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.sm),
+                    minLines = 3
+                )
+
+                // Prosthetic/AFO
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = isProsthetic, onCheckedChange = { isProsthetic = it })
+                    Text("Uses prosthetic/AFO", style = MaterialTheme.typography.labelSmall)
                 }
 
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = Spacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(checked = isProsthetic, onCheckedChange = { isProsthetic = it })
-                        Text("Uses prosthetic/AFO", style = MaterialTheme.typography.labelSmall)
-                    }
-
-                    if (isProsthetic) {
-                        Box(modifier = Modifier.padding(top = Spacing.sm)) {
-                            OutlinedTextField(
-                                value = prostheticType,
-                                onValueChange = { prostheticType = it },
-                                label = { Text("Device type") },
-                                modifier = Modifier.fillMaxWidth(),
-                                trailingIcon = {
-                                    IconButton(onClick = { prostheticMenuExpanded = true }) {
-                                        Icon(Icons.Filled.Add, null)
-                                    }
-                                }
-                            )
-                            DropdownMenu(
-                                expanded = prostheticMenuExpanded,
-                                onDismissRequest = { prostheticMenuExpanded = false }
-                            ) {
-                                PROSTHETIC_TYPES.forEach { type ->
-                                    DropdownMenuItem(
-                                        text = { Text(type) },
-                                        onClick = { prostheticType = type; prostheticMenuExpanded = false }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (bodyPart.isNotEmpty()) {
-                        val newInjury = Injury(
-                            id = injury?.id,
-                            bodyPart = bodyPart,
-                            status = status,
-                            severity = severity,
-                            notes = notes.ifEmpty { null },
-                            injuryDate = injuryDate.ifEmpty { null },
-                            estimatedRecoveryWeeks = estimatedRecoveryWeeks.toIntOrNull(),
-                            isProstheticOrAFO = isProsthetic,
-                            prostheticType = if (isProsthetic) prostheticType else null,
-                            createdAt = injury?.createdAt ?: System.currentTimeMillis()
+                if (isProsthetic) {
+                    Box(modifier = Modifier.padding(top = Spacing.sm)) {
+                        OutlinedTextField(
+                            value = prostheticType,
+                            onValueChange = { prostheticType = it },
+                            label = { Text("Device type") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
                         )
-                        onSave(newInjury)
                     }
                 }
-            ) {
-                Text(if (injury == null) "Add" else "Update")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+
+                // Buttons
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.lg),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Cancel")
+                    }
+                    Button(
+                        onClick = {
+                            if (bodyPart.isNotEmpty()) {
+                                // Convert date from DD-MM-YYYY to YYYY-MM-DD for storage
+                                val storageDateFormat = if (injuryDate.isNotEmpty()) {
+                                    try {
+                                        val parts = injuryDate.split("-")
+                                        if (parts.size == 3) {
+                                            // Assume DD-MM-YYYY format from user
+                                            "${parts[2]}-${parts[1]}-${parts[0]}"
+                                        } else {
+                                            injuryDate
+                                        }
+                                    } catch (e: Exception) {
+                                        injuryDate
+                                    }
+                                } else {
+                                    null
+                                }
+
+                                val newInjury = Injury(
+                                    id = injury?.id,
+                                    bodyPart = bodyPart,
+                                    injurySide = if (shouldShowSideSelector) injurySide else null,
+                                    status = status,
+                                    severity = severity,
+                                    notes = notes.ifEmpty { null },
+                                    injuryDate = storageDateFormat?.ifEmpty { null },
+                                    estimatedRecoveryWeeks = estimatedRecoveryWeeks.toIntOrNull(),
+                                    isProstheticOrAFO = isProsthetic,
+                                    prostheticType = if (isProsthetic) prostheticType.ifEmpty { null } else null,
+                                    createdAt = injury?.createdAt ?: System.currentTimeMillis()
+                                )
+                                onSave(newInjury)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (injury == null) "Add" else "Update")
+                    }
+                }
             }
         }
-    )
+    }
 }
 
 private fun calculateWeeksSince(dateString: String): Int {
@@ -484,5 +570,16 @@ private fun calculateWeeksSince(dateString: String): Int {
         weeks.toInt()
     } catch (e: Exception) {
         0
+    }
+}
+
+private fun formatDateForDisplay(dateString: String): String {
+    return try {
+        val inputFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val outputFormat = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+        val date = inputFormat.parse(dateString) ?: return dateString
+        outputFormat.format(date)
+    } catch (e: Exception) {
+        dateString
     }
 }

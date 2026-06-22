@@ -851,13 +851,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      const { bodyPart, status, severity, notes, injuryDate, estimatedRecoveryWeeks, isProstheticOrAFO, prostheticType } = req.body;
+      const { bodyPart, injurySide, status, severity, notes, injuryDate, estimatedRecoveryWeeks, isProstheticOrAFO, prostheticType } = req.body;
       if (!bodyPart || !status) {
         return res.status(400).json({ error: "bodyPart and status are required" });
       }
       const newInjury = {
         id: Math.random().toString(36).substring(2, 11),
         bodyPart,
+        injurySide: injurySide ?? null,
         status,
         severity: severity ?? "MODERATE",
         notes: notes ?? null,
