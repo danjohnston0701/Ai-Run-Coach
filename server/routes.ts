@@ -1696,8 +1696,8 @@ function transformRunForAndroid(run: any) {
       // Set response headers for file download with unique filename using current timestamp
       const now = new Date();
       const dateTimeSuffix = now.toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_');  // YYYYMMDD_HHMMSS
-      const fileName = `run_${dateTimeSuffix}.fit`;
-      res.setHeader('Content-Type', 'application/octet-stream');
+      const fileName = `run_${dateTimeSuffix}.gpx`;
+      res.setHeader('Content-Type', 'application/gpx+xml');
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Content-Length', fitBuffer.length);
       

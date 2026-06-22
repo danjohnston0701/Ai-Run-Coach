@@ -1,13 +1,12 @@
 /**
  * FIT File Generator
- * Converts AI Run Coach run data to FIT format for Strava upload
+ * Converts AI Run Coach run data to GPX format (simpler alternative to FIT)
+ * GPX is widely supported by Garmin, Strava, and other fitness platforms
  * 
- * FIT (Flexible and Interoperable Data Transfer) is a binary file format used by:
- * - Garmin devices
- * - Strava (accepts FIT files for rich activity data)
- * 
- * FIT files contain: GPS track, HR, cadence, power, temperature, elevation
- * Strava uses these to generate route maps and analyze performance
+ * GPX (GPS Exchange Format) is a text-based XML format containing:
+ * - GPS track with latitude, longitude, elevation
+ * - Timestamps for each trackpoint
+ * - Heart rate and cadence data in extensions
  */
 
 import { Run } from '@shared/schema';
@@ -18,126 +17,118 @@ interface FitGeneratorOptions {
 }
 
 /**
- * Generate FIT file using @garmin/fitsdk
- * Creates a minimal but valid FIT file structure
+ * Generate GPX file from run data
+ * GPX is more reliable than FIT and widely supported
  */
 export async function generateFitFile(
   run: Run,
   options: FitGeneratorOptions = {}
 ): Promise<Buffer> {
   try {
-    const {
-      deviceName = 'AI Run Coach',
-      manufacturerId = 255, // 255 = Unknown/Custom manufacturer
-    } = options;
+    const { deviceName = 'AI Run Coach' } = options;
 
-    // Import Garmin FIT SDK for FIT file generation
-    const { Encoder, enums } = await import('@garmin/fitsdk');
-    
-    const encoder = new Encoder();
-    
-    const startTime = Math.floor(run.completedAt?.getTime() / 1000 || Date.now() / 1000);
-    const endTime = startTime + (run.duration || run.elapsedTime || 0);
-    
-    // File ID message
-    encoder.write({
-      name: 'file_id',
-      type: enums.File.ACTIVITY,
-      manufacturer: enums.Manufacturer.DEVELOPMENT,
-      product: 1,
-      serial_number: Math.floor(Math.random() * 1000000000),
-      time_created: startTime,
-    });
-    
-    // Device Info message
-    encoder.write({
-      name: 'device_info',
-      timestamp: startTime,
-      device_index: 0,
-      manufacturer: enums.Manufacturer.DEVELOPMENT,
-      device_type: enums.DeviceType.WATCH,
-      hardware_version: 1,
-      software_version: 100,
-    });
-    
-    // Session message (summary)
-    encoder.write({
-      name: 'session',
-      timestamp: endTime,
-      start_time: startTime,
-      sport: enums.Sport.RUNNING,
-      sub_sport: enums.SubSport.RUN,
-      total_distance: (run.distance || 0) * 1000, // meters
-      total_elapsed_time: (run.elapsedTime || run.duration || 0) * 1000, // milliseconds
-      total_timer_time: (run.movingTime || run.duration || 0) * 1000,
-      num_active_laps: 1,
-      avg_speed: run.avgSpeed || 0,
-      max_speed: run.maxSpeed || 0,
-      avg_heart_rate: Math.round(run.avgHeartRate || 0),
-      max_heart_rate: Math.round(run.maxHeartRate || 0),
-      avg_cadence: Math.round(run.cadence || 0),
-      total_ascent: Math.round(run.elevationGain || 0),
-      total_descent: Math.round(run.elevationLoss || 0),
-      message_index: 0,
-    });
-    
-    // Lap message
-    encoder.write({
-      name: 'lap',
-      timestamp: endTime,
-      start_time: startTime,
-      sport: enums.Sport.RUNNING,
-      sub_sport: enums.SubSport.RUN,
-      total_distance: (run.distance || 0) * 1000,
-      total_elapsed_time: (run.elapsedTime || run.duration || 0) * 1000,
-      total_timer_time: (run.movingTime || run.duration || 0) * 1000,
-      avg_speed: run.avgSpeed || 0,
-      max_speed: run.maxSpeed || 0,
-      avg_heart_rate: Math.round(run.avgHeartRate || 0),
-      max_heart_rate: Math.round(run.maxHeartRate || 0),
-      avg_cadence: Math.round(run.cadence || 0),
-      message_index: 0,
-    });
-    
-    // Add trackpoints (GPS records)
-    if (run.gpsTrack && Array.isArray(run.gpsTrack)) {
-      const gpsTrack = run.gpsTrack as any[];
+    const startTime = run.completedAt || new Date();
+    const gpsTrack = (run.gpsTrack || []) as any[];
+
+    // Build GPX XML content
+    let gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="${deviceName}"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2"
+  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  
+  <metadata>
+    <name>${run.name || 'Run'}</name>
+    <desc>Distance: ${(run.distance / 1000).toFixed(2)} km | Pace: ${run.averagePace || 'N/A'}</desc>
+    <author>
+      <name>${deviceName}</name>
+    </author>
+    <time>${startTime.toISOString()}</time>
+  </metadata>
+
+  <trk>
+    <name>${run.name || 'Run'}</name>
+    <desc>Distance: ${(run.distance / 1000).toFixed(2)} km | Duration: ${formatDuration(run.duration)}</desc>
+    <trkseg>
+`;
+
+    // Add trackpoints
+    gpsTrack.forEach((point, index) => {
+      const lat = point.lat || point.latitude;
+      const lng = point.lng || point.longitude;
+      const ele = point.elevation || point.altitude || 0;
       
-      gpsTrack.forEach((point, index) => {
-        const recordTimestamp = startTime + (point.timestamp || index);
-        
-        encoder.write({
-          name: 'record',
-          timestamp: recordTimestamp,
-          position_lat: point.lat || point.latitude,
-          position_long: point.lng || point.longitude,
-          altitude: Math.round(point.elevation || point.altitude || 0),
-          distance: point.distance || (index / gpsTrack.length) * (run.distance || 0) * 1000,
-          speed: point.speed || 0,
-          heart_rate: Math.round(point.heartRate || 0),
-          cadence: Math.round(point.cadence || 0),
-          temperature: point.temperature ? Math.round(point.temperature) : undefined,
-        });
-      });
+      // Calculate time for each point
+      let pointTime: string;
+      if (point.timestamp) {
+        // If timestamp is relative (seconds since start)
+        const pointDate = new Date(startTime.getTime() + (point.timestamp as number) * 1000);
+        pointTime = pointDate.toISOString();
+      } else {
+        // Estimate based on position in track
+        const fractionOfRun = index / Math.max(gpsTrack.length - 1, 1);
+        const durationMs = (run.duration || run.elapsedTime || 0) * 1000;
+        const pointDate = new Date(startTime.getTime() + fractionOfRun * durationMs);
+        pointTime = pointDate.toISOString();
+      }
+
+      const hr = point.heartRate ? Math.round(point.heartRate) : null;
+      const cad = point.cadence ? Math.round(point.cadence) : null;
+
+      gpxContent += `      <trkpt lat="${lat}" lon="${lng}">
+        <ele>${Math.round(ele)}</ele>
+        <time>${pointTime}</time>`;
+
+      // Add Garmin extensions for HR and cadence
+      if (hr || cad) {
+        gpxContent += '\n        <extensions>\n          <gpxtpx:TrackPointExtension>';
+        if (hr) gpxContent += `\n            <gpxtpx:hr>${hr}</gpxtpx:hr>`;
+        if (cad) gpxContent += `\n            <gpxtpx:cad>${cad}</gpxtpx:cad>`;
+        gpxContent += '\n          </gpxtpx:TrackPointExtension>\n        </extensions>';
+      }
+
+      gpxContent += '\n      </trkpt>\n';
+    });
+
+    gpxContent += `    </trkseg>
+  </trk>
+</gpx>`;
+
+    const gpxBuffer = Buffer.from(gpxContent, 'utf-8');
+
+    if (!gpxBuffer || gpxBuffer.length === 0) {
+      throw new Error('GPX file generation produced empty buffer');
     }
-    
-    // Get the encoded buffer
-    const fitBuffer = encoder.finish();
-    
-    if (!fitBuffer || fitBuffer.length === 0) {
-      throw new Error('FIT file generation produced empty buffer');
-    }
-    
-    return fitBuffer;
+
+    return gpxBuffer;
   } catch (error: any) {
-    console.error('FIT file generation error:', {
+    console.error('GPX file generation error:', {
       errorMessage: error.message,
       errorStack: error.stack,
       runId: run.id,
       hasGpsTrack: !!run.gpsTrack,
       gpsTrackLength: Array.isArray(run.gpsTrack) ? run.gpsTrack.length : 0,
     });
-    throw new Error(`FIT generation failed: ${error.message}`);
+    throw new Error(`GPX generation failed: ${error.message}`);
+  }
+}
+
+/**
+ * Format duration in milliseconds to readable string
+ */
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  } else {
+    return `${seconds}s`;
   }
 }
 

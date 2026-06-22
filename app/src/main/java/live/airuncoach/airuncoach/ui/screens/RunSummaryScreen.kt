@@ -7087,7 +7087,7 @@ private fun DataTabFlagship(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Download Run as .FIT", fontWeight = FontWeight.Medium)
+                    Text("Download Run as .GPX", fontWeight = FontWeight.Medium)
                 }
                 
                 // Upload to Strava button

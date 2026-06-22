@@ -1101,10 +1101,10 @@ class RunSummaryViewModel @Inject constructor(
     fun downloadRunAsFit(runId: String) {
         viewModelScope.launch {
             try {
-                Log.d("RunSummaryVM", "Downloading FIT file for run: $runId")
+                Log.d("RunSummaryVM", "Downloading GPX file for run: $runId")
                 android.widget.Toast.makeText(
                     context,
-                    "Downloading run data as .FIT file...",
+                    "Downloading run data as .GPX file...",
                     android.widget.Toast.LENGTH_SHORT
                 ).show()
 
