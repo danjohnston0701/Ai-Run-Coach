@@ -621,10 +621,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get current authenticated user
   app.get("/api/users/me", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const user = await storage.getUser(req.user!.userId);
+      const userId = req.user!.userId;
+      console.log(`[GET /api/users/me] Fetching user ${userId}`);
+      
+      const user = await storage.getUser(userId);
       if (!user) {
+        console.error(`[GET /api/users/me] User not found in DB: ${userId}`);
         return res.status(404).json({ error: "User not found" });
       }
+      
+      console.log(`[GET /api/users/me] Found user: ${user.name} (${user.id}), injuries: ${(user.injuryHistory || []).length}`);
       
       const { password: _, ...userWithoutPassword } = user;
       // Map injuryHistory → injuries so Android model (which uses 'injuries') deserializes correctly
@@ -848,8 +854,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/user/injuries", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
+      console.log(`[POST /api/user/injuries] Adding injury for user ${userId}`);
+      
       const user = await storage.getUser(userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
+      if (!user) {
+        console.error(`[POST /api/user/injuries] User not found: ${userId}`);
+        return res.status(404).json({ error: "User not found" });
+      }
 
       const { bodyPart, injurySide, status, severity, notes, injuryDate, estimatedRecoveryWeeks, isProstheticOrAFO, prostheticType } = req.body;
       if (!bodyPart || !status) {
@@ -873,8 +884,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const injuries = (user.injuryHistory || []) as any[];
       injuries.push(newInjury);
+      console.log(`[POST /api/user/injuries] Updated injuries array, length: ${injuries.length}`);
 
-      await storage.updateUser(userId, { injuryHistory: injuries });
+      const updated = await storage.updateUser(userId, { injuryHistory: injuries });
+      console.log(`[POST /api/user/injuries] Updated user, update result:`, updated ? "success" : "null");
       
       res.status(201).json(newInjury);
     } catch (error: any) {
