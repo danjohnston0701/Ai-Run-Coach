@@ -261,7 +261,7 @@ fun ProfileScreen(
                 SettingsItem(icon = R.drawable.icon_calendar_vector, text = "Coaching Programme", onClick = onNavigateToCoachingProgramme)
             }
         }
-        item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+        item { Spacer(modifier = Modifier.height(Spacing.md)) }
 
         item { SectionTitle(title = "Profile") }
         item {
