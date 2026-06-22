@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -48,31 +49,38 @@ fun InjuryManagementScreen(
 
     val allInjuries: List<Injury> = user?.injuries ?: emptyList()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Health & Injuries") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showAddInjuryDialog = true }) {
-                        Icon(Icons.Filled.Add, "Add injury")
-                    }
-                }
-            )
-        },
-        contentWindowInsets = WindowInsets(0) // outer Scaffold already applies nav bar insets
-    ) { padding ->
-        if (allInjuries.isEmpty()) {
-            Box(
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header matching Personal Details and My Data style
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                .padding(top = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onNavigateBack, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+            }
+            Text(
+                "Health & Injuries",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
+                    .weight(1f)
+                    .padding(start = Spacing.md)
+            )
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(horizontal = Spacing.lg))
+
+        // Content
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (allInjuries.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(Spacing.lg)
@@ -98,13 +106,12 @@ fun InjuryManagementScreen(
                     }
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(Spacing.lg)
-            ) {
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(Spacing.lg)
+                ) {
                 items(allInjuries) { injury ->
                     InjuryCard(
                         injury = injury,
@@ -121,6 +128,7 @@ fun InjuryManagementScreen(
                         onDelete = { injury.id?.let { viewModel.deleteInjury(it) } }
                     )
                     Spacer(modifier = Modifier.height(Spacing.md))
+                    }
                 }
             }
         }
