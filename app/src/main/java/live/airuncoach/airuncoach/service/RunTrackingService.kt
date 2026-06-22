@@ -533,6 +533,14 @@ class RunTrackingService : Service(), SensorEventListener {
          * track the run and receive the eventual watch "stop" command to save the session.
          */
         const val ACTION_START_TRACKING_FROM_WATCH = "ACTION_START_TRACKING_FROM_WATCH"
+        /**
+         * Recovery signal sent by [GarminWatchManager] when it receives a "watchReady" message
+         * with hasPendingSync=true.  This means the watch finished a run but its "stop" BT
+         * message was silently dropped (ConnectIQ is fire-and-forget with no delivery guarantee).
+         * If tracking is active AND it was watch-initiated, this action stops tracking so the
+         * phone session is saved and the offline batch sync can proceed.
+         */
+        const val ACTION_WATCH_RUN_FINISHED = "ACTION_WATCH_RUN_FINISHED"
         const val EXTRA_TARGET_DISTANCE = "EXTRA_TARGET_DISTANCE"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
@@ -887,6 +895,24 @@ class RunTrackingService : Service(), SensorEventListener {
                 lastWatchGpsMs = System.currentTimeMillis()
                 Log.d("RunTrackingService", "⌚ ACTION_START_TRACKING_FROM_WATCH — watch-only run, starting tracking immediately")
                 startTracking()
+            }
+            ACTION_WATCH_RUN_FINISHED -> {
+                // Recovery: GarminWatchManager detected that the watch finished a run
+                // (watchReady + hasPendingSync=true) but the "stop" BT message was dropped.
+                // Only stop tracking if this service was itself started for a watch-initiated run.
+                // This avoids accidentally aborting a phone-initiated run that happens to be active
+                // while an old offline batch is waiting to sync on the watch.
+                if (wasRunStartedByWatch && isTracking) {
+                    Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — watch run ended (stop was dropped), stopping tracking now")
+                    stopTracking()
+                } else {
+                    // Service wasn't tracking a watch-initiated run — nothing to do.
+                    // Call stopSelf() to clean up in case we were started fresh by this intent.
+                    if (!isTracking) {
+                        Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — not tracking, nothing to stop")
+                        stopSelf()
+                    }
+                }
             }
             ACTION_CANCEL_PREPARE_FOR_WATCH -> {
                 // Only honour the cancel if tracking has not yet started (standby state).

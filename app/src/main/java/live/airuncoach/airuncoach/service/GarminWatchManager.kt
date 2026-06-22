@@ -341,6 +341,13 @@ class GarminWatchManager(
      */
     var onWatchAppReady: (() -> Unit)? = null
 
+    // ── Watch-only run tracking ───────────────────────────────────────────────
+    // Set to true when a "start" command arrives with onWatchCommand == null, meaning
+    // GarminWatchManager bootstrapped RunTrackingService itself (ACTION_START_TRACKING_FROM_WATCH).
+    // Cleared when "stop" is received or when the watchReady+hasPendingSync recovery fires.
+    // Used to safely auto-stop the service if the "stop" BT message was silently dropped.
+    private var watchOnlyRunActive = false
+
     // ── Cached auth credentials ───────────────────────────────────────────────
     // Stored whenever sendAuth() is called so we can auto-respond to "watchReady"
     // messages that arrive when no ViewModel has registered an onWatchCommand handler
@@ -650,6 +657,26 @@ class GarminWatchManager(
                         if (hasPending) {
                             Log.d(TAG, "watchReady: watch has pending offline run — showing sync indicator")
                             _hasPendingWatchSync.value = true
+                            // ── Dropped-stop recovery ─────────────────────────────────────────
+                            // hasPendingSync=true means the watch finished a run.  If the watch's
+                            // "stop" BT message was silently dropped (ConnectIQ is fire-and-forget),
+                            // RunTrackingService may still be running with wasRunStartedByWatch=true.
+                            // Send ACTION_WATCH_RUN_FINISHED so the service stops itself safely
+                            // (it only stops if wasRunStartedByWatch && isTracking, so phone-initiated
+                            // runs are never accidentally aborted).
+                            // Always attempt recovery — the service only stops if
+                            // wasRunStartedByWatch && isTracking, so phone-initiated runs
+                            // are never accidentally aborted.
+                            watchOnlyRunActive = false
+                            Log.d(TAG, "watchReady+hasPendingSync: forwarding WATCH_RUN_FINISHED (dropped-stop recovery)")
+                            try {
+                                val finishIntent = Intent(context, RunTrackingService::class.java).apply {
+                                    this.action = RunTrackingService.ACTION_WATCH_RUN_FINISHED
+                                }
+                                context.startService(finishIntent)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "watchReady+hasPendingSync: could not forward WATCH_RUN_FINISHED: ${e.message}")
+                            }
                         }
                         val token = cachedAuthToken
                         if (token != null) {
@@ -686,6 +713,7 @@ class GarminWatchManager(
                             "start" -> {
                                 // Show the "run in progress" notification so the user sees feedback.
                                 showWatchRunNotification()
+                                watchOnlyRunActive = true
                                 // Also start RunTrackingService so it registers onWatchCommand and
                                 // can receive the eventual "stop" command to save the run.
                                 // This handles the case where the user starts a run on the watch
@@ -706,7 +734,23 @@ class GarminWatchManager(
                                     Log.w(TAG, "⌚ Could not start RunTrackingService for watch-only run: ${e.message}")
                                 }
                             }
-                            "stop"  -> cancelWatchRunNotification()
+                            "stop"  -> {
+                                cancelWatchRunNotification()
+                                watchOnlyRunActive = false
+                                // Forward stop to RunTrackingService in case the service is still
+                                // running but its onWatchCommand listener was cleared (e.g. the
+                                // Activity/ViewModel that overwrote onWatchCommand was destroyed).
+                                // stopTracking() is a safe no-op if no run is currently active.
+                                try {
+                                    val stopIntent = Intent(context, RunTrackingService::class.java).apply {
+                                        this.action = RunTrackingService.ACTION_STOP_TRACKING
+                                    }
+                                    context.startService(stopIntent)
+                                    Log.d(TAG, "⌚ Watch STOP (no listener) — forwarded ACTION_STOP_TRACKING to RunTrackingService")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "⌚ Could not forward stop to RunTrackingService: ${e.message}")
+                                }
+                            }
                         }
                     } else {
                         onWatchCommand?.invoke(action)
