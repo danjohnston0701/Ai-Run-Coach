@@ -303,6 +303,7 @@ fun RunSummaryScreenFlagship(
                             aiConsentGranted = aiConsentGranted,
                             onRequestAiConsent = { showAiConsentSheet = true },
                             hasGroupRun = hasGroupRun,
+                            hasDynamicsTab = hasDynamicsTab,
                         )
 
                         // Tab 1: Group Run leaderboard (only when run is linked to a group run)
@@ -329,6 +330,7 @@ fun RunSummaryScreenFlagship(
                             onTabSelected = { selectedTab = it },
                             personalBests = runPersonalBests,
                             hasGroupRun = hasGroupRun,
+                            hasDynamicsTab = hasDynamicsTab,
                         )
 
                         selectedTab == 2 + groupRunTabOffset -> GraphsTabContent(
@@ -337,6 +339,7 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             hasGroupRun = hasGroupRun,
+                            hasDynamicsTab = hasDynamicsTab,
                         )
 
                         // Dynamics tab — only shown when run has Garmin watch data
@@ -347,6 +350,7 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             hasGroupRun = hasGroupRun,
+                            hasDynamicsTab = hasDynamicsTab,
                         )
 
                         selectedTab == 3 + groupRunTabOffset + dynamicsTabOffset -> DataTabFlagship(
@@ -356,8 +360,7 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             hasGroupRun = hasGroupRun,
-                            racePredictions = racePredictions,
-                            isLoadingRacePredictions = isLoadingRacePredictions,
+                            hasDynamicsTab = hasDynamicsTab,
                         )
                         selectedTab == 4 + groupRunTabOffset + dynamicsTabOffset -> AchievementsTabFlagship(
                             run = session!!,
@@ -366,6 +369,7 @@ fun RunSummaryScreenFlagship(
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             hasGroupRun = hasGroupRun,
+                            hasDynamicsTab = hasDynamicsTab,
                         )
                     }
                         }
@@ -671,15 +675,15 @@ private fun RunTabsFlagship(
     selected: Int,
     onSelected: (Int) -> Unit,
     hasGroupRun: Boolean = false,
-    hasGarminData: Boolean = false
+    hasDynamicsTab: Boolean = false
 ) {
-    val labels = remember(hasGroupRun, hasGarminData) {
+    val labels = remember(hasGroupRun, hasDynamicsTab) {
         buildList {
             add("Ai Insights")
             if (hasGroupRun) add("Group Run")
             add("Summary")
             add("Graphs")
-            if (hasGarminData) add("Dynamics")
+            if (hasDynamicsTab) add("Dynamics")
             add("Data")
             add("Badges")
         }
@@ -724,6 +728,7 @@ private fun GroupRunLeaderboardTab(
     debrief: GroupRunDebriefResponse? = null,
     isLoadingDebrief: Boolean = false,
     onRequestDebrief: () -> Unit = {},
+    hasDynamicsTab: Boolean = false,
 ) {
     // Track which stat the user wants to sort by
     var activeFilter by remember { mutableStateOf("Pace") }
@@ -751,7 +756,7 @@ private fun GroupRunLeaderboardTab(
     ) {
         // Tab bar (sticky navigation — same pattern as every other tab)
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasDynamicsTab = hasDynamicsTab)
         }
 
         // ── Group run name header ──────────────────────────────────────────────
@@ -1065,6 +1070,7 @@ private fun AiInsightsTabContent(
     isWaitingForGarminSync: Boolean = false,
     coachingNotes: List<AiCoachingNote> = emptyList(),
     onShareCard: () -> Unit,
+    hasDynamicsTab: Boolean = false,
     onDelete: () -> Unit,
     onStruggleComment: (String, String) -> Unit = { _, _ -> },
     onStruggleDismiss: (String, DismissReason) -> Unit = { _, _ -> },
@@ -1087,7 +1093,7 @@ private fun AiInsightsTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasDynamicsTab = hasDynamicsTab)
         }
 
         // ── Strava attribution — REQUIRED by Strava API Brand Guidelines ──────
@@ -1345,6 +1351,7 @@ private fun SummaryTabContent(
     onTabSelected: (Int) -> Unit = {},
     personalBests: List<String> = emptyList(),
     hasGroupRun: Boolean = false,
+    hasDynamicsTab: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -1355,7 +1362,7 @@ private fun SummaryTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasDynamicsTab = hasDynamicsTab)
         }
 
         // Personal Best banner — always visible when this run holds any PBs
@@ -1436,6 +1443,7 @@ private fun GraphsTabContent(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = false,
+    hasDynamicsTab: Boolean = false,
 ) {
     // State for collapsible sections — only used when Garmin data IS available
     var dynamicsExpanded by remember { mutableStateOf(true) }
@@ -1449,7 +1457,7 @@ private fun GraphsTabContent(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasDynamicsTab = hasDynamicsTab)
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -6548,6 +6556,7 @@ private fun DynamicsTabContent(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = false,
+    hasDynamicsTab: Boolean = false,
 ) {
     var chartMode by remember { mutableStateOf(ChartMode.Time) }
 
@@ -6563,7 +6572,7 @@ private fun DynamicsTabContent(
                 selected = selectedTab,
                 onSelected = onTabSelected,
                 hasGroupRun = hasGroupRun,
-                hasGarminData = run.hasGarminData
+                hasDynamicsTab = hasDynamicsTab
             )
         }
 
@@ -6821,8 +6830,7 @@ private fun DataTabFlagship(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = false,
-    racePredictions: RacePredictionsResponse? = null,
-    isLoadingRacePredictions: Boolean = false,
+    hasDynamicsTab: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -6833,7 +6841,7 @@ private fun DataTabFlagship(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasDynamicsTab = hasDynamicsTab)
         }
 
         // ==================== PACE SECTION ====================
@@ -7052,14 +7060,6 @@ private fun DataTabFlagship(
             if (run.kmSplits.isNotEmpty()) {
                 KmSplitsCard(run.kmSplits)
             }
-        }
-
-        // ==================== RACE PREDICTIONS SECTION ====================
-        item {
-            RacePredictionsCard(
-                predictions = racePredictions,
-                isLoading = isLoadingRacePredictions
-            )
         }
 
         // ==================== DOWNLOAD & UPLOAD SECTION ====================
@@ -7447,6 +7447,7 @@ private fun AchievementsTabFlagship(
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = false,
+    hasDynamicsTab: Boolean = false,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -7457,7 +7458,7 @@ private fun AchievementsTabFlagship(
     ) {
         // Tabs for navigation
         item {
-            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasGarminData = run.hasGarminData)
+            RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasDynamicsTab = hasDynamicsTab)
         }
 
         item {

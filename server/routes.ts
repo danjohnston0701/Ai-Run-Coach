@@ -1680,10 +1680,23 @@ function transformRunForAndroid(run: any) {
       }
 
       // Generate FIT file
-      const fitBuffer = await generateFitFile(run);
+      let fitBuffer: Buffer;
+      try {
+        fitBuffer = await generateFitFile(run);
+      } catch (genError: any) {
+        console.error(`[GET /api/runs/${req.params.id}/download-fit] FIT generation error: ${genError.message}`);
+        return res.status(500).json({ error: `FIT generation failed: ${genError.message}` });
+      }
       
-      // Set response headers for file download
-      const fileName = `run_${run.id}_${new Date(run.completedAt || Date.now()).toISOString().split('T')[0]}.fit`;
+      if (!fitBuffer || fitBuffer.length === 0) {
+        console.error(`[GET /api/runs/${req.params.id}/download-fit] FIT generation returned empty buffer`);
+        return res.status(500).json({ error: "Failed to generate FIT file - empty output" });
+      }
+      
+      // Set response headers for file download with unique filename using current timestamp
+      const now = new Date();
+      const dateTimeSuffix = now.toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_');  // YYYYMMDD_HHMMSS
+      const fileName = `run_${dateTimeSuffix}.fit`;
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.setHeader('Content-Length', fitBuffer.length);

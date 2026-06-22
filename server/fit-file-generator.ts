@@ -18,105 +18,127 @@ interface FitGeneratorOptions {
 }
 
 /**
- * Simple FIT file builder (fit-file library)
+ * Generate FIT file using @garmin/fitsdk
  * Creates a minimal but valid FIT file structure
  */
 export async function generateFitFile(
   run: Run,
   options: FitGeneratorOptions = {}
 ): Promise<Buffer> {
-  const {
-    deviceName = 'AI Run Coach',
-    manufacturerId = 255, // 255 = Unknown/Custom manufacturer
-  } = options;
+  try {
+    const {
+      deviceName = 'AI Run Coach',
+      manufacturerId = 255, // 255 = Unknown/Custom manufacturer
+    } = options;
 
-  // fit-file library for FIT generation
-  const FitFile = require('fit-file');
-  const fit = new FitFile();
-
-  const startTime = Math.floor(run.completedAt?.getTime() / 1000 || Date.now() / 1000);
-  const endTime = startTime + (run.duration || run.elapsedTime || 0);
-
-  // File Header
-  fit.addRecord('FileId', {
-    type: 4, // activity
-    manufacturer: manufacturerId,
-    product: 256,
-    serialNumber: Math.floor(Math.random() * 1000000000),
-    timeCreated: startTime,
-    dataType: 0x80, // FIT
-  });
-
-  // File Info / Device Info
-  fit.addRecord('DeviceInfo', {
-    timestamp: startTime,
-    deviceIndex: 0,
-    manufacturer: manufacturerId,
-    product: 256,
-    serialNumber: Math.floor(Math.random() * 1000000000),
-    hardwareVersion: 1,
-    softwareVersion: 100,
-  });
-
-  // Session (Summary stats)
-  fit.addRecord('Session', {
-    timestamp: endTime,
-    startTime,
-    sport: 1, // running
-    subSport: 13, // trail running
-    totalDistance: (run.distance || 0) * 1000, // meters
-    totalElapsedTime: (run.elapsedTime || run.duration || 0) * 1000, // milliseconds
-    totalTimerTime: (run.movingTime || run.duration || 0) * 1000,
-    numActiveLaps: 1,
-    avgSpeed: run.avgSpeed || 0,
-    maxSpeed: run.maxSpeed || 0,
-    avgHeartRate: run.avgHeartRate || 0,
-    maxHeartRate: run.maxHeartRate || 0,
-    avgCadence: run.cadence || 0,
-    totalAscent: Math.round(run.elevationGain || 0),
-    totalDescent: Math.round(run.elevationLoss || 0),
-    messageIndex: 0,
-  });
-
-  // Lap
-  fit.addRecord('Lap', {
-    timestamp: endTime,
-    startTime,
-    sport: 1, // running
-    totalDistance: (run.distance || 0) * 1000,
-    totalElapsedTime: (run.elapsedTime || run.duration || 0) * 1000,
-    totalTimerTime: (run.movingTime || run.duration || 0) * 1000,
-    avgSpeed: run.avgSpeed || 0,
-    maxSpeed: run.maxSpeed || 0,
-    avgHeartRate: run.avgHeartRate || 0,
-    maxHeartRate: run.maxHeartRate || 0,
-    avgCadence: run.cadence || 0,
-    messageIndex: 0,
-  });
-
-  // Add trackpoints (GPS data, HR, cadence)
-  if (run.gpsTrack && Array.isArray(run.gpsTrack)) {
-    const gpsTrack = run.gpsTrack as any[];
-
-    gpsTrack.forEach((point, index) => {
-      const recordTimestamp = startTime + (point.timestamp || index);
-
-      fit.addRecord('Record', {
-        timestamp: recordTimestamp,
-        latitude: point.lat || point.latitude,
-        longitude: point.lng || point.longitude,
-        altitude: Math.round(point.elevation || point.altitude || 0),
-        distance: point.distance || (index / gpsTrack.length) * (run.distance || 0) * 1000,
-        speed: point.speed || 0,
-        heartRate: point.heartRate || 0,
-        cadence: point.cadence || 0,
-        temperature: point.temperature || undefined,
-        power: (point as any).power || undefined,
-      });
+    // Import Garmin FIT SDK for FIT file generation
+    const { Encoder, enums } = await import('@garmin/fitsdk');
+    
+    const encoder = new Encoder();
+    
+    const startTime = Math.floor(run.completedAt?.getTime() / 1000 || Date.now() / 1000);
+    const endTime = startTime + (run.duration || run.elapsedTime || 0);
+    
+    // File ID message
+    encoder.write({
+      name: 'file_id',
+      type: enums.File.ACTIVITY,
+      manufacturer: enums.Manufacturer.DEVELOPMENT,
+      product: 1,
+      serial_number: Math.floor(Math.random() * 1000000000),
+      time_created: startTime,
     });
+    
+    // Device Info message
+    encoder.write({
+      name: 'device_info',
+      timestamp: startTime,
+      device_index: 0,
+      manufacturer: enums.Manufacturer.DEVELOPMENT,
+      device_type: enums.DeviceType.WATCH,
+      hardware_version: 1,
+      software_version: 100,
+    });
+    
+    // Session message (summary)
+    encoder.write({
+      name: 'session',
+      timestamp: endTime,
+      start_time: startTime,
+      sport: enums.Sport.RUNNING,
+      sub_sport: enums.SubSport.RUN,
+      total_distance: (run.distance || 0) * 1000, // meters
+      total_elapsed_time: (run.elapsedTime || run.duration || 0) * 1000, // milliseconds
+      total_timer_time: (run.movingTime || run.duration || 0) * 1000,
+      num_active_laps: 1,
+      avg_speed: run.avgSpeed || 0,
+      max_speed: run.maxSpeed || 0,
+      avg_heart_rate: Math.round(run.avgHeartRate || 0),
+      max_heart_rate: Math.round(run.maxHeartRate || 0),
+      avg_cadence: Math.round(run.cadence || 0),
+      total_ascent: Math.round(run.elevationGain || 0),
+      total_descent: Math.round(run.elevationLoss || 0),
+      message_index: 0,
+    });
+    
+    // Lap message
+    encoder.write({
+      name: 'lap',
+      timestamp: endTime,
+      start_time: startTime,
+      sport: enums.Sport.RUNNING,
+      sub_sport: enums.SubSport.RUN,
+      total_distance: (run.distance || 0) * 1000,
+      total_elapsed_time: (run.elapsedTime || run.duration || 0) * 1000,
+      total_timer_time: (run.movingTime || run.duration || 0) * 1000,
+      avg_speed: run.avgSpeed || 0,
+      max_speed: run.maxSpeed || 0,
+      avg_heart_rate: Math.round(run.avgHeartRate || 0),
+      max_heart_rate: Math.round(run.maxHeartRate || 0),
+      avg_cadence: Math.round(run.cadence || 0),
+      message_index: 0,
+    });
+    
+    // Add trackpoints (GPS records)
+    if (run.gpsTrack && Array.isArray(run.gpsTrack)) {
+      const gpsTrack = run.gpsTrack as any[];
+      
+      gpsTrack.forEach((point, index) => {
+        const recordTimestamp = startTime + (point.timestamp || index);
+        
+        encoder.write({
+          name: 'record',
+          timestamp: recordTimestamp,
+          position_lat: point.lat || point.latitude,
+          position_long: point.lng || point.longitude,
+          altitude: Math.round(point.elevation || point.altitude || 0),
+          distance: point.distance || (index / gpsTrack.length) * (run.distance || 0) * 1000,
+          speed: point.speed || 0,
+          heart_rate: Math.round(point.heartRate || 0),
+          cadence: Math.round(point.cadence || 0),
+          temperature: point.temperature ? Math.round(point.temperature) : undefined,
+        });
+      });
+    }
+    
+    // Get the encoded buffer
+    const fitBuffer = encoder.finish();
+    
+    if (!fitBuffer || fitBuffer.length === 0) {
+      throw new Error('FIT file generation produced empty buffer');
+    }
+    
+    return fitBuffer;
+  } catch (error: any) {
+    console.error('FIT file generation error:', {
+      errorMessage: error.message,
+      errorStack: error.stack,
+      runId: run.id,
+      hasGpsTrack: !!run.gpsTrack,
+      gpsTrackLength: Array.isArray(run.gpsTrack) ? run.gpsTrack.length : 0,
+    });
+    throw new Error(`FIT generation failed: ${error.message}`);
   }
-
-  return fit.toBuffer();
 }
 
 /**

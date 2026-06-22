@@ -1111,11 +1111,22 @@ class RunSummaryViewModel @Inject constructor(
                 // Get FIT file data from API
                 val response = apiService.downloadRunAsFit(runId)
                 
+                if (!response.isSuccessful) {
+                    Log.e("RunSummaryVM", "API error: ${response.code()} - ${response.message()}")
+                    android.widget.Toast.makeText(
+                        context,
+                        "Error: ${response.code()} - ${response.message()}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@launch
+                }
+                
                 response.body()?.let { responseBody ->
                     val bytes = responseBody.bytes()
                     
-                    // Save to Downloads folder
-                    val fileName = "run_${runId}_${System.currentTimeMillis()}.fit"
+                    // Save to Downloads folder with unique filename using current timestamp
+                    val dateTimeSuffix = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                    val fileName = "run_${dateTimeSuffix}.fit"
                     val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
                         android.os.Environment.DIRECTORY_DOWNLOADS
                     )
@@ -1142,10 +1153,10 @@ class RunSummaryViewModel @Inject constructor(
                     ).show()
                 }
             } catch (e: Exception) {
-                Log.e("RunSummaryVM", "Failed to download FIT file", e)
+                Log.e("RunSummaryVM", "Failed to download FIT file: ${e.message}", e)
                 android.widget.Toast.makeText(
                     context,
-                    "Error: ${e.message}",
+                    "Error: ${e.localizedMessage ?: e.message ?: "Unknown error"}",
                     android.widget.Toast.LENGTH_SHORT
                 ).show()
             }
