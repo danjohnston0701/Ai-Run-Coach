@@ -119,7 +119,7 @@ const formatPaceForTTS = (pace: string | undefined): string => {
 // TTS format rules — applied to every coaching system prompt.
 // Text goes straight to Polly neural TTS, so it must be spoken English with no abbreviations.
 const TTS_UNIT_RULES = `UNIT FORMAT: NEVER use abbreviations — this text is read aloud by a text-to-speech engine. Say "beats per minute" not "bpm"; say "steps per minute" not "spm"; say "kilometres" not "km" for distances.`;
-const PACE_FORMAT_RULE = `PACE FORMAT: Always say pace as "X minutes and Y seconds per kilometer" (e.g. "4 minutes and 32 seconds per kilometer"). Never use shorthand like "4:32" or "4:32/km" — the runner is listening via audio. ${TTS_UNIT_RULES}`;
+const PACE_FORMAT_RULE = `PACE FORMAT: CRITICAL — Always say pace as "X minutes and Y seconds per kilometer" (e.g. "4 minutes and 32 seconds per kilometer"). NEVER use time notation like "5:00/km" or "4:32/km" because TTS will interpret colons as clock time (e.g., "5 o'clock" instead of "5 minutes"). The pace values provided above are already formatted correctly — use them exactly as shown. ${TTS_UNIT_RULES}`;
 
 // OpenAI TTS handles commas as natural brief pauses — no comma suppression needed.
 
@@ -756,7 +756,7 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
     runnerContext += buildRunHistoryContext(runHistory, currentPace);
   }
 
-  const spokenCurrentPace = formatPaceForTTS(currentPace);  // overall average pace
+  const spokenCurrentPace = currentPace ? formatPaceForTTS(currentPace) : null;  // overall average pace - already includes "per kilometer"
   const spokenSplitPace = formatPaceForTTS(splitPace);       // this km's split pace
   
   // Training session context — builds a plan-aware framing block for the AI
@@ -1002,7 +1002,10 @@ export async function generatePhaseCoaching(params: {
   }
 
   // Build target pace comparison if available (use spoken format for TTS)
-  const spokenPhasePace = formatPaceForTTS(currentPace);
+  // For phase coaching, we need to provide the pace in a way that won't be doubled
+  // formatPaceForTTS already returns "X minutes and Y seconds per kilometer"
+  // so we just reference it as is, without the AI adding "/km" again
+  const spokenPhasePace = currentPace ? formatPaceForTTS(currentPace) : null;
   const spokenTargetPace = formatPaceForTTS(targetPace);
   
   let paceComparisonInfo = '';
@@ -1366,7 +1369,7 @@ ${phaseVarietySeed}
 ${triggerInstruction} Be ${coachTone} and direct.
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${runnerFirstName ? ` You may address them as "${runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
-Runners want to hear their real numbers — weave in their actual stats (pace, distance, time, cadence, heart rate) naturally in your coaching message. This should feel like a coach who is watching their real performance, not vague encouragement. ${targetPace ? `Be clear about whether they are on track for target pace ${spokenTargetPace} — ${paceVerdict}. Do not praise a slow pace when they are behind target.` : ""}${targetTime && targetTime > 0 ? ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.` : ""}${cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ""}${elevationInstruction ? ' Acknowledge the elevation context.' : ""}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ""}`;
+Runners want to hear their real numbers — weave in their actual stats (pace, distance, time, cadence, heart rate) naturally in your coaching message. This should feel like a coach who is watching their real performance, not vague encouragement. CRITICAL: The pace values above (current pace and target pace if provided) are already fully formatted and should NOT be reformatted — use them exactly as shown. ${targetPace ? `Be clear about whether they are on track for target pace ${spokenTargetPace} — ${paceVerdict}. Do not praise a slow pace when they are behind target.` : ""}${targetTime && targetTime > 0 ? ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.` : ""}${cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ""}${elevationInstruction ? ' Acknowledge the elevation context.' : ""}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ""}`;
 
     systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target — be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
   }
@@ -2741,21 +2744,30 @@ interface InsightItem {
  */
 function analyzePositiveWeatherConditions(
   weather: any,
-  weatherImpact?: WeatherImpactData
+  weatherImpact?: WeatherImpactData,
+  userTimezoneId?: string
 ): string {
   if (!weatherImpact || !weatherImpact.hasEnoughData || !weatherImpact.insights?.bestCondition) {
     return '';
   }
 
   const insights = weatherImpact.insights;
-  const currentHour = new Date().getHours();
+  
+  // Get current time in user's timezone
+  const now = new Date();
+  const timeStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: userTimezoneId || 'UTC',
+    hour: '2-digit',
+    hour12: false
+  }).format(now);
+  const currentHour = parseInt(timeStr, 10);
   
   // Determine current time of day
   let currentTimeOfDay = '';
   if (currentHour >= 5 && currentHour < 9) currentTimeOfDay = 'Morning';
   else if (currentHour >= 9 && currentHour < 12) currentTimeOfDay = 'Late Morning';
   else if (currentHour >= 12 && currentHour < 14) currentTimeOfDay = 'Midday';
-  else if (currentHour >= 14 && currentTimeOfDay < 17) currentTimeOfDay = 'Afternoon';
+  else if (currentHour >= 14 && currentHour < 17) currentTimeOfDay = 'Afternoon';
   else if (currentHour >= 17 && currentHour < 20) currentTimeOfDay = 'Evening';
   else currentTimeOfDay = 'Night';
 
@@ -2837,6 +2849,7 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   weatherImpact?: WeatherImpactData;
   runnerName?: string;
   fitnessLevel?: string;
+  userTimezoneId?: string;  // User's timezone (e.g. "Pacific/Auckland")
   // Training plan context
   trainingPlanId?: string;
   planGoalType?: string;
@@ -2854,10 +2867,10 @@ export async function generateWellnessAwarePreRunBriefing(params: {
   routeInsight?: string;
   weatherAdvantage?: string;
 }> {
-  const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, coachAccent, wellness, hasRoute = true, targetTime, targetPace, weatherImpact, runnerName, fitnessLevel, trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks, workoutType, workoutIntensity, workoutDescription } = params;
+  const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, coachAccent, wellness, hasRoute = true, targetTime, targetPace, weatherImpact, runnerName, fitnessLevel, userTimezoneId, trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks, workoutType, workoutIntensity, workoutDescription } = params;
 
   // Analyze positive weather conditions BEFORE building the prompt
-  const weatherAdvantage = analyzePositiveWeatherConditions(weather, weatherImpact);
+  const weatherAdvantage = analyzePositiveWeatherConditions(weather, weatherImpact, userTimezoneId);
 
   const weatherInfo = weather
     ? `Weather: ${weather.temp || weather.temperature || 'N/A'}°C, ${weather.condition || 'clear'}, wind ${weather.windSpeed || 0} km/h.`
@@ -4494,8 +4507,11 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
   } = params;
 
   // For Zone 1-2 aerobic/recovery runs, skip speed-focused coaching (final pushes, sprint finishes)
-  // These zones are about heart rate control, not speed
+  // FINAL KM is different — if they're in Zone 4-5, that's appropriate for a finishing push
+  // Only constrain HR if they're in a recovery/easy zone (Z1-Z2) during the final stage
+  // For interval/threshold work in the final km, pushing into Z4-5 is EXPECTED and GOOD
   if ((coachingType === 'final_500m' || coachingType === 'final_100m') && targetHeartRateZone && targetHeartRateZone <= 2) {
+    // Only suppress sprint coaching if this is a RECOVERY session (Z1-Z2 target)
     return `Great work maintaining Zone ${targetHeartRateZone}! Keep the effort steady to the finish. Focus on your breathing and heart rate, not the pace.`;
   }
 

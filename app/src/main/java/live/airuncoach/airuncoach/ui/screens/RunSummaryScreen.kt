@@ -162,9 +162,15 @@ fun RunSummaryScreenFlagship(
     val isLoadingDebrief by viewModel.isLoadingDebrief.collectAsState()
     val hasGroupRun = linkedGroupRunId != null
     val groupRunTabOffset = if (hasGroupRun) 1 else 0
-    // Dynamics tab is injected between Graphs and Data when Garmin data is available.
+    // Dynamics tab is injected between Graphs and Data when Running Dynamics data is available.
+    // Check for actual Running Dynamics metrics, not just hasGarminData flag (which is broader).
     // dynamicsTabOffset shifts Data/Badges indices by 1 when the Dynamics tab is present.
-    val hasDynamicsTab = runSession?.hasGarminData == true
+    val hasDynamicsTab = runSession?.let {
+        !it.groundContactTimeData.isNullOrEmpty() ||
+        !it.verticalOscillationData.isNullOrEmpty() ||
+        !it.verticalRatioData.isNullOrEmpty() ||
+        !it.strideLengthData.isNullOrEmpty()
+    } == true
     val dynamicsTabOffset = if (hasDynamicsTab) 1 else 0
 
     // Race Predictor
@@ -336,6 +342,7 @@ fun RunSummaryScreenFlagship(
                         // Dynamics tab — only shown when run has Garmin watch data
                         hasDynamicsTab && selectedTab == 3 + groupRunTabOffset -> DynamicsTabContent(
                             run = session!!,
+                            viewModel = viewModel,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
@@ -344,6 +351,7 @@ fun RunSummaryScreenFlagship(
 
                         selectedTab == 3 + groupRunTabOffset + dynamicsTabOffset -> DataTabFlagship(
                             run = session!!,
+                            viewModel = viewModel,
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
@@ -4418,7 +4426,8 @@ private fun buildPaceElevationDualSeries(
 
     return DualSeriesData(
         paceY = smoothY(medianFilter(paceOut, 5), 15),
-        elevY = smoothY(medianFilter(elevOut, 7), 11),
+        // Apply IQR rejection to match standalone elevation chart processing
+        elevY = smoothY(medianFilter(iqrFilterAltitude(elevOut), 7), 11),
         labels = labels
     )
 }
@@ -4478,7 +4487,8 @@ private fun buildCadenceElevationDualSeries(
 
     return DualSeriesData(
         paceY = smoothY(cadOut, 11),
-        elevY = smoothY(medianFilter(elevOut, 7), 11),
+        // Apply IQR rejection to match standalone elevation chart processing
+        elevY = smoothY(medianFilter(iqrFilterAltitude(elevOut), 7), 11),
         labels = labels
     )
 }
@@ -4691,11 +4701,11 @@ private fun DualAxisChartCanvas(
                 )
             }
 
-            // Secondary line (thin, behind primary)
+            // Secondary line (thin, behind primary) — 50% thinner to show subtle elevation changes
             drawPath(
                 path = secPath,
                 color = secondaryColor.copy(alpha = 0.55f),
-                style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                style = Stroke(width = 0.75.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
             )
 
             // --- Primary line (pace / cadence): bold line on top ---
@@ -6533,6 +6543,7 @@ private fun WeatherPerformanceCard(weather: WeatherData) {
 @Composable
 private fun DynamicsTabContent(
     run: RunSession,
+    viewModel: RunSummaryViewModel,
     onDelete: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
@@ -6805,6 +6816,7 @@ private fun DynamicsTabContent(
 @Composable
 private fun DataTabFlagship(
     run: RunSession,
+    viewModel: RunSummaryViewModel,
     onDelete: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
@@ -7060,13 +7072,7 @@ private fun DataTabFlagship(
             ) {
                 // Download .FIT file button
                 OutlinedButton(
-                    onClick = {
-                        android.widget.Toast.makeText(
-                            context,
-                            "Downloading run data as .FIT file...",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                    },
+                    onClick = { viewModel.downloadRunAsFit(run.id) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = Colors.primary

@@ -1098,6 +1098,60 @@ class RunSummaryViewModel @Inject constructor(
         }
     }
 
+    fun downloadRunAsFit(runId: String) {
+        viewModelScope.launch {
+            try {
+                Log.d("RunSummaryVM", "Downloading FIT file for run: $runId")
+                android.widget.Toast.makeText(
+                    context,
+                    "Downloading run data as .FIT file...",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+
+                // Get FIT file data from API
+                val response = apiService.downloadRunAsFit(runId)
+                
+                response.body()?.let { responseBody ->
+                    val bytes = responseBody.bytes()
+                    
+                    // Save to Downloads folder
+                    val fileName = "run_${runId}_${System.currentTimeMillis()}.fit"
+                    val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS
+                    )
+                    
+                    if (!downloadsDir.exists()) {
+                        downloadsDir.mkdirs()
+                    }
+                    
+                    val file = java.io.File(downloadsDir, fileName)
+                    file.writeBytes(bytes)
+                    
+                    Log.d("RunSummaryVM", "FIT file saved to: ${file.absolutePath} (${bytes.size} bytes)")
+                    android.widget.Toast.makeText(
+                        context,
+                        "Run downloaded: $fileName",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                } ?: run {
+                    Log.e("RunSummaryVM", "Failed to download FIT file: empty response body")
+                    android.widget.Toast.makeText(
+                        context,
+                        "Failed to download FIT file",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e("RunSummaryVM", "Failed to download FIT file", e)
+                android.widget.Toast.makeText(
+                    context,
+                    "Error: ${e.message}",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
     // ── Group Run leaderboard loading ──────────────────────────────────────────
 
     /**

@@ -770,7 +770,9 @@ class RunSessionViewModel @Inject constructor(
                         WeatherPayload(
                             temp = it.temperature.toInt(),
                             condition = it.description,
-                            windSpeed = it.windSpeed.toInt()
+                            windSpeed = it.windSpeed.toInt(),
+                            timestamp = System.currentTimeMillis(),
+                            userTimezoneId = java.util.TimeZone.getDefault().id
                         )
                     }
                     val wellnessPayload = _runState.value.wellnessContext?.let {

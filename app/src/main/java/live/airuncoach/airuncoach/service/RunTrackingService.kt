@@ -449,7 +449,9 @@ class RunTrackingService : Service(), SensorEventListener {
         //                A 270 m ascent would show as ≈0–6 m in the database (exactly the
         //                symptom: "6 m elevation on hilly terrain").  Use a 0.4 m gate instead.
         private const val ELEVATION_NOISE_THRESHOLD        = 1.5 // Phone GPS  (±5-10 m, 1 Hz) — legacy, not used for gain
-        private const val ELEVATION_NOISE_THRESHOLD_GARMIN = 0.4 // Garmin GPS (±1 m, 0.5 Hz to phone)
+        // Garmin GPS threshold: 0.4m was too aggressive, causing GPS jitter to accumulate as false elevation gain
+        // Raised to 2.0m to match the actual Garmin accuracy and reduce false positives from noisy altitude samples
+        private const val ELEVATION_NOISE_THRESHOLD_GARMIN = 2.0 // Garmin GPS (±1 m nominal, but ±2-3m in noisy conditions)
 
         // Phone GPS elevation gain — windowed mean approach.
         // Problem: at 1 Hz and ±10 m GPS noise, per-sample altitude changes on a real 10% hill are
@@ -2264,7 +2266,10 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
 
-        // Calculate incline degrees from elevation change
+        // Calculate incline percentage from elevation change
+        // Note: We calculate degrees first, then convert to percentage grade (not degrees)
+        // Percentage grade = tan(angle_in_radians) × 100
+        // This is more useful for coaching than degrees
         var inclineDegrees: Float? = null
         if (location.hasAltitude()) {
             if (routePoints.isNotEmpty()) {
@@ -2275,7 +2280,11 @@ class RunTrackingService : Service(), SensorEventListener {
                         LocationPoint(location.latitude, location.longitude, location.time, 
                             null, null, null, null, null, null))
                     if (distToNextPoint > 0) {
-                        inclineDegrees = (kotlin.math.atan(altChange / distToNextPoint) * (180 / kotlin.math.PI)).toFloat()
+                        // Calculate angle in radians first
+                        val angleRadians = kotlin.math.atan(altChange / distToNextPoint)
+                        // Convert to percentage grade (not degrees!)
+                        // This represents the grade percentage which is more intuitive for coaching
+                        inclineDegrees = (kotlin.math.tan(angleRadians) * 100).toFloat()
                     }
                 }
             }
@@ -3004,7 +3013,21 @@ class RunTrackingService : Service(), SensorEventListener {
         stopTimer()
         
         Log.d("RunTrackingService", "Stopped all tracking")
-        
+
+        // Immediately notify the watch that the session has ended.
+        // This MUST happen before the upload coroutine starts so the watch stops
+        // sending "pause"/"resume" commands and exits the run screen right away.
+        // Without this, in-flight runUpdate(isRunning=true) messages arrive after
+        // finishRun() on the watch and trap it in a pause/start loop.
+        try {
+            if (garminWatchManager?.isWatchConnected?.value == true) {
+                Log.d("RunTrackingService", "⌚ Sending sessionEnded to watch immediately on stop")
+                garminWatchManager?.sendSessionEnded()
+            }
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "sessionEnded early notify failed (non-fatal): ${e.message}")
+        }
+
         // Create a separate coroutine scope that won't be cancelled immediately
         val uploadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         
@@ -4591,7 +4614,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun fireStartCoaching() {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
 
-        // Try to get a tone-appropriate prompt; fall back to generic if it fails
+        // Try to get Polly TTS audio for a tone-appropriate prompt; fall back to generic if it fails
         serviceScope.launch {
             try {
                 val tone = currentUser?.coachTone ?: "encouraging"
@@ -4603,9 +4626,26 @@ class RunTrackingService : Service(), SensorEventListener {
                     message = startPrompt
                 ))
                 
-                // Fire via audio immediately (with tone applied via accent/gender in TTS)
+                // Try to get Polly TTS audio for this motivation statement
                 if (!isMuted) {
-                    playCoachingAudio(null, null, startPrompt)
+                    try {
+                        val audioResponse = apiService.getStartRunAudio(
+                            live.airuncoach.airuncoach.network.model.StartRunAudioRequest(
+                                motivationalText = startPrompt
+                            )
+                        )
+                        
+                        if (audioResponse.audio != null && audioResponse.format != null) {
+                            Log.d("RunTrackingService", "Start coaching audio generated via Polly TTS (tone=$tone)")
+                            playCoachingAudio(audioResponse.audio, audioResponse.format, startPrompt)
+                        } else {
+                            Log.w("RunTrackingService", "No audio in start coaching response, using device TTS fallback")
+                            playCoachingAudio(null, null, startPrompt)
+                        }
+                    } catch (e: Exception) {
+                        Log.w("RunTrackingService", "Failed to get Polly TTS audio: ${e.message}, using device TTS fallback")
+                        playCoachingAudio(null, null, startPrompt)
+                    }
                 }
                 
                 Log.d("RunTrackingService", "Start coaching (tone=$tone): $startPrompt")

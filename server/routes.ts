@@ -1663,6 +1663,39 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // GET /api/runs/:id/download-fit — Download run as FIT file for Garmin/Strava
+  app.get("/api/runs/:id/download-fit", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      console.log(`[GET /api/runs/${req.params.id}/download-fit] Generating FIT file for user: ${req.user?.userId}`);
+      const run = await storage.getRun(req.params.id);
+      if (!run) {
+        console.error(`[GET /api/runs/${req.params.id}/download-fit] Run NOT FOUND`);
+        return res.status(404).json({ error: "Run not found" });
+      }
+      
+      // Verify user owns this run
+      if (run.userId !== req.user!.userId) {
+        console.error(`[GET /api/runs/${req.params.id}/download-fit] Unauthorized — user mismatch`);
+        return res.status(403).json({ error: "Unauthorized" });
+      }
+
+      // Generate FIT file
+      const fitBuffer = await generateFitFile(run);
+      
+      // Set response headers for file download
+      const fileName = `run_${run.id}_${new Date(run.completedAt || Date.now()).toISOString().split('T')[0]}.fit`;
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Content-Length', fitBuffer.length);
+      
+      res.send(fitBuffer);
+      console.log(`[GET /api/runs/${req.params.id}/download-fit] FIT file sent successfully (${fitBuffer.length} bytes)`);
+    } catch (error: any) {
+      console.error("[GET /api/runs/:id/download-fit] Error:", error);
+      res.status(500).json({ error: "Failed to generate FIT file" });
+    }
+  });
+
   app.post("/api/runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
@@ -8272,12 +8305,17 @@ function transformRunForAndroid(run: any) {
       if (!pace) return;
 
       // Time of day from completedAt (in user's local time)
-      // TODO: Use user.timezone once we store it; for now use +13 (NZ)
       if (run.completedAt) {
         const date = new Date(run.completedAt);
-        const utcHour = date.getUTCHours();
-        const userTimezoneOffset = 13; // NZ timezone (UTC+13)
-        const hour = (utcHour + userTimezoneOffset) % 24;
+        // Use the Intl API to get the hour in the user's timezone (or use user.timezone if stored in DB)
+        // For now, we use the default system behavior - the backend should get userTimezoneId from the request
+        const timeStr = new Intl.DateTimeFormat('en-US', {
+          timeZone: run.userTimezoneId || 'UTC',
+          hour: '2-digit',
+          hour12: false
+        }).format(date);
+        const hour = parseInt(timeStr, 10);
+        
         let timeLabel = '';
         if (hour >= 5 && hour < 9) timeLabel = 'Morning';
         else if (hour >= 9 && hour < 12) timeLabel = 'Late Morning';
@@ -8495,8 +8533,11 @@ function transformRunForAndroid(run: any) {
   app.post("/api/coaching/pre-run-briefing", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, targetTime, targetPace, weather, trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks, workoutType, workoutIntensity, workoutDescription } = req.body;
+      
+      // Extract timezone from weather payload if available
+      const userTimezoneId = weather?.userTimezoneId;
 
-      console.log(`[Pre-run briefing] Request data - distance: ${distance}, targetTime: ${targetTime}, targetPace: ${targetPace}, hasRoute: ${hasRoute}, weather: ${JSON.stringify(weather)}`);
+      console.log(`[Pre-run briefing] Request data - distance: ${distance}, targetTime: ${targetTime}, targetPace: ${targetPace}, hasRoute: ${hasRoute}, timezone: ${userTimezoneId}, weather: ${JSON.stringify(weather)}`);
 
       // Get user's coach settings
       const user = await storage.getUser(req.user!.userId);
@@ -8570,6 +8611,7 @@ function transformRunForAndroid(run: any) {
         targetTime: targetTime,
         targetPace: targetPace,
         weatherImpact: weatherImpactData,
+        userTimezoneId: userTimezoneId,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
         runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),
@@ -8638,6 +8680,52 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // Start Run Audio endpoint
+  // Generates Polly TTS audio for motivational start run announcements
+  app.post("/api/coaching/start-run-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { motivationalText } = req.body;
+      
+      if (!motivationalText || motivationalText.trim().length === 0) {
+        return res.status(400).json({ error: "Missing motivationalText" });
+      }
+
+      // Get user's coach settings
+      const user = await storage.getUser(req.user!.userId);
+      const coachGender = user?.coachGender || 'female';
+      const coachTone = user?.coachTone || 'energetic';
+      const coachAccent = user?.coachAccent || 'british';
+      const coachName = user?.coachName || 'Coach';
+
+      // Generate Polly TTS instructions for the start run announcement
+      const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+
+      // Generate TTS audio
+      const aiService = await import("./ai-service");
+      const audioBuffer = await aiService.generateTTS(
+        motivationalText,
+        "default",  // voice (not used for Polly, but kept for API compatibility)
+        ttsInstructions,
+        coachAccent,
+        coachGender
+      );
+
+      // Return as base64 for mobile playback
+      const base64Audio = audioBuffer.toString('base64');
+
+      console.log(`[Start Run Audio] Generated TTS for: "${motivationalText.substring(0, 50)}..." (accent: ${coachAccent}, tone: ${coachTone})`);
+
+      res.json({
+        audio: base64Audio,
+        format: 'mp3',
+        text: motivationalText
+      });
+    } catch (error: any) {
+      console.error("[Start Run Audio] TTS generation error:", error);
+      res.status(500).json({ error: "Failed to generate start run audio" });
+    }
+  });
+
   // Enhanced pre-run briefing with TTS audio
   // Uses AI-powered generateWellnessAwarePreRunBriefing() for intelligent, personalized content,
   // then generates OpenAI TTS audio from the AI response. Best of both worlds.
@@ -8661,6 +8749,7 @@ function transformRunForAndroid(run: any) {
       
       // Fetch weather if not provided
       let weather = clientWeather;
+      const userTimezoneId = clientWeather?.userTimezoneId;  // Extract timezone from client
       if (!weather && startLocation?.lat && startLocation?.lng) {
         try {
           const weatherRes = await fetch(
@@ -8672,6 +8761,7 @@ function transformRunForAndroid(run: any) {
               temp: Math.round(data.current_weather?.temperature || 20),
               condition: data.current_weather?.weathercode <= 3 ? 'clear' : 'cloudy',
               windSpeed: Math.round(data.current_weather?.windspeed || 0),
+              userTimezoneId: userTimezoneId,  // Preserve timezone even when fetching weather
             };
           }
         } catch (e) {
@@ -8741,6 +8831,7 @@ function transformRunForAndroid(run: any) {
         targetTime: targetTime || null,
         targetPace: targetPace || null,
         weatherImpact,
+        userTimezoneId: userTimezoneId,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
         runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),

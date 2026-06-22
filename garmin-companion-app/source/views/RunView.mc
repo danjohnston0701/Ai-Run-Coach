@@ -75,6 +75,9 @@ class RunView extends Ui.View {
 
     // Tracks whether we've already sent sessionReady to the phone this session
     private var _sessionReadySent = false;
+    // Set when finishRun() is called — prevents a stale runUpdate from the phone
+    // (in-flight before the service stops) restoring _isRunning=true on the watch.
+    private var _isFinishing = false;
 
     // Watch GPS cache
     private var _lastGpsLat    = null;
@@ -285,6 +288,7 @@ class RunView extends Ui.View {
     function startRun() {
         Sys.println(">>> startRun() entry — connected=" + _isConnected + " gpsQ=" + _gpsQuality + " auth=" + _isAuthenticated);
         if (_isRunning) { return; }
+        _isFinishing = false;  // Ensure clean state at the start of every new run
         // GPS quality gate: require "Usable" (>=3) for standalone, but allow "Last known"
         // (>=2) when phone is connected since phone GPS will be authoritative for the run.
         var minGpsQ = _isConnected ? 2 : 3;
@@ -388,6 +392,7 @@ class RunView extends Ui.View {
     }
 
     function finishRun() {
+        _isFinishing     = true;   // Block stale runUpdates from phone during shutdown
         _isRunning       = false;
         _isPaused        = false;
         _sessionReadySent = false;  // Reset so next session notifies phone again
@@ -558,6 +563,7 @@ class RunView extends Ui.View {
         } else if (t.equals("startRun")) {
             // Scenario A: phone initiates the run — watch acts as companion display.
             // Phone owns the backend session + GPS; watch just mirrors the metrics.
+            _isFinishing     = false;  // Clean slate for the new session
             _phoneControlled = true;
             _isRunning       = true;
             _isPaused        = false;
@@ -596,6 +602,10 @@ class RunView extends Ui.View {
             Ui.requestUpdate();
 
         } else if (t.equals("runUpdate")) {
+            // If the user has already called finishRun(), ignore any in-flight state
+            // updates from the phone — they would restore _isRunning=true and trap the
+            // watch in a pause/start loop.
+            if (_isFinishing) { return; }
             // When the PHONE started the run (_phoneControlled), mirror all phone metrics.
             // When the WATCH started the run (!_phoneControlled), the watch own Activity.Info
             // data (actInfo.timerTime, actInfo.elapsedDistance, etc.) is authoritative — do NOT
@@ -629,6 +639,7 @@ class RunView extends Ui.View {
             _isRunning        = false;
             _isPaused         = false;
             _phoneControlled  = false;
+            _isFinishing      = false;  // Reset for next run
             _sessionReadySent = false;  // Allow next session to send sessionReady again
             _overlayState     = OVERLAY_READY;
             if (_gpsListening) {
@@ -1329,6 +1340,9 @@ class RunView extends Ui.View {
 (:gui)
 class RunDelegate extends Ui.BehaviorDelegate {
     private var _view;
+    // Double-tap detection: first tap records time, second tap within 300ms triggers Talk to Coach
+    private var _lastTapTimeMs = 0;
+    private const DOUBLE_TAP_WINDOW_MS = 300;
     function initialize()      { BehaviorDelegate.initialize(); }
     function setView(v)        { _view = v; }
 
@@ -1355,9 +1369,21 @@ class RunDelegate extends Ui.BehaviorDelegate {
     // ALWAYS returns true so the tap is consumed and never falls through to
     // onSelect() which would incorrectly start/pause the run.
     function onTap(clickEvent) {
-        Sys.println(">>> onTap: screen touched, consuming event (no start/pause)");
+        // Double-tap required to trigger Talk to Coach — single tap does nothing.
+        // This prevents accidental triggers when the runner brushes the screen.
         if (_view != null && _view.isRunning() && !_view.isPaused()) {
-            _view.requestTalkToCoach();
+            var now = Sys.getTimer();
+            var elapsed = now - _lastTapTimeMs;
+            if (_lastTapTimeMs > 0 && elapsed <= DOUBLE_TAP_WINDOW_MS) {
+                // Second tap within window → Talk to Coach
+                Sys.println(">>> onTap: DOUBLE-TAP (" + elapsed + "ms) — Talk to Coach");
+                _view.requestTalkToCoach();
+                _lastTapTimeMs = 0;  // reset so triple-tap doesn't fire again
+            } else {
+                // First tap — record time, wait for second
+                Sys.println(">>> onTap: first tap — waiting for second tap");
+                _lastTapTimeMs = now;
+            }
         }
         return true; // always consume — screen touches must NEVER start/pause a run
     }

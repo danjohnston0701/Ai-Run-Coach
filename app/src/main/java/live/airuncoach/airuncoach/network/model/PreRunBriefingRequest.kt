@@ -39,7 +39,9 @@ data class StartLocation(
 data class WeatherPayload(
     @SerializedName("temp") val temp: Int,
     @SerializedName("condition") val condition: String,
-    @SerializedName("windSpeed") val windSpeed: Int
+    @SerializedName("windSpeed") val windSpeed: Int,
+    @SerializedName("timestamp") val timestamp: Long? = null,  // Epoch millis for timezone-aware time-of-day analysis
+    @SerializedName("userTimezoneId") val userTimezoneId: String? = null  // User's timezone (e.g., "Pacific/Auckland")
 )
 
 data class WellnessPayload(

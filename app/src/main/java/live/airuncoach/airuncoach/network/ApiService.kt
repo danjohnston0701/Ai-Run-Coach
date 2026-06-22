@@ -137,6 +137,9 @@ interface ApiService {
     @POST("/api/coaching/pre-run-briefing-audio")
     suspend fun getPreRunBriefing(@Body request: PreRunBriefingRequest): PreRunBriefingResponse
 
+    @POST("/api/coaching/start-run-audio")
+    suspend fun getStartRunAudio(@Body request: StartRunAudioRequest): StartRunAudioResponse
+
     @POST("/api/coaching/cadence-coaching")
     suspend fun getCadenceCoaching(@Body request: CadenceCoachingRequest): CadenceCoachingResponse
 
@@ -254,6 +257,9 @@ interface ApiService {
         @Path("id") runId: String,
         @Body request: FreeformAnalysisRequest
     ): FreeformAnalysisResponse
+    
+    @GET("/api/runs/{id}/download-fit")
+    suspend fun downloadRunAsFit(@Path("id") runId: String): retrofit2.Response<okhttp3.ResponseBody>
     
     @POST("/api/runs")
     suspend fun uploadRun(@Body request: UploadRunRequest): UploadRunResponse
