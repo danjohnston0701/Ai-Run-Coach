@@ -1340,9 +1340,11 @@ class RunView extends Ui.View {
 (:gui)
 class RunDelegate extends Ui.BehaviorDelegate {
     private var _view;
-    // Double-tap detection: first tap records time, second tap within 300ms triggers Talk to Coach
-    private var _lastTapTimeMs = 0;
-    private const DOUBLE_TAP_WINDOW_MS = 300;
+    // Double-tap detection: first tap records time, second tap within 400ms triggers Talk to Coach.
+    // CRITICAL: Sys.getTimer() returns Long on CIQ 4.x+. Use Long literals throughout so that
+    // Long-Long arithmetic never throws "Symbol Not Found / Failed invoking <symbol>" on CIQ 6.0.
+    private var _lastTapTimeMs = 0l;
+    private const DOUBLE_TAP_WINDOW_MS = 400l;
     function initialize()      { BehaviorDelegate.initialize(); }
     function setView(v)        { _view = v; }
 
@@ -1370,20 +1372,28 @@ class RunDelegate extends Ui.BehaviorDelegate {
     // onSelect() which would incorrectly start/pause the run.
     function onTap(clickEvent) {
         // Double-tap required to trigger Talk to Coach — single tap does nothing.
-        // This prevents accidental triggers when the runner brushes the screen.
-        if (_view != null && _view.isRunning() && !_view.isPaused()) {
-            var now = Sys.getTimer();
-            var elapsed = now - _lastTapTimeMs;
-            if (_lastTapTimeMs > 0 && elapsed <= DOUBLE_TAP_WINDOW_MS) {
-                // Second tap within window → Talk to Coach
-                Sys.println(">>> onTap: DOUBLE-TAP (" + elapsed + "ms) — Talk to Coach");
-                _view.requestTalkToCoach();
-                _lastTapTimeMs = 0;  // reset so triple-tap doesn't fire again
-            } else {
-                // First tap — record time, wait for second
-                Sys.println(">>> onTap: first tap — waiting for second tap");
-                _lastTapTimeMs = now;
+        // CIQ type safety: all timer values are Long (toLong() + 0l/400l literals) so
+        // Long-Long arithmetic is always safe across every CIQ version.
+        try {
+            if (_view != null && _view.isRunning() && !_view.isPaused()) {
+                var now = Sys.getTimer().toLong();  // toLong() ensures Long on ALL CIQ versions
+                var elapsed = now - _lastTapTimeMs; // Long - Long = Long ✓
+                if (_lastTapTimeMs > 0l && elapsed <= DOUBLE_TAP_WINDOW_MS) {
+                    // Second tap within window → Talk to Coach
+                    Sys.println(">>> onTap: DOUBLE-TAP (" + elapsed + "ms) — Talk to Coach");
+                    _view.requestTalkToCoach();
+                    _lastTapTimeMs = 0l;  // reset so triple-tap doesn't fire again
+                } else {
+                    // First tap — record time, wait for second
+                    Sys.println(">>> onTap: first tap — waiting for second tap");
+                    _lastTapTimeMs = now;
+                }
             }
+        } catch (e) {
+            // Belt-and-suspenders: if timer arithmetic ever fails on an unexpected
+            // firmware, reset and log rather than crashing the entire app.
+            Sys.println(">>> onTap: timer error — " + e.toString());
+            _lastTapTimeMs = 0l;
         }
         return true; // always consume — screen touches must NEVER start/pause a run
     }

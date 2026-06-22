@@ -134,7 +134,7 @@ class DataStreamer {
         if (responseCode == 200) {
             // Notify RunView: HTTP is reachable — reset failure counter so offline
             // buffer stays dormant in Scenario 3 (phone nearby, app not open).
-            var app = Application.getApp();
+            var app = App.getApp();
             if (app != null && (app has :onHttpSuccess)) { app.onHttpSuccess(); }
 
             // Deliver coaching cue to the active RunView if one was piggybacked on the response
@@ -153,12 +153,12 @@ class DataStreamer {
             _authToken = null;  // Stop sending HTTP requests for this session
             // (App.Storage token is intentionally kept so the next open can show a proper
             //  "reconnect needed" prompt rather than a generic "waiting for phone" screen)
-            var app = Application.getApp();
+            var app = App.getApp();
             if (app != null && (app has :onHttpFailure)) { app.onHttpFailure(); }
         } else {
             // Notify RunView: HTTP failed — increment failure counter
             Sys.println("Data send failed: " + responseCode);
-            var app = Application.getApp();
+            var app = App.getApp();
             if (app != null && (app has :onHttpFailure)) { app.onHttpFailure(); }
         }
     }
@@ -313,7 +313,7 @@ class DataStreamer {
             // Notify the app so it can tell the phone to show a sync notification.
             // The server returns { success: true, runId: <int>, ... } so we can deep-link.
             var runId = (data != null && data instanceof Lang.Dictionary) ? data.get("runId") : null;
-            var app = Application.getApp();
+            var app = App.getApp();
             if (app != null && (app has :onBatchUploaded)) {
                 app.onBatchUploaded(_pendingBatchSessionId, runId);
             }
