@@ -70,7 +70,8 @@ fun PreviousRunsScreen(
     // run_summary or any child screen), so the user sees fresh data after a delete.
     LaunchedEffect(isActiveDestination) {
         if (isActiveDestination) {
-            viewModel.fetchRuns()
+            // Force refresh to ensure deleted runs are removed and cache is fresh
+            viewModel.fetchRuns(forceRefresh = true)
             viewModel.calculateWeatherImpact()
         }
     }
