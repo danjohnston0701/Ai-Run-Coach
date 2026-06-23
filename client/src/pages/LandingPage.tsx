@@ -106,7 +106,7 @@ export default function LandingPage() {
       <nav className="absolute top-0 left-0 right-0 z-50 p-6 flex justify-between items-center">
         <div className="flex items-center gap-2">
           <img src={logoImage} alt="AI Run Coach Logo" className="w-24 h-24 object-contain mix-blend-screen" />
-          <span className="font-display font-bold uppercase tracking-tighter text-2xl hidden sm:block">AI Run Coach</span>
+          <span className="font-display font-bold uppercase tracking-tighter text-2xl hidden sm:block">Ai Run Coach</span>
         </div>
         <Button
           onClick={openForm}
@@ -197,7 +197,7 @@ export default function LandingPage() {
               Your Garmin.<br />Supercharged.
             </h2>
             <p className="text-muted-foreground text-base leading-relaxed max-w-md">
-              The AI Run Coach Garmin Companion app streams real-time heart rate, pace, and distance straight to your AI coach — so every coaching cue is informed by what's actually happening on your wrist, right now.
+              The Ai Run Coach Garmin Companion app streams real-time heart rate, pace, and distance straight to your AI coach — so every coaching cue is informed by what's actually happening on your wrist, right now.
             </p>
             <ul className="space-y-3">
               {[
@@ -225,7 +225,7 @@ export default function LandingPage() {
               <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl scale-75 opacity-60" />
               <img
                 src={garminWatchImage}
-                alt="Garmin Watch with AI Run Coach"
+                alt="Garmin Watch with Ai Run Coach"
                 className="relative w-72 md:w-96 rounded-3xl object-contain drop-shadow-2xl"
               />
             </div>
@@ -303,7 +303,7 @@ export default function LandingPage() {
               Route My Run
             </h2>
             <p className="text-muted-foreground text-base leading-relaxed max-w-md">
-              Set your distance, pick your preferences, and let AI Run Coach generate three ready-to-run circular routes from your current location — complete with elevation data and map preview.
+              Set your distance, pick your preferences, and let Ai Run Coach generate three ready-to-run circular routes from your current location — complete with elevation data and map preview.
             </p>
             <ul className="space-y-3">
               {[
@@ -377,7 +377,7 @@ export default function LandingPage() {
               Insights Used by<br />Elite Runners
             </h2>
             <p className="text-muted-foreground text-base leading-relaxed max-w-md">
-              Go beyond pace and distance. AI Run Coach surfaces professional metrics that show you how your body is really performing.
+              Go beyond pace and distance. Ai Run Coach surfaces professional metrics that show you how your body is really performing.
             </p>
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-card/50 border border-white/5 space-y-1">
@@ -412,7 +412,7 @@ export default function LandingPage() {
       <section className="py-32 px-6 text-center">
         <div className="max-w-3xl mx-auto space-y-8 bg-card/30 p-12 rounded-[3rem] border border-white/10 backdrop-blur-3xl">
           <h2 className="text-5xl font-display font-black uppercase tracking-tighter">Ready to evolve?</h2>
-          <p className="text-muted-foreground text-lg">Be the first to know when AI Run Coach launches. Register your interest and we'll keep you updated.</p>
+          <p className="text-muted-foreground text-lg">Be the first to know when Ai Run Coach launches. Register your interest and we'll keep you updated.</p>
           <Button
             size="lg"
             className="h-12 px-8 text-base font-display uppercase tracking-widest rounded-full bg-primary text-background hover:bg-primary/90"
@@ -426,7 +426,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="py-12 px-6 text-center border-t border-white/5 opacity-60">
-        <p className="text-[10px] uppercase tracking-[0.2em] mb-4">© 2025 AI Run Coach • Designed for Peak Performance</p>
+        <p className="text-[10px] uppercase tracking-[0.2em] mb-4">© 2025 Ai Run Coach • Designed for Peak Performance</p>
         <div className="flex items-center justify-center gap-6">
           <a href="/privacy" className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors">Privacy Policy</a>
           <a href="/terms" className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors">Terms of Use</a>
@@ -475,7 +475,7 @@ export default function LandingPage() {
                     </div>
                     <h3 className="text-2xl font-display font-bold uppercase tracking-tight">You're on the list!</h3>
                     <p className="text-muted-foreground text-sm leading-relaxed">
-                      Thanks for registering your interest. We'll email you with development updates and let you know the moment AI Run Coach is ready to download.
+                      Thanks for registering your interest. We'll email you with development updates and let you know the moment Ai Run Coach is ready to download.
                     </p>
                     <Button
                       onClick={closeForm}
