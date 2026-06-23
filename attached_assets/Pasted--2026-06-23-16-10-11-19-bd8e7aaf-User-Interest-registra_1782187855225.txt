@@ -1,0 +1,161 @@
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+Interest registration error: error: column "message" of relation "interest_registrations" does not exist
+
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+at async file:///home/runner/workspace/node_modules/drizzle-orm/node-postgres/session.js:83:22
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+at async file:///home/runner/workspace/server_dist/index.js:20944:28 {
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+severity: 'ERROR',
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+position: '73',
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+at async DatabaseStorage.createInterestRegistration (file:///home/runner/workspace/server_dist/index.js:2977:23)
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+column: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+code: '42703',
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+schema: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+internalQuery: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+at /home/runner/workspace/node_modules/pg-pool/index.js:45:11
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+where: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+dataType: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+hint: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+detail: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+internalPosition: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+length: 142,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+table: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+constraint: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+constraint: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+table: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+length: 142,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+internalPosition: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+detail: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+hint: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+dataType: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+where: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+at /home/runner/workspace/node_modules/pg-pool/index.js:45:11
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+internalQuery: undefined,
+
+2026-06-23 16:10:11.19
+bd8e7aaf
+User
+schema: undefined,
