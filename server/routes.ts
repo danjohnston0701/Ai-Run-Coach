@@ -944,12 +944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Injury not found" });
       }
 
-      // Only allow deleting HEALED or CHRONIC injuries
-      if (!['HEALED', 'CHRONIC'].includes(injury.status?.toUpperCase())) {
-        return res.status(400).json({ 
-          error: "Cannot delete active/recovering injuries. Mark as healed first." 
-        });
-      }
+      // Allow deleting injuries at any stage
 
       const updatedInjuries = injuries.filter((i: any) => i.id !== injuryId);
       await storage.updateUser(userId, { injuryHistory: updatedInjuries });
@@ -1941,7 +1936,12 @@ function transformRunForAndroid(run: any) {
       // ── Track AI coaching km usage ─────────────────────────────────────────
       // If AI coaching was active for this run, count its distance toward the
       // user's monthly AI coaching quota. Fire-and-forget; never blocks the save.
-      if (run.aiCoachEnabled && (run.distance ?? 0) > 0) {
+      // Track AI coaching km based on whether coaching actually happened (notes were generated),
+      // not just whether the flag was set. This correctly handles watch-started runs,
+      // runs where the coach was toggled mid-run, and any edge cases where the flag
+      // was true but no coaching fired.
+      const hasAiCoachingNotes = Array.isArray(run.aiCoachingNotes) && run.aiCoachingNotes.length > 0;
+      if (hasAiCoachingNotes && (run.distance ?? 0) > 0) {
         recordUsage(userId, "aiCoachingKm", run.distance ?? 0);
       }
 

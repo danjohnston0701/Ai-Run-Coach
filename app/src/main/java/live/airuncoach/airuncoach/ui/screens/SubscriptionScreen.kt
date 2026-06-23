@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -642,7 +643,9 @@ private fun DeleteAccountSection() {
 }
 
 @Composable
-private fun UsageTabContent(@Suppress("UNUSED_PARAMETER") viewModel: SubscriptionViewModel) {
+private fun UsageTabContent(viewModel: SubscriptionViewModel) {
+    val usageState by viewModel.usageState.collectAsState()
+    
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -651,12 +654,45 @@ private fun UsageTabContent(@Suppress("UNUSED_PARAMETER") viewModel: Subscriptio
     ) {
         // Current Plan Banner
         item {
-            CurrentPlanBanner()
+            when (usageState) {
+                is SubscriptionViewModel.UsageState.Success -> {
+                    val usage = (usageState as SubscriptionViewModel.UsageState.Success).usage
+                    CurrentPlanBanner(
+                        tierName = usage.tier.replaceFirstChar { it.uppercase() },
+                        resetDate = usage.yearMonth
+                    )
+                }
+                else -> {
+                    CurrentPlanBanner(tierName = "Loading...", resetDate = "")
+                }
+            }
         }
 
         // Usage Rows
         item {
-            UsageRowsContainer()
+            when (usageState) {
+                is SubscriptionViewModel.UsageState.Success -> {
+                    val usage = (usageState as SubscriptionViewModel.UsageState.Success).usage
+                    UsageRowsContainer(usage)
+                }
+                is SubscriptionViewModel.UsageState.Loading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(Spacing.lg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+                is SubscriptionViewModel.UsageState.Error -> {
+                    Text(
+                        text = "Failed to load usage data",
+                        color = Colors.textMuted,
+                        modifier = Modifier.padding(Spacing.lg)
+                    )
+                }
+            }
         }
 
         // Upgrade CTA (Free users only)
@@ -664,10 +700,39 @@ private fun UsageTabContent(@Suppress("UNUSED_PARAMETER") viewModel: Subscriptio
             UpgradeCTA()
         }
     }
+    
+    // Load usage data on first composition
+    LaunchedEffect(Unit) {
+        viewModel.loadUsageData()
+    }
 }
 
 @Composable
-private fun CurrentPlanBanner() {
+private fun CurrentPlanBanner(
+    tierName: String = "Loading...",
+    resetDate: String = ""
+) {
+    val tierColor = when (tierName.lowercase()) {
+        "lite" -> Colors.primary
+        "standard" -> Color(0xFFA78BFA)
+        else -> Color(0xFF8E9BAE)
+    }
+    
+    // Parse reset date (format: YYYY-MM) to human readable (1 Jul 2026)
+    val displayResetDate = try {
+        val parts = resetDate.split("-")
+        if (parts.size == 2) {
+            val year = parts[0]
+            val month = parts[1].toIntOrNull() ?: 1
+            val monthName = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[month - 1]
+            "1 $monthName $year"
+        } else {
+            "Next month"
+        }
+    } catch (e: Exception) {
+        "Next month"
+    }
+    
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -689,10 +754,10 @@ private fun CurrentPlanBanner() {
                     color = Colors.textMuted
                 )
                 Text(
-                    text = "Standard",
+                    text = tierName,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFA78BFA)
+                    color = tierColor
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
@@ -702,7 +767,7 @@ private fun CurrentPlanBanner() {
                     color = Colors.textMuted
                 )
                 Text(
-                    text = "1 Jul 2026",
+                    text = displayResetDate,
                     fontSize = 14.sp,
                     color = Colors.textSecondary
                 )
@@ -712,7 +777,7 @@ private fun CurrentPlanBanner() {
 }
 
 @Composable
-private fun UsageRowsContainer() {
+private fun UsageRowsContainer(usage: SubscriptionViewModel.UsageData) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -725,37 +790,41 @@ private fun UsageRowsContainer() {
             UsageRow(
                 icon = Icons.Default.Favorite,
                 title = "AI Coaching",
-                usage = 150,
-                limit = 200,
+                usage = usage.aiCoachingKmUsed,
+                limit = usage.aiCoachingKmLimit,
                 unit = "km",
-                accentColor = Color(0xFF34D399)
+                accentColor = Color(0xFF34D399),
+                isUnlimited = usage.aiCoachingKmLimit == -1
             )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
             UsageRow(
                 icon = Icons.Default.Description,
                 title = "AI Run Summaries",
-                usage = 45,
-                limit = 50,
+                usage = usage.postRunAnalysesUsed,
+                limit = usage.postRunAnalysesLimit,
                 unit = "summaries",
-                accentColor = Color(0xFFF59E0B)
+                accentColor = Color(0xFFF59E0B),
+                isUnlimited = usage.postRunAnalysesLimit == -1
             )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
             UsageRow(
                 icon = Icons.Default.Place,
                 title = "AI Routes",
-                usage = 25,
-                limit = 30,
+                usage = usage.routesGeneratedUsed,
+                limit = usage.routesGeneratedLimit,
                 unit = "routes",
-                accentColor = Colors.primary
+                accentColor = Colors.primary,
+                isUnlimited = usage.routesGeneratedLimit == -1
             )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
             UsageRow(
                 icon = Icons.Default.DateRange,
                 title = "AI Training Plans",
-                usage = 2,
-                limit = 3,
+                usage = usage.trainingPlansUsed,
+                limit = usage.trainingPlansLimit,
                 unit = "plans",
-                accentColor = Color(0xFFA78BFA)
+                accentColor = Color(0xFFA78BFA),
+                isUnlimited = usage.trainingPlansLimit == -1
             )
         }
     }
@@ -768,19 +837,24 @@ private fun UsageRow(
     usage: Int,
     limit: Int,
     unit: String,
-    accentColor: Color
+    accentColor: Color,
+    isUnlimited: Boolean = false
 ) {
-    val progressValue = (usage.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
+    val progressValue = if (isUnlimited || limit <= 0) 0f else (usage.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
     val barColor = when {
+        isUnlimited -> accentColor
         usage >= limit -> Color(0xFFFF5252)
         usage >= (limit * 0.8f) -> Color(0xFFF59E0B)
         else -> accentColor
     }
     val countColor = when {
+        isUnlimited -> Colors.textSecondary
         usage >= limit -> Color(0xFFFF5252)
         usage >= (limit * 0.8f) -> Color(0xFFF59E0B)
         else -> Colors.textSecondary
     }
+    
+    val displayText = if (isUnlimited) "Unlimited" else "$usage / $limit $unit"
 
     Column(
         modifier = Modifier
@@ -815,24 +889,26 @@ private fun UsageRow(
                 )
             }
             Text(
-                text = "$usage / $limit $unit",
+                text = displayText,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = countColor
             )
         }
 
-        Spacer(modifier = Modifier.height(Spacing.sm))
+        if (!isUnlimited) {
+            Spacer(modifier = Modifier.height(Spacing.sm))
 
-        LinearProgressIndicator(
-            progress = { progressValue },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp)),
-            color = barColor,
-            trackColor = Colors.backgroundTertiary
-        )
+            LinearProgressIndicator(
+                progress = { progressValue },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = barColor,
+                trackColor = Colors.backgroundTertiary
+            )
+        }
     }
 }
 

@@ -40,6 +40,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.google.gson.Gson
 import kotlinx.coroutines.delay
+
 import live.airuncoach.airuncoach.AppRoutes
 import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.R
@@ -53,6 +54,7 @@ import live.airuncoach.airuncoach.util.WorkoutHolder
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
 import live.airuncoach.airuncoach.viewmodel.TrainingPlanViewModel
+import live.airuncoach.airuncoach.ui.components.PromoCodeDialog
 
 sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
@@ -76,6 +78,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
     val navController = rememberNavController()
     var showLocationPermissionDialog by remember { mutableStateOf(false) }
     var onLocationPermissionGranted: (() -> Unit)? by remember { mutableStateOf(null) }
+    var showPromoCodeDialog by remember { mutableStateOf(false) }
+    var promoCodeLoading by remember { mutableStateOf(false) }
 
     // Permission requests are now handled in LocationPermissionScreen
     // Only request notification permission here if needed
@@ -764,9 +768,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                 }
                             },
                             onPromoCodeClick = {
-                                // Show promo code dialog or navigate to settings
-                                // For now, just navigate back
-                                navController.popBackStack()
+                                // Show promo code dialog
+                                showPromoCodeDialog = true
                             },
                             onBackClick = {
                                 navController.popBackStack()
@@ -836,7 +839,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                     popUpTo("check_route_availability") { inclusive = true }
                                 }
                             },
-                            onPromoCodeClick = { navController.popBackStack() },
+                            onPromoCodeClick = { showPromoCodeDialog = true },
                             onBackClick = { navController.popBackStack() }
                         )
                     }
@@ -1162,6 +1165,26 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 )
             }
         }
+    }
+    
+    // Show promo code dialog when requested
+    if (showPromoCodeDialog) {
+        PromoCodeDialog(
+            isVisible = true,
+            isLoading = promoCodeLoading,
+            onDismiss = { 
+                showPromoCodeDialog = false
+            },
+            onRedeem = { code ->
+                // TODO: Implement full promo code redemption flow
+                // This will need to:
+                // 1. Call apiService.redeemPromoCode(PromoCodeRequest(code))
+                // 2. Show success/error message
+                // 3. Refresh feature limit checks
+                promoCodeLoading = false
+                showPromoCodeDialog = false
+            }
+        )
     }
     
     // Show location permission dialog when requested
