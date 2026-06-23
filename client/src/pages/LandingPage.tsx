@@ -16,6 +16,10 @@ import {
 
 import heroImage from "@assets/stock_images/cinematic_runner_nig_a3303f7d.jpg";
 import logoImage from "@/assets/logo-transparent.png";
+import garminWatchImage from "@assets/file_00000000aa847207abf4003ff79d9d95_1782188349595.png";
+import weatherImage from "@assets/file_000000008cf8720b839e8147d4464eda_1782188349596.png";
+import insightsImage from "@assets/Screenshot_20260623_162246_Ai_Run_Coach_1782188606082.jpg";
+import routeVideoUrl from "@assets/map_my_run_1782188349596.mp4";
 
 const COUNTRIES = [
   "Australia","Canada","France","Germany","India","Ireland","Japan","New Zealand",
@@ -173,6 +177,219 @@ export default function LandingPage() {
               <p className="text-muted-foreground text-sm leading-relaxed">{feature.description}</p>
             </motion.div>
           ))}
+        </div>
+      </section>
+
+      {/* Garmin Companion Watch */}
+      <section className="py-24 px-6 max-w-7xl mx-auto">
+        <div className="grid md:grid-cols-2 gap-16 items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="space-y-6"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary text-xs font-bold uppercase tracking-widest">
+              Garmin Integration
+            </div>
+            <h2 className="text-4xl md:text-5xl font-display font-black uppercase tracking-tighter leading-tight">
+              Your Garmin.<br />Supercharged.
+            </h2>
+            <p className="text-muted-foreground text-base leading-relaxed max-w-md">
+              The AI Run Coach Garmin Companion app streams real-time heart rate, pace, and distance straight to your AI coach — so every coaching cue is informed by what's actually happening on your wrist, right now.
+            </p>
+            <ul className="space-y-3">
+              {[
+                "Live HR, pace & distance fed to your AI coach",
+                "Intelligent coaching that adapts as you run",
+                "Compatible with Garmin Forerunner & Fenix series",
+              ].map((point) => (
+                <li key={point} className="flex items-start gap-3 text-sm text-muted-foreground">
+                  <span className="mt-0.5 w-5 h-5 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
+                    <Check className="w-3 h-3 text-primary" />
+                  </span>
+                  {point}
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="flex justify-center"
+          >
+            <div className="relative">
+              <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl scale-75 opacity-60" />
+              <img
+                src={garminWatchImage}
+                alt="Garmin Watch with AI Run Coach"
+                className="relative w-72 md:w-96 rounded-3xl object-contain drop-shadow-2xl"
+              />
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Weather Impact Analysis */}
+      <section className="py-24 px-6 bg-primary/5 border-y border-white/5">
+        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="order-2 md:order-1 flex justify-center"
+          >
+            <div className="relative">
+              <div className="absolute inset-0 rounded-3xl bg-blue-500/10 blur-2xl" />
+              <img
+                src={weatherImage}
+                alt="Weather Impact Analysis"
+                className="relative w-full max-w-md rounded-3xl shadow-2xl border border-white/10"
+              />
+            </div>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="order-1 md:order-2 space-y-6"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary text-xs font-bold uppercase tracking-widest">
+              Smart Insights
+            </div>
+            <h2 className="text-4xl md:text-5xl font-display font-black uppercase tracking-tighter leading-tight">
+              Weather Impact<br />Analysis
+            </h2>
+            <p className="text-muted-foreground text-base leading-relaxed max-w-md">
+              Understand exactly how temperature, humidity, wind, and time of day affect your pace and performance. Stop guessing — know your best conditions.
+            </p>
+            <ul className="space-y-3">
+              {[
+                "Identify your best and toughest running conditions",
+                "Temperature, humidity & time-of-day breakdowns",
+                "Data-driven insights from your own run history",
+              ].map((point) => (
+                <li key={point} className="flex items-start gap-3 text-sm text-muted-foreground">
+                  <span className="mt-0.5 w-5 h-5 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
+                    <Check className="w-3 h-3 text-primary" />
+                  </span>
+                  {point}
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Route My Run Demo */}
+      <section className="py-24 px-6 max-w-7xl mx-auto">
+        <div className="grid md:grid-cols-2 gap-16 items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="space-y-6"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary text-xs font-bold uppercase tracking-widest">
+              Route Generation
+            </div>
+            <h2 className="text-4xl md:text-5xl font-display font-black uppercase tracking-tighter leading-tight">
+              Route My Run
+            </h2>
+            <p className="text-muted-foreground text-base leading-relaxed max-w-md">
+              Set your distance, pick your preferences, and let AI Run Coach generate three ready-to-run circular routes from your current location — complete with elevation data and map preview.
+            </p>
+            <ul className="space-y-3">
+              {[
+                "AI-generated routes tailored to your distance goal",
+                "Three route options to choose from every time",
+                "Elevation-aware with real map preview",
+              ].map((point) => (
+                <li key={point} className="flex items-start gap-3 text-sm text-muted-foreground">
+                  <span className="mt-0.5 w-5 h-5 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
+                    <Check className="w-3 h-3 text-primary" />
+                  </span>
+                  {point}
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="flex justify-center"
+          >
+            <div className="relative w-full max-w-sm">
+              <div className="absolute inset-0 rounded-[2rem] bg-primary/10 blur-2xl" />
+              <div className="relative rounded-[2rem] overflow-hidden border border-white/10 shadow-2xl bg-black">
+                <video
+                  src={routeVideoUrl}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  className="w-full h-auto"
+                />
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Enhanced Insights */}
+      <section className="py-24 px-6 bg-primary/5 border-y border-white/5">
+        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="order-2 md:order-1 flex justify-center"
+          >
+            <div className="relative">
+              <div className="absolute inset-0 rounded-3xl bg-green-500/10 blur-2xl" />
+              <img
+                src={insightsImage}
+                alt="Aerobic Decoupling and Running Economy insights"
+                className="relative w-56 md:w-72 rounded-[2rem] shadow-2xl border border-white/10"
+              />
+            </div>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 40 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.7 }}
+            className="order-1 md:order-2 space-y-6"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary text-xs font-bold uppercase tracking-widest">
+              Pro-Grade Metrics
+            </div>
+            <h2 className="text-4xl md:text-5xl font-display font-black uppercase tracking-tighter leading-tight">
+              Insights Used by<br />Elite Runners
+            </h2>
+            <p className="text-muted-foreground text-base leading-relaxed max-w-md">
+              Go beyond pace and distance. AI Run Coach surfaces professional metrics that show you how your body is really performing.
+            </p>
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-card/50 border border-white/5 space-y-1">
+                <p className="text-sm font-bold uppercase tracking-wide text-foreground">Aerobic Decoupling</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">Measures heart rate vs pace drift over a run. Low decoupling means your aerobic system handled the effort efficiently — a strong fitness indicator.</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-card/50 border border-white/5 space-y-1">
+                <p className="text-sm font-bold uppercase tracking-wide text-foreground">Running Economy</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">How efficiently you convert cardiac output to speed — measured in metres per heartbeat. Improving economy means getting faster at the same heart rate.</p>
+              </div>
+            </div>
+          </motion.div>
         </div>
       </section>
 
