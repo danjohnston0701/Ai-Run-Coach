@@ -328,11 +328,6 @@ fun InjuryCard(
         InjuryStatus.CHRONIC    -> Color(0xFFAB47BC) // purple
         InjuryStatus.HEALED     -> Colors.success
     }
-    val statusLabel = when (injury.status) {
-        InjuryStatus.RECOVERING -> "Recovering"
-        InjuryStatus.CHRONIC    -> "Chronic"
-        InjuryStatus.HEALED     -> "Healed"
-    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -373,18 +368,19 @@ fun InjuryCard(
                         )
                     }
                 }
-                // Status badge
-                Surface(
-                    color = statusColor.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Text(
-                        statusLabel,
-                        color = statusColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
+                // Edit button in top-right
+                if (onEdit != null) {
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "Edit",
+                            tint = Colors.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
@@ -451,7 +447,7 @@ fun InjuryCard(
             }
 
             // Actions
-            if (onMarkHealed != null || onEdit != null || onDelete != null) {
+            if (onMarkHealed != null || onDelete != null) {
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -462,38 +458,23 @@ fun InjuryCard(
                             onClick = onMarkHealed,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(38.dp),
+                                .height(44.dp),
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Colors.success.copy(alpha = 0.15f),
                                 contentColor = Colors.success
                             )
                         ) {
-                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Mark Healed", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    if (onEdit != null) {
-                        OutlinedButton(
-                            onClick = onEdit,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Colors.border),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textSecondary)
-                        ) {
-                            Icon(Icons.Filled.Edit, null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Edit", fontSize = 12.sp)
+                            Icon(Icons.Filled.Check, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Mark as Healed", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                     if (onDelete != null) {
                         IconButton(
                             onClick = onDelete,
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(44.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Colors.error.copy(alpha = 0.10f))
                         ) {
@@ -501,7 +482,7 @@ fun InjuryCard(
                                 Icons.Filled.Delete,
                                 contentDescription = "Delete",
                                 tint = Colors.error,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
