@@ -2,7 +2,7 @@
 
 ## Context
 
-We've just shipped a comprehensive **Health & Injuries** management feature to the Android app. The iOS app needs the same feature. This brief describes exactly what to build, including all API contracts, data models, and UI behaviour.
+We've just shipped a comprehensive **Health & Injuries** management feature to the Android app with significant UI/UX improvements. The iOS app needs the same feature. This brief describes exactly what to build, including all API contracts, data models, and UI behaviour.
 
 ---
 
@@ -14,12 +14,13 @@ Create an `Injury` struct and supporting enums. This maps 1:1 to the JSON the se
 struct Injury: Codable, Identifiable {
     var id: String?
     var bodyPart: String
+    var injurySide: String?            // "Left" or "Right" for bilateral body parts
     var status: InjuryStatus
     var severity: InjurySeverity
     var notes: String?
-    var injuryDate: String?           // "YYYY-MM-DD"
+    var injuryDate: String?            // "YYYY-MM-DD"
     var estimatedRecoveryWeeks: Int?
-    var recoveryDate: String?         // "YYYY-MM-DD" — set when status → HEALED
+    var recoveryDate: String?          // "YYYY-MM-DD" — set when status → HEALED
     var updatedAt: Int64
     var isProstheticOrAFO: Bool
     var prostheticType: String?
@@ -51,6 +52,12 @@ let bodyParts = [
     "Foot", "Calf", "Hamstring", "Quad", "Groin", "Shoulder",
     "Wrist", "IT Band", "Achilles", "Plantar Fascia", "Other"
 ]
+
+// Body parts that have left/right variants
+let bilateralBodyParts = Set([
+    "Knee", "Ankle", "Hip", "Shoulder", "Elbow", "Wrist", "Foot", "Leg", "Arm",
+    "Hamstring", "Quad", "Calf", "IT Band", "Achilles", "Plantar Fascia"
+])
 
 let prostheticTypes = [
     "Carbon fiber AFO (ankle-foot orthotic)",
@@ -89,6 +96,7 @@ Add a new injury.
 Request body (JSON):
 {
   "bodyPart": "Knee",
+  "injurySide": "Left",
   "status": "RECOVERING",
   "severity": "MODERATE",
   "notes": "Twisted during hill run",
@@ -115,11 +123,10 @@ To **mark as healed**, send:
 (merged with existing fields server-side)
 
 ### DELETE /api/user/injuries/:injuryId
-Delete an injury. Only HEALED or CHRONIC injuries can be deleted.
+Delete an injury. **Can be deleted at any status** (RECOVERING, CHRONIC, or HEALED).
 
 ```
 Response: { "message": "Injury deleted successfully" }
-Error 400: "Cannot delete active/recovering injuries. Mark as healed first."
 ```
 
 ---
@@ -141,57 +148,73 @@ Add a row to the Profile settings list (same style as "Goals", "Personal Details
 
 ---
 
-### Screen Layout
+### Screen Layout — Tabbed Interface (NEW)
 
-The screen has a **navigation bar** with title "Health & Injuries" and a **+ button** (top right) to add a new injury.
-
-Display injuries in a `List` or `ScrollView`, sectioned by status:
+Instead of sections, use **3 tabs** to organize injuries by status:
 
 ```
-Section: "Active / Recovering"   — RECOVERING status
-Section: "Chronic / Ongoing"     — CHRONIC status
-Section: "Healed / Archive"      — HEALED status (collapsed by default or at bottom)
+[Recovering: 1]  [Chronic: 0]  [Healed: 3]
 ```
 
-If no injuries, show a centred empty-state message: *"No injuries recorded. Tap + to add one."*
+Each tab shows:
+- Tab label + count badge (number of injuries in that status)
+- List of injuries for that status
+- Empty state if no injuries
+
+**Tab styling**:
+- Active tab has underline indicator
+- Count badges show number in a small circle
+- Match the Goals screen tab design for consistency
+
+**Empty states** (customized per tab):
+- Recovering: "No active injuries. Add one to get personalized training."
+- Chronic: "No chronic conditions recorded."
+- Healed: "You have no healed injuries."
 
 ---
 
-### Injury Row / Card
+### Injury Card
 
-Each injury displays:
+Each injury displays in a card with:
 
 ```
-┌─────────────────────────────────────────┐
-│  Knee                  [Recovering]     │
-│  Injured on 2026-06-01                  │
-│  Recovery: 75%  (3 of 4 weeks)          │
-│  Notes: Twisted during hill run         │
-│                                         │
-│  [Mark Healed]   [Edit]        🗑        │
-└─────────────────────────────────────────┘
+╔════════════════════════════════════════╗
+║  Knee · Left              [✎ Edit]     ║  ← Edit button top-right
+║  Since 2026-06-01                      ║
+║  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ║
+║  ⚠ Moderate                            ║
+║  ⏱ Recovery 75% (3 of 4 weeks)         ║
+║  Notes: Twisted during hill run        ║
+║  🦿 Device: Carbon fiber AFO           ║
+║                                        ║
+║  [✓ Mark as Healed]         [🗑 Delete]║  ← Action buttons
+╚════════════════════════════════════════���
 ```
 
-- **Status badge**: colour-coded pill
-  - RECOVERING → orange `#E65100`
-  - CHRONIC    → purple `#7B1FA2`
-  - HEALED     → green  `#2E7D32`
+**Key improvements from Android implementation**:
 
-- **Recovery progress**: only shown when `estimatedRecoveryWeeks` is set. Calculate:
-  ```
-  weeksElapsed = daysBetween(injuryDate, today) / 7
-  progress = min(weeksElapsed / estimatedRecoveryWeeks, 1.0)
-  ```
+- **Edit button in top-right** — moved from bottom row for better accessibility
+- **Status badge removed** — redundant since viewing a specific tab
+- **"Mark as Healed" button expanded** — full width with better touch target
+- **Delete icon button** — smaller, on the right side
+- **Left accent bar** — 4dp colored bar (amber/purple/green) matches status
+- **Date format**: "Since DD-MM-YYYY" for display
+- **Recovery progress**: only shown when `estimatedRecoveryWeeks` is set
 
-- **"Mark Healed" button**: shown only for `RECOVERING` injuries.
-  - On tap: update `status = "HEALED"`, set `recoveryDate` to today, call PUT endpoint, refresh list.
+**Status colors**:
+- RECOVERING → amber `#FFB300`
+- CHRONIC    → purple `#AB47BC`
+- HEALED     → green  `#4CAF50`
 
-- **"Edit" button**: opens the Add/Edit sheet for all non-HEALED injuries.
+**Actions**:
+- **"Mark Healed"** (RECOVERING only): updates status, sets recoveryDate to today, calls PUT, refreshes tab
+- **Edit**: opens the Add/Edit sheet
+- **Delete**: no confirmation needed, deletes immediately at any status (all statuses allowed per server)
 
-- **Delete (🗑)**: confirms before calling DELETE. Show `"Mark as healed before deleting"` alert if server returns 400.
-
-- **Prosthetic indicator**: if `isProstheticOrAFO == true`, show a blue info line:
-  `"Device: Carbon fiber AFO (ankle-foot orthotic)"`
+**Prosthetic indicator**: if `isProstheticOrAFO == true`, show:
+```
+🦿 Device: Carbon fiber AFO (ankle-foot orthotic)
+```
 
 ---
 
@@ -201,20 +224,32 @@ A modal sheet or form with the following fields in order:
 
 | Field | Control | Notes |
 |---|---|---|
-| Body Part | Picker / Menu | Use `bodyParts` list; allow typing custom |
-| Status | Segmented control or Picker | RECOVERING / CHRONIC / HEALED |
-| Severity | Segmented control | MILD / MODERATE / SEVERE |
-| Injury Date | DatePicker | date-only, outputs `"YYYY-MM-DD"` |
-| Est. Recovery (weeks) | Stepper or numeric field | Optional |
+| Body Part | TextField with autocomplete | Use `bodyParts` list; allow typing custom |
+| Which Side? | 2 buttons: Left / Right | Only show if `bilateralBodyParts` contains selected body part |
+| Status | Radio buttons or Picker | RECOVERING / CHRONIC / HEALED (3 options with descriptions) |
+| Severity | 3 buttons (segmented) | MILD / MODERATE / SEVERE |
+| Date of Injury | DatePicker | **MUST be a calendar picker, not free-text** |
+| Est. Recovery (weeks) | TextField (numeric) | Optional, only show when status = RECOVERING |
 | Notes | TextEditor (multi-line) | Optional |
-| Uses Prosthetic/AFO | Toggle | |
-| Device Type | Picker (if toggle ON) | Use `prostheticTypes` list; allow typing |
+| Prosthetic/AFO Device | Toggle | |
+| Device Type | Picker or TextField | Only show if toggle ON; use `prostheticTypes` list |
 
-**Validation**: `bodyPart` must be non-empty before Save is enabled.
+**Key UX improvements**:
 
-On **Save**:
-- New injury → POST → refresh user + injury list
-- Edit → PUT with full updated object → refresh
+1. **Date picker MUST be a native calendar picker** — not a text field
+   - Tap the field → calendar appears
+   - User selects date → calendar closes, date displays as "DD-MM-YYYY"
+   - Internally store as "YYYY-MM-DD"
+
+2. **Sheet scrolling** — must scroll properly when keyboard is open
+   - When user types in notes, keyboard shouldn't hide buttons
+   - Users should see Cancel/Save buttons at all times
+
+3. **Validation**: `bodyPart` must be non-empty before Save is enabled
+
+4. **On Save**:
+   - New injury → POST → refresh user + injury list
+   - Edit → PUT with full updated object → refresh
 
 ---
 
@@ -234,21 +269,36 @@ No iOS-specific changes are needed for this part — it's all server-side. Once 
 
 ---
 
-## 7. Existing Profile Navigation Pattern
+## 7. Usage Tracking: AI Coaching KM
+
+**IMPORTANT**: When tracking AI coaching usage, the system now uses **actual coaching data** instead of just a toggle flag:
+
+- If a run has **AI coaching notes** (`aiCoachingNotes.count > 0`) → the km is deducted from the user's quota
+- If a run has **no coaching notes** (empty array) → km is **NOT** deducted, even if the user had AI enabled
+
+This allows watch-started runs, briefing-only runs, and Garmin-native imports to correctly avoid quota deduction when coaching didn't actually occur.
+
+---
+
+## 8. Existing Profile Navigation Pattern
 
 Check how existing profile navigation rows are implemented (e.g. the "Goals" or "Connected Devices" rows) and match the same pattern exactly for consistency. On iOS this is likely a `NavigationLink` within a `List` inside `ProfileView`.
 
 ---
 
-## 8. Summary Checklist
+## 9. Summary Checklist
 
 - [ ] `Injury` struct + `InjuryStatus` + `InjurySeverity` enums (Codable)
-- [ ] `User` model has `injuries: [Injury]?` and deserialises from `/api/users/me`
+- [ ] `injurySide` field added to Injury struct ("Left"/"Right" for bilateral parts)
+- [ ] `User` model has `injuries: [Injury]?` and deserializes from `/api/users/me`
 - [ ] `InjuryService` (or equivalent) with `getInjuries()`, `addInjury()`, `updateInjury()`, `deleteInjury()`
-- [ ] `InjuryManagementView` — list sectioned by status, empty state, nav bar + button
-- [ ] `InjuryCard` / row — status badge, recovery progress, Mark Healed, Edit, Delete
-- [ ] `AddEditInjuryView` — sheet with all fields, pickers for body part and prosthetic type
+- [ ] `InjuryManagementView` — **tabbed interface** (Recovering, Chronic, Healed) with count badges
+- [ ] `InjuryCard` — status color bar, recovery progress, Edit button in top-right, Mark Healed + Delete buttons
+- [ ] `AddEditInjuryView` — all fields, **native calendar date picker** (not text field)
+- [ ] Side selector — conditionally shown for bilateral body parts
 - [ ] Mark Healed: sets status + recoveryDate → PUT → refresh
-- [ ] Delete: 404/400 error handling, confirm dialog
+- [ ] Delete: no confirmation needed, allowed at any status
 - [ ] Profile screen: add "Health & Injuries" navigation row with active-count badge
 - [ ] Refresh `GET /api/users/me` after every mutation
+- [ ] Sheet scrolls properly when keyboard is open
+- [ ] Body part suggestions/autocomplete in Add/Edit sheet
