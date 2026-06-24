@@ -236,6 +236,7 @@ fun WorkoutDetailScreen(
 
             // ── Key stats ─────────────────────────────────────────────────────
             if (workout.workoutType != "rest") {
+                // Top row: Distance + Intensity (50/50)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(Spacing.md)
@@ -243,13 +244,28 @@ fun WorkoutDetailScreen(
                     workout.distance?.let {
                         WorkoutStatCard(label = "Distance", value = "${it}km", icon = R.drawable.icon_target_vector, modifier = Modifier.weight(1f))
                     }
+                    workout.intensity?.let {
+                        val zoneNumber = it.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 2
+                        val zoneInfo = HeartRateZones.getZoneInfo(zoneNumber)
+                        // Show "Zone X" with effort level below (e.g., "Easy")
+                        val zoneLabel = "Zone $zoneNumber"
+                        val effortLabel = zoneInfo.effort
+                        WorkoutStatCard(label = "Intensity", value = zoneLabel, subtitleValue = effortLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
+                    }
+                    // Spacer if intensity is missing
+                    if (workout.intensity == null) {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+                Spacer(modifier = Modifier.height(Spacing.md))
+
+                // Bottom row: Target Pace (full width)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
                     workout.targetPace?.let {
                         WorkoutStatCard(label = "Target Pace", value = it, icon = R.drawable.icon_timer_vector, modifier = Modifier.weight(1f))
-                    }
-                    workout.intensity?.let {
-                        // Convert "z1" to "Zone 1", "z2" to "Zone 2", etc.
-                        val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
-                        WorkoutStatCard(label = "Intensity", value = zoneLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
                     }
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))
@@ -258,6 +274,19 @@ fun WorkoutDetailScreen(
                 workout.intensity?.let { intensity ->
                     val zoneNumber = intensity.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 2
                     val zoneInfo = HeartRateZones.getZoneInfo(zoneNumber)
+                    
+                    Text(
+                        "Intensity Explained",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Text(
+                        "Intensity zones (1-5) guide your effort level. Zone 1 is very easy recovery pace, Zone 5 is all-out sprint. RPE (Rated Perceived Exertion) is simply how hard the effort feels to you.",
+                        style = AppTextStyles.small,
+                        color = Colors.textSecondary
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.md))
                     
                     Card(
                         modifier = Modifier
@@ -714,7 +743,7 @@ private fun WorkoutGpsBanner(
 // ── Shared helpers (unchanged) ────────────────────────────────────────────────
 
 @Composable
-fun WorkoutStatCard(label: String, value: String, icon: Int, modifier: Modifier = Modifier) {
+fun WorkoutStatCard(label: String, value: String, icon: Int, modifier: Modifier = Modifier, subtitleValue: String? = null) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
@@ -727,6 +756,10 @@ fun WorkoutStatCard(label: String, value: String, icon: Int, modifier: Modifier 
             Icon(painterResource(icon), null, tint = Colors.primary, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.height(4.dp))
             Text(value, style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+            if (subtitleValue != null) {
+                Text(subtitleValue, style = AppTextStyles.small, color = Colors.primary, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(2.dp))
+            }
             Text(label, style = AppTextStyles.small, color = Colors.textMuted)
         }
     }
