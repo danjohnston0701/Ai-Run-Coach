@@ -243,10 +243,12 @@ fun EventDetailScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Colors.backgroundRoot
-                )
+                ),
+                windowInsets = WindowInsets(0)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
     ) { paddingValues ->
         when {
             isLoading -> {

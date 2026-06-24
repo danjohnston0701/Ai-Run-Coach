@@ -6,6 +6,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -888,33 +889,21 @@ private fun DatePickerField(
     onDateSelected: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val calendar = Calendar.getInstance()
-    var showDatePicker by remember { mutableStateOf(false) }
 
-    // Parse existing date if available
-    if (value.isNotEmpty()) {
-        try {
-            val dateFormat = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
-            val date = dateFormat.parse(value)
-            if (date != null) {
-                calendar.time = date
-            }
-        } catch (_: Exception) {
-            // Ignore parsing errors
+    fun openPicker() {
+        val calendar = Calendar.getInstance()
+        if (value.isNotEmpty()) {
+            try {
+                val date = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).parse(value)
+                if (date != null) calendar.time = date
+            } catch (_: Exception) { /* use today */ }
         }
-    }
-
-    // Show the date picker dialog when state is true
-    if (showDatePicker) {
         DatePickerDialog(
             context,
-            { _, year, month, dayOfMonth ->
-                val selectedCalendar = Calendar.getInstance()
-                selectedCalendar.set(year, month, dayOfMonth)
-                val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                val formattedDate = dateFormat.format(selectedCalendar.time)
-                onDateSelected(formattedDate)
-                showDatePicker = false
+            { _, year, month, day ->
+                val cal = Calendar.getInstance().also { it.set(year, month, day) }
+                val formatted = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
+                onDateSelected(formatted)
             },
             calendar.get(Calendar.YEAR),
             calendar.get(Calendar.MONTH),
@@ -924,27 +913,46 @@ private fun DatePickerField(
 
     FormSectionLabel("Date of Injury (optional)")
     Spacer(modifier = Modifier.height(Spacing.sm))
-    OutlinedTextField(
-        value = value,
-        onValueChange = {},
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                showDatePicker = true
+
+    // OutlinedTextField with readOnly=true still consumes all touch events internally,
+    // so .clickable() on it never fires. The fix: disable the field (prevents touch
+    // consumption) + override disabled colors to look normal + transparent overlay Box.
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Select date...", color = Colors.textMuted) },
+            readOnly = true,
+            enabled = false,
+            trailingIcon = {
+                Icon(
+                    Icons.Filled.DateRange,
+                    contentDescription = "Select date",
+                    tint = Colors.primary,
+                    modifier = Modifier.size(20.dp)
+                )
             },
-        placeholder = { Text("Select date...", color = Colors.textMuted) },
-        readOnly = true,
-        trailingIcon = {
-            Icon(
-                Icons.Filled.DateRange,
-                contentDescription = "Select date",
-                tint = Colors.primary,
-                modifier = Modifier.size(20.dp)
-            )
-        },
-        colors = outlinedFieldColors(),
-        shape = RoundedCornerShape(10.dp)
-    )
+            colors = OutlinedTextFieldDefaults.colors(
+                disabledTextColor = Colors.textPrimary,
+                disabledBorderColor = Colors.border,
+                disabledPlaceholderColor = Colors.textMuted,
+                disabledTrailingIconColor = Colors.primary,
+                disabledContainerColor = Colors.backgroundTertiary,
+                disabledLabelColor = Colors.textSecondary,
+            ),
+            shape = RoundedCornerShape(10.dp)
+        )
+        // Transparent overlay captures the tap and opens the native date picker
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) { openPicker() }
+        )
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

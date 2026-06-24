@@ -1050,7 +1050,7 @@ OUTPUT NOTES:
 - For athletes with no run history: use stated fitness level — do not default to overly conservative language unless genuinely warranted.`;
 
     // Fetch AI runner profile for richer personalisation
-    const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+    const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
 
     const systemPromptContent = `You are an elite AI running coach with deep expertise in exercise physiology, training periodisation, injury prevention, and performance optimisation. You have coached athletes across all levels and distances — from first-time 5K runners to ultra marathon competitors.
 
@@ -1520,7 +1520,7 @@ export async function generateNextBlock(planId: string, userId: string): Promise
   ).join('\n');
 
   // ── 3. Fetch runner's recent performance data ──────────────────────────────
-  const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+  const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
 
   // ── 4. Build the next-block prompt ────────────────────────────────────────
   const isLastBlock = nextBlockEnd >= totalWeeks;
@@ -2007,7 +2007,7 @@ UPCOMING WORKOUTS (next ${upcomingWorkouts.length} sessions):
 ${upcomingWorkouts.map((w, i) => `${i + 1}. ID="${w.id}" | ${w.workoutType} | ${w.distance ?? "?"}km | intensity=${w.intensity ?? "?"} | ${w.scheduledDate ? new Date(w.scheduledDate).toDateString() : "unscheduled"}`).join("\n")}`
       : "\nNo upcoming workouts found.";
 
-    const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+    const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
 
     // Check if runner has prosthetic/AFO
     const hasProsthetic = userProfile?.[0]?.injuryHistory && Array.isArray(userProfile[0].injuryHistory) && 
@@ -2333,7 +2333,7 @@ Provide your assessment in JSON format:
   "recommendation": "Specific coaching recommendation for the runner"
 }`;
 
-        const aiRunnerProfileForReassess = await getRunnerProfile(userId).catch(() => null);
+        const aiRunnerProfileForReassess = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
 
         const response = await openai.chat.completions.create({
           model: "gpt-4o",

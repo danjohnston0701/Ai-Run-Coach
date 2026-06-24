@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -938,14 +939,20 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val listViewModel: TrainingPlanViewModel? =
                     if (plansListEntry != null) hiltViewModel(plansListEntry) else null
 
+                // Get the currently selected tab from the list ViewModel so we reload the right tab
+                val selectedTab by (listViewModel?.selectedTab?.collectAsState() ?: remember { mutableIntStateOf(0) })
+                
                 LaunchedEffect(planCancelSuccess) {
                     if (planCancelSuccess && planId.isNotBlank()) {
                         // Optimistically remove from the list (zero-flicker) then refresh from
                         // the server. Since abandonPlan() awaited the API before setting this
                         // flag, the plan is already "cancelled" server-side, so the refresh
-                        // will return the correct active-only list.
+                        // will return the correct tab-filtered list.
                         listViewModel?.removePlanFromList(planId)
-                        listViewModel?.loadUserPlans("active")
+                        // Reload the currently selected tab (not hardcoded "active")
+                        val statusMap = mapOf(0 to "active", 1 to "completed", 2 to "cancelled")
+                        val currentStatus = statusMap[selectedTab] ?: "active"
+                        listViewModel?.loadUserPlans(currentStatus)
                         // Clear the flag here (not in the child composable) to avoid the race
                         // where clearPlanActionSuccess() runs before this effect processes it.
                         detailViewModel.clearPlanActionSuccess()

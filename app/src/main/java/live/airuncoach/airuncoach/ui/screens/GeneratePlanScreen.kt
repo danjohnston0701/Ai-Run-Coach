@@ -123,10 +123,12 @@ fun GeneratePlanScreen(
                         Icon(painterResource(R.drawable.icon_arrow_back_vector), "Back", tint = Colors.textPrimary)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot),
+                windowInsets = WindowInsets(0)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         when (generateState) {
             is GeneratePlanState.Generating -> GeneratingScreen()

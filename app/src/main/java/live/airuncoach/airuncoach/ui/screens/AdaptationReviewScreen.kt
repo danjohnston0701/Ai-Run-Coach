@@ -61,10 +61,12 @@ fun AdaptationReviewScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Colors.backgroundRoot,
                     titleContentColor = Colors.textPrimary
-                )
+                ),
+                windowInsets = WindowInsets(0)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         LazyColumn(
             modifier = Modifier

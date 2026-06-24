@@ -39,10 +39,12 @@ fun DistanceScaleScreen(onNavigateBack: () -> Unit, viewModel: DistanceScaleView
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot),
+                windowInsets = WindowInsets(0)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         LazyColumn(
             modifier = Modifier

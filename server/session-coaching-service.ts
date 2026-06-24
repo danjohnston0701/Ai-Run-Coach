@@ -83,7 +83,7 @@ export async function determineSessonCoachingTone(
   const sessionCharacteristics = buildSessionCharacteristics(request);
 
   // Fetch AI runner profile for hyper-personalised tone selection
-  const aiRunnerProfile = await getRunnerProfile(request.userId).catch(() => null);
+  const aiRunnerProfile = (await getRunnerProfile(request.userId).catch(() => null))?.profile ?? null;
 
   // Call OpenAI to determine optimal tone
   const response = await openai.chat.completions.create({
@@ -278,7 +278,7 @@ export async function generateSessionInstructions(
   workoutData: SessionToneRequest
 ) {
   // Fetch AI runner profile once — reuse in both parallel calls
-  const aiRunnerProfile = await getRunnerProfile(userId).catch(() => null);
+  const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
   
   // Fetch user's recent pace for pace-aware coaching
   const user = await db

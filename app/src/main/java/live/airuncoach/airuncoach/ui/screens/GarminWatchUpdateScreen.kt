@@ -79,10 +79,12 @@ fun GarminWatchUpdateScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Colors.backgroundRoot
-                )
+                ),
+                windowInsets = WindowInsets(0)
             )
         },
-        containerColor = Colors.backgroundRoot
+        containerColor = Colors.backgroundRoot,
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         Column(
             modifier = Modifier

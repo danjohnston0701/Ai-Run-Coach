@@ -2482,10 +2482,11 @@ function transformRunForAndroid(run: any) {
       // Strip heavy arrays to keep payload small for OpenAI
       const { gpsData, heartRateData, routePoints, splitData, ...runSummary } = run as any;
 
-      const [userRows, aiRunnerProfile] = await Promise.all([
+      const [userRows, aiRunnerProfileResult] = await Promise.all([
         db.select().from(users).where(eq(users.id, userId)).limit(1),
         getRunnerProfile(userId).catch(() => null),
       ]);
+      const aiRunnerProfile = aiRunnerProfileResult?.profile ?? null;
       const coachName = (userRows[0] as any)?.coachName || "Coach";
       const coachPersonality = (userRows[0] as any)?.coachPersonality || "motivating";
 
@@ -2726,7 +2727,7 @@ function transformRunForAndroid(run: any) {
       }
 
       const aiRunnerProfile = userId
-        ? await getRunnerProfile(userId).catch(() => null)
+        ? (await getRunnerProfile(userId).catch(() => null))?.profile ?? null
         : null;
 
       const routeGenAI = await import("./route-generation-ai");
@@ -8637,7 +8638,7 @@ function transformRunForAndroid(run: any) {
         userTimezoneId: userTimezoneId,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
-        runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),
+        runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
         // Training plan context for personalized coaching
         trainingPlanId: trainingPlanId,
         planGoalType: planGoalType,
@@ -8857,7 +8858,7 @@ function transformRunForAndroid(run: any) {
         userTimezoneId: userTimezoneId,
         runnerName: req.body.runnerName || user?.name || undefined,
         fitnessLevel: user?.fitnessLevel || undefined,
-        runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),
+        runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
         // Training plan context — enables workout-specific coaching briefings
         trainingPlanId,
         planGoalType,
@@ -9380,7 +9381,7 @@ function transformRunForAndroid(run: any) {
         runnerAge,
         fitnessLevel: req.body.fitnessLevel ?? (user as any)?.fitnessLevel ?? undefined,
         runnerName: req.body.runnerName ?? user?.name ?? undefined,
-        runnerProfile: await getRunnerProfile(req.user!.userId).catch(() => null),
+        runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
       });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)

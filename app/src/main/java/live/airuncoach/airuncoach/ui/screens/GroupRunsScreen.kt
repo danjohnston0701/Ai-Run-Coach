@@ -55,9 +55,11 @@ fun GroupRunsScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot),
+                windowInsets = WindowInsets(0)
             )
         },
+        contentWindowInsets = WindowInsets(0),
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onCreateGroupRun,
