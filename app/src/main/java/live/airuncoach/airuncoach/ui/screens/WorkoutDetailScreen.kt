@@ -461,6 +461,7 @@ fun WorkoutDetailScreen(
                     companionInstalled = companionInstalled && isCoachingReady,
                     sendState = watchSendState,
                     onPrepare = {
+                        // 1. Send the coached session to the watch (coaching brief + interval data)
                         runSessionViewModel.prepareRunOnWatchWithCoaching(
                             workoutId        = workout.id,
                             distanceKm       = workout.distance?.toFloat() ?: 0f,
@@ -471,6 +472,10 @@ fun WorkoutDetailScreen(
                             intervalDistKm   = workout.intervalDistanceMeters?.let { it / 1000f },
                             intervalDurSecs  = workout.intervalDurationSeconds
                         )
+                        // 2. Set RunConfigHolder + navigate to run_session screen immediately,
+                        //    exactly as pressing "Start This Workout" does. The run_session screen
+                        //    will wait in standby until the watch fires its "start" command.
+                        onStartWorkout(workout)
                     },
                     modifier = Modifier.padding(bottom = Spacing.sm)
                 )
