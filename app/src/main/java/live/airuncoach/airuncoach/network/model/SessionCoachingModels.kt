@@ -156,11 +156,16 @@ data class DynamicSessionCoachingPlan(
 
 /**
  * A phase in the coaching plan.
- * For intervals: one phase per rep + one per recovery jog.
- * For continuous runs: warmup + main_effort + cooldown.
+ *
+ * For simple sessions: warmup + main_effort + cooldown.
+ * For interval sessions: use `repetitions > 1` on the work and recovery phases rather than
+ * listing each rep individually. Consecutive phases with `repetitions > 1` are treated as a
+ * group and interleaved: (work rep 1, recovery rep 1, work rep 2, recovery rep 2, …).
+ * This keeps the coaching plan compact for high-rep sessions (e.g. 10× intervals stay at
+ * 4 phases instead of 20).
  */
 data class DynamicCoachingPhase(
-    val name: String,               // "warmup", "hill_rep_1", "recovery_jog_1", "cooldown", etc.
+    val name: String,               // "warmup", "work", "recovery_walk", "cooldown", etc.
     val order: Int,                 // 0-indexed execution order
     val durationMinutes: Double?,
     val distanceKm: Double?,
@@ -170,7 +175,8 @@ data class DynamicCoachingPhase(
     val targetHRMax: Int?,          // BPM
     val effort: String,             // "easy" | "moderate" | "threshold" | "hard" | "max"
     val coachingFocus: String,      // "relaxation" | "power" | "rhythm" | "endurance" | "speed"
-    val phaseInstructions: String?
+    val phaseInstructions: String?,
+    val repetitions: Int? = null    // > 1 for repeating interval phases (e.g. 10 for 10× reps)
 )
 
 /**

@@ -3949,13 +3949,14 @@ class RunTrackingService : Service(), SensorEventListener {
      * Evaluate which phase the runner is in and fire phase_start / phase_end /
      * rep_start / rep_end / recovery_start triggers when phase boundaries are crossed.
      *
-     * Supports BOTH distance-based phases (distanceKm) and time-based phases (durationMinutes).
+     * Supports BOTH distance-based phases (distanceKm) and time-based phases (durationMinutes),
+     * and handles REPEATING interval phases via the `repetitions` field.
      *
-     * For interval sessions (cueingStrategy == "interval") or any phase that only has
-     * durationMinutes, elapsed active run time is used for phase detection. This is critical
-     * for structured interval sessions like "1 min jog + 2 min walk × 10 reps" where
-     * each rep covers only 100-200m — the old distance-only approach caused phases to fire
-     * 1-2 minutes late or not at all.
+     * Repeating interval phases (repetitions > 1):
+     * Consecutive phases with repetitions > 1 form an "interval group" that interleaves:
+     *   work (reps=10, 1min) + recovery_walk (reps=10, 2min)
+     *   → work rep1, recovery rep1, work rep2, recovery rep2, … × 10
+     * This allows interval sessions to be described with 2-4 phases instead of 20.
      *
      * Phase-start triggers bypass the 150m distance gate so they always fire at interval
      * transitions even when the athlete has covered less than 150m since the last cue.
@@ -3967,103 +3968,161 @@ class RunTrackingService : Service(), SensorEventListener {
         val elapsedMinutes = getActiveRunDuration() / 60000.0
         val isIntervalPlan = plan.cueingStrategy == "interval"
 
-        var cumulativeKm = 0.0
-        var cumulativeMin = 0.0
-        var resolvedIndex = phases.size - 1
+        // ── Build the expanded flat timeline ─────────────────────────────────
+        // For phases with repetitions > 1, expand them into individual rep entries.
+        // Consecutive phases with the same repetitions count are "grouped" and interleave.
+        data class ExpandedPhase(
+            val phase: live.airuncoach.airuncoach.network.model.DynamicCoachingPhase,
+            val repNumber: Int,          // 1-indexed rep number (1 for non-repeating phases)
+            val totalReps: Int,          // total reps for this phase (1 for non-repeating)
+            val cumulativeMinStart: Double,
+            val cumulativeKmStart: Double,
+            val durationMin: Double,
+            val distKm: Double
+        )
 
-        for ((idx, phase) in phases.withIndex()) {
-            val phaseKm = phase.distanceKm
-            val phaseMin = phase.durationMinutes
+        val expanded = mutableListOf<ExpandedPhase>()
+        var cumMin = 0.0
+        var cumKm = 0.0
+        var i = 0
 
-            // Phase detection logic:
-            // - Interval plans: prefer time-based detection (interval timing is the ground truth)
-            // - Other plans: prefer distance-based detection
-            // - Fall back to whichever dimension is available
-            val stillInPhase = when {
-                isIntervalPlan && phaseMin != null && phaseMin > 0 ->
-                    elapsedMinutes < cumulativeMin + phaseMin
-                phaseKm != null && phaseKm > 0 ->
-                    currentDistanceKm < cumulativeKm + phaseKm
-                phaseMin != null && phaseMin > 0 ->
-                    elapsedMinutes < cumulativeMin + phaseMin
-                else -> false  // no usable duration info — treat as instantaneous
+        while (i < phases.size) {
+            val phase = phases[i]
+            val reps = (phase.repetitions ?: 1).coerceAtLeast(1)
+
+            if (reps > 1) {
+                // This phase has repetitions — find consecutive sibling phases in the same group
+                // (consecutive phases with non-null repetitions that have the same count)
+                val groupPhases = mutableListOf(phase)
+                var j = i + 1
+                while (j < phases.size && (phases[j].repetitions ?: 1) > 1) {
+                    groupPhases.add(phases[j])
+                    j++
+                }
+
+                // Interleave: for each rep, add all group phases in order
+                repeat(reps) { repIdx ->
+                    for (gp in groupPhases) {
+                        val pMin = gp.durationMinutes ?: 0.0
+                        val pKm = gp.distanceKm ?: 0.0
+                        expanded.add(ExpandedPhase(gp, repIdx + 1, reps, cumMin, cumKm, pMin, pKm))
+                        cumMin += pMin
+                        cumKm += pKm
+                    }
+                }
+                i = j  // skip all processed group phases
+            } else {
+                val pMin = phase.durationMinutes ?: 0.0
+                val pKm = phase.distanceKm ?: 0.0
+                expanded.add(ExpandedPhase(phase, 1, 1, cumMin, cumKm, pMin, pKm))
+                cumMin += pMin
+                cumKm += pKm
+                i++
             }
-
-            if (stillInPhase) {
-                resolvedIndex = idx
-                break
-            }
-
-            // Advance cumulative trackers for completed phases
-            cumulativeKm += phaseKm ?: 0.0
-            cumulativeMin += phaseMin ?: 0.0
         }
 
-        val resolvedPhase = phases[resolvedIndex]
-        val isNewPhase = resolvedIndex != dynamicCurrentPhaseIndex || dynamicCurrentPhaseName == null
+        if (expanded.isEmpty()) return
+
+        // ── Find which expanded entry we're currently in ──────────────────────
+        var resolvedEntryIdx = expanded.size - 1
+
+        for ((idx, entry) in expanded.withIndex()) {
+            val stillInPhase = when {
+                isIntervalPlan && entry.durationMin > 0 ->
+                    elapsedMinutes < entry.cumulativeMinStart + entry.durationMin
+                entry.distKm > 0 ->
+                    currentDistanceKm < entry.cumulativeKmStart + entry.distKm
+                entry.durationMin > 0 ->
+                    elapsedMinutes < entry.cumulativeMinStart + entry.durationMin
+                else -> false
+            }
+            if (stillInPhase) {
+                resolvedEntryIdx = idx
+                break
+            }
+        }
+
+        val entry = expanded[resolvedEntryIdx]
+        val resolvedPhase = entry.phase
+        val repNumber = entry.repNumber
+        val totalReps = entry.totalReps
+
+        // Resolved phase name includes rep number for repeated phases, e.g. "work_rep_3_of_10"
+        val resolvedPhaseName = if (totalReps > 1) "${resolvedPhase.name}_rep_${repNumber}_of_${totalReps}"
+                                else resolvedPhase.name
+        val isNewPhase = resolvedPhaseName != dynamicCurrentPhaseName
 
         if (isNewPhase) {
             val previousPhaseName = dynamicCurrentPhaseName
-            dynamicCurrentPhaseIndex = resolvedIndex
-            dynamicCurrentPhaseName = resolvedPhase.name
+            dynamicCurrentPhaseIndex = resolvedEntryIdx
+            dynamicCurrentPhaseName = resolvedPhaseName
             dynamicPhaseDistanceStartKm = currentDistanceKm
 
+            val isRecovery = resolvedPhase.name.lowercase().let {
+                it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("jog")
+            }
+
             Log.d("RunTrackingService",
-                "🏃 Dynamic phase: $previousPhaseName → ${resolvedPhase.name} " +
+                "🏃 Dynamic phase: $previousPhaseName → $resolvedPhaseName " +
                 "(${String.format("%.2f", currentDistanceKm)}km / ${String.format("%.1f", elapsedMinutes)}min)")
 
-            // Fire phase_start trigger — bypass distance gate so transitions always fire
-            // even during short interval phases (e.g. 1 min jog = ~133m)
-            val phaseStartTrigger = plan.triggers.firstOrNull { t ->
-                (t.type == "phase_start" || t.type == "recovery_start") &&
-                (t.condition.contains(resolvedPhase.name) || t.id.startsWith(resolvedPhase.name)) &&
-                !triggerFiredOnce.contains(t.id)
+            // Fire the appropriate trigger for this phase transition.
+            // Priority: rep_start / recovery_start (for repeating phases) → phase_start (for unique phases)
+            // Bypass the 150m distance gate so transitions always fire for short interval phases.
+            val triggerTypeToMatch = when {
+                totalReps > 1 && isRecovery -> listOf("recovery_start", "rep_start", "phase_start")
+                totalReps > 1              -> listOf("rep_start", "phase_start")
+                else                       -> listOf("phase_start", "recovery_start")
             }
+
+            // For repeating phases: use a stable trigger id (not per-rep) so alternativeMessages rotate
+            val phaseBaseName = resolvedPhase.name
+            val phaseStartTrigger = plan.triggers.firstOrNull { t ->
+                t.type in triggerTypeToMatch &&
+                (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName)) &&
+                // "once" triggers only fire on the very first occurrence; others fire every rep
+                if (t.frequency == "once") !triggerFiredOnce.contains(t.id) else true
+            }
+
             if (phaseStartTrigger != null && !hasCoachingFiredThisTick &&
                 canFireCoaching(bypassDistanceGate = true)) {
                 val msg = pickTriggerMessage(phaseStartTrigger)
-                triggerFiredOnce.add(phaseStartTrigger.id)
+                // Mark "once" triggers as fired; leave repeating triggers unfired so they rotate
+                if (phaseStartTrigger.frequency == "once") triggerFiredOnce.add(phaseStartTrigger.id)
                 triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
-                fireDynamicTrigger(msg, phaseStartTrigger.type, resolvedPhase.name)
+                fireDynamicTrigger(msg, phaseStartTrigger.type, resolvedPhaseName)
             }
         }
 
-        // Detect "phase_end" proximity and fire a heads-up trigger
-        // Distance-based phases: warn 50-100m before end
-        // Time-based phases: warn 5-12 seconds before end
+        // ── Phase-end warning ────────────────────────────────────────────────
         if (!hasCoachingFiredThisTick) {
-            val phaseKm = resolvedPhase.distanceKm
-            val phaseMin = resolvedPhase.durationMinutes
-
             val nearPhaseEnd = when {
-                isIntervalPlan && phaseMin != null && phaseMin > 0 -> {
-                    val posInPhaseMin = elapsedMinutes - cumulativeMin
-                    val secsToEnd = (phaseMin - posInPhaseMin) * 60.0
-                    secsToEnd in 5.0..12.0  // 5-12 seconds before phase ends
+                isIntervalPlan && entry.durationMin > 0 -> {
+                    val secsToEnd = (entry.cumulativeMinStart + entry.durationMin - elapsedMinutes) * 60.0
+                    secsToEnd in 5.0..12.0
                 }
-                phaseKm != null && phaseKm > 0 -> {
-                    val posInPhase = currentDistanceKm - cumulativeKm
-                    val distToEnd = phaseKm - posInPhase
-                    distToEnd in 0.05..0.10  // 50-100m from end
+                entry.distKm > 0 -> {
+                    val distToEnd = entry.cumulativeKmStart + entry.distKm - currentDistanceKm
+                    distToEnd in 0.05..0.10
                 }
-                phaseMin != null && phaseMin > 0 -> {
-                    val posInPhaseMin = elapsedMinutes - cumulativeMin
-                    val secsToEnd = (phaseMin - posInPhaseMin) * 60.0
+                entry.durationMin > 0 -> {
+                    val secsToEnd = (entry.cumulativeMinStart + entry.durationMin - elapsedMinutes) * 60.0
                     secsToEnd in 5.0..12.0
                 }
                 else -> false
             }
 
             if (nearPhaseEnd) {
+                val phaseBaseName = resolvedPhase.name
                 val phaseEndTrigger = plan.triggers.firstOrNull { t ->
                     t.type == "phase_end" &&
-                    (t.condition.contains(resolvedPhase.name) || t.id.startsWith(resolvedPhase.name)) &&
-                    !triggerFiredOnce.contains(t.id)
+                    (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName)) &&
+                    if (t.frequency == "once") !triggerFiredOnce.contains(t.id) else true
                 }
                 if (phaseEndTrigger != null && canFireCoaching(bypassDistanceGate = true)) {
                     val msg = pickTriggerMessage(phaseEndTrigger)
-                    triggerFiredOnce.add(phaseEndTrigger.id)
-                    fireDynamicTrigger(msg, "phase_end", resolvedPhase.name)
+                    if (phaseEndTrigger.frequency == "once") triggerFiredOnce.add(phaseEndTrigger.id)
+                    fireDynamicTrigger(msg, "phase_end", resolvedPhaseName)
                 }
             }
         }

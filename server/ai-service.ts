@@ -4990,6 +4990,10 @@ export interface SessionCoachingPhase {
   effort: string;
   coachingFocus: string;
   phaseInstructions?: string;
+  /** > 1 for repeating interval phases. Consecutive phases with repetitions > 1 are
+   *  interleaved as a group: (work rep 1, recovery rep 1, work rep 2, recovery rep 2, …).
+   *  Use this instead of generating one phase per rep for high-rep interval sessions. */
+  repetitions?: number;
 }
 
 export interface SessionCoachingTrigger {
@@ -5283,16 +5287,22 @@ Design the phase structure that genuinely fits this session. You choose the numb
 - Continuous effort sessions (tempo, easy, long run) can be a single main effort or broken into logical sub-phases with milestone triggers
 - Zone-based sessions benefit from reactive HR triggers throughout to keep the athlete in the target zone
 
-CRITICAL — Phase duration fields:
-- If the session specifies interval timing (e.g. "1 min jog + 2 min walk"), set durationMinutes on every phase to the EXACT duration of that phase in minutes. The live coaching engine uses durationMinutes to detect phase transitions in real time — accuracy here directly determines when the athlete hears each coaching cue.
-- For distance-based phases (e.g. warmup/cooldown based on distance), set distanceKm.
-- You may set both, but durationMinutes is mandatory for any time-based interval phase.
-- Example: a "1 min gentle jog, 2 min brisk walk × 10 reps" session should produce phases named "jog_1", "walk_1", "jog_2", "walk_2"... with durationMinutes: 1 and durationMinutes: 2 respectively.
+CRITICAL — Phase duration and repetitions:
+- For time-based phases, set durationMinutes to the EXACT duration in minutes (e.g. 1 for a 1-minute jog). The live engine uses this to detect phase transitions in real time.
+- For distance-based phases (warmup/cooldown by distance), set distanceKm.
+- INTERVAL SESSIONS: use the "repetitions" field instead of generating one phase per rep. Set repetitions > 1 on consecutive work/recovery phases — the engine interleaves them automatically. Example for "1 min jog + 2 min walk × 10 reps":
+  { "name": "jog", "order": 1, "durationMinutes": 1, "repetitions": 10 }
+  { "name": "recovery_walk", "order": 2, "durationMinutes": 2, "repetitions": 10 }
+  This produces: jog rep 1 → walk rep 1 → jog rep 2 → walk rep 2 → … × 10
+- Name recovery phases starting with "recovery_" so the runtime detects them as recovery.
 
-ALWAYS include phase_start triggers for every phase — the athlete needs to know what each phase requires.
-Each trigger id must be unique (use format: "{phase_name}_{trigger_type}" e.g. "tempo_block_hr_high", "work_rep_2_pace_slow").
-Trigger messages: under 20 words, present tense, active voice, spoken like a coach in your ear.
-For reactive triggers (hr_zone, pace_deviation): provide 3-5 alternativeMessages with varied wording so the athlete hears different language each time the condition fires.`;
+TRIGGERS for interval sessions with repetitions:
+- Add "rep_start" and "recovery_start" triggers referencing the phase name (e.g. id: "jog_rep_start", condition: "phase == jog"). The engine fires these at the start of EACH rep automatically.
+- Use alternativeMessages (3-5 variations) on rep triggers so the athlete hears varied language across 10 reps — never the same phrase twice.
+- Always add a phase_start trigger for the first occurrence of every phase.
+
+TRIGGER ids must be unique. Format: "{phase_name}_{trigger_type}". Keep messages under 15 words.
+For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with varied wording.`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -5302,7 +5312,7 @@ For reactive triggers (hr_zone, pace_deviation): provide 3-5 alternativeMessages
         { role: "user", content: userPrompt },
       ],
       temperature: 0.7,
-      max_tokens: 2500,
+      max_tokens: 4000,  // Raised from 2500 — interval sessions with many reps + triggers need headroom
       response_format: { type: "json_object" },
     });
 
