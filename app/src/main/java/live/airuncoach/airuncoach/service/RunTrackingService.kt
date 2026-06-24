@@ -3550,7 +3550,7 @@ class RunTrackingService : Service(), SensorEventListener {
      * All coaching triggers should call this before firing. Navigation uses a shorter gap.
      * Returns true if coaching is allowed, false if it should be suppressed.
      */
-    private fun canFireCoaching(isNavigation: Boolean = false): Boolean {
+    private fun canFireCoaching(isNavigation: Boolean = false, bypassDistanceGate: Boolean = false): Boolean {
         val now = System.currentTimeMillis()
         val minGapMs = if (isNavigation) NAV_COACHING_MIN_GAP_MS else GLOBAL_COACHING_MIN_GAP_MS
         val timeSinceLastCoaching = now - lastGlobalCoachingTime
@@ -3558,6 +3558,14 @@ class RunTrackingService : Service(), SensorEventListener {
 
         // Navigation only checks time gap (turns are position-critical, not distance-dependent)
         if (isNavigation) {
+            return timeSinceLastCoaching >= minGapMs
+        }
+
+        // Structured interval phase transitions bypass the 150m distance gate.
+        // Interval phases can be as short as 100-150m (e.g. 1 min jog at 8 km/h = 133m),
+        // meaning the standard distance gate would BLOCK every phase transition after the first.
+        // Phase transitions are time-critical for the session structure, so only the time gap matters.
+        if (bypassDistanceGate) {
             return timeSinceLastCoaching >= minGapMs
         }
 
@@ -3938,23 +3946,57 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
-     * Evaluate which phase the runner is in (distance-based) and fire phase_start /
-     * phase_end / rep_start / rep_end / recovery_start triggers when phase boundaries are crossed.
+     * Evaluate which phase the runner is in and fire phase_start / phase_end /
+     * rep_start / rep_end / recovery_start triggers when phase boundaries are crossed.
+     *
+     * Supports BOTH distance-based phases (distanceKm) and time-based phases (durationMinutes).
+     *
+     * For interval sessions (cueingStrategy == "interval") or any phase that only has
+     * durationMinutes, elapsed active run time is used for phase detection. This is critical
+     * for structured interval sessions like "1 min jog + 2 min walk × 10 reps" where
+     * each rep covers only 100-200m — the old distance-only approach caused phases to fire
+     * 1-2 minutes late or not at all.
+     *
+     * Phase-start triggers bypass the 150m distance gate so they always fire at interval
+     * transitions even when the athlete has covered less than 150m since the last cue.
      */
     private fun evaluateDynamicPhase(currentDistanceKm: Double, plan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan) {
         val phases = plan.phases.sortedBy { it.order }
         if (phases.isEmpty()) return
 
+        val elapsedMinutes = getActiveRunDuration() / 60000.0
+        val isIntervalPlan = plan.cueingStrategy == "interval"
+
         var cumulativeKm = 0.0
+        var cumulativeMin = 0.0
         var resolvedIndex = phases.size - 1
 
         for ((idx, phase) in phases.withIndex()) {
-            val phaseKm = phase.distanceKm ?: ((phase.durationMinutes ?: 5.0) * 0.1) // rough estimate
-            if (currentDistanceKm < cumulativeKm + phaseKm) {
+            val phaseKm = phase.distanceKm
+            val phaseMin = phase.durationMinutes
+
+            // Phase detection logic:
+            // - Interval plans: prefer time-based detection (interval timing is the ground truth)
+            // - Other plans: prefer distance-based detection
+            // - Fall back to whichever dimension is available
+            val stillInPhase = when {
+                isIntervalPlan && phaseMin != null && phaseMin > 0 ->
+                    elapsedMinutes < cumulativeMin + phaseMin
+                phaseKm != null && phaseKm > 0 ->
+                    currentDistanceKm < cumulativeKm + phaseKm
+                phaseMin != null && phaseMin > 0 ->
+                    elapsedMinutes < cumulativeMin + phaseMin
+                else -> false  // no usable duration info — treat as instantaneous
+            }
+
+            if (stillInPhase) {
                 resolvedIndex = idx
                 break
             }
-            cumulativeKm += phaseKm
+
+            // Advance cumulative trackers for completed phases
+            cumulativeKm += phaseKm ?: 0.0
+            cumulativeMin += phaseMin ?: 0.0
         }
 
         val resolvedPhase = phases[resolvedIndex]
@@ -3966,15 +4008,19 @@ class RunTrackingService : Service(), SensorEventListener {
             dynamicCurrentPhaseName = resolvedPhase.name
             dynamicPhaseDistanceStartKm = currentDistanceKm
 
-            Log.d("RunTrackingService", "🏃 Dynamic phase: $previousPhaseName → ${resolvedPhase.name}")
+            Log.d("RunTrackingService",
+                "🏃 Dynamic phase: $previousPhaseName → ${resolvedPhase.name} " +
+                "(${String.format("%.2f", currentDistanceKm)}km / ${String.format("%.1f", elapsedMinutes)}min)")
 
-            // Fire phase_start trigger for this phase
+            // Fire phase_start trigger — bypass distance gate so transitions always fire
+            // even during short interval phases (e.g. 1 min jog = ~133m)
             val phaseStartTrigger = plan.triggers.firstOrNull { t ->
                 (t.type == "phase_start" || t.type == "recovery_start") &&
                 (t.condition.contains(resolvedPhase.name) || t.id.startsWith(resolvedPhase.name)) &&
                 !triggerFiredOnce.contains(t.id)
             }
-            if (phaseStartTrigger != null && !hasCoachingFiredThisTick && canFireCoaching()) {
+            if (phaseStartTrigger != null && !hasCoachingFiredThisTick &&
+                canFireCoaching(bypassDistanceGate = true)) {
                 val msg = pickTriggerMessage(phaseStartTrigger)
                 triggerFiredOnce.add(phaseStartTrigger.id)
                 triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
@@ -3982,23 +4028,42 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Detect "phase_end" proximity — fire warning 80-100m before phase ends
+        // Detect "phase_end" proximity and fire a heads-up trigger
+        // Distance-based phases: warn 50-100m before end
+        // Time-based phases: warn 5-12 seconds before end
         if (!hasCoachingFiredThisTick) {
-            val phaseKm = resolvedPhase.distanceKm ?: 0.0
-            if (phaseKm > 0) {
-                val posInPhase = currentDistanceKm - cumulativeKm
-                val distToPhaseEnd = phaseKm - posInPhase
-                if (distToPhaseEnd in 0.05..0.10) {  // 50-100m from end
-                    val phaseEndTrigger = plan.triggers.firstOrNull { t ->
-                        t.type == "phase_end" &&
-                        (t.condition.contains(resolvedPhase.name) || t.id.startsWith(resolvedPhase.name)) &&
-                        !triggerFiredOnce.contains(t.id)
-                    }
-                    if (phaseEndTrigger != null && canFireCoaching()) {
-                        val msg = pickTriggerMessage(phaseEndTrigger)
-                        triggerFiredOnce.add(phaseEndTrigger.id)
-                        fireDynamicTrigger(msg, "phase_end", resolvedPhase.name)
-                    }
+            val phaseKm = resolvedPhase.distanceKm
+            val phaseMin = resolvedPhase.durationMinutes
+
+            val nearPhaseEnd = when {
+                isIntervalPlan && phaseMin != null && phaseMin > 0 -> {
+                    val posInPhaseMin = elapsedMinutes - cumulativeMin
+                    val secsToEnd = (phaseMin - posInPhaseMin) * 60.0
+                    secsToEnd in 5.0..12.0  // 5-12 seconds before phase ends
+                }
+                phaseKm != null && phaseKm > 0 -> {
+                    val posInPhase = currentDistanceKm - cumulativeKm
+                    val distToEnd = phaseKm - posInPhase
+                    distToEnd in 0.05..0.10  // 50-100m from end
+                }
+                phaseMin != null && phaseMin > 0 -> {
+                    val posInPhaseMin = elapsedMinutes - cumulativeMin
+                    val secsToEnd = (phaseMin - posInPhaseMin) * 60.0
+                    secsToEnd in 5.0..12.0
+                }
+                else -> false
+            }
+
+            if (nearPhaseEnd) {
+                val phaseEndTrigger = plan.triggers.firstOrNull { t ->
+                    t.type == "phase_end" &&
+                    (t.condition.contains(resolvedPhase.name) || t.id.startsWith(resolvedPhase.name)) &&
+                    !triggerFiredOnce.contains(t.id)
+                }
+                if (phaseEndTrigger != null && canFireCoaching(bypassDistanceGate = true)) {
+                    val msg = pickTriggerMessage(phaseEndTrigger)
+                    triggerFiredOnce.add(phaseEndTrigger.id)
+                    fireDynamicTrigger(msg, "phase_end", resolvedPhase.name)
                 }
             }
         }
@@ -4634,25 +4699,37 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
-     * Fire a short motivational start prompt when the run begins.
-     * Uses a prompt generated with the user's tone preference via TTS.
+     * Fire the start coaching when a run begins.
+     *
+     * For coached plan sessions: uses the AI-generated preRunBrief from the dynamic coaching plan
+     * to give the athlete a specific, session-aware briefing (e.g. "Today is a 1.5km interval
+     * session — 1 minute jog then 2 minute walk for 10 reps. Stay in zone 2…").
+     *
+     * For free runs: generates a short tone-based motivational prompt.
      */
     private fun fireStartCoaching() {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
 
-        // Try to get Polly TTS audio for a tone-appropriate prompt; fall back to generic if it fails
         serviceScope.launch {
             try {
-                val tone = currentUser?.coachTone ?: "encouraging"
-                val startPrompt = generateStartPromptByTone(tone)
-                
+                // ── Coached plan session: use the AI-generated preRunBrief ────────────
+                // This gives the athlete a session-specific briefing instead of a generic prompt.
+                val planPreRunBrief = dynamicCoachingPlan?.preRunBrief?.takeIf { it.isNotBlank() }
+                val startPrompt = if (planPreRunBrief != null) {
+                    Log.d("RunTrackingService", "Using coaching plan preRunBrief for start message")
+                    planPreRunBrief
+                } else {
+                    // Free run: generate a short tone-appropriate motivational prompt
+                    val tone = currentUser?.coachTone ?: "encouraging"
+                    generateStartPromptByTone(tone)
+                }
+
                 // Log as a coaching note for the run history
                 coachingHistory.add(AiCoachingNote(
                     time = 0,
                     message = startPrompt
                 ))
-                
-                // Try to get Polly TTS audio for this motivation statement
+
                 if (!isMuted) {
                     try {
                         val audioResponse = apiService.getStartRunAudio(
@@ -4660,12 +4737,11 @@ class RunTrackingService : Service(), SensorEventListener {
                                 motivationalText = startPrompt
                             )
                         )
-                        
+
                         if (audioResponse.audio != null && audioResponse.format != null) {
-                            Log.d("RunTrackingService", "Start coaching audio generated via Polly TTS (tone=$tone)")
+                            Log.d("RunTrackingService", "Start coaching audio via Polly TTS (plan=${planPreRunBrief != null})")
                             playCoachingAudio(audioResponse.audio, audioResponse.format, startPrompt)
                         } else {
-                            Log.w("RunTrackingService", "No audio in start coaching response, using device TTS fallback")
                             playCoachingAudio(null, null, startPrompt)
                         }
                     } catch (e: Exception) {
@@ -4673,11 +4749,10 @@ class RunTrackingService : Service(), SensorEventListener {
                         playCoachingAudio(null, null, startPrompt)
                     }
                 }
-                
-                Log.d("RunTrackingService", "Start coaching (tone=$tone): $startPrompt")
+
+                Log.d("RunTrackingService", "Start coaching (plan=${planPreRunBrief != null}): $startPrompt")
             } catch (e: Exception) {
                 Log.w("RunTrackingService", "Start prompt generation failed, using fallback: ${e.message}")
-                // Fallback: use generic prompts if something fails
                 fireStartCoachingFallback()
             }
         }

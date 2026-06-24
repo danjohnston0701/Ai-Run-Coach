@@ -590,6 +590,10 @@ export async function getOrGenerateSessionCoaching(
     targetHRMin:           workout.hrZoneMinBpm ?? undefined,
     targetHRMax:           workout.hrZoneMaxBpm ?? undefined,
     sessionInstructions:   workout.instructions ?? workout.description ?? undefined,
+    // Interval-specific rep structure — enables GPT to generate accurate per-phase durationMinutes
+    intervalCount:             workout.intervalCount ?? undefined,
+    intervalDistanceMeters:    workout.intervalDistanceMeters ?? undefined,
+    intervalDurationSeconds:   workout.intervalDurationSeconds ?? undefined,
     runnerProfile: {
       age:                  (user as any).age ?? undefined,
       gender:               (user as any).gender ?? undefined,

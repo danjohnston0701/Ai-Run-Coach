@@ -4926,6 +4926,10 @@ export interface GenerateSessionCoachingParams {
   targetHRMin?: number;         // BPM
   targetHRMax?: number;         // BPM
   sessionInstructions?: string; // Full AI-generated session instructions text
+  // Interval-specific fields — present when the session has structured repeating reps
+  intervalCount?: number;           // Number of repetitions (e.g. 10)
+  intervalDistanceMeters?: number;  // Distance per work interval in meters (e.g. 400)
+  intervalDurationSeconds?: number; // Duration per work interval in seconds (e.g. 60 for 1 min)
   runnerProfile: {
     age?: number;
     gender?: string;
@@ -5054,6 +5058,9 @@ export async function generateSessionCoaching(
     targetHRMin,
     targetHRMax,
     sessionInstructions,
+    intervalCount,
+    intervalDistanceMeters,
+    intervalDurationSeconds,
     runnerProfile,
     coachName = "Coach",
     coachTone = "motivational",
@@ -5080,6 +5087,23 @@ Runner Profile:
       ).join("\n")
     : "\nRecent Runs: No data available";
 
+  // Build interval-specific context string when the session has defined rep structure
+  const intervalContext = (() => {
+    const { intervalCount, intervalDistanceMeters, intervalDurationSeconds } = params;
+    if (!intervalCount) return "";
+    const repDetails: string[] = [];
+    if (intervalDurationSeconds) {
+      const mins = Math.floor(intervalDurationSeconds / 60);
+      const secs = intervalDurationSeconds % 60;
+      repDetails.push(secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`);
+    }
+    if (intervalDistanceMeters) {
+      repDetails.push(`${intervalDistanceMeters}m`);
+    }
+    const repDesc = repDetails.length > 0 ? ` (${repDetails.join(" / ")} per rep)` : "";
+    return `\n- Interval Structure: ${intervalCount} repetitions${repDesc}`;
+  })();
+
   // Build session context
   const sessionContext = `
 Session Details:
@@ -5088,7 +5112,7 @@ Session Details:
 - Target Duration: ${targetDurationMinutes} minutes
 - Target Distance: ${targetDistanceKm} km
 - Target Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
-- Target HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm
+- Target HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm${intervalContext}
 ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
 
   const systemPrompt = `You are ${coachName}, an elite AI running coach delivering a world-class, hyper-personalised coaching experience for a single training session. Your mission is to make this athlete feel like they have a dedicated personal coach running beside them — reading their performance in real time and delivering exactly the right guidance at exactly the right moment.
@@ -5258,6 +5282,12 @@ Design the phase structure that genuinely fits this session. You choose the numb
 - Interval/rep sessions work best with alternating work and recovery phases so each phase has its own targets and coaching triggers
 - Continuous effort sessions (tempo, easy, long run) can be a single main effort or broken into logical sub-phases with milestone triggers
 - Zone-based sessions benefit from reactive HR triggers throughout to keep the athlete in the target zone
+
+CRITICAL — Phase duration fields:
+- If the session specifies interval timing (e.g. "1 min jog + 2 min walk"), set durationMinutes on every phase to the EXACT duration of that phase in minutes. The live coaching engine uses durationMinutes to detect phase transitions in real time — accuracy here directly determines when the athlete hears each coaching cue.
+- For distance-based phases (e.g. warmup/cooldown based on distance), set distanceKm.
+- You may set both, but durationMinutes is mandatory for any time-based interval phase.
+- Example: a "1 min gentle jog, 2 min brisk walk × 10 reps" session should produce phases named "jog_1", "walk_1", "jog_2", "walk_2"... with durationMinutes: 1 and durationMinutes: 2 respectively.
 
 ALWAYS include phase_start triggers for every phase — the athlete needs to know what each phase requires.
 Each trigger id must be unique (use format: "{phase_name}_{trigger_type}" e.g. "tempo_block_hr_high", "work_rep_2_pace_slow").
