@@ -1209,40 +1209,39 @@ fun ExpandableWeekCard(
     val skippedCount = week.workouts.count { it.isSkipped() }
     val completedCount = week.workouts.count { it.isCompleted && !it.isSkipped() }
     
-    // Calculate scheduled vs missed based on date
+    // Calculate scheduled vs missed based on date (device local timezone)
     // A workout is "scheduled" if it's today or in the future
-    // A workout is "missed" if it was due yesterday or earlier (before today)
-    val now = System.currentTimeMillis()
-    val todayCalendar = java.util.Calendar.getInstance().apply {
+    // A workout is "missed" only if it was due strictly before today (yesterday or earlier)
+    val sdfWeek = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+        timeZone = java.util.TimeZone.getDefault()
+    }
+    val todayStartWeek = java.util.Calendar.getInstance().apply {
         set(java.util.Calendar.HOUR_OF_DAY, 0)
         set(java.util.Calendar.MINUTE, 0)
         set(java.util.Calendar.SECOND, 0)
         set(java.util.Calendar.MILLISECOND, 0)
-    }
-    val tomorrowTime = todayCalendar.apply { add(java.util.Calendar.DAY_OF_MONTH, 1) }.timeInMillis
-    
+    }.timeInMillis
+
     val scheduledCount = week.workouts.count { workout ->
-        !workout.isCompleted && !workout.isSkipped() && 
+        !workout.isCompleted && !workout.isSkipped() &&
         !workout.workoutType.equals("rest", ignoreCase = true) &&
         workout.scheduledDate?.let { dateString ->
             try {
-                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                val scheduledTime = sdf.parse(dateString)?.time ?: now
-                scheduledTime >= now && scheduledTime < tomorrowTime + (7 * 24 * 60 * 60 * 1000) // Within 7 days from today
+                val scheduledTime = sdfWeek.parse(dateString)?.time ?: Long.MAX_VALUE
+                scheduledTime >= todayStartWeek // today or future → still scheduled
             } catch (_: Exception) { false }
         } ?: false
     }
-    
+
     val missedCount = week.workouts.count { workout ->
-        !workout.isCompleted && !workout.isSkipped() && 
+        !workout.isCompleted && !workout.isSkipped() &&
         !workout.workoutType.equals("rest", ignoreCase = true) &&
         workout.scheduledDate?.let { dateString ->
             try {
-                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                val scheduledTime = sdf.parse(dateString)?.time ?: now
-                scheduledTime < tomorrowTime // Before tomorrow (i.e., yesterday or earlier)
+                val scheduledTime = sdfWeek.parse(dateString)?.time ?: 0L
+                scheduledTime < todayStartWeek // strictly before today → missed
             } catch (_: Exception) { false }
-        } ?: true
+        } ?: false
     }
     
     val totalCount = week.workouts.size
@@ -1426,30 +1425,31 @@ fun ExpandedWeekWorkoutRow(
     val dayName = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(((workout.dayOfWeek % 7) + 7) % 7) { "Day" }
     
     // Determine status: scheduled, completed, missed, or skipped
-    val now = System.currentTimeMillis()
-    val todayCalendar = java.util.Calendar.getInstance().apply {
+    // "Missed" = strictly before today (yesterday or earlier) in the device's local timezone.
+    // Today's session is always "Scheduled" until completed/skipped.
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+        timeZone = java.util.TimeZone.getDefault()
+    }
+    val todayStart = java.util.Calendar.getInstance().apply {
         set(java.util.Calendar.HOUR_OF_DAY, 0)
         set(java.util.Calendar.MINUTE, 0)
         set(java.util.Calendar.SECOND, 0)
         set(java.util.Calendar.MILLISECOND, 0)
-    }
-    val tomorrowTime = todayCalendar.apply { add(java.util.Calendar.DAY_OF_MONTH, 1) }.timeInMillis
-    
-    val isScheduled = !workout.isCompleted && !workout.isSkipped() && 
+    }.timeInMillis
+
+    val isScheduled = !workout.isCompleted && !workout.isSkipped() &&
         workout.scheduledDate?.let { dateString ->
             try {
-                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                val scheduledTime = sdf.parse(dateString)?.time ?: now
-                scheduledTime >= tomorrowTime // Scheduled for tomorrow or later
+                val scheduledTime = sdf.parse(dateString)?.time ?: Long.MAX_VALUE
+                scheduledTime >= todayStart // today or future → scheduled
             } catch (_: Exception) { false }
         } ?: false
-    
-    val isMissed = !workout.isCompleted && !workout.isSkipped() && !isScheduled && 
+
+    val isMissed = !workout.isCompleted && !workout.isSkipped() && !isScheduled &&
         workout.scheduledDate?.let { dateString ->
             try {
-                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                val scheduledTime = sdf.parse(dateString)?.time ?: now
-                scheduledTime < tomorrowTime // Was due before tomorrow (today or earlier)
+                val scheduledTime = sdf.parse(dateString)?.time ?: 0L
+                scheduledTime < todayStart // strictly before today → missed
             } catch (_: Exception) { false }
         } ?: false
     
