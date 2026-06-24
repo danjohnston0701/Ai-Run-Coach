@@ -81,7 +81,7 @@ fun GoalsScreen(
                             )
                         )
                         Text(
-                            text = "Track your running objectives",
+                            text = "Track your objectives",
                             style = AppTextStyles.small,
                             color = Colors.textSecondary
                         )
