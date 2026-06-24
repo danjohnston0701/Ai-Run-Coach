@@ -4062,9 +4062,17 @@ class RunTrackingService : Service(), SensorEventListener {
                 it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("jog")
             }
 
+            // Reset reactive trigger cooldowns on every phase transition.
+            // Each new interval phase (jog → walk → jog → walk…) deserves fresh HR/pace monitoring.
+            // Without this, a 90-second cooldown from the previous phase would block reactive
+            // feedback during the next interval even if conditions warrant it immediately.
+            plan.triggers
+                .filter { t -> t.type in listOf("hr_zone_high", "hr_zone_low", "pace_too_fast", "pace_too_slow") }
+                .forEach { t -> triggerLastFiredMs.remove(t.id) }
+
             Log.d("RunTrackingService",
                 "🏃 Dynamic phase: $previousPhaseName → $resolvedPhaseName " +
-                "(${String.format("%.2f", currentDistanceKm)}km / ${String.format("%.1f", elapsedMinutes)}min)")
+                "(${String.format("%.2f", currentDistanceKm)}km / ${String.format("%.1f", elapsedMinutes)}min) — reactive cooldowns reset")
 
             // Fire the appropriate trigger for this phase transition.
             // Priority: rep_start / recovery_start (for repeating phases) → phase_start (for unique phases)

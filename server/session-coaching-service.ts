@@ -528,7 +528,12 @@ export async function getOrGenerateSessionCoaching(
 ): Promise<SessionCoachingPlan> {
   const { userId, plannedWorkoutId, forceRegenerate = false } = request;
 
-  // 1. Check cache — return existing plan if available and not forced to regenerate
+  // Current plan schema version — bump this whenever the plan format changes in a way that
+  // requires existing cached plans to be regenerated (e.g. new fields, prompt improvements).
+  // Plans cached at an older version are silently regenerated on next access.
+  const CURRENT_PLAN_VERSION = "2.1";
+
+  // 1. Check cache — return existing plan if available, up-to-date, and not forced to regenerate
   if (!forceRegenerate) {
     const existing = await db
       .select()
@@ -541,8 +546,13 @@ export async function getOrGenerateSessionCoaching(
 
       // Check if this is the new-format SessionCoachingPlan (has phases + triggers)
       if (structure?.phases && structure?.triggers && structure?.cueingStrategy) {
-        console.log(`[getOrGenerateSessionCoaching] Cache hit for workout ${plannedWorkoutId}`);
-        return structure as SessionCoachingPlan;
+        const cachedVersion = (existing.generatedVersion as string | null) ?? "1.0";
+        if (cachedVersion >= CURRENT_PLAN_VERSION) {
+          console.log(`[getOrGenerateSessionCoaching] Cache hit v${cachedVersion} for workout ${plannedWorkoutId}`);
+          return structure as SessionCoachingPlan;
+        }
+        // Plan exists but is an older version — fall through and regenerate silently
+        console.log(`[getOrGenerateSessionCoaching] Cached plan v${cachedVersion} < v${CURRENT_PLAN_VERSION} — regenerating for workout ${plannedWorkoutId}`);
       }
     }
   }
@@ -643,7 +653,7 @@ export async function getOrGenerateSessionCoaching(
           : ["pace_deviation", "effort_level", "split_time"],
         exclude: plan.targetMetrics.isRecovery ? ["pace_deviation"] : [],
       },
-      generatedVersion: "2.0",
+      generatedVersion: CURRENT_PLAN_VERSION,
       updatedAt: new Date(),
     };
 
