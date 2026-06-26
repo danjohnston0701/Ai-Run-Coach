@@ -116,12 +116,16 @@ class MainActivity : ComponentActivity() {
 
         Log.d("MainActivity", "Deep link — uriRun=$uriRunId notifRun=$notifRunId activeRun=$launchToActiveRun observerSession=$observerSessionId garminUpdate=$garminUpdateVersion")
 
+        // Friend request notification
+        val launchToFriends = intent?.getBooleanExtra("deeplink_friends", false) == true
+
         // Store inner-nav destinations so MainScreen can handle them once its
         // NavHost is ready. run_summary and run_session are NOT in the root NavHost.
         when {
             launchToActiveRun -> pendingDeepLink.value = "run_session"
             observerSessionId != null -> pendingDeepLink.value = "observer_session/$observerSessionId"
             anyRunId != null  -> pendingDeepLink.value = "run_summary/$anyRunId"
+            launchToFriends   -> pendingDeepLink.value = "friends"
         }
         
         Log.d("MainActivity", "Is Garmin update notification: $isGarminUpdateNotification")
@@ -275,6 +279,11 @@ class MainActivity : ComponentActivity() {
             intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true -> {
                 Log.d("MainActivity", "Warm launch: run_session (active run)")
                 pendingDeepLink.value = "run_session"
+            }
+            // Friend request notification → inner nav friends
+            intent?.getBooleanExtra("deeplink_friends", false) == true -> {
+                Log.d("MainActivity", "Warm launch: friends (friend request)")
+                pendingDeepLink.value = "friends"
             }
         }
     }

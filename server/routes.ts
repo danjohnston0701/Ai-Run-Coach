@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { eq, and, or, gte, lt, desc, lte, count, isNull } from "drizzle-orm";
+import { eq, and, or, gte, lt, desc, lte, count, isNull, isNotNull } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
@@ -176,6 +176,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
 
       console.log(`[FriendRequests] userId=${userId} sent=${sent.length} received=${received.length}`);
+      // Prevent CDN/proxy caching so UI always reflects latest state after send/withdraw/accept
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate");
       res.json({ v: 5, sent, received });
     } catch (error: any) {
       console.error("Get friend requests error:", error);
@@ -1036,6 +1038,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Re-use any existing declined/withdrawn request (set back to pending) instead of creating a duplicate
       const request = await storage.upsertFriendRequest(requesterId, addresseeId, message);
+
+      // Send push notification to the addressee so they see the request immediately
+      try {
+        const requester = await storage.getUser(requesterId);
+        const requesterName = requester?.name || "Someone";
+        const notificationService = await import("./notification-service");
+        const pushSent = await notificationService.sendFirebasePush(
+          addresseeId,
+          `${requesterName} sent you a friend request`,
+          "Open the app to accept or decline.",
+          { type: "friend_request", requestId: request.id, requesterId }
+        );
+        console.log(`[FriendRequests] Push notification sent to ${addresseeId}: ${pushSent}`);
+      } catch (pushError) {
+        // Don't fail the request if push notification fails
+        console.error("[FriendRequests] Failed to send push notification:", pushError);
+      }
+
       res.status(201).json(request);
     } catch (error: any) {
       console.error("Create friend request error:", error);
@@ -5670,6 +5690,123 @@ function transformRunForAndroid(run: any) {
               }
             }
             
+            // ── Auto-complete linked coaching plan session ────────────────────
+            // Two-tier matching strategy:
+            //
+            // Tier 1 — Companion session (explicit link):
+            //   If the iOS/web app stored a plannedWorkoutId on the companion session
+            //   (by passing it in the session/start payload), use that to mark the
+            //   exact workout as Done.  This is the most precise match.
+            //
+            // Tier 2 — Date-based matching (implicit link):
+            //   For watch-only runs (e.g., Garmin-started without the phone app
+            //   storing a workoutId), match against any single un-completed, non-rest
+            //   planned workout for the user's active plans that is scheduled for the
+            //   same calendar date as the run.  This covers the common case where the
+            //   user runs their scheduled session entirely on the watch.
+            setImmediate(() => {
+              (async () => {
+                try {
+                  const activityStartMs = (activity.startTimeInSeconds || 0) * 1000;
+                  const activityStartDate = new Date(activityStartMs);
+
+                  // ── Tier 1: companion session lookup ──────────────────────────
+                  const windowMs = 10 * 60 * 1000; // ±10 min tolerance
+                  const windowStart = new Date(activityStartMs - windowMs);
+                  const windowEnd   = new Date(activityStartMs + windowMs);
+
+                  const [matchedSession] = await db
+                    .select()
+                    .from(garminCompanionSessions)
+                    .where(
+                      and(
+                        eq(garminCompanionSessions.userId, device.userId),
+                        isNotNull(garminCompanionSessions.plannedWorkoutId),
+                        gte(garminCompanionSessions.startedAt, windowStart),
+                        lte(garminCompanionSessions.startedAt, windowEnd)
+                      )
+                    )
+                    .orderBy(sql`ABS(EXTRACT(EPOCH FROM (started_at - ${activityStartDate.toISOString()}::timestamptz)))`)
+                    .limit(1);
+
+                  if (matchedSession?.plannedWorkoutId) {
+                    const [workout] = await db
+                      .select()
+                      .from(plannedWorkouts)
+                      .where(eq(plannedWorkouts.id, matchedSession.plannedWorkoutId))
+                      .limit(1);
+
+                    if (workout && !workout.isCompleted) {
+                      await db.update(plannedWorkouts)
+                        .set({ isCompleted: true, completedRunId: runId })
+                        .where(eq(plannedWorkouts.id, matchedSession.plannedWorkoutId));
+                      console.log(`✅ [Garmin Webhook] Tier-1: auto-completed planned workout ${matchedSession.plannedWorkoutId} via companion session for run ${runId}`);
+                      return; // Done — no need for Tier-2 lookup
+                    } else if (workout?.isCompleted) {
+                      console.log(`[Garmin Webhook] Planned workout ${matchedSession.plannedWorkoutId} already completed — skipping`);
+                      return;
+                    }
+                  }
+
+                  // ── Tier 2: date-based matching ───────────────────────────────
+                  // Build a YYYY-MM-DD string in the local time offset sent by the watch.
+                  // Garmin provides startTimeOffsetInSeconds (UTC offset at activity location).
+                  const tzOffsetMs = (activity.startTimeOffsetInSeconds || 0) * 1000;
+                  const localMs = activityStartMs + tzOffsetMs;
+                  const localDate = new Date(localMs);
+                  const runDateStr = localDate.toISOString().split('T')[0]; // YYYY-MM-DD
+
+                  // Find the user's active training plans
+                  const activePlans = await db
+                    .select({ id: trainingPlans.id })
+                    .from(trainingPlans)
+                    .where(
+                      and(
+                        eq(trainingPlans.userId, device.userId),
+                        eq(trainingPlans.status, 'active')
+                      )
+                    );
+
+                  if (activePlans.length === 0) {
+                    console.log(`[Garmin Webhook] No active plans — skipping date-based workout match`);
+                    return;
+                  }
+
+                  const planIds = activePlans.map(p => p.id);
+
+                  // Look for non-rest, non-completed workouts scheduled for today
+                  const candidates = await db
+                    .select()
+                    .from(plannedWorkouts)
+                    .where(
+                      and(
+                        // Must belong to one of the user's active plans
+                        sql`${plannedWorkouts.trainingPlanId} = ANY(ARRAY[${sql.join(planIds.map(id => sql`${id}`), sql`, `)}]::text[])`,
+                        eq(plannedWorkouts.scheduledDate, runDateStr),
+                        eq(plannedWorkouts.isCompleted, false),
+                        // Exclude rest days — they shouldn't be auto-completed by a run
+                        sql`LOWER(COALESCE(${plannedWorkouts.workoutType}, '')) NOT IN ('rest', 'off', 'cross_training')`
+                      )
+                    );
+
+                  if (candidates.length === 1) {
+                    // Unambiguous single match — safe to auto-complete
+                    const [workout] = candidates;
+                    await db.update(plannedWorkouts)
+                      .set({ isCompleted: true, completedRunId: runId })
+                      .where(eq(plannedWorkouts.id, workout.id));
+                    console.log(`✅ [Garmin Webhook] Tier-2: auto-completed planned workout ${workout.id} (scheduled ${runDateStr}) for run ${runId}`);
+                  } else if (candidates.length > 1) {
+                    console.log(`[Garmin Webhook] Tier-2: ${candidates.length} planned workouts on ${runDateStr} — ambiguous, skipping auto-complete`);
+                  } else {
+                    console.log(`[Garmin Webhook] Tier-2: no planned workout found for ${runDateStr}`);
+                  }
+                } catch (err) {
+                  console.error("[Garmin Webhook] Failed to auto-complete planned workout:", err);
+                }
+              })();
+            });
+
             // Trigger plan reassessment asynchronously
             setImmediate(() => {
               (async () => {
@@ -9557,7 +9694,11 @@ function transformRunForAndroid(run: any) {
   app.post("/api/garmin-companion/session/start", companionAuthMiddleware, async (req: Request, res: Response) => {
     try {
       const { userId } = (req as any).companionUser;
-      const { sessionId, deviceId, deviceModel, activityType } = req.body;
+      // plannedWorkoutId is optional — only present when the user started this run
+      // from a coaching plan session in the iOS/web app.  It is stored so that when
+      // the Garmin activity webhook arrives after the run, we can automatically mark
+      // the planned session as Done even for watch-only runs.
+      const { sessionId, deviceId, deviceModel, activityType, plannedWorkoutId } = req.body;
       
       if (!sessionId) {
         return res.status(400).json({ error: "Session ID required" });
@@ -9576,6 +9717,7 @@ function transformRunForAndroid(run: any) {
         deviceId,
         deviceModel,
         activityType: activityType || "running",
+        plannedWorkoutId: plannedWorkoutId || null,
         status: "active",
         startedAt: new Date(),
       }).returning();
