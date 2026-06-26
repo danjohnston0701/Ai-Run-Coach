@@ -24,6 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import java.util.Locale
 import org.json.JSONObject
 import live.airuncoach.airuncoach.R
@@ -401,7 +404,18 @@ fun TrainingPlanDashboardScreen(
     var showAbandonDialog by remember { mutableStateOf(false) }
     var showAddInjuryDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(planId) { viewModel.loadPlanDetail(planId) }
+    // Reload plan detail every time this screen is RESUMED — this covers:
+    //  • Initial navigation to the screen (first RESUMED event)
+    //  • Navigating back from workout_detail after marking a session done/skipped
+    //  • App returning from background
+    // The ViewModel's planDetailJob cancellation ensures only the latest reload wins,
+    // so there is no race between this reload and one triggered by completeWorkout().
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, planId) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            viewModel.loadPlanDetail(planId)
+        }
+    }
 
     // Navigate back once the API call has completed.
     // NOTE: We deliberately do NOT call clearPlanActionSuccess() here — the ViewModel is

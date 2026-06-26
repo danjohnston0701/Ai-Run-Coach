@@ -1131,6 +1131,9 @@ export const garminCompanionSessions = pgTable("garmin_companion_sessions", {
   deviceId: text("device_id"), // Garmin device ID/serial
   deviceModel: text("device_model"), // e.g., "Forerunner 965"
   activityType: text("activity_type").default("running"),
+  // When the user starts a planned coaching session on the watch, the iOS/web app passes
+  // this ID so the Garmin webhook can auto-complete the session after the run syncs.
+  plannedWorkoutId: varchar("planned_workout_id").references(() => plannedWorkouts.id, { onDelete: "set null" }),
   status: text("status").notNull().default("active"), // active, paused, completed, abandoned
   startedAt: timestamp("started_at").defaultNow(),
   endedAt: timestamp("ended_at"),

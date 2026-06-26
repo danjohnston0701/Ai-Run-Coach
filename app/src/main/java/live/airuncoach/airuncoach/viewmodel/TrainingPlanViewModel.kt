@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,6 +79,11 @@ class TrainingPlanViewModel @Inject constructor(
 
     private val _nextBlockTriggering = MutableStateFlow(false)
     val nextBlockTriggering: StateFlow<Boolean> = _nextBlockTriggering.asStateFlow()
+
+    // Tracks the current in-flight loadPlanDetail job so we can cancel it when a newer
+    // request arrives (e.g. completeWorkout triggers a reload while a lifecycle-based
+    // reload is already in-flight, preventing stale data from overwriting fresh data).
+    private var planDetailJob: Job? = null
 
     init {
         loadUserPlans("active")
@@ -161,7 +167,11 @@ class TrainingPlanViewModel @Inject constructor(
     }
 
     fun loadPlanDetail(planId: String) {
-        viewModelScope.launch {
+        // Cancel any in-flight load before starting a new one so the latest call always wins.
+        // This prevents a stale lifecycle-triggered reload from overwriting fresh data that
+        // was returned by a reload triggered after completeWorkout finishes.
+        planDetailJob?.cancel()
+        planDetailJob = viewModelScope.launch {
             Log.d("TrainingPlanVM", "📋 Loading plan detail for planId=$planId...")
             _planDetailState.value = PlanDetailState.Loading
             try {
@@ -195,6 +205,9 @@ class TrainingPlanViewModel @Inject constructor(
                 // Await details first — if this throws, cancel progress too
                 val details = try {
                     detailsDeferred.await()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Job was cancelled (new reload superseded this one) — exit silently.
+                    throw e
                 } catch (e: Exception) {
                     progressDeferred.cancel()
                     Log.e("TrainingPlanVM", "Error loading plan detail: ${e.message}", e)
@@ -214,6 +227,11 @@ class TrainingPlanViewModel @Inject constructor(
                 // Load pending adaptations count + rolling block status
                 loadPendingAdaptationsCount(planId)
                 loadBlockStatus(planId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Job was cancelled (new reload superseded this one) — exit silently without
+                // touching _planDetailState so the screen keeps its current content until
+                // the newer job completes.
+                throw e
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Unexpected error loading plan detail: ${e.message}", e)
                 _planDetailState.value = PlanDetailState.Error("Something went wrong. Please try again.")

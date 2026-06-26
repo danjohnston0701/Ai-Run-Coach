@@ -219,11 +219,17 @@ class RunSummaryViewModel @Inject constructor(
     private fun completeLinkedWorkout(workoutId: String, runId: String, planId: String) {
         viewModelScope.launch {
             try {
-                apiService.completeWorkout(workoutId, CompleteWorkoutRequest(runId))
-                Log.d("RunSummaryViewModel", "✅ Workout $workoutId auto-completed with run $runId (plan: $planId)")
+                val response = apiService.completeWorkout(workoutId, CompleteWorkoutRequest(runId))
+                if (response.isSuccessful) {
+                    Log.d("RunSummaryViewModel", "✅ Workout $workoutId auto-completed with run $runId (plan: $planId)")
+                } else {
+                    // Log the failure clearly so it shows up in logcat for debugging
+                    Log.w("RunSummaryViewModel",
+                        "⚠️ Failed to auto-complete workout $workoutId: HTTP ${response.code()} — ${response.errorBody()?.string()}")
+                }
             } catch (e: Exception) {
                 // Silently log failures - the run is already saved, this is just for plan tracking
-                Log.w("RunSummaryViewModel", "Failed to auto-complete workout $workoutId: ${e.message}")
+                Log.w("RunSummaryViewModel", "⚠️ Failed to auto-complete workout $workoutId: ${e.message}")
             }
         }
     }
