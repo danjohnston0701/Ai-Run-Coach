@@ -257,6 +257,11 @@ class RunTrackingService : Service(), SensorEventListener {
     private var baselineCadence: Int = 0
     private var cadenceSamplesForBaseline: Int = 0
     private val recentStrideLengths = mutableListOf<Double>()
+    // Speed (m/s) at the time of the last cadence coaching cue.
+    // Used to detect significant pace shifts (>0.5 m/s ≈ ~30 sec/km) that warrant a
+    // fresh cadence cue — a runner who accelerates from 5:30 to 4:00/km or decelerates
+    // should receive updated advice because their optimal cadence has changed materially.
+    private var lastCadenceCoachingSpeedMs: Double = 0.0
 
     // Elite coaching triggers — technique, milestones, reinforcement, ETA, trends, elevation
     private var lastEliteCoachingTime: Long = 0
@@ -435,6 +440,13 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val ELEVATION_COOLDOWN_MS = 120_000 // 2 minutes
         private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
         private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
+        private const val CADENCE_COOLDOWN_MS = 120_000L // 2 minutes between cadence cues
+        // Re-coach cadence if pace shifts by more than this threshold (m/s) since last cue.
+        // 0.5 m/s ≈ 30 sec/km difference — e.g. 5:30→4:50/km is a meaningful effort change that
+        // shifts the optimal cadence by ~5-8 spm, warranting fresh advice.
+        private const val CADENCE_REFIRE_SPEED_DELTA_MS = 0.5
+        // Also re-coach periodically if the runner stays non-optimal even without a pace shift.
+        private const val CADENCE_REPEAT_INTERVAL_MS = 8 * 60_000L // 8 minutes
 
         // ELEVATION NOISE FILTER — two thresholds because the GPS sources have very different
         // update rates and accuracy profiles:
@@ -1058,6 +1070,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastBaselineUpdateDistance = 0.0
         hasCadenceCoachingFired = false
         lastCadenceCoachingTime = 0
+        lastCadenceCoachingSpeedMs = 0.0
         lastStrideZone = "OPTIMAL"
         baselineCadence = 0
         cadenceSamplesForBaseline = 0
@@ -1903,26 +1916,36 @@ class RunTrackingService : Service(), SensorEventListener {
      *   - Speed/pace: faster running requires higher cadence
      *   - Height: taller runners have longer natural step length → slightly lower optimal cadence
      *   - Age: runners over 50 have reduced lower-limb reactivity → relax target by ~1 spm per 5 years
+     *   - Terrain gradient: uphill forces shorter quicker steps; downhill allows slightly longer strides
      *
      * Formula:
      *   stepLengthRatio = 0.58 + (speed_ms - 2.78) × 0.16   (calibrated against research norms)
      *   stepLength = stepLengthRatio × heightM
      *   optimalCadence = (speed_ms / stepLength) × 60
      *
-     * Research calibration points (175cm runner):
+     * Research calibration points (175cm runner at 0% grade):
      *   6:00/km (2.78 m/s) → ~163 spm
      *   5:00/km (3.33 m/s) → ~168 spm
+     *   4:30/km (3.70 m/s) → ~173 spm
      *   4:00/km (4.17 m/s) → ~177 spm
      *
-     * @param speedMs    Current speed in metres/second
-     * @param heightCm   Runner height in cm (default 170)
-     * @param age        Runner age in years (optional, adjusts for over-50s)
+     * Terrain adjustments (approximate research consensus):
+     *   +3–5% grade (uphill):    +2 spm  (shorter, quicker steps reduce ground-contact time)
+     *   +5–8% grade (steep up):  +4 spm
+     *   −3–5% grade (downhill):  −2 spm  (slightly longer strides are natural, reduce braking)
+     *   −5–8% grade (steep dn):  −3 spm  (more lenient but overstriding still penalised elsewhere)
+     *
+     * @param speedMs      Current speed in metres/second
+     * @param heightCm     Runner height in cm (default 170)
+     * @param age          Runner age in years (optional, adjusts for over-50s)
+     * @param gradePercent Real-time slope % (positive = uphill, negative = downhill; default 0.0)
      * @return Triple(optimalCadenceMin, optimalCadenceTarget, optimalCadenceMax)
      */
     private fun calculatePersonalisedCadenceRange(
         speedMs: Double,
         heightCm: Double = 170.0,
-        age: Int? = null
+        age: Int? = null,
+        gradePercent: Double = 0.0
     ): Triple<Int, Int, Int> {
         val heightM = heightCm.coerceIn(140.0, 220.0) / 100.0
         val speed   = speedMs.coerceIn(1.5, 6.0)         // ~2:45/km to walking pace
@@ -1940,6 +1963,20 @@ class RunTrackingService : Service(), SensorEventListener {
             val adjustment = ((age - 50) / 5).coerceAtMost(6)
             optimal = (optimal - adjustment).coerceAtLeast(148)
         }
+
+        // Terrain gradient adjustment: uphill demands shorter/quicker steps; downhill allows longer strides.
+        // Adjustments are additive on top of the speed-based target so the cadence advice always reflects
+        // both the runner's actual pace AND the terrain they are currently on.
+        val gradeAdjustment = when {
+            gradePercent >= 8.0  ->  5   // Very steep uphill — maximum cadence increase
+            gradePercent >= 5.0  ->  4   // Steep uphill
+            gradePercent >= 3.0  ->  2   // Moderate uphill
+            gradePercent <= -8.0 -> -3   // Very steep downhill — allow longer strides
+            gradePercent <= -5.0 -> -3   // Steep downhill
+            gradePercent <= -3.0 -> -2   // Moderate downhill
+            else                 ->  0   // Flat (±3%)
+        }
+        optimal = (optimal + gradeAdjustment).coerceAtLeast(148)
 
         // Cadence tolerance buffer: ±5-8 spm is normal variation during a run
         // Too strict = false positives that frustrate runners (e.g. "3 spm off is not a problem")
@@ -1979,13 +2016,6 @@ class RunTrackingService : Service(), SensorEventListener {
         val optimalMin = heightM * 0.35
         val optimalMax = heightM * 0.45
 
-        // Personalised cadence range using biomechanics model
-        val (cadenceLow, cadenceTarget, cadenceHigh) = calculatePersonalisedCadenceRange(
-            speedMs = currentSpeed,
-            heightCm = heightCm,
-            age = currentUser?.age
-        )
-
         // Terrain context — use real-time smoothed grade, not the whole-run average gradient
         val grade = currentSmoothedGrade
         val terrain = when {
@@ -1994,13 +2024,36 @@ class RunTrackingService : Service(), SensorEventListener {
             else -> "flat"
         }
 
-        // Stride zone — uses personalised cadence thresholds, not hardcoded values
+        // Personalised cadence range using biomechanics model — now includes terrain gradient so the
+        // target shifts upward on hills (shorter quicker steps) and slightly downward on descents.
+        val (cadenceLow, cadenceTarget, cadenceHigh) = calculatePersonalisedCadenceRange(
+            speedMs = currentSpeed,
+            heightCm = heightCm,
+            age = currentUser?.age,
+            gradePercent = grade
+        )
+
+        // Terrain-aware stride zone — uses personalised thresholds, not hardcoded values.
+        //
+        // Uphill: runners naturally shorten their stride length; the cadence target already
+        //   accounts for this via the grade adjustment above.  We still check for understriding
+        //   (too slow a turnover on hills drains energy) but relax the overstriding threshold
+        //   because stride length will naturally be below flat-terrain norms.
+        //
+        // Downhill: slightly longer strides are expected and efficient.  The overstriding threshold
+        //   is relaxed proportionally to the grade so we only flag genuine braking-stride form issues.
+        //
+        // Flat: standard thresholds apply.
+        val overstridingThresholdFraction = when {
+            terrain == "uphill"   -> 0.48  // Tighter on uphills — long strides into a hill are inefficient
+            terrain == "downhill" -> 0.55  // More lenient on downhills — stride naturally lengthens
+            else                  -> 0.50  // Flat standard
+        }
         val zone = when {
-            terrain == "uphill" -> "OPTIMAL" // Shorter strides uphill are natural
-            strideLength > heightM * 0.50 -> "OVERSTRIDING"
-            strideLength > optimalMax -> "OVERSTRIDING"
-            terrain == "flat" && currentCadence < cadenceLow -> "UNDERSTRIDING"
-            else -> "OPTIMAL"
+            strideLength > heightM * overstridingThresholdFraction -> "OVERSTRIDING"
+            strideLength > optimalMax && terrain != "downhill"      -> "OVERSTRIDING"
+            currentCadence < cadenceLow                             -> "UNDERSTRIDING"
+            else                                                     -> "OPTIMAL"
         }
 
         // Fatigue detection: cadence drops > 5-6% from baseline indicates form breakdown from fatigue
@@ -3375,7 +3428,7 @@ class RunTrackingService : Service(), SensorEventListener {
             val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
                 .setContentTitle("⌚ Watch Ready")
                 .setContentText("Your Garmin watch is connected and GPS is locked. Press START on your watch to begin.")
-                .setSmallIcon(R.drawable.android_icon_monochrome)
+                .setSmallIcon(R.drawable.notification_icon)
                 .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
@@ -3424,7 +3477,7 @@ class RunTrackingService : Service(), SensorEventListener {
             val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
                 .setContentTitle("🏃 Run Started")
                 .setContentText("Your phone is recording. Enjoy your run!")
-                .setSmallIcon(R.drawable.android_icon_monochrome)
+                .setSmallIcon(R.drawable.notification_icon)
                 .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
@@ -4513,22 +4566,53 @@ class RunTrackingService : Service(), SensorEventListener {
         if (totalDistance < 1000) return // Need at least 1km of data
 
         val stride = getCurrentStrideAnalysis() ?: return
+        if (stride.strideZone == "OPTIMAL") return // No issue detected — nothing to coach
+
         val now = System.currentTimeMillis()
-        val CADENCE_COOLDOWN_MS = 120_000L // 2 minutes
 
-        // Determine if we should fire cadence coaching - ONLY ONCE per run (first time non-optimal stride detected)
-        val shouldFire = !hasCadenceCoachingFired && stride.strideZone != "OPTIMAL"
-
-        if (!shouldFire) return
+        // Minimum cooldown between any two cadence cues — prevents rapid-fire coaching
         if ((now - lastCadenceCoachingTime) < CADENCE_COOLDOWN_MS) return
         if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return
 
+        // Current GPS speed (m/s) used to decide whether the pace has shifted enough to
+        // warrant fresh coaching even if a cue has already fired this run.
+        val currentSpeedMs = if (routePoints.isNotEmpty() && routePoints.last().speed != null && routePoints.last().speed!! > 0.5f) {
+            routePoints.last().speed!!.toDouble()
+        } else if (routePoints.size >= 2) {
+            val last = routePoints.last()
+            val prev = routePoints[routePoints.size - 2]
+            val dt = (last.timestamp - prev.timestamp) / 1000.0
+            if (dt > 0) calculateDistance(prev, last) / dt else 0.0
+        } else 0.0
+
+        // Re-fire logic — cadence coaching is NOT limited to once per run.
+        // A runner who changes pace substantially (e.g. easy jog → tempo, or slows on hills)
+        // has a different optimal cadence and deserves fresh, relevant advice.
+        //
+        // Three conditions that each independently allow the cue to fire:
+        //   1. First-time: cue has never fired this run.
+        //   2. Pace shift: speed has changed by >0.5 m/s (~30 sec/km) since last cue — the
+        //      biomechanics target has shifted enough that the previous cue is now stale.
+        //   3. Sustained issue: runner has been non-optimal for 8+ minutes (form drift / fatigue).
+        val speedDelta = kotlin.math.abs(currentSpeedMs - lastCadenceCoachingSpeedMs)
+        val paceBucketChanged = hasCadenceCoachingFired && speedDelta >= CADENCE_REFIRE_SPEED_DELTA_MS
+        val sustainedIssue = hasCadenceCoachingFired && (now - lastCadenceCoachingTime) >= CADENCE_REPEAT_INTERVAL_MS
+
+        val shouldFire = !hasCadenceCoachingFired || paceBucketChanged || sustainedIssue
+        if (!shouldFire) return
+
         hasCadenceCoachingFired = true
         lastCadenceCoachingTime = now
+        lastCadenceCoachingSpeedMs = currentSpeedMs
         lastCoachingTime = now
         lastStrideZone = stride.strideZone
         hasCoachingFiredThisTick = true
         recordCoachingFired()
+
+        // Capture snapshot values for the coroutine (avoid capturing mutable service state)
+        val snapshotSpeed = currentSpeedMs
+        val snapshotGrade = currentSmoothedGrade
+        val snapshotTerrain = stride.terrainContext
 
         serviceScope.launch {
             try {
@@ -4544,24 +4628,23 @@ class RunTrackingService : Service(), SensorEventListener {
                     currentPace = currentPace,
                     targetPace = cadenceTargetPaceStr,
                     targetTime = targetTime?.let { it / 1000 },  // Convert ms to seconds
+                    // optimalCadenceTarget now reflects both pace AND current gradient
                     optimalCadenceTarget = stride.optimalCadenceTarget,
-                    speed = if (routePoints.size >= 2) {
-                        val last = routePoints.last()
-                        val prev = routePoints[routePoints.size - 2]
-                        val dt = (last.timestamp - prev.timestamp) / 1000.0
-                        if (dt > 0) calculateDistance(prev, last) / dt else 0.0
-                    } else 0.0,
+                    speed = snapshotSpeed,
                     distance = totalDistance / 1000.0,
                     elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     heartRate = if (currentHeartRate > 0) currentHeartRate else null,
                     userHeight = currentUser?.height?.let { it / 100.0 },
                     userWeight = currentUser?.weight?.toDouble(),
                     userAge = currentUser?.age,
-                    // Personalised optimal cadence from biomechanics model (not hardcoded)
+                    // Personalised optimal cadence range from biomechanics model (not hardcoded)
                     optimalCadenceMin = stride.optimalCadenceMin,
                     optimalCadenceMax = stride.optimalCadenceMax,
                     optimalStrideLengthMin = stride.optimalMin,
                     optimalStrideLengthMax = stride.optimalMax,
+                    // Terrain context — lets AI tailor advice for hills vs flat terrain
+                    currentGrade = snapshotGrade,
+                    terrainContext = snapshotTerrain,
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,

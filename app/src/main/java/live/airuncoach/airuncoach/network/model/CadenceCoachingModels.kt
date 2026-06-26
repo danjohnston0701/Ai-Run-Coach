@@ -9,7 +9,7 @@ data class CadenceCoachingRequest(
     @SerializedName("currentPace") val currentPace: String,
     @SerializedName("targetPace") val targetPace: String?,       // User's goal pace for this run (e.g. "5:15")
     @SerializedName("targetTime") val targetTime: Long?,          // User's goal time in seconds
-    @SerializedName("optimalCadenceTarget") val optimalCadenceTarget: Int, // Biomechanics-computed ideal spm at current speed
+    @SerializedName("optimalCadenceTarget") val optimalCadenceTarget: Int, // Biomechanics-computed ideal spm at current speed & grade
     @SerializedName("speed") val speed: Double, // m/s
     @SerializedName("distance") val distance: Double, // km
     @SerializedName("elapsedTime") val elapsedTime: Long,
@@ -21,6 +21,9 @@ data class CadenceCoachingRequest(
     @SerializedName("optimalCadenceMax") val optimalCadenceMax: Int,
     @SerializedName("optimalStrideLengthMin") val optimalStrideLengthMin: Double,
     @SerializedName("optimalStrideLengthMax") val optimalStrideLengthMax: Double,
+    // Terrain context — lets the AI tailor advice for hills vs flat (e.g. shorter steps on uphill)
+    @SerializedName("currentGrade") val currentGrade: Double?,    // Real-time slope % (positive=uphill, negative=downhill)
+    @SerializedName("terrainContext") val terrainContext: String?, // "flat" | "uphill" | "downhill"
     @SerializedName("coachName") val coachName: String?,
     @SerializedName("coachTone") val coachTone: String?,
     @SerializedName("coachGender") val coachGender: String?,

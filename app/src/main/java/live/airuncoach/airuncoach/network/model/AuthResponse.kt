@@ -126,7 +126,11 @@ data class AuthResponse(
     val coachKmSplitIntervalKm: Int? = null,
     
     @SerializedName("injuries")
-    val injuries: List<Injury>? = null
+    val injuries: List<Injury>? = null,
+
+    // ISO-8601 trial expiry date (e.g. "2025-01-10") — account creation date + 14 days, set by server
+    @SerializedName("trialExpiresAt")
+    val trialExpiresAt: String? = null
 ) {
     /**
      * Extract the actual User object, whether it's wrapped or flattened
@@ -169,7 +173,8 @@ data class AuthResponse(
                 coachMotivationalEnabled = coachMotivationalEnabled,
                 coachHalfKmCheckInEnabled = coachHalfKmCheckInEnabled,
                 coachKmSplitIntervalKm = coachKmSplitIntervalKm,
-                injuries = injuries
+                injuries = injuries,
+                trialExpiresAt = trialExpiresAt
             )
         } else {
             null

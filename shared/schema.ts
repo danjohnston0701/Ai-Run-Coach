@@ -62,6 +62,13 @@ export const users = pgTable("users", {
 
   // Session type preference
   defaultSessionType: text("default_session_type").default("run"), // "run" | "walk" | "interval" — user's preferred activity type
+
+  // ── Trial / Subscription lifecycle ───────────────────────────────────────
+  // Set to created_at + 14 days on account creation.
+  // Free-tier users are hard-blocked after this date until they upgrade.
+  // Null-safe: if missing (legacy accounts before this migration), the server
+  // computes it on-the-fly from created_at.
+  trialExpiresAt: timestamp("trial_expires_at"),
 });
 
 // Friends table

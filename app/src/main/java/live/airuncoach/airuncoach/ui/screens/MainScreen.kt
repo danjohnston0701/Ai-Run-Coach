@@ -48,14 +48,16 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.domain.model.User
+import live.airuncoach.airuncoach.ui.components.PromoCodeDialog
+import live.airuncoach.airuncoach.ui.components.TrialExpiredWallScreen
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.util.RunConfigHolder
 import live.airuncoach.airuncoach.util.WorkoutHolder
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
+import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 import live.airuncoach.airuncoach.viewmodel.TrainingPlanViewModel
-import live.airuncoach.airuncoach.ui.components.PromoCodeDialog
 
 sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
@@ -81,6 +83,13 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
     var onLocationPermissionGranted: (() -> Unit)? by remember { mutableStateOf(null) }
     var showPromoCodeDialog by remember { mutableStateOf(false) }
     var promoCodeLoading by remember { mutableStateOf(false) }
+
+    // ── Trial expiry gate ──────────────────────────────────────────────────
+    // Checks the locally-cached user profile on every composition.
+    // When the trial has expired the entire app UI is replaced by a full-screen
+    // paywall — nothing is accessible until the user upgrades or signs out.
+    val subscriptionViewModel: SubscriptionViewModel = hiltViewModel()
+    val isTrialExpired = subscriptionViewModel.isTrialExpired()
 
     // Permission requests are now handled in LocationPermissionScreen
     // Only request notification permission here if needed
@@ -191,10 +200,16 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             }
         }
     ) { innerPadding ->
+        // ── Trial expiry hard gate ─────────────────────────────────────────────
+        // When the trial has expired, cover the entire content area with the paywall.
+        // Only "Upgrade" (→ subscription screen inside NavHost) and "Sign Out" are exposed.
+        // The NavHost still runs beneath so the subscription screen can be navigated into.
+        Box(modifier = Modifier.padding(innerPadding)) {
+
         NavHost(
             navController,
             startDestination = Screen.Home.route,
-            Modifier.padding(innerPadding)
+            Modifier.fillMaxSize()
         ) {
             composable(Screen.Home.route) { backStackEntry ->
                 val dashboardViewModel: DashboardViewModel = hiltViewModel()
@@ -1171,9 +1186,26 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToLogin = onNavigateToLogin
                 )
             }
+        } // end NavHost
+
+        // ── Trial expiry paywall overlay ───────────────────────────────────────
+        // Rendered on top of the NavHost (z-order: last child in Box = topmost layer).
+        // When the trial is expired AND the user has not subscribed, this full-screen
+        // overlay blocks ALL app content.  Only "Upgrade" (→ subscription screen) and
+        // "Sign Out" are accessible — no runs, history, goals, or plans can be started.
+        if (isTrialExpired) {
+            TrialExpiredWallScreen(
+                onUpgradeClick = { navController.navigate("subscription") },
+                onSignOutClick = { onNavigateToLogin() },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Colors.backgroundRoot)
+            )
         }
-    }
-    
+
+        } // end Box (trial gate wrapper)
+    } // end Scaffold content
+
     // Show promo code dialog when requested
     if (showPromoCodeDialog) {
         PromoCodeDialog(

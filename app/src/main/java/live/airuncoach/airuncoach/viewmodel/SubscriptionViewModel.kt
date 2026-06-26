@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.billing.BillingManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
+import java.time.LocalDate
 import javax.inject.Inject
 
 /**
@@ -106,7 +107,79 @@ class SubscriptionViewModel @Inject constructor(
      * Get the AI Coaching Plans limit for the user's tier.
      */
     fun getAiCoachingPlansLimit(): Int = billingManager.getAiCoachingPlansLimit()
-    
+
+    // ── Trial lifecycle helpers ──────────────────────────────────────────────
+
+    /**
+     * Read the cached User object from SharedPreferences.
+     * Returns null if not found or parsing fails.
+     */
+    private fun getCachedUser(): User? = try {
+        val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+        val userJson = sharedPrefs.getString("user", null) ?: return null
+        Gson().fromJson(userJson, User::class.java)
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Returns the trial expiry date for the current user, or null if unavailable.
+     * The server sets [User.trialExpiresAt] to accountCreatedAt + 14 days on sign-up.
+     * Falls back to null (which means we cannot determine expiry — we treat as active).
+     */
+    fun getTrialExpiresAt(): LocalDate? {
+        val user = getCachedUser() ?: return null
+        val raw = user.trialExpiresAt ?: return null
+        return try {
+            // ISO-8601: "2025-01-10" or "2025-01-10T00:00:00.000Z" — take first 10 chars
+            LocalDate.parse(raw.take(10))
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * True if the user's 14-day free trial has expired AND they have not upgraded.
+     *
+     * Paid users (lite/standard) are never considered expired — this only applies to
+     * the "free" tier once the trial window has closed.
+     *
+     * Also respects the server-set [User.subscriptionStatus] == "trial_expired" flag
+     * as an authoritative override (e.g. admin enforcement or immediate expiry).
+     */
+    fun isTrialExpired(): Boolean {
+        val tier = getSubscriptionTier()
+        if (tier != "free") return false  // Paid subscribers always have access
+
+        val user = getCachedUser()
+
+        // Server can explicitly flag the account as expired
+        if (user?.subscriptionStatus == "trial_expired") return true
+
+        // Client-side date check against trialExpiresAt
+        val expiryDate = getTrialExpiresAt() ?: return false
+        return LocalDate.now().isAfter(expiryDate)
+    }
+
+    /**
+     * True if the user is currently within their 14-day free trial window (not yet expired).
+     */
+    fun isInActiveTrial(): Boolean {
+        if (getSubscriptionTier() != "free") return false
+        val expiry = getTrialExpiresAt() ?: return true  // No date → assume active
+        return !LocalDate.now().isAfter(expiry)
+    }
+
+    /**
+     * Returns the number of days remaining in the trial (0 if expired or no date available).
+     */
+    fun trialDaysRemaining(): Int {
+        val expiry = getTrialExpiresAt() ?: return 0
+        val today = LocalDate.now()
+        if (today.isAfter(expiry)) return 0
+        return (expiry.toEpochDay() - today.toEpochDay()).toInt()
+    }
+
     /**
      * Load current usage data from the API
      */

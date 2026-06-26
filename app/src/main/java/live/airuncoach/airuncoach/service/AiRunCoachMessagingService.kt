@@ -168,7 +168,7 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setSmallIcon(R.drawable.android_icon_monochrome)
+            .setSmallIcon(R.drawable.notification_icon)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)

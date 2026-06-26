@@ -345,6 +345,176 @@ fun RunRouteLimitUpsellScreen(
     )
 }
 
+// ── Trial Expired Hard Wall ───────────────────────────────────────────────────
+
+/**
+ * Full-screen paywall shown when the user's 14-day free trial has expired.
+ *
+ * This screen is presented as a non-dismissible overlay over the entire app.
+ * The user CANNOT start a run, view history, or use any feature until they
+ * either upgrade to a paid plan or sign out.  It has no Back button.
+ */
+@Composable
+fun TrialExpiredWallScreen(
+    onUpgradeClick: () -> Unit,
+    onSignOutClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+        ) {
+            // ── Main Content ────────────────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = Spacing.lg),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Spacer(modifier = Modifier.height(Spacing.xxxl))
+
+                    // Icon
+                    Text("🏃", fontSize = 72.sp, modifier = Modifier.padding(bottom = Spacing.md))
+
+                    // Lock badge
+                    Card(
+                        modifier = Modifier.size(80.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Colors.error.copy(alpha = 0.15f)
+                        ),
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Trial Expired",
+                                tint = Colors.error,
+                                modifier = Modifier.size(40.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(Spacing.xl))
+
+                    Text(
+                        "Your Free Trial Has Ended",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = Spacing.md)
+                    )
+
+                    Text(
+                        "You've had 14 days to experience the power of AI Run Coach. " +
+                        "Upgrade now to unlock unlimited AI coaching, post-run analysis, routes and training plans.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = Spacing.lg)
+                    )
+
+                    // Feature summary card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = Spacing.md),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Colors.backgroundSecondary
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.md),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            TrialFeatureHighlight("🎙️", "Real-time AI coaching while you run")
+                            TrialFeatureHighlight("📊", "Detailed AI post-run analysis")
+                            TrialFeatureHighlight("🗺️", "AI-generated personalised routes")
+                            TrialFeatureHighlight("📋", "Custom AI training plans")
+                            TrialFeatureHighlight("💪", "Heart rate, cadence & pace coaching")
+                        }
+                    }
+                }
+            }
+
+            // ── Action Buttons ──────────────────────────────────────────────
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg)
+                    .padding(bottom = Spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                Button(
+                    onClick = onUpgradeClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "Upgrade to Continue",
+                        style = AppTextStyles.body.copy(
+                            color = Colors.buttonText,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onSignOutClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textSecondary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "Sign Out",
+                        style = AppTextStyles.body.copy(color = Colors.textSecondary)
+                    )
+                }
+
+                Text(
+                    "Starting from \$7.99/month. Cancel any time.",
+                    style = AppTextStyles.small,
+                    color = Colors.textMuted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.sm)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrialFeatureHighlight(emoji: String, text: String) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(emoji, fontSize = 18.sp)
+        Text(text, style = AppTextStyles.body, color = Colors.textPrimary)
+    }
+}
+
 /**
  * Feature Limit Upsell for Post-Run Analysis
  */

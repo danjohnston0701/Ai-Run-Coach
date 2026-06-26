@@ -9,6 +9,54 @@ import { Response } from "express";
 import { storage } from "./storage";
 import { getLimitsForTier, TierLimits } from "./tier-limits";
 
+// ── Trial expiry helpers ──────────────────────────────────────────────────────
+
+/**
+ * Returns true if a free-tier user's 14-day trial has expired.
+ *
+ * Paid users are NEVER considered trial-expired — this only blocks free accounts.
+ * If `trialExpiresAt` is null (legacy account created before this migration),
+ * we fall back to computing the expiry from `createdAt` + 14 days.
+ */
+export function isTrialExpired(
+  tier: string | null | undefined,
+  trialExpiresAt: Date | null | undefined,
+  createdAt: Date | null | undefined
+): boolean {
+  // Paid subscribers are never blocked by trial expiry
+  const normalised = (tier ?? "free").toLowerCase().trim();
+  if (normalised !== "free") return false;
+
+  const now = new Date();
+
+  // Use server-set trialExpiresAt if available
+  if (trialExpiresAt) return now > trialExpiresAt;
+
+  // Fall back: compute from account creation date
+  if (createdAt) {
+    const fallbackExpiry = new Date(createdAt);
+    fallbackExpiry.setDate(fallbackExpiry.getDate() + 14);
+    return now > fallbackExpiry;
+  }
+
+  // Cannot determine — assume trial is still active (fail open, not closed)
+  return false;
+}
+
+/**
+ * Resolves the effective tier for limit enforcement.
+ * Returns "trial_expired" when a free user's trial window has closed,
+ * so getLimitsForTier() returns all-zero limits (hard block).
+ */
+export function effectiveTier(
+  tier: string | null | undefined,
+  trialExpiresAt: Date | null | undefined,
+  createdAt: Date | null | undefined
+): string {
+  if (isTrialExpired(tier, trialExpiresAt, createdAt)) return "trial_expired";
+  return (tier ?? "free").toLowerCase().trim();
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Returns the current calendar month as "YYYY-MM" in UTC. */
@@ -47,14 +95,23 @@ export interface UsageWithLimits {
 /**
  * Fetches current-month usage and tier limits for a user.
  * Suitable for the GET /api/usage/current API response.
+ *
+ * Pass `trialExpiresAt` and `createdAt` from the User record so trial
+ * expiry is enforced — free-tier users whose trial has lapsed get all-zero
+ * limits and the tier label "trial_expired".
  */
 export async function getUsageWithLimits(
   userId: string,
-  tier: string | null | undefined
+  tier: string | null | undefined,
+  trialExpiresAt?: Date | null,
+  createdAt?: Date | null
 ): Promise<UsageWithLimits> {
   const yearMonth = currentYearMonth();
   const row = await storage.getMonthlyUsage(userId, yearMonth);
-  const limits = getLimitsForTier(tier);
+
+  // Resolve effective tier — "trial_expired" if free user's window has closed
+  const resolvedTier = effectiveTier(tier, trialExpiresAt, createdAt);
+  const limits = getLimitsForTier(resolvedTier);
 
   const toApiLimit = (v: number) => (v === Infinity ? null : v);
   const toRemaining = (used: number, limit: number) =>
@@ -62,7 +119,7 @@ export async function getUsageWithLimits(
 
   return {
     yearMonth,
-    tier: (tier ?? "free").toLowerCase(),
+    tier: resolvedTier,
     usage: {
       aiCoachingKm: row.aiCoachingKm,
       trainingPlansGenerated: row.trainingPlansGenerated,
@@ -90,20 +147,38 @@ export type GatedFeature = keyof TierLimits;
  * Checks whether a user has quota remaining for a feature.
  *
  * Returns true if allowed.
- * Writes a 429 JSON response and returns false if the limit is reached —
+ * Writes a 402 or 429 JSON response and returns false if blocked —
  * the route handler should return immediately when this returns false.
  *
- * @param amount  For aiCoachingKm, pass the km to be used (check is "current + amount > limit").
- *                For count features, pass 1 (or omit).
+ * @param amount         For aiCoachingKm, pass the km to be used (check is "current + amount > limit").
+ *                       For count features, pass 1 (or omit).
+ * @param trialExpiresAt User's trial expiry timestamp (from DB) — used to enforce hard block.
+ * @param createdAt      User's account creation timestamp — fallback for trial expiry calculation.
  */
 export async function checkAndEnforceLimit(
   res: Response,
   userId: string,
   tier: string | null | undefined,
   feature: GatedFeature,
-  amount: number = 1
+  amount: number = 1,
+  trialExpiresAt?: Date | null,
+  createdAt?: Date | null
 ): Promise<boolean> {
-  const limits = getLimitsForTier(tier);
+  // ── Trial expiry hard block ────────────────────────────────────────────────
+  // This check runs before everything else — an expired trial blocks all features
+  // regardless of remaining quota or promo codes.
+  if (isTrialExpired(tier, trialExpiresAt, createdAt)) {
+    res.status(402).json({
+      error: "trial_expired",
+      message:
+        "Your 14-day free trial has ended. Upgrade to a paid plan to continue using AI Run Coach.",
+      upgradeRequired: true,
+    });
+    return false;
+  }
+
+  const resolvedTier = effectiveTier(tier, trialExpiresAt, createdAt);
+  const limits = getLimitsForTier(resolvedTier);
   const limit = limits[feature];
 
   // Unlimited tier — skip the DB read entirely
@@ -133,11 +208,11 @@ export async function checkAndEnforceLimit(
     };
 
     const nextMonth = nextMonthLabel(yearMonth);
-    const isFreeUser = tier === "free" || !tier;
-    
-    let message = `You have reached the limit of ${featureLabel[feature]} this month for your ${tier ?? "free"} plan. `;
+    const isFreeUser = resolvedTier === "free" || !tier;
+
+    let message = `You have reached the limit of ${featureLabel[feature]} for your ${resolvedTier} plan. `;
     if (isFreeUser) {
-      message += `Upgrade to unlock unlimited ${featureLabel[feature]}, or wait until ${nextMonth} to try again.`;
+      message += `Upgrade to a paid plan to unlock more ${featureLabel[feature]}.`;
     } else {
       message += `Upgrade to a higher tier, or wait until ${nextMonth} to try again.`;
     }

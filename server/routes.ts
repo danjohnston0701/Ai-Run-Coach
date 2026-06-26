@@ -211,12 +211,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       const shortUserId = generateShortUserId();
 
+      // Trial expires 14 days from account creation
+      const trialExpiresAt = new Date();
+      trialExpiresAt.setDate(trialExpiresAt.getDate() + 14);
+
       const user = await storage.createUser({
         email,
         password: hashedPassword,
         name,
         userCode,
         shortUserId,
+        trialExpiresAt,
       });
       
       const token = generateToken({ userId: user.id, email: user.email });
@@ -2193,7 +2198,7 @@ function transformRunForAndroid(run: any) {
 
       // ── Tier limit check (only for new analyses, not cached returns) ──────
       const analysisUser = await storage.getUser(userId);
-      const analysisAllowed = await checkAndEnforceLimit(res, userId, analysisUser?.subscriptionTier, "postRunAnalyses");
+      const analysisAllowed = await checkAndEnforceLimit(res, userId, analysisUser?.subscriptionTier, "postRunAnalyses", 1, analysisUser?.trialExpiresAt ?? null, analysisUser?.createdAt ?? null);
       if (!analysisAllowed) return;
       
       // Get the run data
@@ -2722,7 +2727,7 @@ function transformRunForAndroid(run: any) {
       // ── Tier limit check ─────────────────────────────────────────────────
       if (userId) {
         const routeUser = await storage.getUser(userId);
-        const routeAllowed = await checkAndEnforceLimit(res, userId, routeUser?.subscriptionTier, "routesGenerated");
+        const routeAllowed = await checkAndEnforceLimit(res, userId, routeUser?.subscriptionTier, "routesGenerated", 1, routeUser?.trialExpiresAt ?? null, routeUser?.createdAt ?? null);
         if (!routeAllowed) return;
       }
 
@@ -2787,7 +2792,7 @@ function transformRunForAndroid(run: any) {
       // ── Tier limit check ─────────────────────────────────────────────────
       const templateRouteUserId = req.user!.userId;
       const templateRouteUser = await storage.getUser(templateRouteUserId);
-      const templateRouteAllowed = await checkAndEnforceLimit(res, templateRouteUserId, templateRouteUser?.subscriptionTier, "routesGenerated");
+      const templateRouteAllowed = await checkAndEnforceLimit(res, templateRouteUserId, templateRouteUser?.subscriptionTier, "routesGenerated", 1, templateRouteUser?.trialExpiresAt ?? null, templateRouteUser?.createdAt ?? null);
       if (!templateRouteAllowed) return;
       
       const routeGenV1 = await import("./route-generation");
@@ -3683,11 +3688,21 @@ function transformRunForAndroid(run: any) {
   app.get("/api/subscriptions/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const user = await storage.getUser(req.user!.userId);
+      // Compute trial expiry — fall back to created_at + 14 days if column not set yet
+      let trialExpiresAt = user?.trialExpiresAt ?? null;
+      if (!trialExpiresAt && user?.createdAt) {
+        trialExpiresAt = new Date(user.createdAt);
+        (trialExpiresAt as Date).setDate((trialExpiresAt as Date).getDate() + 14);
+      }
+      const { isTrialExpired: checkExpired } = await import("./usage-service");
+      const trialExpired = checkExpired(user?.subscriptionTier, trialExpiresAt, user?.createdAt ?? null);
       res.json({
         tier: user?.subscriptionTier || "free",
-        status: user?.subscriptionStatus || "inactive",
+        status: trialExpired ? "trial_expired" : (user?.subscriptionStatus || "inactive"),
         entitlementType: user?.entitlementType,
         expiresAt: user?.entitlementExpiresAt,
+        trialExpiresAt: trialExpiresAt?.toISOString().split("T")[0] ?? null,
+        trialExpired,
       });
     } catch (error: any) {
       console.error("Get subscription status error:", error);
@@ -3701,7 +3716,12 @@ function transformRunForAndroid(run: any) {
   app.get("/api/usage/current", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const user = await storage.getUser(req.user!.userId);
-      const usageData = await getUsageWithLimits(req.user!.userId, user?.subscriptionTier);
+      const usageData = await getUsageWithLimits(
+        req.user!.userId,
+        user?.subscriptionTier,
+        user?.trialExpiresAt ?? null,
+        user?.createdAt ?? null
+      );
       res.json(usageData);
     } catch (error: any) {
       console.error("[Usage] GET /api/usage/current error:", error);
@@ -12297,7 +12317,7 @@ function transformRunForAndroid(run: any) {
 
       // ── Tier limit check ─────────────────────────────────────────────────
       const planUser = await storage.getUser(userId);
-      const planAllowed = await checkAndEnforceLimit(res, userId, planUser?.subscriptionTier, "trainingPlansGenerated");
+      const planAllowed = await checkAndEnforceLimit(res, userId, planUser?.subscriptionTier, "trainingPlansGenerated", 1, planUser?.trialExpiresAt ?? null, planUser?.createdAt ?? null);
       if (!planAllowed) return;
 
       // ── Deduplication guard ───────────────────────────────────────────────

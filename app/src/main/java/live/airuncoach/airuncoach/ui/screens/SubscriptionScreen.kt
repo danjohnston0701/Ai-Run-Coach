@@ -35,6 +35,8 @@ import com.android.billingclient.api.ProductDetails
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun SubscriptionScreen(
@@ -48,8 +50,12 @@ fun SubscriptionScreen(
     val context = LocalContext.current
     val activity = context as? Activity
     val isPremium = viewModel.isPremiumUser()
-    
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Plans, 1 = Usage
+    val isTrialExpired = viewModel.isTrialExpired()
+    val trialDaysRemaining = viewModel.trialDaysRemaining()
+    val trialExpiresAt = viewModel.getTrialExpiresAt()
+
+    // Open directly to Plans tab if trial has expired so user sees the upgrade path immediately
+    var selectedTab by remember { mutableIntStateOf(if (isTrialExpired) 0 else 0) } // 0 = Plans, 1 = Usage
 
     Column(
         modifier = Modifier
@@ -88,8 +94,22 @@ fun SubscriptionScreen(
         // Content
         if (billingConnectionState) {
             when (selectedTab) {
-                0 -> PlansTabContent(subscriptions, isPremium, activity, viewModel)
-                1 -> UsageTabContent(viewModel)
+                0 -> PlansTabContent(
+                    subscriptions = subscriptions,
+                    isPremium = isPremium,
+                    activity = activity,
+                    viewModel = viewModel,
+                    isTrialExpired = isTrialExpired,
+                    trialDaysRemaining = trialDaysRemaining,
+                    trialExpiresAt = trialExpiresAt
+                )
+                1 -> UsageTabContent(
+                    viewModel = viewModel,
+                    isTrialExpired = isTrialExpired,
+                    trialDaysRemaining = trialDaysRemaining,
+                    trialExpiresAt = trialExpiresAt,
+                    onUpgradeClick = { selectedTab = 0 }
+                )
             }
         } else {
             Box(
@@ -162,20 +182,42 @@ private fun PlansTabContent(
     subscriptions: List<ProductDetails>,
     isPremium: Boolean,
     activity: Activity?,
-    viewModel: SubscriptionViewModel
+    viewModel: SubscriptionViewModel,
+    isTrialExpired: Boolean = false,
+    trialDaysRemaining: Int = 0,
+    trialExpiresAt: LocalDate? = null
 ) {
+    // Hoisted OUTSIDE LazyColumn so scrolling can never reset it
+    var isAnnual by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundDefault),
         contentPadding = PaddingValues(vertical = Spacing.lg)
     ) {
+        // Trial expired urgent banner
+        if (isTrialExpired && !isPremium) {
+            item {
+                TrialExpiredBanner()
+            }
+        }
+
+        // Trial countdown banner (active trial, not expired, not paid)
+        if (!isTrialExpired && !isPremium && trialDaysRemaining > 0) {
+            item {
+                TrialCountdownBanner(daysRemaining = trialDaysRemaining, expiresAt = trialExpiresAt)
+            }
+        }
+
         // Subtitle
         item {
             Text(
-                text = "Choose a plan that fits your running",
+                text = if (isTrialExpired && !isPremium) "Upgrade to continue running with AI coaching"
+                       else "Choose a plan that fits your running",
                 fontSize = 16.sp,
-                color = Colors.textSecondary,
+                color = if (isTrialExpired && !isPremium) Colors.textPrimary else Colors.textSecondary,
+                fontWeight = if (isTrialExpired && !isPremium) FontWeight.SemiBold else FontWeight.Normal,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -183,34 +225,39 @@ private fun PlansTabContent(
             )
         }
 
-        // Billing Period Toggle
+        // Billing Period Toggle — state lives in the parent composable, never resets on scroll
         item {
-            BillingPeriodToggle()
+            BillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
         }
 
         // Plan Cards
-        val freeTier = PlanData.FREE
+        val freeTier = PlanData.FREE_TRIAL
         val liteTier = PlanData.LITE
         val standardTier = PlanData.STANDARD
 
-        item {
-            PlanCard(
-                plan = freeTier,
-                isCurrent = !isPremium,
-                onUpgradeClick = {}
-            )
-            Spacer(modifier = Modifier.height(Spacing.lg))
+        // Free trial card — only shown when the user is NOT already paid
+        if (!isPremium) {
+            item {
+                PlanCard(
+                    plan = freeTier,
+                    isCurrent = !isPremium && !isTrialExpired,
+                    isExpired = isTrialExpired,
+                    isAnnual = isAnnual,
+                    onUpgradeClick = {}
+                )
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
         }
 
         item {
             PlanCard(
                 plan = liteTier,
                 isCurrent = false,
+                isAnnual = isAnnual,
                 onUpgradeClick = {
                     activity?.let {
-                        val liteProduct = subscriptions.find { sub ->
-                            sub.productId.startsWith("lite_")
-                        }
+                        val productId = if (isAnnual) "lite_annual" else "lite_monthly"
+                        val liteProduct = subscriptions.find { sub -> sub.productId == productId }
                         if (liteProduct != null) {
                             viewModel.purchaseSubscription(it, liteProduct)
                         }
@@ -225,11 +272,11 @@ private fun PlansTabContent(
                 plan = standardTier,
                 isCurrent = false,
                 isPopular = true,
+                isAnnual = isAnnual,
                 onUpgradeClick = {
                     activity?.let {
-                        val standardProduct = subscriptions.find { sub ->
-                            sub.productId.startsWith("standard_")
-                        }
+                        val productId = if (isAnnual) "standard_annual" else "standard_monthly"
+                        val standardProduct = subscriptions.find { sub -> sub.productId == productId }
                         if (standardProduct != null) {
                             viewModel.purchaseSubscription(it, standardProduct)
                         }
@@ -258,7 +305,7 @@ private fun PlansTabContent(
         // Footnotes
         item {
             Text(
-                text = "Prices shown in your local currency.",
+                text = "All prices in USD (US Dollars).",
                 fontSize = 12.sp,
                 color = Colors.textMuted,
                 textAlign = TextAlign.Center,
@@ -295,10 +342,14 @@ private fun PlansTabContent(
     }
 }
 
+/**
+ * Controlled billing period toggle — state is owned by the parent so it survives scrolling.
+ */
 @Composable
-private fun BillingPeriodToggle() {
-    var isAnnual by remember { mutableStateOf<Boolean>(true) }
-
+private fun BillingPeriodToggle(
+    isAnnual: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -307,15 +358,17 @@ private fun BillingPeriodToggle() {
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp)
     ) {
+        // Monthly button
         Button(
-            onClick = { isAnnual = false },
+            onClick = { onToggle(false) },
             modifier = Modifier
                 .weight(1f)
                 .height(38.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (!isAnnual) Colors.backgroundSecondary else Color.Transparent
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp, 0.dp)
         ) {
             Text(
                 text = "Monthly",
@@ -325,22 +378,21 @@ private fun BillingPeriodToggle() {
             )
         }
 
-        Box(modifier = Modifier.width(1.dp).height(32.dp).background(Colors.backgroundTertiary))
-
+        // Annual button — always shows SAVE badge to entice users
         Button(
-            onClick = { isAnnual = true },
+            onClick = { onToggle(true) },
             modifier = Modifier
                 .weight(1f)
                 .height(38.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (isAnnual) Colors.backgroundSecondary else Color.Transparent
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp, 0.dp)
         ) {
             Row(
                 horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "Annual",
@@ -349,21 +401,96 @@ private fun BillingPeriodToggle() {
                     color = if (isAnnual) Colors.textPrimary else Colors.textSecondary
                 )
                 Spacer(modifier = Modifier.width(Spacing.sm))
-                if (isAnnual) {
-                    Surface(
-                        color = Color(0xFF22C55E),
-                        shape = RoundedCornerShape(999.dp),
-                        modifier = Modifier.height(20.dp).padding(horizontal = 5.dp)
-                    ) {
-                        Text(
-                            text = "SAVE 17%",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Colors.textPrimary,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
+                // Always visible to make the saving obvious even before clicking
+                Surface(
+                    color = if (isAnnual) Color(0xFF22C55E) else Color(0xFF22C55E).copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Text(
+                        text = "SAVE 17%",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Colors.textPrimary,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
                 }
+            }
+        }
+    }
+}
+
+/** Shown at the top of the Plans tab when the free trial has expired. */
+@Composable
+private fun TrialExpiredBanner() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(top = Spacing.lg),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("⏰", fontSize = 28.sp)
+            Column {
+                Text(
+                    text = "Your free trial has ended",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFEF4444)
+                )
+                Text(
+                    text = "Upgrade now to continue using AI Run Coach",
+                    fontSize = 13.sp,
+                    color = Colors.textSecondary
+                )
+            }
+        }
+    }
+}
+
+/** Shown during the active trial period to show days remaining. */
+@Composable
+private fun TrialCountdownBanner(daysRemaining: Int, expiresAt: LocalDate?) {
+    val isUrgent = daysRemaining <= 3
+    val bannerColor = if (isUrgent) Color(0xFFF59E0B) else Colors.primary
+    val expiryText = expiresAt?.format(DateTimeFormatter.ofPattern("d MMM yyyy")) ?: "soon"
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(top = Spacing.lg),
+        colors = CardDefaults.cardColors(containerColor = bannerColor.copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(if (isUrgent) "⚠️" else "🎉", fontSize = 28.sp)
+            Column {
+                Text(
+                    text = if (daysRemaining == 1) "1 day left in your free trial"
+                           else "$daysRemaining days left in your free trial",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = bannerColor
+                )
+                Text(
+                    text = "Trial expires $expiryText — upgrade to keep your AI coach",
+                    fontSize = 13.sp,
+                    color = Colors.textSecondary
+                )
             }
         }
     }
@@ -374,6 +501,8 @@ private fun PlanCard(
     plan: PlanData,
     isCurrent: Boolean = false,
     isPopular: Boolean = false,
+    isExpired: Boolean = false,
+    isAnnual: Boolean = false,
     onUpgradeClick: () -> Unit = {}
 ) {
     Card(
@@ -425,7 +554,20 @@ private fun PlanCard(
                         }
                     }
                     
-                    if (isCurrent) {
+                    if (isExpired) {
+                        Surface(
+                            color = Color(0xFFEF4444).copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(999.dp)
+                        ) {
+                            Text(
+                                text = "EXPIRED",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFEF4444),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    } else if (isCurrent) {
                         Surface(
                             color = plan.accentColor.copy(alpha = 0.15f),
                             shape = RoundedCornerShape(999.dp)
@@ -444,31 +586,40 @@ private fun PlanCard(
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            // Price
+            // Price — switches between monthly and annual based on the toggle
+            val hasAnnual = plan.annualPriceDisplay.isNotEmpty()
+            val displayPrice = if (isAnnual && hasAnnual) plan.annualPriceDisplay else plan.monthlyPriceDisplay
+            val displaySuffix = if (isAnnual && hasAnnual) plan.annualPriceSuffix else plan.monthlyPriceSuffix
+            val displayEquivalent = when {
+                isAnnual && hasAnnual -> plan.annualMonthlyEquivalent
+                !hasAnnual -> plan.monthlyEquivalent  // FREE_TRIAL
+                else -> ""
+            }
+
             Row(
                 horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.Bottom
             ) {
                 Text(
-                    text = plan.priceDisplay,
+                    text = displayPrice,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = plan.accentColor,
                     lineHeight = 24.sp
                 )
-                if (plan.priceSuffix.isNotEmpty()) {
+                if (displaySuffix.isNotEmpty()) {
                     Text(
-                        text = plan.priceSuffix,
+                        text = displaySuffix,
                         fontSize = 14.sp,
                         color = Colors.textMuted,
-                        modifier = Modifier.padding(start = 4.dp)
+                        modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
                     )
                 }
             }
 
-            if (plan.monthlyEquivalent.isNotEmpty()) {
+            if (displayEquivalent.isNotEmpty()) {
                 Text(
-                    text = plan.monthlyEquivalent,
+                    text = displayEquivalent,
                     fontSize = 12.sp,
                     color = Colors.textMuted,
                     modifier = Modifier.padding(top = Spacing.xs)
@@ -643,15 +794,29 @@ private fun DeleteAccountSection() {
 }
 
 @Composable
-private fun UsageTabContent(viewModel: SubscriptionViewModel) {
+private fun UsageTabContent(
+    viewModel: SubscriptionViewModel,
+    isTrialExpired: Boolean = false,
+    trialDaysRemaining: Int = 0,
+    trialExpiresAt: LocalDate? = null,
+    onUpgradeClick: () -> Unit = {}
+) {
     val usageState by viewModel.usageState.collectAsState()
-    
+    val isPremium = viewModel.isPremiumUser()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundDefault),
         contentPadding = PaddingValues(vertical = Spacing.lg)
     ) {
+        // Trial expired urgent banner above the plan info
+        if (isTrialExpired && !isPremium) {
+            item { TrialExpiredBanner() }
+        } else if (!isTrialExpired && !isPremium && trialDaysRemaining > 0) {
+            item { TrialCountdownBanner(daysRemaining = trialDaysRemaining, expiresAt = trialExpiresAt) }
+        }
+
         // Current Plan Banner
         item {
             when (usageState) {
@@ -659,21 +824,32 @@ private fun UsageTabContent(viewModel: SubscriptionViewModel) {
                     val usage = (usageState as SubscriptionViewModel.UsageState.Success).usage
                     CurrentPlanBanner(
                         tierName = usage.tier.replaceFirstChar { it.uppercase() },
-                        resetDate = usage.yearMonth
+                        resetDate = usage.yearMonth,
+                        isTrialExpired = isTrialExpired,
+                        trialDaysRemaining = trialDaysRemaining,
+                        trialExpiresAt = trialExpiresAt,
+                        isPremium = isPremium
                     )
                 }
                 else -> {
-                    CurrentPlanBanner(tierName = "Loading...", resetDate = "")
+                    CurrentPlanBanner(
+                        tierName = "Loading...",
+                        resetDate = "",
+                        isTrialExpired = isTrialExpired,
+                        trialDaysRemaining = trialDaysRemaining,
+                        trialExpiresAt = trialExpiresAt,
+                        isPremium = isPremium
+                    )
                 }
             }
         }
 
-        // Usage Rows
+        // Usage Rows — limit values reflect the trial caps (15km, 3 summaries, 0 routes, 0 plans)
         item {
             when (usageState) {
                 is SubscriptionViewModel.UsageState.Success -> {
                     val usage = (usageState as SubscriptionViewModel.UsageState.Success).usage
-                    UsageRowsContainer(usage)
+                    UsageRowsContainer(usage, isTrialExpired = isTrialExpired, isPremium = isPremium)
                 }
                 is SubscriptionViewModel.UsageState.Loading -> {
                     Box(
@@ -695,12 +871,12 @@ private fun UsageTabContent(viewModel: SubscriptionViewModel) {
             }
         }
 
-        // Upgrade CTA (Free users only)
+        // Upgrade CTA — urgent messaging if trial expired
         item {
-            UpgradeCTA()
+            UpgradeCTA(isUrgent = isTrialExpired && !isPremium, onUpgradeClick = onUpgradeClick)
         }
     }
-    
+
     // Load usage data on first composition
     LaunchedEffect(Unit) {
         viewModel.loadUsageData()
@@ -710,74 +886,117 @@ private fun UsageTabContent(viewModel: SubscriptionViewModel) {
 @Composable
 private fun CurrentPlanBanner(
     tierName: String = "Loading...",
-    resetDate: String = ""
+    resetDate: String = "",
+    isTrialExpired: Boolean = false,
+    trialDaysRemaining: Int = 0,
+    trialExpiresAt: LocalDate? = null,
+    isPremium: Boolean = false
 ) {
-    val tierColor = when (tierName.lowercase()) {
-        "lite" -> Colors.primary
-        "standard" -> Color(0xFFA78BFA)
+    val isFreeTrial = !isPremium
+    val tierColor = when {
+        isTrialExpired -> Color(0xFFEF4444)
+        tierName.lowercase() == "lite" -> Colors.primary
+        tierName.lowercase() == "standard" -> Color(0xFFA78BFA)
         else -> Color(0xFF8E9BAE)
     }
-    
+
     // Parse reset date (format: YYYY-MM) to human readable (1 Jul 2026)
     val displayResetDate = try {
         val parts = resetDate.split("-")
         if (parts.size == 2) {
             val year = parts[0]
             val month = parts[1].toIntOrNull() ?: 1
-            val monthName = arrayOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[month - 1]
+            val monthName = arrayOf("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")[month - 1]
             "1 $monthName $year"
         } else {
             "Next month"
         }
-    } catch (e: Exception) {
-        "Next month"
-    }
-    
+    } catch (_: Exception) { "Next month" }
+
+    // Trial expiry display
+    val trialExpiryDisplay = trialExpiresAt?.format(DateTimeFormatter.ofPattern("d MMM yyyy")) ?: ""
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.lg)
             .padding(top = Spacing.lg),
-        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isTrialExpired && isFreeTrial)
+                Color(0xFFEF4444).copy(alpha = 0.08f)
+            else Colors.backgroundSecondary
+        ),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(Spacing.lg),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
                 Text(
-                    text = "Current Plan",
+                    text = if (isFreeTrial) "Free Trial" else "Current Plan",
                     fontSize = 12.sp,
                     color = Colors.textMuted
                 )
                 Text(
-                    text = tierName,
+                    text = when {
+                        isTrialExpired && isFreeTrial -> "Trial Expired"
+                        isFreeTrial -> "14-Day Trial"
+                        else -> tierName
+                    },
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = tierColor
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "Resets",
-                    fontSize = 12.sp,
-                    color = Colors.textMuted
-                )
-                Text(
-                    text = displayResetDate,
-                    fontSize = 14.sp,
-                    color = Colors.textSecondary
-                )
+                when {
+                    isTrialExpired && isFreeTrial -> {
+                        Text("Trial ended", fontSize = 12.sp, color = Color(0xFFEF4444))
+                        if (trialExpiryDisplay.isNotEmpty()) {
+                            Text(trialExpiryDisplay, fontSize = 14.sp, color = Color(0xFFEF4444),
+                                fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    isFreeTrial && trialExpiresAt != null -> {
+                        Text("Expires", fontSize = 12.sp, color = Colors.textMuted)
+                        Text(trialExpiryDisplay, fontSize = 14.sp, color = Colors.textSecondary)
+                        if (trialDaysRemaining > 0) {
+                            Text(
+                                text = "$trialDaysRemaining days left",
+                                fontSize = 12.sp,
+                                color = if (trialDaysRemaining <= 3) Color(0xFFF59E0B) else Colors.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    else -> {
+                        Text("Resets", fontSize = 12.sp, color = Colors.textMuted)
+                        Text(displayResetDate, fontSize = 14.sp, color = Colors.textSecondary)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun UsageRowsContainer(usage: SubscriptionViewModel.UsageData) {
+private fun UsageRowsContainer(
+    usage: SubscriptionViewModel.UsageData,
+    isTrialExpired: Boolean = false,
+    isPremium: Boolean = false
+) {
+    // For free-trial users the caps are fixed regardless of what the server returns,
+    // so we always display the correct trial limits in the UI.
+    val isFreeTrial = !isPremium
+    val coachingLimit = if (isFreeTrial) 15 else usage.aiCoachingKmLimit
+    val summariesLimit = if (isFreeTrial) 3 else usage.postRunAnalysesLimit
+    val routesLimit = if (isFreeTrial) 0 else usage.routesGeneratedLimit
+    val plansLimit = if (isFreeTrial) 0 else usage.trainingPlansLimit
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -791,40 +1010,46 @@ private fun UsageRowsContainer(usage: SubscriptionViewModel.UsageData) {
                 icon = Icons.Default.Favorite,
                 title = "AI Coaching",
                 usage = usage.aiCoachingKmUsed,
-                limit = usage.aiCoachingKmLimit,
+                limit = coachingLimit,
                 unit = "km",
                 accentColor = Color(0xFF34D399),
-                isUnlimited = usage.aiCoachingKmLimit == -1
+                isUnlimited = !isFreeTrial && usage.aiCoachingKmLimit == -1,
+                isLocked = isFreeTrial && isTrialExpired
             )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
             UsageRow(
                 icon = Icons.Default.Description,
                 title = "AI Run Summaries",
                 usage = usage.postRunAnalysesUsed,
-                limit = usage.postRunAnalysesLimit,
+                limit = summariesLimit,
                 unit = "summaries",
                 accentColor = Color(0xFFF59E0B),
-                isUnlimited = usage.postRunAnalysesLimit == -1
+                isUnlimited = !isFreeTrial && usage.postRunAnalysesLimit == -1,
+                isLocked = isFreeTrial && isTrialExpired
             )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
             UsageRow(
                 icon = Icons.Default.Place,
                 title = "AI Routes",
                 usage = usage.routesGeneratedUsed,
-                limit = usage.routesGeneratedLimit,
+                limit = routesLimit,
                 unit = "routes",
                 accentColor = Colors.primary,
-                isUnlimited = usage.routesGeneratedLimit == -1
+                isUnlimited = !isFreeTrial && usage.routesGeneratedLimit == -1,
+                isLocked = isFreeTrial,   // Always locked on free trial
+                lockedLabel = "Paid plans only"
             )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
             UsageRow(
                 icon = Icons.Default.DateRange,
                 title = "AI Training Plans",
                 usage = usage.trainingPlansUsed,
-                limit = usage.trainingPlansLimit,
+                limit = plansLimit,
                 unit = "plans",
                 accentColor = Color(0xFFA78BFA),
-                isUnlimited = usage.trainingPlansLimit == -1
+                isUnlimited = !isFreeTrial && usage.trainingPlansLimit == -1,
+                isLocked = isFreeTrial,   // Always locked on free trial
+                lockedLabel = "Paid plans only"
             )
         }
     }
@@ -838,23 +1063,35 @@ private fun UsageRow(
     limit: Int,
     unit: String,
     accentColor: Color,
-    isUnlimited: Boolean = false
+    isUnlimited: Boolean = false,
+    isLocked: Boolean = false,       // Feature not available on this plan at all
+    lockedLabel: String = "Upgrade required"
 ) {
-    val progressValue = if (isUnlimited || limit <= 0) 0f else (usage.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
+    val progressValue = when {
+        isLocked || limit <= 0 -> 1f
+        isUnlimited -> 0f
+        else -> (usage.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
+    }
     val barColor = when {
+        isLocked -> Color(0xFFEF4444)
         isUnlimited -> accentColor
         usage >= limit -> Color(0xFFFF5252)
         usage >= (limit * 0.8f) -> Color(0xFFF59E0B)
         else -> accentColor
     }
     val countColor = when {
+        isLocked -> Color(0xFFEF4444)
         isUnlimited -> Colors.textSecondary
         usage >= limit -> Color(0xFFFF5252)
         usage >= (limit * 0.8f) -> Color(0xFFF59E0B)
         else -> Colors.textSecondary
     }
-    
-    val displayText = if (isUnlimited) "Unlimited" else "$usage / $limit $unit"
+
+    val displayText = when {
+        isLocked -> lockedLabel
+        isUnlimited -> "Unlimited"
+        else -> "$usage / $limit $unit"
+    }
 
     Column(
         modifier = Modifier
@@ -876,16 +1113,16 @@ private fun UsageRow(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = icon,
+                        imageVector = if (isLocked) Icons.Default.Lock else icon,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
-                        tint = accentColor
+                        tint = if (isLocked) Color(0xFFEF4444) else accentColor
                     )
                 }
                 Text(
                     text = title,
                     fontSize = 16.sp,
-                    color = Colors.textPrimary
+                    color = if (isLocked) Colors.textMuted else Colors.textPrimary
                 )
             }
             Text(
@@ -913,30 +1150,47 @@ private fun UsageRow(
 }
 
 @Composable
-private fun UpgradeCTA() {
-    Button(
-        onClick = { /* Switch to Plans tab */ },
+private fun UpgradeCTA(isUrgent: Boolean = false, onUpgradeClick: () -> Unit = {}) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.lg)
-            .padding(top = Spacing.xxl)
-            .height(46.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
-        shape = RoundedCornerShape(20.dp)
+            .padding(top = Spacing.xxl),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(
-            imageVector = Icons.Default.ArrowUpward,
-            contentDescription = null,
+        Button(
+            onClick = onUpgradeClick,
             modifier = Modifier
-                .size(18.dp)
-                .padding(end = Spacing.sm)
-        )
-        Text(
-            text = "Upgrade for more",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = Colors.buttonText
-        )
+                .fillMaxWidth()
+                .height(52.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isUrgent) Color(0xFFEF4444) else Colors.primary
+            ),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ArrowUpward,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(18.dp)
+                    .padding(end = Spacing.sm)
+            )
+            Text(
+                text = if (isUrgent) "Upgrade now to continue" else "Upgrade for more",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Colors.buttonText
+            )
+        }
+        if (isUrgent) {
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                text = "Your free trial has ended. Upgrade to unlock AI coaching.",
+                fontSize = 12.sp,
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
 
@@ -948,32 +1202,45 @@ data class PlanFeature(
 
 data class PlanData(
     val name: String,
-    val priceDisplay: String,
-    val priceSuffix: String = "",
-    val monthlyEquivalent: String = "",
+    // Monthly billing
+    val monthlyPriceDisplay: String,
+    val monthlyPriceSuffix: String = "/month",
+    // Annual billing — empty strings mean the plan has no annual option (e.g. Free Trial)
+    val annualPriceDisplay: String = "",
+    val annualPriceSuffix: String = "/year",
+    /** Displayed under the annual price, e.g. "USD · $6.67/month" */
+    val annualMonthlyEquivalent: String = "",
     val accentColor: Color,
-    val features: List<PlanFeature>
+    val features: List<PlanFeature>,
+    // Legacy alias kept for the FREE_TRIAL card which has no annual price
+    val priceDisplay: String = monthlyPriceDisplay,
+    val priceSuffix: String = monthlyPriceSuffix,
+    val monthlyEquivalent: String = ""
 ) {
     companion object {
-        val FREE = PlanData(
-            name = "Free",
-            priceDisplay = "Free",
-            priceSuffix = "",
+        /** 14-day free trial card — shown to non-paid users on the Plans tab */
+        val FREE_TRIAL = PlanData(
+            name = "Free Trial",
+            monthlyPriceDisplay = "14 Days",
+            monthlyPriceSuffix = " free",
             accentColor = Color(0xFF8E9BAE),
+            monthlyEquivalent = "No credit card required",
             features = listOf(
-                PlanFeature("1 AI Run per month", true),
-                PlanFeature("10km of AI Coaching per month", true),
-                PlanFeature("5 AI Post-Run Summaries per month", true),
-                PlanFeature("3 AI Route Generations per month", true),
-                PlanFeature("No AI Training Plans", false)
+                PlanFeature("15km of AI Coaching during trial", true),
+                PlanFeature("3 AI Post-Run Summaries during trial", true),
+                PlanFeature("No AI Route Generation", false),
+                PlanFeature("No AI Training Plans", false),
+                PlanFeature("Full access expires after 14 days", false)
             )
         )
 
         val LITE = PlanData(
             name = "Lite",
-            priceDisplay = "$7.99",
-            priceSuffix = "/month",
-            monthlyEquivalent = "$6.67/month",
+            monthlyPriceDisplay = "USD $7.99",
+            monthlyPriceSuffix = "/month",
+            annualPriceDisplay = "USD $79.99",
+            annualPriceSuffix = "/year",
+            annualMonthlyEquivalent = "USD $6.67/month — save $15.89",
             accentColor = Colors.primary,
             features = listOf(
                 PlanFeature("Unlimited AI Runs", true),
@@ -986,12 +1253,14 @@ data class PlanData(
 
         val STANDARD = PlanData(
             name = "Standard",
-            priceDisplay = "$14.99",
-            priceSuffix = "/month",
-            monthlyEquivalent = "$12.50/month",
+            monthlyPriceDisplay = "USD $14.99",
+            monthlyPriceSuffix = "/month",
+            annualPriceDisplay = "USD $149.99",
+            annualPriceSuffix = "/year",
+            annualMonthlyEquivalent = "USD $12.50/month — save $29.89",
             accentColor = Color(0xFFA78BFA),
             features = listOf(
-                PlanFeature("20 AI Runs per month", true),
+                PlanFeature("Unlimited AI Runs", true),
                 PlanFeature("200km of AI Coaching per month", true),
                 PlanFeature("50 AI Post-Run Summaries per month", true),
                 PlanFeature("30 AI Route Generations per month", true),
