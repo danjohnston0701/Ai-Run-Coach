@@ -242,6 +242,13 @@ class RunTrackingService : Service(), SensorEventListener {
     // Phone GPS elevation tracking — 60-second windowed means (see PHONE_ELEV_WINDOW constant)
     private val phoneElevBuffer = ArrayList<Double>() // Accumulates raw altitudes for 60-second window
     private var prevPhoneElevWindowMean: Double? = null // Mean from the previous completed 60-second window
+    // Garmin GPS elevation tracking — 10-sample windowed means (~20 seconds at 0.5 Hz update rate).
+    // The per-sample 2.0m threshold approach was too aggressive: at 5:30/km on a 5% grade each
+    // 2-second Garmin sample only rises ~0.15m — far below 2.0m — so ALL climbing was discarded.
+    // Window approach: 10 samples × 2s = 20-second window; mean noise ±0.10m; a 5% grade gives
+    // ~1.5m per window (well above the 0.5m commit threshold). False-positive on flat: rare.
+    private val garminElevBuffer = ArrayList<Double>() // Accumulates raw Garmin altitudes for 20-second window
+    private var prevGarminElevWindowMean: Double? = null // Mean from the previous completed window
     // Real-time grade: current slope % from smoothed altitude (NOT the whole-run average)
     // Used for isOnHill and hill coaching triggers — updated every GPS point
     private var currentSmoothedGrade: Double = 0.0
@@ -478,9 +485,6 @@ class RunTrackingService : Service(), SensorEventListener {
         //                A 270 m ascent would show as ≈0–6 m in the database (exactly the
         //                symptom: "6 m elevation on hilly terrain").  Use a 0.4 m gate instead.
         private const val ELEVATION_NOISE_THRESHOLD        = 1.5 // Phone GPS  (±5-10 m, 1 Hz) — legacy, not used for gain
-        // Garmin GPS threshold: 0.4m was too aggressive, causing GPS jitter to accumulate as false elevation gain
-        // Raised to 2.0m to match the actual Garmin accuracy and reduce false positives from noisy altitude samples
-        private const val ELEVATION_NOISE_THRESHOLD_GARMIN = 2.0 // Garmin GPS (±1 m nominal, but ±2-3m in noisy conditions)
 
         // Phone GPS elevation gain — windowed mean approach.
         // Problem: at 1 Hz and ±10 m GPS noise, per-sample altitude changes on a real 10% hill are
@@ -490,6 +494,16 @@ class RunTrackingService : Service(), SensorEventListener {
         // commit threshold.  False-positive rate on flat ground: ~5% per window ≈ 1 commit/hour.
         private const val PHONE_ELEV_WINDOW            = 60  // Number of 1 Hz readings per window
         private const val PHONE_ELEV_COMMIT_THRESHOLD  = 1.5 // Min net change (m) per 60-s window to count
+
+        // Garmin GPS elevation gain — 10-sample windowed mean approach (same principle as phone, tuned for Garmin).
+        // Previous approach (per-sample 2.0m threshold) was catastrophically wrong:
+        //   At 5:30/km on a 5% grade, each 2-second Garmin sample only rises 0.15m.
+        //   A 2.0m threshold requires a ~66% gradient — impossible running incline — so ALL climbing was discarded.
+        // Fix: 10-sample window (~20 s at 0.5 Hz). Mean noise = ±0.3m/√10 ≈ ±0.10m.
+        //   5% grade at 5:30/km → 20s × 1.52 m/s × 0.05 = 1.52m per window → well above 0.5m threshold. ✓
+        //   Flat ground noise → window mean change ±0.10m → almost never triggers 0.5m. ✓
+        private const val GARMIN_ELEV_WINDOW           = 10  // ~20 seconds at 0.5 Hz
+        private const val GARMIN_ELEV_COMMIT_THRESHOLD = 0.5 // Min net change (m) per window to commit to gain/loss
         
         // ELEVATION-BASED TRIGGERS (Primary) — More reliable than grade % which can be noisy from GPS
         // Thresholds are deliberately conservative to avoid GPS drift false positives on flat terrain.
@@ -1049,6 +1063,8 @@ class RunTrackingService : Service(), SensorEventListener {
         hasGpsElevation = false
         currentSmoothedGrade = 0.0
         totalElevationLoss = 0.0
+        garminElevBuffer.clear()
+        prevGarminElevWindowMean = null
         weatherAtStart = null
         weatherAtEnd = null
         currentCadence = 0
@@ -2476,12 +2492,28 @@ class RunTrackingService : Service(), SensorEventListener {
                     hasGpsElevation = true   // GPS altitude is available for this run
 
                     if (location.provider == "garmin") {
-                        // Garmin watch GPS: accurate altitude (±1 m), sent every ~2 s.
-                        // Use per-sample threshold — real hill changes are small but detectable.
-                        val elevChange = newPoint.altitude - prevPoint.altitude
-                        if (abs(elevChange) > ELEVATION_NOISE_THRESHOLD_GARMIN) {
-                            if (elevChange > 0) totalElevationGain += elevChange
-                            else totalElevationLoss += abs(elevChange)
+                        // Garmin barometric-GPS fusion altitude: accurate to ±0.3-0.5m but updates
+                        // only every ~2 seconds. Per-sample gain accumulation fails because at normal
+                        // running pace a 5% grade only produces ~0.15m per sample — impossible to
+                        // separate from noise with a threshold approach.
+                        //
+                        // Instead: buffer 10 samples (≈20 s), compare successive window means.
+                        // Window noise: ±0.3m/√10 ≈ ±0.10m. Real 5% grade at 5:30/km yields
+                        // ~1.5m per window — comfortably above the 0.5m commit threshold.
+                        garminElevBuffer.add(newPoint.altitude)
+                        if (garminElevBuffer.size >= GARMIN_ELEV_WINDOW) {
+                            val windowMean = garminElevBuffer.average()
+                            val prevMean = prevGarminElevWindowMean
+                            if (prevMean != null) {
+                                val change = windowMean - prevMean
+                                if (change > GARMIN_ELEV_COMMIT_THRESHOLD) {
+                                    totalElevationGain += change
+                                } else if (change < -GARMIN_ELEV_COMMIT_THRESHOLD) {
+                                    totalElevationLoss += abs(change)
+                                }
+                            }
+                            prevGarminElevWindowMean = windowMean
+                            garminElevBuffer.clear() // Start next window fresh
                         }
                     } else {
                         // Phone GPS: altitude accuracy ±5–10 m at 1 Hz.  Per-sample threshold
@@ -2816,7 +2848,7 @@ class RunTrackingService : Service(), SensorEventListener {
             totalElevationLoss = if (hasMovedEnough) totalElevationLoss else 0.0,
             averageGradient = if (hasMovedEnough) calculateAverageGradient() else 0f,
             maxGradient = if (hasMovedEnough) calculateMaxGradient() else 0f,
-            terrainType = if (hasMovedEnough) determineTerrainType(calculateAverageGradient()) else TerrainType.FLAT,
+            terrainType = if (hasMovedEnough) determineTerrainType() else TerrainType.FLAT,
             routeHash = generateRouteHash(),
             routeName = null,
             externalSource = null, // Not synced from external source
@@ -2948,7 +2980,31 @@ class RunTrackingService : Service(), SensorEventListener {
         return routePoints.mapNotNull { it.altitude }.maxOrNull()
     }
     
-    private fun determineTerrainType(avgGradient: Float): TerrainType = when { abs(avgGradient) < 2f -> TerrainType.FLAT; abs(avgGradient) < 5f -> TerrainType.ROLLING; abs(avgGradient) < 10f -> TerrainType.HILLY; else -> TerrainType.MOUNTAINOUS }
+    /**
+     * Classify terrain using elevation RANGE per km (max - min across all GPS points).
+     *
+     * Why NOT avgGradient: on any loop/parkrun course the runner starts and finishes at nearly the
+     * same altitude, so the net gradient is ~0% → always "FLAT" even on a 40m rolling course.
+     *
+     * Elevation range per km reflects undulation regardless of whether the course is a loop or out-and-back:
+     *   < 5 m/km  → Flat
+     *   5–20 m/km → Rolling   (e.g. parkrun with 40m range over 5km = 8 m/km)
+     *   20–50 m/km → Hilly
+     *   > 50 m/km → Mountainous
+     */
+    private fun determineTerrainType(): TerrainType {
+        val distanceKm = (totalDistance / 1000.0).coerceAtLeast(0.1)
+        val minElev = calculateMinElevation()
+        val maxElev = calculateMaxElevation()
+        if (minElev == null || maxElev == null || maxElev <= minElev) return TerrainType.FLAT
+        val elevRangePerKm = (maxElev - minElev) / distanceKm
+        return when {
+            elevRangePerKm < 5.0  -> TerrainType.FLAT
+            elevRangePerKm < 20.0 -> TerrainType.ROLLING
+            elevRangePerKm < 50.0 -> TerrainType.HILLY
+            else                  -> TerrainType.MOUNTAINOUS
+        }
+    }
     
     private fun generateRouteHash(): String = MessageDigest.getInstance("MD5").digest(routePoints.joinToString(",") { "${String.format("%.4f", it.latitude)},${String.format("%.4f", it.longitude)}" }.toByteArray()).joinToString("") { "%02x".format(it) }
 

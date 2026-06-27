@@ -1991,9 +1991,11 @@ private fun MainStatsGridFlagship(run: RunSession, lastRunForDelta: RunSession?)
             } else {
                 add(StatTile("Avg Cadence", "-- spm", R.drawable.icon_repeat_vector, Colors.textMuted))
             }
-            // Bottom left: Elevation Gain
-            if (run.totalElevationGain > 0) {
-                add(StatTile("Elev Gain", "${run.totalElevationGain.roundToInt()} m", R.drawable.icon_trending_vector, Colors.success))
+            // Bottom left: Elevation range (max - min) — more intuitive than cumulative gain for runners
+            val elevRange = run.maxElevation?.let { max -> run.minElevation?.let { min -> (max - min).coerceAtLeast(0.0) } }
+            val elevDisplay = elevRange?.roundToInt()?.takeIf { it > 0 } ?: run.totalElevationGain.roundToInt().takeIf { it > 0 }
+            if (elevDisplay != null && elevDisplay > 0) {
+                add(StatTile("Elev Gain", "$elevDisplay m", R.drawable.icon_trending_vector, Colors.success))
             } else {
                 add(StatTile("Elev Gain", "0 m", R.drawable.icon_trending_vector, Colors.textMuted))
             }
@@ -3220,13 +3222,21 @@ private fun ChartsSectionFlagship(run: RunSession) {
             buildElevationSeries(run, mode)
         }
 
+        // "Gain" = elevation range (max - min). Hoisted here so it's accessible to all three
+        // elevation-related charts (Elevation, Pace vs Elev, Cadence vs Elev).
+        // Uses stored minElevation/maxElevation (computed from raw GPS points at run-end) so it
+        // reflects the true altitude spread regardless of the accumulation algorithm quality.
+        val elevGainDisplay = run.maxElevation?.let { max ->
+            run.minElevation?.let { min -> (max - min).coerceAtLeast(0.0).roundToInt() }
+        } ?: run.totalElevationGain.roundToInt()
+
         if (elevationSeries.y.size >= 2) {
             val minAlt = elevationSeries.y.minOrNull() ?: 0.0
             val maxAlt = elevationSeries.y.maxOrNull() ?: 0.0
             if (maxAlt - minAlt >= 0.5) {
                 LineChartCardFlagship(
                     title = "Elevation",
-                    subtitleLeft = "Gain: ${run.totalElevationGain.roundToInt()} m",
+                    subtitleLeft = "Gain: $elevGainDisplay m",
                     subtitleRight = "Max: ${maxAlt.roundToInt()} m",
                     accent = Colors.success
                 ) {
@@ -3305,7 +3315,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
             LineChartCardFlagship(
                 title = "Pace vs Elevation",
                 subtitleLeft = "Pace: ${run.averagePace ?: "—"}",
-                subtitleRight = "Gain: ${run.totalElevationGain.roundToInt()} m",
+                subtitleRight = "Gain: $elevGainDisplay m",
                 accent = Colors.primary
             ) {
                 DualAxisChartCanvas(
@@ -3336,7 +3346,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
             LineChartCardFlagship(
                 title = "Cadence vs Elevation",
                 subtitleLeft = "Avg: $avgCadElev spm",
-                subtitleRight = "Gain: ${run.totalElevationGain.roundToInt()} m",
+                subtitleRight = "Gain: $elevGainDisplay m",
                 accent = Color(0xFF8B5CF6)
             ) {
                 DualAxisChartCanvas(
