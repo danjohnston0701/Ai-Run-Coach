@@ -261,6 +261,25 @@ class RunSummaryViewModel @Inject constructor(
         _userPostRunComments.value = comments
     }
 
+    /**
+     * Rename the run on the server and update local state.
+     * Called from the rename dialog's onSave callback.
+     */
+    fun renameRun(newName: String?) {
+        val runId = _runSession.value?.id ?: return
+        viewModelScope.launch {
+            try {
+                Log.d("RunSummaryViewModel", "Renaming run $runId to: $newName")
+                val request = RenameRunRequest(name = newName?.ifBlank { null })
+                val updated = apiService.renameRun(runId, request)
+                _runSession.value = updated
+                Log.d("RunSummaryViewModel", "✅ Run renamed successfully to: ${updated.name ?: "(default)"}")
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "❌ Failed to rename run: ${e.message}", e)
+            }
+        }
+    }
+
     fun isAdminUser(): Boolean {
         val userJson = sharedPrefs.getString("user", null) ?: return false
         return try {

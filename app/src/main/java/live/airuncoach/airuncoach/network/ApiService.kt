@@ -273,6 +273,12 @@ interface ApiService {
     @DELETE("/api/runs/{runId}")
     suspend fun deleteRun(@Path("runId") runId: String)
 
+    @PATCH("/api/runs/{id}/rename")
+    suspend fun renameRun(
+        @Path("id") runId: String,
+        @Body request: RenameRunRequest
+    ): RunSession
+
     // Garmin OAuth
     @GET("/api/auth/garmin")
     suspend fun initiateGarminAuth(

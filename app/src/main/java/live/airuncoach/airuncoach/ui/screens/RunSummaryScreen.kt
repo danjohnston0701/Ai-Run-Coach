@@ -478,10 +478,8 @@ fun RunSummaryScreenFlagship(
                         runNameDraft = runNameDraft,
                         onDraftChange = { runNameDraft = it },
                         onSave = {
-                            viewModel.initializeRunSummary(
-                                runSession = runSession!!.copy(name = runNameDraft.ifBlank { null }),
-                                strugglePoints = viewModel.strugglePoints.value
-                            )
+                            // Persist the rename to the server and update local state
+                            viewModel.renameRun(runNameDraft.ifBlank { null })
                             showRenameDialog = false
                         },
                         onCancel = { showRenameDialog = false }

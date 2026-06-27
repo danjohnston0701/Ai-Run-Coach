@@ -205,3 +205,10 @@ data class FreeformAnalysisResponse(
 data class UpdateStrugglePointCommentRequest(
     @SerializedName("userComment") val userComment: String
 )
+
+/**
+ * Request: rename a run.
+ */
+data class RenameRunRequest(
+    @SerializedName("name") val name: String?
+)
