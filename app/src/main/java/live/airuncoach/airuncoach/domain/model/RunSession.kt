@@ -147,7 +147,8 @@ data class RunSession(
     val timeInZone5: Int? = null,            // seconds in Zone 5 (≥ 90% maxHR)
 
     // Run achievements and milestones
-    val achievements: List<RunAchievement> = emptyList() // Personal bests and milestone badges
+    // Nullable to allow Gson to handle older JSON without this field
+    val achievements: List<RunAchievement>? = null // Personal bests and milestone badges
 ) {
     fun getDistanceInKm(): Double = distance / 1000.0
     
