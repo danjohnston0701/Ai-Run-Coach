@@ -2220,7 +2220,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  // ── iOS: Rename a run ────────────────────────────────────────────────────────
+  // ── Rename a run (iOS & Android) ─────────────────────────────────────────────
   app.patch("/api/runs/:id/rename", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const run = await storage.getRun(req.params.id);
@@ -2228,8 +2228,12 @@ function transformRunForAndroid(run: any) {
       if (req.user?.userId && run.userId !== req.user.userId) {
         return res.status(403).json({ error: "Not authorized" });
       }
-      const updated = await storage.updateRun(req.params.id, { name: req.body.name });
-      res.json(updated);
+      const newName = req.body.name ?? null;
+      const updated = await storage.updateRun(req.params.id, { name: newName });
+      if (!updated) return res.status(404).json({ error: "Run not found after update" });
+      console.log(`[PATCH /api/runs/:id/rename] ✅ Run ${req.params.id} renamed to: ${newName ?? "(cleared)"}`);
+      // Return the run in Android-compatible format so the app can update its state correctly
+      res.json(transformRunForAndroid(updated));
     } catch (error: any) {
       console.error("[PATCH /api/runs/:id/rename]", error);
       res.status(500).json({ error: "Failed to rename run" });

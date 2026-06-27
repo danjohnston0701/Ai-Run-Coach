@@ -264,20 +264,45 @@ class RunSummaryViewModel @Inject constructor(
     /**
      * Rename the run on the server and update local state.
      * Called from the rename dialog's onSave callback.
+     *
+     * Uses an optimistic update so the UI reflects the new name immediately,
+     * then invalidates the RunRepository caches so any subsequent navigation
+     * fetches fresh data rather than serving the stale pre-rename cache.
      */
     fun renameRun(newName: String?) {
         val runId = _runSession.value?.id ?: return
+        val cleanName = newName?.ifBlank { null }
+        val previousName = _runSession.value?.name  // Save for revert if API fails
+
+        // Optimistic update: update local state immediately with just the name changed.
+        // This keeps all other run fields intact and shows the change before the API responds.
+        _runSession.value = _runSession.value?.copy(name = cleanName)
+
         viewModelScope.launch {
             try {
-                Log.d("RunSummaryViewModel", "Renaming run $runId to: $newName")
-                val request = RenameRunRequest(name = newName?.ifBlank { null })
+                Log.d("RunSummaryViewModel", "Renaming run $runId to: $cleanName")
+                val request = RenameRunRequest(name = cleanName)
                 val updated = apiService.renameRun(runId, request)
+                // Update with the full server-confirmed session (now in Android format)
                 _runSession.value = updated
+                // Invalidate caches so the renamed run is reflected everywhere in the app
+                runRepository.invalidateRunById(runId)
+                val userId = getUserIdFromPrefs()
+                if (userId != null) runRepository.invalidateRunsForUser(userId)
                 Log.d("RunSummaryViewModel", "✅ Run renamed successfully to: ${updated.name ?: "(default)"}")
             } catch (e: Exception) {
+                // Revert optimistic update to the original name on failure
+                _runSession.value = _runSession.value?.copy(name = previousName)
                 Log.e("RunSummaryViewModel", "❌ Failed to rename run: ${e.message}", e)
             }
         }
+    }
+
+    private fun getUserIdFromPrefs(): String? {
+        return try {
+            val userJson = sharedPrefs.getString("user", null) ?: return null
+            gson.fromJson(userJson, User::class.java)?.id
+        } catch (_: Exception) { null }
     }
 
     fun isAdminUser(): Boolean {
