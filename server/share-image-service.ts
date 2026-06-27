@@ -1060,22 +1060,34 @@ function buildMiniChart(x: number, y: number, w: number, h: number, data: number
   const min = Math.min(...data);
   const max = Math.max(...data);
   const range = max - min || 1;
-  const chartH = h - 40;
-  const chartY = y + 30;
+  const paddingTop = 28;
+  const paddingBottom = 10;
+  const chartH = h - paddingTop - paddingBottom;
+  const chartY = y + paddingTop;
   const stepX = w / (data.length - 1);
 
   const points = data.map((v, i) => {
     const px = x + i * stepX;
     const py = chartY + chartH - ((v - min) / range) * chartH;
-    return `${px},${py}`;
+    return `${px.toFixed(1)},${py.toFixed(1)}`;
   }).join(" ");
 
   const areaPoints = `${x},${chartY + chartH} ${points} ${x + w},${chartY + chartH}`;
 
+  // Unique clip-path id derived from position so multiple charts don't collide
+  const clipId = `chartClip_${Math.round(x)}_${Math.round(y)}_${Math.round(w)}_${Math.round(h)}`;
+
   return `
-    <text x="${x}" y="${y + 16}" font-family="${FONT}" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1">${esc(label.toUpperCase())}</text>
-    <polygon points="${areaPoints}" fill="${color}" opacity="0.08"/>
-    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <defs>
+      <clipPath id="${clipId}">
+        <rect x="${x}" y="${y}" width="${w}" height="${h}"/>
+      </clipPath>
+    </defs>
+    <text x="${x + 8}" y="${y + 18}" font-family="${FONT}" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1">${esc(label.toUpperCase())}</text>
+    <g clip-path="url(#${clipId})">
+      <polygon points="${areaPoints}" fill="${color}" opacity="0.08"/>
+      <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
   `;
 }
 
