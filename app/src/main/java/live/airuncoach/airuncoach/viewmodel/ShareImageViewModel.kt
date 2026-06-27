@@ -178,6 +178,18 @@ class ShareImageViewModel @Inject constructor(
         requestPreviewDebounced()
     }
 
+    fun toggleStickerTransparentBackground(widgetId: String) {
+        _state.update { state ->
+            state.copy(
+                placedStickers = state.placedStickers.map {
+                    if (it.widgetId == widgetId) it.copy(transparentBackground = !it.transparentBackground)
+                    else it
+                }
+            )
+        }
+        requestPreviewDebounced()
+    }
+
     // ═══════════════════ Custom Background ═══════════════════
 
     fun setCustomBackground(uri: Uri) {

@@ -12,6 +12,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -128,7 +129,8 @@ fun ShareImageEditorScreen(
                         onStickerDrag = { id, x, y -> viewModel.updateStickerPosition(id, x, y) },
                         onStickerDragEnd = { id -> viewModel.finalizeStickerPosition(id) },
                         onStickerScale = { id, scale -> viewModel.updateStickerScale(id, scale) },
-                        onStickerRemove = { id -> viewModel.removeSticker(id) }
+                        onStickerRemove = { id -> viewModel.removeSticker(id) },
+                        onStickerToggleTransparent = { id -> viewModel.toggleStickerTransparentBackground(id) }
                     )
                 }
 
@@ -334,7 +336,8 @@ private fun PreviewAreaFullBleed(
     onStickerDrag: (String, Float, Float) -> Unit,
     onStickerDragEnd: (String) -> Unit,
     onStickerScale: (String, Float) -> Unit,
-    onStickerRemove: (String) -> Unit
+    onStickerRemove: (String) -> Unit,
+    onStickerToggleTransparent: (String) -> Unit = {}
 ) {
     val targetAspect = when (aspectRatio) {
         "1:1" -> 1f
@@ -343,10 +346,13 @@ private fun PreviewAreaFullBleed(
         else -> 1f
     }
 
+    val scrollState = rememberScrollState()
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .verticalScroll(scrollState),
         contentAlignment = Alignment.Center
     ) {
         // The preview card fills as much space as possible while maintaining aspect ratio
@@ -451,7 +457,8 @@ private fun PreviewAreaFullBleed(
                                 onDrag = { id, x, y -> onStickerDrag(id, x, y) },
                                 onDragEnd = { id -> onStickerDragEnd(id) },
                                 onScale = { id, scale -> onStickerScale(id, scale) },
-                                onRemove = { onStickerRemove(placed.widgetId) }
+                                onRemove = { onStickerRemove(placed.widgetId) },
+                                onToggleTransparent = { onStickerToggleTransparent(placed.widgetId) }
                             )
                         }
                     }
@@ -968,7 +975,8 @@ private fun StickerOverlayChip(
     onDrag: (String, Float, Float) -> Unit,
     onDragEnd: (String) -> Unit,
     onScale: (String, Float) -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onToggleTransparent: () -> Unit = {}
 ) {
     val density = LocalDensity.current
     val xPx = placed.x * containerSize.width
@@ -995,8 +1003,11 @@ private fun StickerOverlayChip(
     Box(
         modifier = Modifier
             .offset(
-                x = xDp - compW / 2,
-                y = yDp - compH / 2 - buttonRowH
+                // x/y are normalized top-left coords (matching server's px = x*canvasW, py = y*canvasH).
+                // Do NOT center-offset here — that caused the drag handle to appear shifted
+                // relative to the server-rendered sticker in the preview image behind it.
+                x = xDp,
+                y = yDp - buttonRowH
             )
     ) {
         // Fixed-size action buttons — always 22dp regardless of component scale
@@ -1038,6 +1049,26 @@ private fun StickerOverlayChip(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Add, contentDescription = "Larger", tint = Color.White, modifier = Modifier.size(12.dp))
+                }
+            }
+            // Transparent background toggle
+            Surface(
+                onClick = onToggleTransparent,
+                shape = CircleShape,
+                color = if (placed.transparentBackground)
+                    Colors.primary.copy(alpha = 0.85f)
+                else
+                    Color(0xFF1A2332).copy(alpha = 0.95f),
+                border = BorderStroke(1.dp, if (placed.transparentBackground) Colors.primary else Colors.border),
+                modifier = Modifier.size(buttonSize)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.InvertColors,
+                        contentDescription = if (placed.transparentBackground) "Opaque background" else "Transparent background",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
                 }
             }
             // Remove

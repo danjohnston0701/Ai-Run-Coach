@@ -38,7 +38,8 @@ data class PlacedSticker(
     val widgetId: String,
     val x: Float,
     val y: Float,
-    val scale: Float = 1.0f
+    val scale: Float = 1.0f,
+    val transparentBackground: Boolean = false
 )
 
 data class CustomSticker(
