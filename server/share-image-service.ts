@@ -1055,38 +1055,80 @@ function buildMinimalSvg(w: number, h: number, run: RunDataForImage, userName?: 
   `;
 }
 
-function buildMiniChart(x: number, y: number, w: number, h: number, data: number[], color: string, label: string): string {
+/** Smart axis config matching Android GraphAxisUtils — prevents consistent data looking erratic. */
+function calculateSmartAxis(
+  values: number[],
+  typicalMin: number,
+  typicalMax: number,
+  minSpreadPct: number = 0.10,
+  baseMargin: number = 0.05
+): { visMin: number; visMax: number } {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = max - min;
+  const threshold = (typicalMax - typicalMin) * minSpreadPct;
+  if (spread < threshold) {
+    const buffer = (threshold - spread) / 2;
+    return { visMin: min - buffer, visMax: max + buffer };
+  }
+  const margin = spread * baseMargin;
+  return { visMin: min - margin, visMax: max + margin };
+}
+
+/**
+ * Renders a mini line chart with smart axis margins.
+ * visMin/visMax override auto-computed axis bounds (pass from calculateSmartAxis).
+ */
+function buildMiniChart(
+  x: number, y: number, w: number, h: number,
+  data: number[], color: string, label: string,
+  visMin?: number, visMax?: number
+): string {
   if (!data || data.length < 2) return "";
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const paddingTop = 28;
-  const paddingBottom = 10;
+
+  const axisMin = visMin ?? Math.min(...data);
+  const axisMax = visMax ?? Math.max(...data);
+  const range = axisMax - axisMin || 1;
+
+  const paddingTop = 30;
+  const paddingBottom = 12;
+  const paddingLeft = 6;
+  const paddingRight = 6;
   const chartH = h - paddingTop - paddingBottom;
+  const chartW = w - paddingLeft - paddingRight;
+  const chartX = x + paddingLeft;
   const chartY = y + paddingTop;
-  const stepX = w / (data.length - 1);
 
-  const points = data.map((v, i) => {
-    const px = x + i * stepX;
-    const py = chartY + chartH - ((v - min) / range) * chartH;
+  const stepX = chartW / (data.length - 1);
+
+  const pts = data.map((v, i) => {
+    const px = chartX + i * stepX;
+    const py = chartY + chartH - ((v - axisMin) / range) * chartH;
     return `${px.toFixed(1)},${py.toFixed(1)}`;
-  }).join(" ");
+  });
+  const polylinePoints = pts.join(" ");
+  const areaPoints = `${chartX},${chartY + chartH} ${polylinePoints} ${chartX + chartW},${chartY + chartH}`;
 
-  const areaPoints = `${x},${chartY + chartH} ${points} ${x + w},${chartY + chartH}`;
+  // Unique clipPath id — encode position + size to avoid collisions when multiple charts exist
+  const clipId = `cc_${Math.round(x)}_${Math.round(y)}_${Math.round(w)}_${Math.round(h)}`;
 
-  // Unique clip-path id derived from position so multiple charts don't collide
-  const clipId = `chartClip_${Math.round(x)}_${Math.round(y)}_${Math.round(w)}_${Math.round(h)}`;
+  // Subtle axis rules matching Android canvas layout
+  const axisColor = "rgba(255,255,255,0.10)";
+  const xAxisY = chartY + chartH;
+  const yAxisX = chartX;
 
   return `
     <defs>
       <clipPath id="${clipId}">
-        <rect x="${x}" y="${y}" width="${w}" height="${h}"/>
+        <rect x="${chartX}" y="${chartY}" width="${chartW}" height="${chartH}"/>
       </clipPath>
     </defs>
-    <text x="${x + 8}" y="${y + 18}" font-family="${FONT}" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1">${esc(label.toUpperCase())}</text>
+    <text x="${x + 8}" y="${y + 19}" font-family="${FONT}" font-size="11" font-weight="600" fill="${C.textMuted}" letter-spacing="1">${esc(label.toUpperCase())}</text>
+    <line x1="${yAxisX}" y1="${chartY}" x2="${yAxisX}" y2="${xAxisY}" stroke="${axisColor}" stroke-width="1"/>
+    <line x1="${yAxisX}" y1="${xAxisY}" x2="${chartX + chartW}" y2="${xAxisY}" stroke="${axisColor}" stroke-width="1"/>
     <g clip-path="url(#${clipId})">
       <polygon points="${areaPoints}" fill="${color}" opacity="0.08"/>
-      <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="${polylinePoints}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
     </g>
   `;
 }
@@ -1153,7 +1195,9 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
         ? rawGps.map((p: any) => p.elevation ?? p.alt ?? p.altitude ?? null).filter((v: any) => v !== null)
         : [];
       if (gpsElevData.length >= 2) {
-        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)")}</g>`;
+        // Smart axis: elevation uses 5% margin on actual data range
+        const elevAxis = calculateSmartAxis(gpsElevData, 0, 500, 0.02, 0.05);
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)", elevAxis.visMin, elevAxis.visMax)}</g>`;
       }
       // Fallback: simulate from pace splits if available (uphill = slower pace)
       if (run.paceData && run.paceData.length >= 2) {
@@ -1163,7 +1207,8 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
         const maxPace = Math.max(...paceVals);
         const range = maxPace - minPace || 1;
         const simElev = paceVals.map((p) => ((p - minPace) / range) * totalElevGain);
-        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, simElev, C.green, "Elevation est.")}</g>`;
+        const simAxis = calculateSmartAxis(simElev, 0, totalElevGain, 0.02, 0.05);
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, simElev, C.green, "Elevation est.", simAxis.visMin, simAxis.visMax)}</g>`;
       }
       // No data placeholder
       return buildNoDataChart(px, py, chartW, chartH, s, C.green, "ELEVATION");
@@ -1177,7 +1222,9 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
       const borderRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>`;
       if (run.paceData && run.paceData.length >= 2) {
         const paceValues = run.paceData.map((p) => p.paceSeconds);
-        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km")}</g>`;
+        // Smart axis: typical pace 4–7 min/km = 240–420 sec, 10% spread threshold = 18 sec
+        const paceAxis = calculateSmartAxis(paceValues, 240, 420, 0.10, 0.05);
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km", paceAxis.visMin, paceAxis.visMax)}</g>`;
       }
       return buildNoDataChart(px, py, chartW, chartH, s, C.orange, "PACE");
     }
@@ -1190,7 +1237,9 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
       const borderRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>`;
       if (run.heartRateData && run.heartRateData.length >= 2) {
         const hrSampled = sampleData(run.heartRateData.map((h) => h.value), 30);
-        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate")}</g>`;
+        // Smart axis: typical HR 140–180 bpm, 10% spread threshold = 4 bpm
+        const hrAxis = calculateSmartAxis(hrSampled, 140, 180, 0.10, 0.05);
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate", hrAxis.visMin, hrAxis.visMax)}</g>`;
       }
       return buildNoDataChart(px, py, chartW, chartH, s, C.red, "HEART RATE");
     }
