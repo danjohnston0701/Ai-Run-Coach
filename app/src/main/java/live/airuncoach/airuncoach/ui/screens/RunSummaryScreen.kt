@@ -235,7 +235,7 @@ fun RunSummaryScreenFlagship(
         contentWindowInsets = WindowInsets(0), // outer Scaffold already handles nav bar insets
         topBar = {
             RunSummaryTopBarFlagship(
-                title = "Run Insights",
+                title = runSession?.name ?: "Run Insights",
                 subtitle = runSession?.let {
                     "${it.getFormattedDate()} • ${
                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it.startTime))
