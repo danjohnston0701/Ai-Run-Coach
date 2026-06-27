@@ -1897,7 +1897,73 @@ function transformRunForAndroid(run: any) {
             ))
             .limit(1);
           if (existingByExternalId) {
-            console.log(`[POST /api/runs] External-ID duplicate detected (${externalId}) — returning existing run ${existingByExternalId.id}`);
+            console.log(`[POST /api/runs] External-ID duplicate detected (${externalId}) — checking for richer data to merge into existing run ${existingByExternalId.id}`);
+
+            // MERGE STRATEGY: The watch creates the run record first (minimal data), then
+            // the phone uploads the same run with coaching notes, GPS track, HR data, etc.
+            // Rather than silently discarding the richer upload, merge any non-null fields
+            // that the existing record is missing into the surviving record.
+            const mergeFields: Record<string, any> = {};
+
+            // Coaching notes — the most important: the watch never has these
+            const incomingNotes = runData.aiCoachingNotes;
+            if (
+              incomingNotes != null &&
+              Array.isArray(incomingNotes) &&
+              incomingNotes.length > 0 &&
+              (!(existingByExternalId as any).aiCoachingNotes ||
+               (existingByExternalId as any).aiCoachingNotes?.length === 0)
+            ) {
+              mergeFields.aiCoachingNotes = incomingNotes;
+              console.log(`[POST /api/runs] Merging ${incomingNotes.length} coaching note(s) into run ${existingByExternalId.id}`);
+            }
+
+            // GPS track — phone has full track, watch may have sent a coarser version
+            if (runData.gpsTrack != null && (existingByExternalId as any).gpsTrack == null) {
+              mergeFields.gpsTrack = runData.gpsTrack;
+            }
+
+            // Heart-rate and pace time-series
+            if (runData.heartRateData != null && (existingByExternalId as any).heartRateData == null) {
+              mergeFields.heartRateData = runData.heartRateData;
+            }
+            if (runData.paceData != null && (existingByExternalId as any).paceData == null) {
+              mergeFields.paceData = runData.paceData;
+            }
+
+            // Struggle points and km splits (computed by the phone, never by the watch)
+            if (runData.strugglePoints != null && (existingByExternalId as any).strugglePoints == null) {
+              mergeFields.strugglePoints = runData.strugglePoints;
+            }
+            if (runData.kmSplits != null && (existingByExternalId as any).kmSplits == null) {
+              mergeFields.kmSplits = runData.kmSplits;
+            }
+
+            // Weather data
+            if (runData.weatherData != null && (existingByExternalId as any).weatherData == null) {
+              mergeFields.weatherData = runData.weatherData;
+            }
+
+            // Target fields — phone knows the target, watch may not
+            if (targetDistance != null && (existingByExternalId as any).targetDistance == null) {
+              mergeFields.targetDistance = targetDistance;
+            }
+            if (targetTime != null && (existingByExternalId as any).targetTime == null) {
+              mergeFields.targetTime = targetTime;
+            }
+            if (wasTargetAchieved != null && (existingByExternalId as any).wasTargetAchieved == null) {
+              mergeFields.wasTargetAchieved = wasTargetAchieved;
+            }
+
+            if (Object.keys(mergeFields).length > 0) {
+              console.log(`[POST /api/runs] Merging ${Object.keys(mergeFields).join(', ')} into run ${existingByExternalId.id}`);
+              const [merged] = await db.update(runs)
+                .set(mergeFields)
+                .where(eq(runs.id, existingByExternalId.id))
+                .returning();
+              return res.status(200).json(transformRunForAndroid(merged));
+            }
+
             return res.status(200).json(transformRunForAndroid(existingByExternalId));
           }
         }
@@ -2158,6 +2224,30 @@ function transformRunForAndroid(run: any) {
     } catch (error: any) {
       console.error("[PATCH /api/runs/:id/rename]", error);
       res.status(500).json({ error: "Failed to rename run" });
+    }
+  });
+
+  // ── Patch coaching notes onto an existing run ────────────────────────────────
+  // Used when the watch created the run record first (no coaching notes) and the
+  // phone wants to attach the notes it generated during the run.  Also supports
+  // manual re-attachment of lost coaching notes (e.g. after a dedup cleanup).
+  app.patch("/api/runs/:id/coaching-notes", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const run = await storage.getRun(req.params.id);
+      if (!run) return res.status(404).json({ error: "Run not found" });
+      if (req.user?.userId && run.userId !== req.user.userId) {
+        return res.status(403).json({ error: "Not authorized" });
+      }
+      const { aiCoachingNotes } = req.body;
+      if (!Array.isArray(aiCoachingNotes)) {
+        return res.status(400).json({ error: "aiCoachingNotes must be an array" });
+      }
+      const updated = await storage.updateRun(req.params.id, { aiCoachingNotes });
+      console.log(`[PATCH /api/runs/:id/coaching-notes] Patched ${aiCoachingNotes.length} note(s) onto run ${req.params.id}`);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[PATCH /api/runs/:id/coaching-notes]", error);
+      res.status(500).json({ error: "Failed to patch coaching notes" });
     }
   });
 

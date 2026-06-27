@@ -639,8 +639,7 @@ interface ApiService {
     @GET("/api/strava/activities")
     suspend fun getStravaActivities(): StravaActivitiesResponse
 
-    // DISABLED: Strava read access not permitted — import functionality removed
-    // @POST("/api/strava/import-history")
+    @POST("/api/strava/import-history")
     suspend fun importStravaHistory(): StravaImportHistoryResponse
 
     /**

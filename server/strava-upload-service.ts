@@ -173,6 +173,70 @@ export async function getStravaActivity(
 /**
  * Deregister from Strava (when user disconnects account)
  */
+export interface StravaActivitySummary {
+  id: number;
+  name: string;
+  type: string;
+  sport_type: string;
+  distance: number;          // metres
+  moving_time: number;       // seconds
+  elapsed_time: number;      // seconds
+  total_elevation_gain: number;
+  start_date: string;        // ISO 8601
+  start_latlng: [number, number] | null;
+  average_heartrate?: number;
+  max_heartrate?: number;
+  average_cadence?: number;
+  calories?: number;
+  map?: { summary_polyline?: string };
+}
+
+/**
+ * Fetch all running activities for the authenticated athlete from Strava.
+ * Paginates automatically — Strava caps each page at 200 activities.
+ * 
+ * NOTE: Requires activity:read_all scope.  Private runs are included only with
+ * this scope; public-only access uses activity:read.
+ * 
+ * @param accessToken - Valid Strava OAuth access token
+ * @param maxPages    - Safety cap on pages (default 10 → up to 2 000 activities)
+ */
+export async function fetchStravaAthleteActivities(
+  accessToken: string,
+  maxPages = 10
+): Promise<StravaActivitySummary[]> {
+  const all: StravaActivitySummary[] = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const { data } = await axios.get<StravaActivitySummary[]>(
+      `${STRAVA_API_BASE}/athlete/activities`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { per_page: 200, page },
+      }
+    );
+
+    if (!data || data.length === 0) break;
+
+    // Filter to running activities only
+    const runs = data.filter(
+      (a) =>
+        a.type === 'Run' ||
+        a.sport_type === 'Run' ||
+        a.sport_type === 'TrailRun' ||
+        a.sport_type === 'VirtualRun'
+    );
+    all.push(...runs);
+
+    if (data.length < 200) break; // Last page
+    page++;
+  }
+
+  console.log(`[Strava] Fetched ${all.length} running activities across ${page} page(s)`);
+  return all;
+}
+
 export async function deregisterFromStrava(
   accessToken: string
 ): Promise<void> {

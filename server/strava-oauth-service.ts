@@ -2,7 +2,8 @@
  * Strava OAuth Service
  * 
  * Handles OAuth 2.0 authorization flow with Strava API
- * Scopes: activity:write (upload activities), activity:read_all (fetch activities)
+ * Scope: activity:read_all — read-only access to import historic runs for AI coaching.
+ * We do NOT request write permissions. Runs cannot be published to Strava through this integration.
  * 
  * Flow:
  * 1. POST /api/strava/auth/authorize - Initiate OAuth flow, redirect to Strava
@@ -76,7 +77,7 @@ export function buildStravaAuthUrl(state: string): string {
     client_id: STRAVA_CLIENT_ID || '',
     redirect_uri: STRAVA_REDIRECT_URI,
     response_type: 'code',
-    scope: 'activity:write,activity:read_all', // activity:write for uploads, activity:read_all for fetching
+    scope: 'activity:read_all', // Read-only: import historic runs into AI coaching engine. No write/publish.
     state,
     approval_prompt: 'auto', // Skip approval if already authorized
   });

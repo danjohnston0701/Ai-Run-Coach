@@ -293,11 +293,131 @@ router.post('/api/strava/disconnect', authMiddleware, async (req: AuthenticatedR
   }
 });
 
+/**
+ * POST /api/strava/import-history
+ *
+ * Pulls the athlete's Strava run history and saves each activity as a run record
+ * in our database (externalSource = 'strava').  This gives the AI coaching engine
+ * historic context for new users who already have years of runs on Strava.
+ *
+ * READ-ONLY — we only request activity:read_all scope.  This endpoint NEVER
+ * publishes or modifies any data on Strava.
+ *
+ * Idempotent: already-imported activities are skipped (keyed on externalId).
+ */
+router.post('/api/strava/import-history', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+
+    // 1. Get the active Strava device record for this user
+    const [device] = await db
+      .select()
+      .from(connectedDevices)
+      .where(
+        and(
+          eq(connectedDevices.userId, userId),
+          eq(connectedDevices.deviceType, 'strava'),
+          eq(connectedDevices.isActive, true)
+        )
+      );
+
+    if (!device || !device.accessToken) {
+      return res.status(401).json({ success: false, error: 'Strava not connected' });
+    }
+
+    // 2. Auto-refresh token if expired
+    let accessToken = device.accessToken;
+    if (device.tokenExpiresAt && device.tokenExpiresAt < new Date() && device.refreshToken) {
+      try {
+        const refreshed = await refreshStravaToken(device.refreshToken);
+        await db.update(connectedDevices)
+          .set({ accessToken: refreshed.accessToken, refreshToken: refreshed.refreshToken, tokenExpiresAt: refreshed.expiresAt, updatedAt: new Date() })
+          .where(eq(connectedDevices.id, device.id));
+        accessToken = refreshed.accessToken;
+        console.log(`[Strava Import] Token auto-refreshed for user ${userId}`);
+      } catch (refreshErr: any) {
+        return res.status(401).json({ success: false, error: 'Strava token expired — please reconnect' });
+      }
+    }
+
+    // 3. Fetch running activities from Strava
+    const { fetchStravaAthleteActivities } = await import('./strava-upload-service');
+    const activities = await fetchStravaAthleteActivities(accessToken);
+    console.log(`[Strava Import] Fetched ${activities.length} running activities for user ${userId}`);
+
+    // 4. Get existing strava run externalIds to avoid duplicates
+    const existingRuns = await db
+      .select({ externalId: runs.externalId })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.userId, userId),
+          eq(runs.externalSource, 'strava')
+        )
+      );
+    const existingIds = new Set(existingRuns.map((r) => r.externalId));
+
+    // 5. Insert new activities
+    let imported = 0;
+    let skipped = 0;
+
+    for (const activity of activities) {
+      const stravaId = String(activity.id);
+
+      if (existingIds.has(stravaId)) {
+        skipped++;
+        continue;
+      }
+
+      // Map Strava fields → our runs schema
+      const distanceKm = activity.distance / 1000;
+      const durationMs = activity.elapsed_time * 1000;
+      const avgPaceSecPerKm = distanceKm > 0 ? activity.moving_time / distanceKm : 0;
+      const paceMin = Math.floor(avgPaceSecPerKm / 60);
+      const paceSec = Math.round(avgPaceSecPerKm % 60);
+      const avgPaceStr = `${paceMin}:${String(paceSec).padStart(2, '0')}`;
+
+      await db.insert(runs).values({
+        userId,
+        externalId: stravaId,
+        externalSource: 'strava',
+        name: activity.name,
+        distance: Math.round(distanceKm * 100) / 100,
+        duration: durationMs,
+        avgPace: avgPaceStr,
+        avgHeartRate: activity.average_heartrate ? Math.round(activity.average_heartrate) : null,
+        maxHeartRate: activity.max_heartrate ? Math.round(activity.max_heartrate) : null,
+        cadence: activity.average_cadence ? Math.round(activity.average_cadence * 2) : null, // Strava reports one-leg cadence; double for spm
+        calories: activity.calories ?? null,
+        elevation: activity.total_elevation_gain ?? null,
+        startLat: activity.start_latlng?.[0] ?? null,
+        startLng: activity.start_latlng?.[1] ?? null,
+        completedAt: new Date(activity.start_date),
+        runDate: activity.start_date.substring(0, 10),
+      });
+
+      imported++;
+    }
+
+    // 6. Update lastSyncAt on the device record
+    await db.update(connectedDevices)
+      .set({ lastSyncAt: new Date(), updatedAt: new Date() })
+      .where(eq(connectedDevices.id, device.id));
+
+    console.log(`[Strava Import] Done for user ${userId}: imported=${imported}, skipped=${skipped}`);
+    res.json({
+      success: true,
+      imported,
+      skipped,
+      message: `Imported ${imported} run${imported !== 1 ? 's' : ''} from Strava${skipped > 0 ? ` (${skipped} already existed)` : ''}.`,
+    });
+  } catch (error: any) {
+    console.error('[Strava Import] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to import Strava history' });
+  }
+});
+
 // ── Strava Webhook ──────────────────────────────────────────────────────────
-//
-// DEPRECATED: The /api/strava/import-history endpoint has been removed. 
-// Strava read access (activity:read_all scope) is not allowed per requirements.
-// Users can only write/publish runs to Strava, not read/import from it.
 //
 // Strava requires a webhook subscription to:
 //   • Know when an athlete deauthorizes the app (mandatory per API Terms)

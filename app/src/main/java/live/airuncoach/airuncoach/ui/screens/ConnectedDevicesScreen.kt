@@ -157,7 +157,7 @@ fun ConnectedDevicesScreen(
             // ── Page subtitle ─────────────────────────────────────────────────
             item {
                 Text(
-                    "Connect your Ai Run Coach app to your fitness devices and services. Get real-time coaching with your Garmin watch, and publish completed runs to Strava with full GPS data and metrics.",
+                    "Connect your Ai Run Coach app to your fitness devices and services. Get real-time coaching with your Garmin watch, and import your historic Strava runs so your AI coach has full context from day one.",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary,
                     modifier = Modifier.padding(top = 4.dp)
@@ -177,12 +177,10 @@ fun ConnectedDevicesScreen(
             }
 
             // ── Section: Strava Integration ───────────────────────────────────
-            // HIDDEN: Awaiting Strava approval for write permissions. Uncomment to re-enable.
-            /*
             item {
                 SectionHeader(
                     title = "Strava",
-                    subtitle = "Publish runs with GPS data",
+                    subtitle = "Import historic runs for AI coaching",
                     accentColor = Color(0xFFFC5200)  // Strava orange
                 )
             }
@@ -199,7 +197,6 @@ fun ConnectedDevicesScreen(
                     onClearImportStatus = { viewModel.clearStravaImportStatus() }
                 )
             }
-            */
 
             // ── Section: Garmin Connect (COMMENTED OUT) ───────────────────────
             // This integration is disabled because Garmin Connect data cannot be
@@ -535,14 +532,14 @@ private fun StravaIntegrationCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Strava Integration",
+                        "Strava",
                         style = AppTextStyles.h3,
                         color = Colors.textPrimary
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        if (isConnected) "Publish runs · Import history"
-                        else "Publish runs with complete GPS data",
+                        if (isConnected) "Historic data · AI coaching baseline"
+                        else "Import historic runs for AI coaching",
                         style = AppTextStyles.caption,
                         color = Colors.textSecondary
                     )
@@ -605,22 +602,53 @@ private fun StravaIntegrationCard(
             // Description — changes based on connection state
             Text(
                 if (isConnected)
-                    "Your Strava account is connected. Publish completed runs with full GPS tracks, heart rate, cadence, and elevation. Import your Strava run history to power AI coaching and plan recommendations."
+                    "Your Strava account is connected. Import your full run history so your AI coach knows your fitness baseline, training trends, and long-term progress from day one."
                 else
-                    "Connect your Strava account to publish completed runs with full GPS tracks, heart rate, cadence, and elevation data. Share your Ai Run Coach sessions with your Strava community.",
+                    "Connect Strava to import your historic runs into Ai Run Coach. This gives your AI coach the context it needs to personalise training plans and coaching — the more history, the smarter your coach.",
                 style = AppTextStyles.caption,
                 color = Colors.textSecondary,
                 lineHeight = 18.sp
             )
 
+            // Important note about data flow direction
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFF1E88E5).copy(alpha = 0.08f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFF1E88E5),
+                        modifier = Modifier.size(14.dp).padding(top = 1.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "Import only — read-only access",
+                            style = AppTextStyles.caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                            color = Color(0xFF1E88E5)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            "This connection is used only to pull your Strava run history into Ai Run Coach. Runs recorded in this app are not published to Strava automatically — to share them, sync via Garmin Connect or upload the GPX/FIT file manually to Strava.",
+                            style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                            color = Colors.textSecondary,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
             // Feature chips
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallChip(Icons.Default.LocationOn, "Route Map", Color(0xFFFC5200))
-                SmallChip(Icons.Default.Favorite, "All Metrics", Color(0xFFFC5200))
-                if (isConnected)
-                    SmallChip(Icons.Default.Star, "AI Baseline", Color(0xFFFC5200))
-                else
-                    SmallChip(Icons.Default.Share, "Social Share", Color(0xFFFC5200))
+                SmallChip(Icons.Default.History, "Run History", Color(0xFFFC5200))
+                SmallChip(Icons.Default.Star, "AI Baseline", Color(0xFFFC5200))
+                SmallChip(Icons.AutoMirrored.Filled.TrendingUp, "Trends", Color(0xFFFC5200))
             }
 
             // Import status message
