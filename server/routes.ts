@@ -1823,6 +1823,18 @@ function transformRunForAndroid(run: any) {
         })),
       };
 
+      // FK SAFETY: Validate routeId before it reaches the INSERT.
+      // If the client sends a routeId that no longer exists in the routes table
+      // (e.g. route was deleted, stale cache, different environment), the DB would
+      // reject the entire run with a foreign-key violation.  Null it out gracefully.
+      if (processedRunData.routeId) {
+        const routeExists = await storage.getRoute(processedRunData.routeId);
+        if (!routeExists) {
+          console.warn(`[POST /api/runs] routeId '${processedRunData.routeId}' not found in routes table — clearing to null to avoid FK violation`);
+          processedRunData.routeId = null;
+        }
+      }
+
       // Explicitly extract fields that have naming mismatches or type ambiguities.
       // These can be lost when Drizzle maps a Record<string,any> spread through the
       // InsertRun type boundary — explicit extraction guarantees they reach the INSERT.
@@ -1851,7 +1863,14 @@ function transformRunForAndroid(run: any) {
       console.log(`[POST /api/runs] Date fields — startedAt: ${processedRunData.startTime}, completedAt: ${processedRunData.completedAt}`);
 
       // ── Deduplication guard ──────────────────────────────────────────────────
-      // Two cases to catch:
+      // Three cases to catch, checked in order of specificity:
+      //
+      // 0. Exact external_id match — highest fidelity.  Garmin companion sends the
+      //    same external_id (Garmin activity ID) for every upload of the same run.
+      //    Checking this FIRST catches race-condition duplicates (two requests that
+      //    arrive within ms of each other) as long as the first has already committed.
+      //    The DB unique constraint (idx_runs_user_external_id_unique) is the final
+      //    safety net for requests that truly race past this point simultaneously.
       //
       // 1. Rapid retries (Android exponential-backoff / SyncWorker): same user +
       //    same distance created within the last 30 seconds.
@@ -1864,7 +1883,25 @@ function transformRunForAndroid(run: any) {
       //    an existing Garmin-companion run for this user with a similar distance
       //    (±10 %) created within the last 3 hours.
       const distanceRounded  = Math.round(distance * 100) / 100; // round to 10m
+      // Support both camelCase (Android) and snake_case (iOS/legacy) field names
+      const externalId     = runData.externalId     || runData.external_id     || null;
+      const externalSource = runData.externalSource || runData.external_source || null;
       try {
+        // Case 0 — exact external_id match (race-condition safe with DB constraint)
+        if (externalId) {
+          const [existingByExternalId] = await db.select()
+            .from(runs)
+            .where(and(
+              eq(runs.userId, userId),
+              eq(runs.externalId, externalId),
+            ))
+            .limit(1);
+          if (existingByExternalId) {
+            console.log(`[POST /api/runs] External-ID duplicate detected (${externalId}) — returning existing run ${existingByExternalId.id}`);
+            return res.status(200).json(transformRunForAndroid(existingByExternalId));
+          }
+        }
+
         // Case 1 — rapid retry window (30 s)
         const thirtySecondsAgo = new Date(Date.now() - 30_000);
         const recentCandidates = await db.select()

@@ -1777,19 +1777,19 @@ ${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
 ${physicalContext}
 
 ${PACE_FORMAT_RULE}
-Give a coaching message (2-3 sentences). IMPORTANT: Tell them their PERSONALISED cadence target (${dynOptimalCadenceTarget} spm), NOT a generic "aim for 180". Their target is based on their height and current pace. ${strideZone === 'OPTIMAL' ? 'Acknowledge their good form briefly.' : `Give 2 specific, actionable tips they can apply RIGHT NOW — things like "shorten your stride", "quicker arm swing", "think light feet". Be direct.`} Be specific with their actual numbers. No emojis. No markdown.`;
+Give a coaching message (2-3 sentences). MANDATORY RULE: You MUST say the runner's CURRENT cadence (${cadence} spm) explicitly in your message — the runner cannot see the screen and has no idea what their cadence is. Then tell them their PERSONALISED cadence target (${dynOptimalCadenceTarget} spm), NOT a generic "aim for 180". ${strideZone === 'OPTIMAL' ? 'Acknowledge their good form briefly.' : `Give 1-2 specific, actionable tips they can apply RIGHT NOW — things like "shorten your stride", "quicker arm swing", "think light feet". Be direct.`} Be specific with their actual numbers. No emojis. No markdown.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 3-4 sentences that can be spoken in under 20 seconds. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running biomechanics coach. You specialize in cadence optimization and stride analysis. Give specific, actionable technique coaching — tell the runner exactly what to change and how. CRITICAL: Always state the runner's current cadence number (e.g. "your cadence is ${cadence} steps per minute") — they are running and cannot see the screen. Reference actual numbers. No emojis. ${PACE_FORMAT_RULE} Keep it to 2-3 sentences that can be spoken in under 15 seconds. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 200,
     temperature: 0.7,
   });
 
-  return completion.choices[0].message.content || `Your cadence is ${cadence} steps per minute with a stride length of ${strideCm}cm. ${strideZone === 'OVERSTRIDING' ? 'Try shortening your stride and landing under your hips.' : strideZone === 'UNDERSTRIDING' ? 'Try picking up your cadence with quicker, more powerful steps.' : 'Great form, keep it up!'}`;
+  return completion.choices[0].message.content || `Your cadence is ${cadence} steps per minute — your target is ${dynOptimalCadenceTarget} spm. ${strideZone === 'OVERSTRIDING' ? 'Try shortening your stride and landing your foot under your hips.' : strideZone === 'UNDERSTRIDING' ? `You are ${cadenceDeficit} steps per minute below your target. Try a quicker arm swing to lift your turnover.` : 'Great form, keep it up!'}`;
 }
 
 export async function generatePreRunSummary(routeData: any, weatherData: any): Promise<any> {

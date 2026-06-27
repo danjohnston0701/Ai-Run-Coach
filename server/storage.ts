@@ -610,8 +610,24 @@ export class DatabaseStorage implements IStorage {
       console.log('[createRun] String date fields found:', dateFieldsBeforeConversion.join(', '));
     }
     const sanitized = this.convertDateFields(run);
-    const [newRun] = await db.insert(runs).values(sanitized).returning();
-    return newRun;
+    try {
+      const [newRun] = await db.insert(runs).values(sanitized).returning();
+      return newRun;
+    } catch (err: any) {
+      // PostgreSQL unique-constraint violation (code 23505).
+      // Happens when two concurrent requests race past the application-level dedup check
+      // with the same external_id.  The DB unique index (idx_runs_user_external_id_unique)
+      // guarantees at most one row wins; the loser finds and returns the winner's record.
+      if (err.code === '23505' && run.externalId && run.userId) {
+        console.warn(`[createRun] Race-condition duplicate detected for externalId=${run.externalId} — fetching existing record`);
+        const [existing] = await db.select()
+          .from(runs)
+          .where(and(eq(runs.userId, run.userId as string), eq(runs.externalId, run.externalId as string)))
+          .limit(1);
+        if (existing) return existing;
+      }
+      throw err;
+    }
   }
 
   async updateRun(id: string, data: Partial<Run>): Promise<Run | undefined> {

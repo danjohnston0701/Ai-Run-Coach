@@ -124,6 +124,11 @@ class RunTrackingService : Service(), SensorEventListener {
     private var targetDistance: Double? = null // ALWAYS in metres (normalized on receipt)
     private var targetTime: Long? = null     // For time-based goals (milliseconds)
     private val FINAL_STRETCH_METERS = 500.0 // Last 500m: only motivation coaching allowed
+    // Smart target inference — when no explicit targetDistance is set (e.g. watch-initiated free
+    // runs), we detect the most likely target from common race distances so final-stretch coaching
+    // (500m / 250m / 100m to go) can still fire.
+    private val COMMON_RACE_DISTANCES_M = listOf(1000.0, 2000.0, 3000.0, 5000.0, 10000.0, 15000.0, 21097.5, 42195.0)
+    private var inferredTargetDistance: Double? = null
     private var hasRoute: Boolean = false
     private val routePoints = mutableListOf<LocationPoint>()
     private val kmSplits = mutableListOf<KmSplit>()
@@ -251,7 +256,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastHrCoachingMinute: Int = -1
 
     // Cadence/stride coaching
-    private var lastCadenceCoachingTime: Long = 0
+    private var lastCadenceCoachingTime: Long = 0       // Wall-clock time of last cadence cue (kept for logging)
+    private var lastCadenceCoachingDistance: Double = 0.0  // totalDistance when last cadence cue fired
+    private var cadenceCoachingCountInWindow: Int = 0      // Cues fired in the current 10 km window
+    private var cadenceCoachingWindowStartDistance: Double = 0.0  // Distance at which current window started
     private var hasCadenceCoachingFired = false
     private var lastStrideZone: String = "OPTIMAL"
     private var baselineCadence: Int = 0
@@ -370,6 +378,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastElevationInsightTime: Long = 0
     private val ELEVATION_INSIGHT_COOLDOWN_MS = 120_000L // 2 min between elevation insights
     private var hasFinal500mFired = false
+    private var hasFinal250mFired = false
     private var hasFinal100mFired = false
     private var lastFlatTerrainCoachingKm: Int = 0 // tracks last km at which flat terrain coaching fired
 
@@ -440,13 +449,21 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val ELEVATION_COOLDOWN_MS = 120_000 // 2 minutes
         private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
         private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
-        private const val CADENCE_COOLDOWN_MS = 120_000L // 2 minutes between cadence cues
+        // ── Cadence coaching rate limits ────────────────────────────────────────
+        // 1 km minimum distance between any two cadence cues — prevents back-to-
+        // back prompts for runners with a persistent sub-target cadence (e.g. due
+        // to injury), which was the source of overwhelming repetition.
+        private const val CADENCE_MIN_DISTANCE_M = 1_000.0
+        // Re-coach if the runner is STILL non-optimal after 2 km since last cue,
+        // without requiring a pace shift — replaces the old 8-minute time interval.
+        private const val CADENCE_REPEAT_DISTANCE_M = 2_000.0
+        // Hard cap: no more than 3 cadence cues in any 10 km window.
+        private const val CADENCE_MAX_PER_10KM = 3
+        private const val CADENCE_WINDOW_DISTANCE_M = 10_000.0
         // Re-coach cadence if pace shifts by more than this threshold (m/s) since last cue.
         // 0.5 m/s ≈ 30 sec/km difference — e.g. 5:30→4:50/km is a meaningful effort change that
         // shifts the optimal cadence by ~5-8 spm, warranting fresh advice.
         private const val CADENCE_REFIRE_SPEED_DELTA_MS = 0.5
-        // Also re-coach periodically if the runner stays non-optimal even without a pace shift.
-        private const val CADENCE_REPEAT_INTERVAL_MS = 8 * 60_000L // 8 minutes
 
         // ELEVATION NOISE FILTER — two thresholds because the GPS sources have very different
         // update rates and accuracy profiles:
@@ -1070,6 +1087,9 @@ class RunTrackingService : Service(), SensorEventListener {
         lastBaselineUpdateDistance = 0.0
         hasCadenceCoachingFired = false
         lastCadenceCoachingTime = 0
+        lastCadenceCoachingDistance = 0.0
+        cadenceCoachingCountInWindow = 0
+        cadenceCoachingWindowStartDistance = 0.0
         lastCadenceCoachingSpeedMs = 0.0
         lastStrideZone = "OPTIMAL"
         baselineCadence = 0
@@ -1085,7 +1105,9 @@ class RunTrackingService : Service(), SensorEventListener {
         lastPositiveReinforcementKm = 0
         lastElevationInsightTime = 0
         hasFinal500mFired = false
+        hasFinal250mFired = false
         hasFinal100mFired = false
+        inferredTargetDistance = null
         lastFlatTerrainCoachingKm = 0
         techniqueRotationIndex = 0
         // Load cross-run technique memory before clearing so we can seed usedTechniqueCategories
@@ -1888,7 +1910,7 @@ class RunTrackingService : Service(), SensorEventListener {
      * HR coaching, cadence coaching, pace analysis, or split breakdowns.
      */
     private fun isInFinalStretch(): Boolean {
-        val td = targetDistance ?: return false // Always in metres (normalized on receipt)
+        val td = targetDistance ?: inferredTargetDistance ?: return false // Always in metres (normalized on receipt)
         if (td <= 0) return false
         val remaining = td - totalDistance
         return remaining in 0.0..FINAL_STRETCH_METERS
@@ -2701,6 +2723,10 @@ class RunTrackingService : Service(), SensorEventListener {
         } else 0f
         
         val phase = determinePhase(displayDistance / 1000.0, targetDistance?.let { it / 1000.0 })
+
+        // Infer likely target distance for watch-initiated free runs that have no explicit target.
+        // Must run before any final-stretch checks so the inferred value is available.
+        maybeInferTargetDistance()
         
         // Reset per-tick flag - only one coaching trigger fires per location update
         hasCoachingFiredThisTick = false
@@ -2756,11 +2782,11 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Elite coaching final-stretch triggers — preserved for coached sessions (final 500m/100m)
+        // Elite coaching final-stretch triggers — preserved for coached sessions (final 500m/250m/100m)
         // Generic milestone/pace-trend/technique elite triggers are suppressed during coached sessions
         if (!hasCoachingFiredThisTick && canFireCoaching()) {
             if (isCoachingPlanActive) {
-                // Coached session: only fire final 500m / 100m motivation, skip all other elite cues
+                // Coached session: only fire final 500m / 250m / 100m motivation, skip all other elite cues
                 maybeFinalStretchCoaching(displayDistance, duration, avgSpeed)
             } else {
                 maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
@@ -3646,14 +3672,36 @@ class RunTrackingService : Service(), SensorEventListener {
         return distIntoCurrentKm >= (1000.0 - KM_SPLIT_EXCLUSION_ZONE_M) ||
                 (totalDistance >= 1000.0 && distIntoCurrentKm <= KM_SPLIT_EXCLUSION_ZONE_M)
     }
-    
+
+    /**
+     * When no explicit [targetDistance] is set (e.g. a watch-initiated free run), infers
+     * the most likely finish distance from the list of common race distances.
+     * Inference fires once the runner has passed 85% of a standard distance — for example,
+     * at 4.25 km the system assumes a 5 km target, enabling 500 m / 250 m / 100 m final-
+     * stretch coaching that would otherwise be silently skipped.
+     *
+     * The inferred value is stored in [inferredTargetDistance] and is reset at the start
+     * of every new run. It is never used if [targetDistance] is already set.
+     */
+    private fun maybeInferTargetDistance() {
+        if (targetDistance != null || inferredTargetDistance != null) return
+        val inferred = COMMON_RACE_DISTANCES_M.firstOrNull { commonDist ->
+            totalDistance >= commonDist * 0.85 && totalDistance <= commonDist
+        } ?: return
+        inferredTargetDistance = inferred
+        Log.d("RunTrackingService", "⚡ Inferred target distance: ${inferred.toInt()}m (runner at ${totalDistance.toInt()}m) — final-stretch coaching now active")
+    }
+
     private fun check500mMilestones() {
         if (!coachingFeaturePrefs.halfKmCheckInEnabled) return
         val current500m = (totalDistance / 500).toInt()
-        // Only trigger the 500m summary once, at the first 0.5km mark.
-        // Also check cooldown to prevent duplicate coaching events
+        // Only trigger the 500m check-in once, at the first 0.5km mark.
+        // The outer call-site (updateRunSession) already gates on GLOBAL_COACHING_MIN_GAP_MS
+        // so we intentionally skip the redundant COACHING_COOLDOWN_MS check here.  Keeping
+        // a separate 30 s inner cooldown meant that cadence or phase-change coaching firing
+        // shortly before the 500m mark could block this one-time event entirely.
         val now = System.currentTimeMillis()
-        if (last500mMilestone == 0 && current500m >= 1 && (now - lastCoachingTime) > COACHING_COOLDOWN_MS) {
+        if (last500mMilestone == 0 && current500m >= 1) {
             last500mMilestone = 1
             lastCoachingTime = now
             recordCoachingFired()
@@ -4570,8 +4618,28 @@ class RunTrackingService : Service(), SensorEventListener {
 
         val now = System.currentTimeMillis()
 
-        // Minimum cooldown between any two cadence cues — prevents rapid-fire coaching
-        if ((now - lastCadenceCoachingTime) < CADENCE_COOLDOWN_MS) return
+        // ── Rate-limit gate 1: rotate 10 km window ──────────────────────────────
+        // When the runner crosses a 10 km boundary from the window start, reset the
+        // per-window counter so the cap applies to each fresh 10 km stretch.
+        if (totalDistance - cadenceCoachingWindowStartDistance >= CADENCE_WINDOW_DISTANCE_M) {
+            cadenceCoachingWindowStartDistance = totalDistance
+            cadenceCoachingCountInWindow = 0
+            Log.d("RunTrackingService", "Cadence coaching window reset at ${totalDistance.toInt()}m")
+        }
+
+        // ── Rate-limit gate 2: hard 10 km cap ───────────────────────────────────
+        // Never deliver more than CADENCE_MAX_PER_10KM cues in a single 10 km window.
+        // This is the primary protection against overwhelming a runner with a persistent
+        // sub-target cadence (e.g. due to injury).
+        if (cadenceCoachingCountInWindow >= CADENCE_MAX_PER_10KM) return
+
+        // ── Rate-limit gate 3: 1 km minimum distance between cues ───────────────
+        // Replaces the old 2-minute time cooldown.  Distance-based cooldown adapts
+        // naturally to run pace — a fast runner and a slow runner both get at least
+        // 1 km of uninterrupted running between prompts.
+        if (totalDistance - lastCadenceCoachingDistance < CADENCE_MIN_DISTANCE_M) return
+
+        // Global coaching cooldown (30 s gap between any coaching type)
         if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return
 
         // Current GPS speed (m/s) used to decide whether the pace has shifted enough to
@@ -4586,23 +4654,27 @@ class RunTrackingService : Service(), SensorEventListener {
         } else 0.0
 
         // Re-fire logic — cadence coaching is NOT limited to once per run.
-        // A runner who changes pace substantially (e.g. easy jog → tempo, or slows on hills)
-        // has a different optimal cadence and deserves fresh, relevant advice.
+        // A runner who changes pace substantially or stays non-optimal deserves
+        // fresh, relevant advice (subject to the distance and cap limits above).
         //
         // Three conditions that each independently allow the cue to fire:
         //   1. First-time: cue has never fired this run.
         //   2. Pace shift: speed has changed by >0.5 m/s (~30 sec/km) since last cue — the
         //      biomechanics target has shifted enough that the previous cue is now stale.
-        //   3. Sustained issue: runner has been non-optimal for 8+ minutes (form drift / fatigue).
+        //   3. Sustained issue: runner has covered 2+ km since last cue and is still
+        //      non-optimal (form drift / fatigue) — replaces old 8-minute time interval.
         val speedDelta = kotlin.math.abs(currentSpeedMs - lastCadenceCoachingSpeedMs)
         val paceBucketChanged = hasCadenceCoachingFired && speedDelta >= CADENCE_REFIRE_SPEED_DELTA_MS
-        val sustainedIssue = hasCadenceCoachingFired && (now - lastCadenceCoachingTime) >= CADENCE_REPEAT_INTERVAL_MS
+        val sustainedIssue = hasCadenceCoachingFired &&
+            (totalDistance - lastCadenceCoachingDistance) >= CADENCE_REPEAT_DISTANCE_M
 
         val shouldFire = !hasCadenceCoachingFired || paceBucketChanged || sustainedIssue
         if (!shouldFire) return
 
         hasCadenceCoachingFired = true
         lastCadenceCoachingTime = now
+        lastCadenceCoachingDistance = totalDistance
+        cadenceCoachingCountInWindow++
         lastCadenceCoachingSpeedMs = currentSpeedMs
         lastCoachingTime = now
         lastStrideZone = stride.strideZone
@@ -4672,19 +4744,27 @@ class RunTrackingService : Service(), SensorEventListener {
      * Final-stretch-only coaching for coached sessions.
      * During a coaching plan run, all generic milestone/technique/ETA elite cues are
      * suppressed — the dynamic plan handles all in-session motivation.
-     * Only the final 500m and final 100m "push" cues are preserved as they are
+     * Only the final 500m, 250m, and 100m "push" cues are preserved as they are
      * universal to every session regardless of type.
      */
     private fun maybeFinalStretchCoaching(displayDistance: Double, duration: Long, avgSpeed: Float) {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
         val now = System.currentTimeMillis()
-        val td = targetDistance
+        val td = targetDistance ?: inferredTargetDistance
         val remainingMeters = if (td != null && td > 0) (td - displayDistance) else null
 
         // FINAL 100m — highest priority, bypasses cooldowns (fires once)
         if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
             hasFinal100mFired = true
             fireFinalCoaching("final_100m", displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
+            return
+        }
+
+        // FINAL 250m — fires between 500m and 100m remaining (fires once)
+        if (!hasFinal250mFired && remainingMeters != null && remainingMeters in 0.0..275.0) {
+            if ((now - lastCoachingTime) < 10_000L) return
+            hasFinal250mFired = true
+            fireFinalCoaching("final_250m", displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
             return
         }
 
@@ -4703,13 +4783,21 @@ class RunTrackingService : Service(), SensorEventListener {
 
         val distKm = displayDistance / 1000.0
         val currentKm = distKm.toInt()
-        val td = targetDistance // Already in metres
+        val td = targetDistance ?: inferredTargetDistance // Use inferred if no explicit target
         val remainingMeters = if (td != null && td > 0) (td - displayDistance) else null
 
         // FINAL 100m — highest priority, bypasses cooldowns (fires once)
         if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
             hasFinal100mFired = true
             fireFinalCoaching("final_100m", distKm, duration, avgSpeed, remainingMeters)
+            return
+        }
+
+        // FINAL 250m — fires between 500m and 100m remaining (fires once)
+        if (!hasFinal250mFired && remainingMeters != null && remainingMeters in 0.0..275.0) {
+            if ((now - lastCoachingTime) < 10_000L) return // minimal 10s gap only
+            hasFinal250mFired = true
+            fireFinalCoaching("final_250m", distKm, duration, avgSpeed, remainingMeters)
             return
         }
 
@@ -5166,8 +5254,8 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun fireFinalCoaching(type: String, distKm: Double, duration: Long, avgSpeed: Float, remainingMeters: Double) {
         recordCoachingFired()
         hasCoachingFiredThisTick = true
-        val td = targetDistance ?: 0.0
-        // targetDistance is in metres, convert to km for ETA calculation
+        val td = targetDistance ?: inferredTargetDistance ?: 0.0
+        // targetDistance (or inferred) is in metres, convert to km for ETA calculation
         val tdKm = td / 1000.0
         val elapsedSec = duration / 1000.0
         val projectedFinishSec = if (distKm > 0) (elapsedSec / distKm * tdKm).toLong() else null
@@ -5194,7 +5282,11 @@ class RunTrackingService : Service(), SensorEventListener {
             etaOverTargetPercent = overPercent,
             remainingMeters = remainingMeters.toInt()
         )
-        fireEliteCoaching(request, if (type == "final_100m") "Final 100m" else "Final 500m")
+        fireEliteCoaching(request, when (type) {
+            "final_100m" -> "Final 100m"
+            "final_250m" -> "Final 250m"
+            else -> "Final 500m"
+        })
     }
 
     private fun fireMilestoneCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
