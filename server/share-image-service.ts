@@ -39,6 +39,7 @@ export interface PlacedSticker {
   y: number;
   scale: number;
   customText?: string;
+  transparentBackground?: boolean;
 }
 
 export interface CustomStickerData {
@@ -449,66 +450,71 @@ function buildStatsGridSvg(
 }
 
 function buildRunMetricsSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
-  const isVertical = h > w;
   const pad = 48;
-  const bottomY = h - LOGO_ZONE_H;
 
-  const statsBlockH = isVertical ? 320 : 280;
-  const statsTop = bottomY - statsBlockH;
-
+  // Gradient covers top so text is readable over a photo background
   const gradientOverlay = `
     <defs>
       <linearGradient id="photoFade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
-        <stop offset="40%" stop-color="#000000" stop-opacity="0"/>
-        <stop offset="70%" stop-color="#000000" stop-opacity="0.55"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
+        <stop offset="0%" stop-color="#000000" stop-opacity="0.7"/>
+        <stop offset="35%" stop-color="#000000" stop-opacity="0.35"/>
+        <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.6"/>
       </linearGradient>
     </defs>
     <rect width="${w}" height="${h}" fill="url(#photoFade)"/>
   `;
 
-  let y = statsTop + 20;
+  // ── Start 15% down from the top ──
+  let y = Math.round(h * 0.15);
 
   let nameSvg = "";
   if (userName) {
-    nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="20" font-weight="600" fill="#FFFFFF" opacity="0.85">${esc(userName)}</text>`;
-    y += 28;
+    nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="22" font-weight="600" fill="#FFFFFF" opacity="0.85">${esc(userName)}</text>`;
+    y += 32;
   }
-  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="14" fill="#FFFFFF" opacity="0.55" letter-spacing="0.5">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
-  y += 36;
+  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="16" fill="#FFFFFF" opacity="0.55" letter-spacing="0.5">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
+  y += 42;
 
   const runName = run.name || "Run";
-  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="28" font-weight="800" fill="#FFFFFF">${esc(runName)}</text>`;
-  y += 46;
+  nameSvg += `<text x="${pad}" y="${y}" font-family="${FONT}" font-size="34" font-weight="800" fill="#FFFFFF">${esc(runName)}</text>`;
+  y += 56;
 
   const col1X = pad;
-  const col2X = w * 0.5;
 
-  const labelStyle = `font-family="${FONT}" font-size="15" font-weight="500" fill="#FFFFFF" opacity="0.6"`;
-  const valueStyle = `font-family="${FONT}" font-size="38" font-weight="800" fill="#FFFFFF"`;
-  const unitStyle = `font-family="${FONT}" font-size="20" font-weight="500" fill="#FFFFFF" opacity="0.7"`;
+  // 50% bigger fonts (38→57, 15→23, 20→30)
+  const labelStyle = `font-family="${FONT}" font-size="23" font-weight="500" fill="#FFFFFF" opacity="0.6"`;
+  const valueStyle = `font-family="${FONT}" font-size="57" font-weight="800" fill="#FFFFFF"`;
+  const unitStyle  = `font-family="${FONT}" font-size="30" font-weight="500" fill="#FFFFFF" opacity="0.7"`;
 
   const paceVal = run.avgPace || "--:--";
   const timeVal = formatDuration(run.duration || 0);
   const distVal = run.distance?.toFixed(2) || "0";
 
+  // Place Time column 50% closer to Pace: measure where pace + /km ends and
+  // offset from there rather than using fixed w*0.5
+  const charW = 34; // approx px per char at 57sp
+  const paceTextW = paceVal.length * charW;
+  const unitW = 55; // "/km" width at 30sp
+  const col2X = col1X + paceTextW + unitW + 60; // 60px gap between /km and Time
+
   let statsSvg = "";
 
   statsSvg += `<text x="${col1X}" y="${y}" ${labelStyle}>Pace</text>`;
   statsSvg += `<text x="${col2X}" y="${y}" ${labelStyle}>Time</text>`;
-  y += 40;
+  y += 52;
 
   statsSvg += `<text x="${col1X}" y="${y}" ${valueStyle}>${esc(paceVal)}</text>`;
-  statsSvg += `<text x="${col1X + paceVal.length * 22 + 6}" y="${y}" ${unitStyle}>/km</text>`;
+  statsSvg += `<text x="${col1X + paceTextW + 6}" y="${y}" ${unitStyle}>/km</text>`;
   statsSvg += `<text x="${col2X}" y="${y}" ${valueStyle}>${esc(timeVal)}</text>`;
-  y += 44;
+  y += 66;
 
   statsSvg += `<text x="${col1X}" y="${y}" ${labelStyle}>Distance</text>`;
-  y += 40;
+  y += 52;
 
+  const distTextW = distVal.length * charW;
   statsSvg += `<text x="${col1X}" y="${y}" ${valueStyle}>${esc(distVal)}</text>`;
-  statsSvg += `<text x="${col1X + distVal.length * 22 + 6}" y="${y}" ${unitStyle}>km</text>`;
+  statsSvg += `<text x="${col1X + distTextW + 6}" y="${y}" ${unitStyle}>km</text>`;
 
   return `
     ${globalDefs(w, h)}
@@ -1126,16 +1132,16 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
       const cRx = Math.round(12 * s);
+      const transBg = sticker.transparentBackground === true;
+      const bgRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>`;
+      const borderRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>`;
       // Try elevation from GPS track points first
       const rawGps = run.gpsTrack as any[];
       const gpsElevData = rawGps?.length >= 2
         ? rawGps.map((p: any) => p.elevation ?? p.alt ?? p.altitude ?? null).filter((v: any) => v !== null)
         : [];
       if (gpsElevData.length >= 2) {
-        return `
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
-          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)")}</g>`;
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)")}</g>`;
       }
       // Fallback: simulate from pace splits if available (uphill = slower pace)
       if (run.paceData && run.paceData.length >= 2) {
@@ -1145,10 +1151,7 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
         const maxPace = Math.max(...paceVals);
         const range = maxPace - minPace || 1;
         const simElev = paceVals.map((p) => ((p - minPace) / range) * totalElevGain);
-        return `
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
-          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, simElev, C.green, "Elevation est.")}</g>`;
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, simElev, C.green, "Elevation est.")}</g>`;
       }
       // No data placeholder
       return buildNoDataChart(px, py, chartW, chartH, s, C.green, "ELEVATION");
@@ -1157,12 +1160,12 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
       const cRx = Math.round(12 * s);
+      const transBg = sticker.transparentBackground === true;
+      const bgRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>`;
+      const borderRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>`;
       if (run.paceData && run.paceData.length >= 2) {
         const paceValues = run.paceData.map((p) => p.paceSeconds);
-        return `
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
-          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km")}</g>`;
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km")}</g>`;
       }
       return buildNoDataChart(px, py, chartW, chartH, s, C.orange, "PACE");
     }
@@ -1170,12 +1173,12 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
       const chartW = Math.round(280 * s);
       const chartH = Math.round(140 * s);
       const cRx = Math.round(12 * s);
+      const transBg = sticker.transparentBackground === true;
+      const bgRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>`;
+      const borderRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>`;
       if (run.heartRateData && run.heartRateData.length >= 2) {
         const hrSampled = sampleData(run.heartRateData.map((h) => h.value), 30);
-        return `
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>
-          <rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>
-          <g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate")}</g>`;
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, hrSampled, C.red, "Heart Rate")}</g>`;
       }
       return buildNoDataChart(px, py, chartW, chartH, s, C.red, "HEART RATE");
     }
