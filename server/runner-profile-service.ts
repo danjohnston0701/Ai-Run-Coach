@@ -124,10 +124,17 @@ export async function refreshRunnerProfile(userId: string): Promise<void> {
     }
 
     const profile = await generateProfile(context);
-    if (!profile) return;
 
-    await persistProfile(userId, profile);
-    console.log(`[RunnerProfile] Updated profile for user ${userId} (${profile.length} chars)`);
+    if (profile) {
+      await persistProfile(userId, profile);
+      console.log(`[RunnerProfile] Updated profile for user ${userId} (${profile.length} chars)`);
+    } else {
+      // OpenAI returned empty/null content (rare edge case — model refusal, empty choices, etc.)
+      // Still update the timestamp so My Data shows "reviewed after this run" even if the
+      // profile text didn't change.  Preserve the existing profile text.
+      console.warn(`[RunnerProfile] generateProfile returned null for user ${userId} — bumping timestamp only`);
+      await bumpProfileTimestamp(userId);
+    }
   } catch (err) {
     // Non-fatal — My Data screen and all AI features have sensible fallbacks
     console.error(`[RunnerProfile] Failed to refresh profile for user ${userId}:`, err);
@@ -600,6 +607,17 @@ coaching observations log above — don't invent tendencies.`;
 }
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
+
+/**
+ * Update only the timestamp — used when OpenAI returns empty content but we still
+ * want My Data to reflect that the coach reviewed this user after the latest run.
+ */
+async function bumpProfileTimestamp(userId: string): Promise<void> {
+  await db
+    .update(userStats)
+    .set({ aiRunnerProfileUpdatedAt: new Date() })
+    .where(eq(userStats.userId, userId));
+}
 
 async function persistProfile(userId: string, profile: string): Promise<void> {
   await db

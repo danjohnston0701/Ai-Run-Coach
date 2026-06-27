@@ -4,7 +4,7 @@ import { eq, and, or, gte, lt, desc, lte, count, isNull, isNotNull } from "drizz
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
-import { getRunnerProfile, runnerProfileBlock, persistCoachingObservation } from "./runner-profile-service";
+import { getRunnerProfile, runnerProfileBlock, persistCoachingObservation, refreshRunnerProfile } from "./runner-profile-service";
 import { 
   garminWellnessMetrics, connectedDevices, garminActivities, garminBodyComposition, 
   runs, garminRealtimeData, garminCompanionSessions,
@@ -1961,9 +1961,18 @@ function transformRunForAndroid(run: any) {
                 .set(mergeFields)
                 .where(eq(runs.id, existingByExternalId.id))
                 .returning();
+              // Refresh the runner profile now that we've merged richer data (coaching notes etc.)
+              refreshRunnerProfile(userId).catch(err =>
+                console.error('[POST /api/runs] Case 0 merge: runner profile refresh failed:', err)
+              );
               return res.status(200).json(transformRunForAndroid(merged));
             }
 
+            // No new data to merge — still refresh the profile so "Last reviewed" timestamp
+            // always advances after any run-related upload, matching user expectations.
+            refreshRunnerProfile(userId).catch(err =>
+              console.error('[POST /api/runs] Case 0 no-merge: runner profile refresh failed:', err)
+            );
             return res.status(200).json(transformRunForAndroid(existingByExternalId));
           }
         }
