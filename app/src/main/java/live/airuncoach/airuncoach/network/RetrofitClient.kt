@@ -143,12 +143,28 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
     )
 
     private val okHttpClient = OkHttpClient.Builder()
-        .cache(httpCache)  // ✅ Enable HTTP caching for bandwidth savings
+        .cache(httpCache)  // ✅ Enable HTTP caching for static assets
         .cookieJar(PersistentCookieJar(context))
         // Increase timeouts for AI route generation (OpenAI + Google Maps can take 2+ minutes)
         .connectTimeout(45, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)  // AI plan generation (gpt-4o call) ~60s; 2min gives headroom
         .writeTimeout(45, TimeUnit.SECONDS)
+        // ─── Strip Cache-Control from API responses to prevent OkHttp disk-caching ──────
+        // The server sends "Cache-Control: private, max-age=3600" on all authenticated GETs.
+        // Without this interceptor, OkHttp's disk cache serves stale run data (e.g., old run
+        // names) even after a rename/update, surviving app restarts for up to 1 hour.
+        // Mutable API data must never be served from the disk cache.
+        .addNetworkInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            val path = chain.request().url.encodedPath
+            if (path.startsWith("/api/")) {
+                response.newBuilder()
+                    .header("Cache-Control", "no-store")
+                    .build()
+            } else {
+                response
+            }
+        }
         // Add Bearer token to all requests
         .addInterceptor { chain ->
             val request = chain.request()
@@ -276,11 +292,23 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                 
                 // Build okhttp client
                 val client = OkHttpClient.Builder()
-                    .cache(httpCache)  // ✅ Enable HTTP caching for bandwidth savings
+                    .cache(httpCache)  // ✅ Enable HTTP caching for static assets
                     .connectTimeout(30, TimeUnit.SECONDS)
                     .readTimeout(30, TimeUnit.SECONDS)
                     .writeTimeout(30, TimeUnit.SECONDS)
                     .cookieJar(PersistentCookieJar(context))
+                    // ─── Strip Cache-Control from API responses (see comment in instance builder) ──
+                    .addNetworkInterceptor { chain ->
+                        val response = chain.proceed(chain.request())
+                        val path = chain.request().url.encodedPath
+                        if (path.startsWith("/api/")) {
+                            response.newBuilder()
+                                .header("Cache-Control", "no-store")
+                                .build()
+                        } else {
+                            response
+                        }
+                    }
                     .addInterceptor { chain ->
                         val originalRequest = chain.request()
                         val requestBuilder = originalRequest.newBuilder()
