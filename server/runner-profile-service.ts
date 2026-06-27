@@ -51,7 +51,7 @@
  *   Stored in user_stats.ai_runner_profile.  Injected verbatim into AI prompts.
  */
 
-import OpenAI from 'openai';
+import OpenAI, { APIError } from 'openai';
 import { db } from './db';
 import {
   users, runs, userStats, goals, trainingPlans, plannedWorkouts,
@@ -115,30 +115,104 @@ Use the above context to personalise every part of your response. Reference spec
  * coaching observations + raw data, and asks OpenAI to UPDATE (not rewrite)
  * its understanding of this runner.
  */
-export async function refreshRunnerProfile(userId: string): Promise<void> {
-  try {
-    const context = await gatherRunnerContext(userId);
-    if (!context) {
-      console.warn(`[RunnerProfile] No context available for user ${userId} — skipping`);
-      return;
-    }
-
-    const profile = await generateProfile(context);
-
-    if (profile) {
-      await persistProfile(userId, profile);
-      console.log(`[RunnerProfile] Updated profile for user ${userId} (${profile.length} chars)`);
-    } else {
-      // OpenAI returned empty/null content (rare edge case — model refusal, empty choices, etc.)
-      // Still update the timestamp so My Data shows "reviewed after this run" even if the
-      // profile text didn't change.  Preserve the existing profile text.
-      console.warn(`[RunnerProfile] generateProfile returned null for user ${userId} — bumping timestamp only`);
-      await bumpProfileTimestamp(userId);
-    }
-  } catch (err) {
-    // Non-fatal — My Data screen and all AI features have sensible fallbacks
-    console.error(`[RunnerProfile] Failed to refresh profile for user ${userId}:`, err);
+/**
+ * Attempt to generate the runner profile once.
+ * Classifies APIError instances into ProfileGenerationError so the caller can
+ * decide whether to retry or log without cluttering the OpenAI SDK error shape.
+ */
+async function attemptProfileGeneration(userId: string): Promise<string> {
+  const context = await gatherRunnerContext(userId);
+  if (!context) {
+    throw new ProfileGenerationError('unknown', `gatherRunnerContext returned null for user ${userId} — user row may be missing`);
   }
+  // generateProfile now throws ProfileGenerationError on every non-success path
+  return generateProfile(context);
+}
+
+export async function refreshRunnerProfile(userId: string): Promise<void> {
+  const MAX_RETRIES = 2; // first attempt + one retry for transient errors
+  const RETRY_DELAY_MS = 12_000; // 12 s — enough to clear a rate-limit window
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const profile = await attemptProfileGeneration(userId);
+      await persistProfile(userId, profile);
+      console.log(`[RunnerProfile] ✅ Updated profile for user ${userId} (${profile.length} chars)${attempt > 1 ? ` on attempt ${attempt}` : ''}`);
+      return; // success — exit the retry loop
+
+    } catch (err: unknown) {
+      lastError = err;
+
+      // ── Classify the error ───────────────────────────────────────────────
+      // Priority: our own ProfileGenerationError first, then OpenAI SDK APIError,
+      // then everything else (network timeout, DNS, etc.)
+
+      if (err instanceof ProfileGenerationError) {
+        switch (err.type) {
+          case 'rate_limit':
+            // Should never appear here since APIError is classified below, but guard anyway
+            console.warn(`[RunnerProfile] ⚠ Rate limited (attempt ${attempt}/${MAX_RETRIES}) for user ${userId}: ${err.message}`);
+            break;
+          case 'content_filter':
+            // Non-transient — retrying will not help; log and give up
+            console.error(`[RunnerProfile] ❌ CONTENT_FILTER — profile generation blocked for user ${userId}: ${err.message}`);
+            return;
+          case 'refusal':
+            console.error(`[RunnerProfile] ❌ REFUSAL — model declined for user ${userId}: ${err.message}`);
+            return;
+          case 'empty_response':
+          case 'empty_choices':
+            // Usually transient (model hiccup); worth one retry
+            console.warn(`[RunnerProfile] ⚠ EMPTY_RESPONSE (attempt ${attempt}/${MAX_RETRIES}) for user ${userId}: ${err.message}`);
+            break;
+          default:
+            console.error(`[RunnerProfile] ❌ UNKNOWN error (attempt ${attempt}/${MAX_RETRIES}) for user ${userId}: ${err.message}`);
+        }
+      } else if (err instanceof APIError) {
+        // OpenAI SDK APIError — classify by HTTP status
+        const status = err.status ?? 0;
+
+        if (status === 401 || status === 403) {
+          // Auth failure — OPENAI_API_KEY is invalid or has no quota.  Retrying is pointless.
+          console.error(`[RunnerProfile] ❌ AUTH ERROR (HTTP ${status}) — OPENAI_API_KEY invalid or lacks quota. User ${userId}: ${err.message}`);
+          return; // permanent failure, do not retry
+
+        } else if (status === 429) {
+          // Rate limit — transient; retry after backoff
+          console.warn(`[RunnerProfile] ⚠ RATE LIMITED (HTTP 429, attempt ${attempt}/${MAX_RETRIES}) for user ${userId}: ${err.message}`);
+
+        } else if (status >= 500) {
+          // OpenAI server error (500, 503, etc.) — transient
+          console.warn(`[RunnerProfile] ⚠ OPENAI SERVER ERROR (HTTP ${status}, attempt ${attempt}/${MAX_RETRIES}) for user ${userId}: ${err.message}`);
+
+        } else {
+          // Unexpected API error
+          console.error(`[RunnerProfile] ❌ API ERROR (HTTP ${status}, attempt ${attempt}/${MAX_RETRIES}) for user ${userId}: ${err.message}`);
+        }
+      } else {
+        // Network timeout, DNS failure, etc.
+        const msg = err instanceof Error ? err.message : String(err);
+        const isTimeout = msg.toLowerCase().includes('timeout') || msg.toLowerCase().includes('econnreset') || msg.toLowerCase().includes('etimedout');
+        if (isTimeout) {
+          console.warn(`[RunnerProfile] ⚠ TIMEOUT (attempt ${attempt}/${MAX_RETRIES}) for user ${userId}: ${msg}`);
+        } else {
+          console.error(`[RunnerProfile] ❌ UNEXPECTED ERROR (attempt ${attempt}/${MAX_RETRIES}) for user ${userId}:`, err);
+        }
+      }
+
+      // If we have retries left, wait then try again
+      if (attempt < MAX_RETRIES) {
+        console.log(`[RunnerProfile] Retrying in ${RETRY_DELAY_MS / 1000}s for user ${userId} (attempt ${attempt + 1}/${MAX_RETRIES})…`);
+        await sleep(RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  // All attempts exhausted — profile NOT updated, timestamp NOT bumped.
+  // A stale-but-accurate "Last reviewed" date is better than a fake-fresh one.
+  console.error(`[RunnerProfile] ❌ All ${MAX_RETRIES} attempts failed for user ${userId}. Profile NOT updated. Last error:`, lastError);
 }
 
 /**
@@ -464,9 +538,39 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
   };
 }
 
+// ─── OpenAI error classification ──────────────────────────────────────────────
+
+type ProfileErrorType =
+  | 'rate_limit'       // 429 — transient, self-heals, retry is appropriate
+  | 'server_error'     // 500/503 — OpenAI-side, transient
+  | 'auth_error'       // 401/403 — OPENAI_API_KEY invalid/expired — needs operator action
+  | 'timeout'          // request timed out on our side
+  | 'content_filter'   // output flagged by OpenAI safety system
+  | 'refusal'          // model declined to answer
+  | 'empty_response'   // model returned no content (finish_reason=length + empty, etc.)
+  | 'empty_choices'    // choices array was empty
+  | 'unknown';         // anything else
+
+class ProfileGenerationError extends Error {
+  constructor(
+    public readonly type: ProfileErrorType,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ProfileGenerationError';
+  }
+}
+
+/**
+ * Helper: sleep for `ms` milliseconds — used for retry backoff.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // ─── GPT generation ───────────────────────────────────────────────────────────
 
-async function generateProfile(ctx: RunnerContext): Promise<string | null> {
+async function generateProfile(ctx: RunnerContext): Promise<string> {
   const injuryNote = ctx.injuryHistory
     ? `Injury history / health notes: ${JSON.stringify(ctx.injuryHistory)}.`
     : '';
@@ -593,31 +697,69 @@ TONE: Factual and sharp. Coaches briefing each other. No filler.
 DO NOT fabricate data not provided. Only reference observed patterns that appear in the
 coaching observations log above — don't invent tendencies.`;
 
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt   },
-    ],
-    max_tokens: 400,
-    temperature: 0.35, // Low temperature for consistent, factual output — slightly higher than before to allow natural synthesis
-  });
+  let completion: Awaited<ReturnType<typeof openai.chat.completions.create>>;
+  try {
+    completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userPrompt   },
+      ],
+      max_tokens: 400,
+      temperature: 0.35,
+    });
+  } catch (apiErr: unknown) {
+    // Re-throw as ProfileGenerationError so callers get structured info.
+    // APIError (rate limit, auth, server error) and network errors are both handled here.
+    if (apiErr instanceof APIError) {
+      const status = apiErr.status ?? 0;
+      if (status === 429) {
+        throw new ProfileGenerationError('rate_limit', `HTTP 429 rate limit: ${apiErr.message}`);
+      } else if (status === 401 || status === 403) {
+        throw new ProfileGenerationError('auth_error', `HTTP ${status} auth failure: ${apiErr.message}`);
+      } else if (status >= 500) {
+        throw new ProfileGenerationError('server_error', `HTTP ${status} OpenAI server error: ${apiErr.message}`);
+      }
+      throw new ProfileGenerationError('unknown', `HTTP ${status} API error: ${apiErr.message}`);
+    }
+    // Network/timeout — preserve the original error for the outer handler
+    throw apiErr;
+  }
 
-  return completion.choices[0]?.message?.content?.trim() ?? null;
+  const choice = completion.choices[0];
+
+  // ── Classify non-stop finish reasons ─────────────────────────────────────
+  if (!choice) {
+    throw new ProfileGenerationError('empty_choices', 'OpenAI returned zero choices — no content generated');
+  }
+
+  const finishReason = choice.finish_reason;
+  if (finishReason === 'content_filter') {
+    throw new ProfileGenerationError('content_filter', 'OpenAI content filter triggered — prompt or output was flagged');
+  }
+  if (finishReason === 'refusal') {
+    const refusalText = (choice.message as any)?.refusal ?? '(no refusal text)';
+    throw new ProfileGenerationError('refusal', `OpenAI model refused to generate profile: ${refusalText}`);
+  }
+  if (finishReason === 'length') {
+    // Truncated but still usable — log a warning and return what we have
+    const truncated = choice.message?.content?.trim();
+    if (truncated) {
+      console.warn(`[RunnerProfile] ⚠ Response truncated at max_tokens — profile may be incomplete. Consider raising max_tokens above 400.`);
+      return truncated; // usable, proceed with persist
+    }
+    throw new ProfileGenerationError('empty_response', 'finish_reason=length but content was empty');
+  }
+
+  const text = choice.message?.content?.trim();
+  if (!text) {
+    throw new ProfileGenerationError('empty_response', `finish_reason=${finishReason ?? 'unknown'} but content was null/empty`);
+  }
+
+  return text;
 }
 
-// ─── Persistence ──────────────────────────────────────────────────────────────
-
-/**
- * Update only the timestamp — used when OpenAI returns empty content but we still
- * want My Data to reflect that the coach reviewed this user after the latest run.
- */
-async function bumpProfileTimestamp(userId: string): Promise<void> {
-  await db
-    .update(userStats)
-    .set({ aiRunnerProfileUpdatedAt: new Date() })
-    .where(eq(userStats.userId, userId));
-}
+// ─── Persistence ─────────────────────��────────────────────────────────────────
 
 async function persistProfile(userId: string, profile: string): Promise<void> {
   await db
