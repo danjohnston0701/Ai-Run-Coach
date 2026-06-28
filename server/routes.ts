@@ -2654,17 +2654,12 @@ function transformRunForAndroid(run: any) {
         );
       });
 
-      // Reassess training plans asynchronously (don't block response)
-      setImmediate(() => {
-        (async () => {
-          try {
-            console.log(`[Run] Triggering plan reassessment for run ${runId}`);
-            await reassessTrainingPlansWithRunData(userId, runId);
-          } catch (err) {
-            console.error("[Run] Plan reassessment failed:", err);
-          }
-        })();
-      });
+      // NOTE: Plan reassessment is intentionally NOT re-triggered here.
+      // It already fires once from onRunSaved (POST /api/runs) and persists its
+      // insights to runs.coaching_insight. Re-running it on every "Generate AI Summary"
+      // tap would cause expensive GPT-4o duplicate calls and flood the training plan
+      // with redundant adaptations. The coaching insight loaded above is the canonical
+      // source — no need to regenerate it.
     } catch (error: any) {
       console.error("Comprehensive run analysis error:", {
         message: error?.message,
@@ -5012,17 +5007,25 @@ function transformRunForAndroid(run: any) {
         }
       });
 
-      // Reassess training plans asynchronously (don't block response)
-      setImmediate(() => {
-        (async () => {
-          try {
-            console.log(`[Run] Triggering plan reassessment for run ${runId}`);
-            await reassessTrainingPlansWithRunData(req.user!.userId, runId);
-          } catch (err) {
-            console.error("[Run] Plan reassessment failed:", err);
-          }
-        })();
-      });
+      // Re-assess training plans only if no coaching insight exists yet.
+      // Garmin enrichment adds meaningful HR + training-effect data that wasn't
+      // available at run-save time, so a fresh assessment makes sense — but only
+      // once, not on every enrichment retry.
+      const enrichedRun = updatedRun as any;
+      if (!enrichedRun?.coachingInsight) {
+        setImmediate(() => {
+          (async () => {
+            try {
+              console.log(`[Run] Triggering plan reassessment for run ${runId} (post Garmin enrich)`);
+              await reassessTrainingPlansWithRunData(req.user!.userId, runId);
+            } catch (err) {
+              console.error("[Run] Plan reassessment failed:", err);
+            }
+          })();
+        });
+      } else {
+        console.log(`[Run] Skipping plan reassessment for run ${runId} — insight already exists`);
+      }
     } catch (error: any) {
       console.error("Garmin enrich run error:", error);
       // Detect expired/invalid token — tell client to reconnect rather than generic 500
@@ -5994,17 +5997,28 @@ function transformRunForAndroid(run: any) {
               })();
             });
 
-            // Trigger plan reassessment asynchronously
-            setImmediate(() => {
-              (async () => {
-                try {
-                  console.log(`[Garmin Webhook] Triggering plan reassessment for run ${runId}`);
-                  await reassessTrainingPlansWithRunData(device.userId, runId);
-                } catch (err) {
-                  console.error("[Garmin Webhook] Plan reassessment failed:", err);
-                }
-              })();
-            });
+            // Trigger plan reassessment asynchronously.
+            // For MERGED runs (run_enriched): the phone run already had reassessment
+            // fired from POST /api/runs — skip to avoid duplicate GPT-4o calls and
+            // redundant plan adaptations. Garmin adds HR/training-effect data, but
+            // those were already present at assessment time (Garmin data often syncs
+            // before the webhook arrives).
+            // For NEW runs created solely from Garmin webhook (new_activity): always
+            // run — this is the first and only assessment for that run.
+            if (notificationType === 'new_activity') {
+              setImmediate(() => {
+                (async () => {
+                  try {
+                    console.log(`[Garmin Webhook] Triggering plan reassessment for new run ${runId}`);
+                    await reassessTrainingPlansWithRunData(device.userId, runId);
+                  } catch (err) {
+                    console.error("[Garmin Webhook] Plan reassessment failed:", err);
+                  }
+                })();
+              });
+            } else {
+              console.log(`[Garmin Webhook] Skipping plan reassessment for merged run ${runId} — already assessed at run save`);
+            }
             
           } else if (!isRunOrWalk) {
             console.log(`⏭️ [Garmin Webhook] Skipping non-running activity: ${activityType}`);
