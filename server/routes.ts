@@ -9338,23 +9338,40 @@ function transformRunForAndroid(run: any) {
     return getRunnerProfile(Number(uid)).catch(() => null);
   };
 
-  // Helper: resolve coachAccent and coachGender from the DB — overrides whatever the Android sends.
-  // This ensures the correct user voice preference is always used even if the Android caches stale values.
+  // Helper: resolve all coach voice/persona settings from the DB.
+  // This overrides whatever the Android sends, ensuring the correct user preferences are
+  // always applied even if the Android caches stale values between sessions.
+  //
+  // Resolved fields:
+  //   coachGender  — affects Polly voice selection (male/female)
+  //   coachAccent  — affects Polly voice selection (british/irish/australian/…)
+  //   coachTone    — affects Polly voice selection AND AI text generation personality
+  //   coachName    — used in TTS instructions and AI prompt personality
+  //
   // Falls back gracefully to req.body values if the DB lookup fails or userId is absent.
-  const resolveVoiceSettings = async (body: any): Promise<{ coachGender: string; coachAccent: string }> => {
+  const resolveVoiceSettings = async (body: any): Promise<{
+    coachGender: string;
+    coachAccent: string;
+    coachTone: string;
+    coachName: string;
+  }> => {
     const uid = body.userId ?? body.user_id;
     let coachGender: string = body.coachGender || 'female';
     let coachAccent: string = body.coachAccent || 'british';
+    let coachTone: string   = body.coachTone   || 'energetic';
+    let coachName: string   = body.coachName   || 'AI Coach';
     if (uid) {
       try {
         const user = await storage.getUser(String(uid));
         if (user) {
           if (user.coachGender) coachGender = user.coachGender;
           if (user.coachAccent) coachAccent = user.coachAccent;
+          if (user.coachTone)   coachTone   = user.coachTone;
+          if (user.coachName)   coachName   = user.coachName;
         }
       } catch { /* non-fatal — fall back to req.body values */ }
     }
-    return { coachGender, coachAccent };
+    return { coachGender, coachAccent, coachTone, coachName };
   };
 
   // Pace Update Coaching with TTS
@@ -9365,9 +9382,11 @@ function transformRunForAndroid(run: any) {
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
 
       // Resolve voice settings from DB — overrides stale Android values
-      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
       req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
+      req.body.coachName   = dbCoachName;   // DB-authoritative coach name
       const baseTone = req.body.coachTone;
       // Use effectiveTone for AI personality only; voice selection stays on baseTone
       const effectiveTone = getPhaseTone(
@@ -9421,9 +9440,11 @@ function transformRunForAndroid(run: any) {
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
 
       // Resolve voice settings from DB — overrides stale Android values
-      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
       req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
+      req.body.coachName   = dbCoachName;   // DB-authoritative coach name
       const baseTone = req.body.coachTone;
       // Use effectiveTone for AI personality only; voice selection stays on baseTone
       const effectiveTone = getPhaseTone(
@@ -9469,9 +9490,11 @@ function transformRunForAndroid(run: any) {
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
 
       // Resolve voice settings from DB — overrides stale Android values
-      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
       req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
+      req.body.coachName   = dbCoachName;   // DB-authoritative coach name
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateCadenceCoaching({ ...req.body, runnerProfile });
@@ -9508,9 +9531,11 @@ function transformRunForAndroid(run: any) {
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
 
       // Resolve voice settings from DB — overrides stale Android values
-      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
       req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
+      req.body.coachName   = dbCoachName;   // DB-authoritative coach name
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.getElevationCoaching({ ...req.body, runnerProfile });
@@ -9547,9 +9572,11 @@ function transformRunForAndroid(run: any) {
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
 
       // Resolve voice settings from DB — overrides stale Android values
-      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
       req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
+      req.body.coachName   = dbCoachName;   // DB-authoritative coach name
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateEliteCoaching({ ...req.body, runnerProfile });
@@ -9591,9 +9618,11 @@ function transformRunForAndroid(run: any) {
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
 
       // Resolve voice settings from DB — overrides stale Android values (fixes wrong accent/voice)
-      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
       req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
+      req.body.coachName   = dbCoachName;   // DB-authoritative coach name
       const baseTone = req.body.coachTone;
       // Use effectiveTone for AI personality only; voice selection stays on baseTone for consistency
       const effectiveTone = getPhaseTone(
@@ -9641,9 +9670,11 @@ function transformRunForAndroid(run: any) {
       const cooldown = await checkCooldown('interval-coaching', req.body, coachingUserId);
 
       // Resolve voice settings from DB — overrides stale Android values
-      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
       req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
+      req.body.coachName   = dbCoachName;   // DB-authoritative coach name
       const baseTone = req.body.coachTone;
       
       const aiService = await import("./ai-service");
