@@ -1240,7 +1240,9 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
   }
 
   // Runner profile context — name, fitness level, physical stats
-  // runnerFirstName is already declared earlier (line 839) before the pace coaching templates
+  // NOTE: runnerFirstName inside the pace_coaching block above is block-scoped (const inside an if).
+  // We declare it again here for all other trigger paths so the template strings below can use it.
+  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
   let runnerProfileContext = '';
   if (runnerFirstName) {
     runnerProfileContext += `\nThe runner's name is ${runnerFirstName}. Use their name naturally (not every sentence, but occasionally to personalise).`;

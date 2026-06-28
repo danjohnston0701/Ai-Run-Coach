@@ -130,19 +130,29 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
  */
 export function sanitizeForTTS(text: string): string {
   return text
-    // ── Unit abbreviations → spoken form ─────────────────────────────────────
-    // Pace notation "M:SS/km", "M:SS per km", or "M:SS per kilometer" → "M minutes and SS seconds per kilometer"
-    // Intentionally also consumes trailing "per kilometer" to prevent "per kilometer per kilometer" duplication
+    // ── Pace notation — comprehensive conversion ──────────────────────────────
+    // Three passes to catch every pattern GPT might produce:
+    //
+    // Pass 1: "M:SS minutes per kilometer" (AI mixes colon notation with spoken unit)
+    //   e.g. "5:00 minutes per kilometer" → "5 minutes per kilometer"
+    //   e.g. "5:20 minutes per kilometer" → "5 minutes and 20 seconds per kilometer"
+    .replace(/(\d+):(\d{2})\s+minutes?\s+per\s+k(?:ilomete)?r(?:s)?/gi, (_, m, s) => {
+      const min = parseInt(m, 10);
+      const sec = parseInt(s, 10);
+      if (sec === 0) return `${min} minutes per kilometer`;
+      return `${min} minutes and ${sec} seconds per kilometer`;
+    })
+    // Pass 2: "M:SS/km", "M:SS per km", "M:SS per kilometer"
     .replace(/(\d+):(\d{2})\s*(?:\/km|per\s*km|per\s*kilometer)\b/gi, (_, m, s) => {
       const min = parseInt(m, 10);
       const sec = parseInt(s, 10);
       if (sec === 0) return `${min} minutes per kilometer`;
       return `${min} minutes and ${sec} seconds per kilometer`;
     })
-    // Bare pace "M:SS" that looks like a pace value (preceded by @ or "pace" or "at").
-    // Also optionally consumes a trailing "per km"/"per kilometer" so we never produce
-    // "per kilometer per kilometer" when the AI writes e.g. "running at 5:20 per kilometer".
-    .replace(/(?<=\b(?:at|pace|running|target|goal)\s+)(\d+):(\d{2})(?:\s*(?:\/km|per\s*km|per\s*kilometer))?/gi, (_, m, s) => {
+    // Pass 3: catch-all for any remaining M:SS in realistic running pace range (3:00–15:59).
+    // Polly reads "5:00" as "five o'clock" — this ensures no colon notation survives.
+    // Range 3–15 min/km covers elite sprinting to a brisk walk.
+    .replace(/\b([3-9]|1[0-5]):([0-5]\d)\b/g, (_, m, s) => {
       const min = parseInt(m, 10);
       const sec = parseInt(s, 10);
       if (sec === 0) return `${min} minutes per kilometer`;

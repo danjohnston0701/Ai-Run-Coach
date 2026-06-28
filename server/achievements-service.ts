@@ -137,9 +137,12 @@ const ACHIEVEMENT_CONFIGS: AchievementConfig[] = [
 /**
  * Parse pace string (mm:ss/km) to minutes as decimal
  */
-function parsePaceToMinutes(paceStr: string | null): number | null {
-  if (!paceStr) return null;
-  const match = paceStr.match(/(\d+):(\d+)/);
+function parsePaceToMinutes(paceStr: string | number | null | undefined): number | null {
+  if (paceStr === null || paceStr === undefined) return null;
+  // If the DB returns a numeric value (seconds-per-km), convert it directly
+  if (typeof paceStr === 'number') return paceStr / 60;
+  // Otherwise parse "M:SS" or "M:SS/km" string format
+  const match = String(paceStr).match(/(\d+):(\d+)/);
   if (!match) return null;
   const minutes = parseInt(match[1]);
   const seconds = parseInt(match[2]);

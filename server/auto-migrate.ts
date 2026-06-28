@@ -209,6 +209,15 @@ export async function runAutoMigrations(): Promise<void> {
       name: "user_stats.coaching_observations",
       sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS coaching_observations JSONB",
     },
+    // ── segments table — gradient columns ────────────────────────────────────
+    {
+      name: "segments.avg_gradient",
+      sql: "ALTER TABLE segments ADD COLUMN IF NOT EXISTS avg_gradient REAL",
+    },
+    {
+      name: "segments.max_gradient",
+      sql: "ALTER TABLE segments ADD COLUMN IF NOT EXISTS max_gradient REAL",
+    },
   ];
 
   let succeeded = 0;
