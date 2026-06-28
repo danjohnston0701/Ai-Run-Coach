@@ -59,6 +59,7 @@ import {
   getUnreadNotificationCount
 } from "./notification-service";
 import { getUsageWithLimits, checkAndEnforceLimit, recordUsage } from "./usage-service";
+import { checkCooldown, recordFired, buildSkipResponse } from "./coaching-cooldown";
 import {
   checkAchievementsAfterRun,
   getUserAchievements,
@@ -9341,6 +9342,10 @@ function transformRunForAndroid(run: any) {
   // Pace Update Coaching with TTS
   app.post("/api/coaching/pace-update", async (req: Request, res: Response) => {
     try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+      const cooldown = await checkCooldown('pace-update', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
       // Resolve voice settings from DB — overrides stale Android values
       const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
@@ -9376,7 +9381,8 @@ function transformRunForAndroid(run: any) {
       } catch (ttsError) {
         console.warn("Pace update TTS failed, returning text only:", ttsError);
       }
-      
+
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({ 
         message,
         nextPace: req.body.currentPace, // Fallback
@@ -9392,6 +9398,10 @@ function transformRunForAndroid(run: any) {
   // Struggle Coaching with TTS
   app.post("/api/coaching/struggle-coaching", async (req: Request, res: Response) => {
     try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+      const cooldown = await checkCooldown('struggle-coaching', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
       // Resolve voice settings from DB — overrides stale Android values
       const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
@@ -9420,7 +9430,8 @@ function transformRunForAndroid(run: any) {
       } catch (ttsError) {
         console.warn("Struggle coaching TTS failed, returning text only:", ttsError);
       }
-      
+
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({ 
         message,
         audio: base64Audio,
@@ -9435,6 +9446,10 @@ function transformRunForAndroid(run: any) {
   // Cadence/Stride Coaching with TTS - analyzes overstriding/understriding
   app.post("/api/coaching/cadence-coaching", async (req: Request, res: Response) => {
     try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+      const cooldown = await checkCooldown('cadence-coaching', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
       // Resolve voice settings from DB — overrides stale Android values
       const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
@@ -9454,7 +9469,8 @@ function transformRunForAndroid(run: any) {
       } catch (ttsError) {
         console.warn("Cadence coaching TTS failed, returning text only:", ttsError);
       }
-      
+
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({ 
         message,
         audio: base64Audio,
@@ -9469,6 +9485,10 @@ function transformRunForAndroid(run: any) {
   // Elevation Coaching with TTS
   app.post("/api/coaching/elevation-coaching", async (req: Request, res: Response) => {
     try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+      const cooldown = await checkCooldown('elevation-coaching', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
       // Resolve voice settings from DB — overrides stale Android values
       const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
@@ -9488,7 +9508,8 @@ function transformRunForAndroid(run: any) {
       } catch (ttsError) {
         console.warn("Elevation coaching TTS failed, returning text only:", ttsError);
       }
-      
+
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({ 
         message,
         audio: base64Audio,
@@ -9503,6 +9524,10 @@ function transformRunForAndroid(run: any) {
   // Elite Coaching with TTS — technique, milestones, positive reinforcement, target ETA, pace trends, elevation insights
   app.post("/api/coaching/elite-coaching", async (req: Request, res: Response) => {
     try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+      const cooldown = await checkCooldown('elite-coaching', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
       // Resolve voice settings from DB — overrides stale Android values
       const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
@@ -9528,6 +9553,7 @@ function transformRunForAndroid(run: any) {
         console.warn("Elite coaching TTS failed, returning text only:", ttsError);
       }
 
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({
         message,
         audio: base64Audio,
@@ -9542,6 +9568,10 @@ function transformRunForAndroid(run: any) {
   // Phase Coaching with TTS
   app.post("/api/coaching/phase-coaching", async (req: Request, res: Response) => {
     try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+      const cooldown = await checkCooldown('phase-coaching', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
       // Resolve voice settings from DB — overrides stale Android values (fixes wrong accent/voice)
       const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
@@ -9570,7 +9600,8 @@ function transformRunForAndroid(run: any) {
       } catch (ttsError) {
         console.warn("Phase coaching TTS failed, returning text only:", ttsError);
       }
-      
+
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({ 
         message,
         nextPhase: null,
@@ -9584,8 +9615,13 @@ function transformRunForAndroid(run: any) {
   });
 
   // Interval-specific coaching (work and recovery phases)
+  // Note: interval-coaching is always treated as a milestone — every interval transition matters.
   app.post("/api/coaching/interval-coaching", async (req: Request, res: Response) => {
     try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+      // interval-coaching is milestone by design — checkCooldown returns allowed:true immediately
+      const cooldown = await checkCooldown('interval-coaching', req.body, coachingUserId);
+
       // Resolve voice settings from DB — overrides stale Android values
       const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
       req.body.coachGender = coachGender;
@@ -9605,7 +9641,8 @@ function transformRunForAndroid(run: any) {
       } catch (ttsError) {
         console.warn("Interval coaching TTS failed, returning text only:", ttsError);
       }
-      
+
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({
         message,
         audio: base64Audio,
@@ -9717,6 +9754,10 @@ function transformRunForAndroid(run: any) {
   // Heart rate zone coaching
   app.post("/api/coaching/hr-coaching", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      const coachingUserId = req.user?.userId ?? req.body.userId ?? req.body.user_id ?? null;
+      const cooldown = await checkCooldown('hr-coaching', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
       const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes } = req.body;
       
       // Get user's coach settings
@@ -9782,7 +9823,8 @@ function transformRunForAndroid(run: any) {
       } catch (ttsError) {
         console.warn("HR coaching TTS failed, returning text only:", ttsError);
       }
-      
+
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({ 
         message: response,
         audio: base64Audio,
