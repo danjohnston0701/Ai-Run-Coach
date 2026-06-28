@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { db } from "./db";
-import { sessionInstructions, plannedWorkouts, users } from "../shared/schema";
-import { eq, and } from "drizzle-orm";
+import { sessionInstructions, plannedWorkouts, users, runs } from "../shared/schema";
+import { eq, and, desc, isNotNull } from "drizzle-orm";
 import {
   generateSessionCoaching,
   type GenerateSessionCoachingParams,
@@ -56,7 +56,8 @@ export interface DeterminedTone {
  * The AI considers the user's profile, session characteristics, and desired outcomes.
  */
 export async function determineSessonCoachingTone(
-  request: SessionToneRequest
+  request: SessionToneRequest,
+  lastRunInsight?: { reason: string; recommendation: string; adjustmentType: string; needsAdjustment: boolean } | null
 ): Promise<DeterminedTone> {
   // Fetch user profile
   const userRecord = await db
@@ -116,7 +117,13 @@ ${athleticProfile}
 
 SESSION CHARACTERISTICS:
 ${sessionCharacteristics}
-
+${lastRunInsight ? `
+LAST RUN COACHING ASSESSMENT (from plan coach — inform your tone decision):
+- Assessment: ${lastRunInsight.reason}
+- Recommendation: ${lastRunInsight.recommendation}
+- Adjustment Type: ${lastRunInsight.adjustmentType}
+- Action Needed: ${lastRunInsight.needsAdjustment ? 'Yes — consider this when setting session intensity and encouragement level' : 'No change needed — runner is on track'}
+` : ''}
 INSTRUCTION:
 Determine the optimal coaching tone and style for this session. Consider how to make it engaging and effective for THIS specific runner doing THIS specific workout.
 
@@ -272,27 +279,50 @@ Runner needs: Direct cues, effort encouragement, clear pacing targets.`;
  * Generate complete session instructions for a planned workout.
  * Runs tone determination and AI session design in parallel for speed.
  */
+/**
+ * Fetch the coaching insight from the user's most recent run that has one.
+ * Returns null if no insight exists (new user, or no plan reassessment run yet).
+ */
+async function getLastRunCoachingInsight(userId: string): Promise<{
+  reason: string;
+  recommendation: string;
+  adjustmentType: string;
+  needsAdjustment: boolean;
+} | null> {
+  try {
+    const [lastRun] = await db
+      .select({ coachingInsight: runs.coachingInsight })
+      .from(runs)
+      .where(and(
+        eq(runs.userId, userId),
+        isNotNull(runs.coachingInsight),
+      ))
+      .orderBy(desc(runs.completedAt))
+      .limit(1);
+    return (lastRun?.coachingInsight as any) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function generateSessionInstructions(
   userId: string,
   plannedWorkoutId: string,
   workoutData: SessionToneRequest
 ) {
-  // Fetch AI runner profile once — reuse in both parallel calls
-  const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
-  
-  // Fetch user's recent pace for pace-aware coaching
-  const user = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .then((rows) => rows[0])
-    .catch(() => null);
+  // Fetch AI runner profile and last-run coaching insight in parallel
+  const [aiRunnerProfile, lastRunInsight, user] = await Promise.all([
+    getRunnerProfile(userId).catch(() => null).then(r => r?.profile ?? null),
+    getLastRunCoachingInsight(userId),
+    db.select().from(users).where(eq(users.id, userId)).then(rows => rows[0]).catch(() => null),
+  ]);
+
   const recentPaceSecPerKm = (user as any)?.recentPaceAvgSecPerKm;
 
-  // Run tone determination and session design in parallel
+  // Run tone determination and session design in parallel, both receive the last-run insight
   const [toneDecision, sessionDesign] = await Promise.all([
-    determineSessonCoachingTone({ userId, plannedWorkoutId, ...workoutData }),
-    generateAiSessionDesign(workoutData, aiRunnerProfile, recentPaceSecPerKm),
+    determineSessonCoachingTone({ userId, plannedWorkoutId, ...workoutData }, lastRunInsight),
+    generateAiSessionDesign(workoutData, aiRunnerProfile, recentPaceSecPerKm, lastRunInsight),
   ]);
 
   return {
@@ -312,10 +342,12 @@ export async function generateSessionInstructions(
  *
  * Returns both as a single AI call to keep latency and cost low.
  */
-async function generateAiSessionDesign(workout: SessionToneRequest, aiRunnerProfile?: string | null, recentPaceSecPerKm?: number): Promise<{
-  preRunBrief: string;
-  sessionStructure: any;
-}> {
+async function generateAiSessionDesign(
+  workout: SessionToneRequest,
+  aiRunnerProfile?: string | null,
+  recentPaceSecPerKm?: number,
+  lastRunInsight?: { reason: string; recommendation: string; adjustmentType: string; needsAdjustment: boolean } | null
+): Promise<{ preRunBrief: string; sessionStructure: any }> {
   const sessionDesc = buildSessionCharacteristics(workout);
 
   const systemPrompt = `You are an elite AI running coach designing a personalised coaching plan for a specific training session. You have full creative authority over how this session is structured and coached.
@@ -328,9 +360,13 @@ Apply your coaching expertise — choose the phase structure, coaching approach,
 
 You must respond with ONLY valid JSON (no markdown, no code blocks).${runnerProfileBlock(aiRunnerProfile)}`;
 
+  const lastRunContext = lastRunInsight
+    ? `\nLAST RUN COACHING ASSESSMENT (use to inform pre-run brief and session design):\n- What happened: ${lastRunInsight.reason}\n- Coach recommendation: ${lastRunInsight.recommendation}\n- Action required: ${lastRunInsight.needsAdjustment ? `Yes (${lastRunInsight.adjustmentType}) — reflect this in the pre-run brief and any intensity guidance` : 'None — runner is on track'}\n`
+    : '';
+
   const userPrompt = `SESSION TO DESIGN:
 ${sessionDesc}
-
+${lastRunContext}
 Return ONLY valid JSON in this exact format:
 {
   "preRunBrief": "2-4 sentence motivating brief specific to this session",
