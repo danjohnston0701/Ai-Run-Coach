@@ -131,7 +131,9 @@ export async function recomputeForUser(userId: string): Promise<void> {
   const [agg] = await db.select({
     totalRuns:           count(),
     totalDistanceKm:     sql<number>`SUM(CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END)`,
-    totalDurationSec:    sum(runs.duration),      // seconds — store as-is
+    // Safety-net: legacy Strava/Garmin rows may have duration stored in ms (e.g. 336000).
+    // Values > 86400 (one day) are impossible in seconds for a single run → treat as ms.
+    totalDurationSec:    sql<number>`SUM(CASE WHEN ${runs.duration} > 86400 THEN ${runs.duration} / 1000 ELSE ${runs.duration} END)`,
     totalElevationGain:  sum(runs.elevationGain),
     totalCalories:       sum(runs.calories),
     totalActiveCalories: sum(runs.activeCalories),
@@ -289,7 +291,9 @@ export async function recomputeForUser(userId: string): Promise<void> {
       .where(eq(runs.userId, userId))
       .orderBy(sql`CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END DESC NULLS LAST`)
       .limit(1);
-    longestRunTimeSec = Math.round(longestRun?.duration || 0);
+    // Normalize duration: legacy rows may be in ms; values > 86400 are impossible in seconds.
+    const rawDur = longestRun?.duration || 0;
+    longestRunTimeSec = Math.round(rawDur > 86400 ? rawDur / 1000 : rawDur);
   }
 
   const highestElevationM = Math.round(Number(agg.highestElevationM ?? 0));

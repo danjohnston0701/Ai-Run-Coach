@@ -225,9 +225,13 @@ export async function recordSegmentUsage(
     for (let i = 0; i < values.length; i += 100) {
       const batch = values.slice(i, i + 100);
       
+      // Use explicit column list in SELECT (not SELECT *) so that extra columns
+      // on the segment_usage table (e.g. id, created_at) don't cause
+      // "INSERT has more expressions than target columns" errors.
       await db.execute(sql`
         INSERT INTO segment_usage (osm_way_id, run_id, user_id, distance_meters, timestamp)
-        SELECT * FROM json_populate_recordset(
+        SELECT osm_way_id, run_id, user_id, distance_meters, timestamp
+        FROM json_populate_recordset(
           NULL::segment_usage,
           ${JSON.stringify(batch)}
         )
