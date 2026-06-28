@@ -162,6 +162,53 @@ export async function runAutoMigrations(): Promise<void> {
       name: "users.default_session_type",
       sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS default_session_type TEXT DEFAULT 'run'",
     },
+
+    // ── user_stats — PB, achievement, and AI profile columns ─────────────────
+    // These columns were added to shared/schema.ts after the table was first
+    // created.  Without these ALTER TABLEs the server throws PG error 42703
+    // ("column does not exist") whenever Drizzle generates an explicit SELECT
+    // or INSERT that references them — which happens after every run save
+    // (refreshRunnerProfile, recomputeForUser).
+    {
+      name: "user_stats.pb_20k_duration_ms",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS pb_20k_duration_ms INTEGER",
+    },
+    {
+      name: "user_stats.pb_20k_run_id",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS pb_20k_run_id VARCHAR",
+    },
+    {
+      name: "user_stats.pb_20k_date",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS pb_20k_date TIMESTAMP",
+    },
+    {
+      name: "user_stats.longest_run_time_sec",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS longest_run_time_sec INTEGER",
+    },
+    {
+      name: "user_stats.highest_elevation_m",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS highest_elevation_m REAL",
+    },
+    {
+      name: "user_stats.most_consecutive_runs",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS most_consecutive_runs INTEGER DEFAULT 0",
+    },
+    {
+      name: "user_stats.goals_achieved",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS goals_achieved INTEGER DEFAULT 0",
+    },
+    {
+      name: "user_stats.ai_runner_profile",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS ai_runner_profile TEXT",
+    },
+    {
+      name: "user_stats.ai_runner_profile_updated_at",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS ai_runner_profile_updated_at TIMESTAMP",
+    },
+    {
+      name: "user_stats.coaching_observations",
+      sql: "ALTER TABLE user_stats ADD COLUMN IF NOT EXISTS coaching_observations JSONB",
+    },
   ];
 
   let succeeded = 0;

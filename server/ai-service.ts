@@ -104,7 +104,9 @@ const formatDistanceForTTS = (km: number | undefined): string => {
 // This prevents the AI from saying "four thirty-two" which is hard to understand while running
 const formatPaceForTTS = (pace: string | undefined): string => {
   if (!pace) return 'unknown pace';
-  const parts = pace.replace('/km', '').trim().split(':');
+  // Strip "/km" or "per km" suffix before parsing (handles "4:32/km", "4:32 per km")
+  const stripped = pace.replace(/\s*(?:\/km|per\s*km)\b/gi, '').trim();
+  const parts = stripped.split(':');
   if (parts.length === 2) {
     const min = parseInt(parts[0], 10);
     const sec = parseInt(parts[1], 10);
@@ -112,6 +114,12 @@ const formatPaceForTTS = (pace: string | undefined): string => {
       if (sec === 0) return `${min} minutes per kilometer`;
       return `${min} minutes and ${sec} seconds per kilometer`;
     }
+  }
+  // Fallback: if the pace already contains "per kilometer" / "per km", return as-is to avoid duplication.
+  // Otherwise append the unit so TTS always hears the full unit.
+  const lcPace = pace.toLowerCase();
+  if (lcPace.includes('per kilometer') || lcPace.includes('per km') || lcPace.includes('/km')) {
+    return pace;
   }
   return `${pace} per kilometer`;
 };
@@ -960,9 +968,11 @@ export async function generatePhaseCoaching(params: {
 
   // Build personalized cadence coaching using biomechanics model
   // Optimal cadence depends on pace + height + age — NOT a universal fixed number
+  // 750m standdown: never coach on cadence in the first 750m — the runner needs time to
+  // warm up and settle into their natural rhythm before receiving cadence guidance.
   let cadenceInfo = '';
   let cadenceCoachingDirective = '';
-  if (cadence && cadence > 0) {
+  if (cadence && cadence > 0 && distance >= 0.75) {
     // Parse current pace to seconds/km for the cadence calculator
     const paceSecPerKm = (() => {
       if (!currentPace) return 360; // default to 6:00/km if unknown

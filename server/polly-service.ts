@@ -131,15 +131,18 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
 export function sanitizeForTTS(text: string): string {
   return text
     // ── Unit abbreviations → spoken form ─────────────────────────────────────
-    // Pace notation "M:SS/km" or "M:SS per km" → "M minutes and SS seconds per kilometer"
-    .replace(/(\d+):(\d{2})\s*(?:\/km|per\s*km)\b/gi, (_, m, s) => {
+    // Pace notation "M:SS/km", "M:SS per km", or "M:SS per kilometer" → "M minutes and SS seconds per kilometer"
+    // Intentionally also consumes trailing "per kilometer" to prevent "per kilometer per kilometer" duplication
+    .replace(/(\d+):(\d{2})\s*(?:\/km|per\s*km|per\s*kilometer)\b/gi, (_, m, s) => {
       const min = parseInt(m, 10);
       const sec = parseInt(s, 10);
       if (sec === 0) return `${min} minutes per kilometer`;
       return `${min} minutes and ${sec} seconds per kilometer`;
     })
-    // Bare pace "M:SS" that looks like a pace value (preceded by @ or "pace" or "at")
-    .replace(/(?<=\b(?:at|pace|running|target|goal)\s+)(\d+):(\d{2})\b/gi, (_, m, s) => {
+    // Bare pace "M:SS" that looks like a pace value (preceded by @ or "pace" or "at").
+    // Also optionally consumes a trailing "per km"/"per kilometer" so we never produce
+    // "per kilometer per kilometer" when the AI writes e.g. "running at 5:20 per kilometer".
+    .replace(/(?<=\b(?:at|pace|running|target|goal)\s+)(\d+):(\d{2})(?:\s*(?:\/km|per\s*km|per\s*kilometer))?/gi, (_, m, s) => {
       const min = parseInt(m, 10);
       const sec = parseInt(s, 10);
       if (sec === 0) return `${min} minutes per kilometer`;

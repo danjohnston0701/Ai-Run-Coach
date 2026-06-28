@@ -1760,11 +1760,53 @@ function transformRunForAndroid(run: any) {
         });
       }
       
-      // Normalize duration to seconds for database storage
-      // Android app sends duration in milliseconds; if > 86400 it's definitely ms
+      // Normalize duration to seconds for database storage.
+      // The Android always sends duration in MILLISECONDS; however the old threshold of >86400
+      // only caught runs longer than ~86 seconds, silently leaving shorter runs (e.g. stopped early)
+      // with a 1000x inflated duration.
+      //
+      // Smart detection: compare rawDuration against the actual elapsed wall-clock time derived
+      // from startTime (always sent by Android) vs server "now".  Whichever interpretation
+      // (ms or seconds) is closer to the true elapsed time wins.
       const rawDuration = runData.duration || 0;
-      const durationInSeconds = rawDuration > 86400 ? Math.round(rawDuration / 1000) : rawDuration;
-      console.log(`[POST /api/runs] Duration normalization: raw=${rawDuration} → ${durationInSeconds}s (was ${rawDuration > 86400 ? 'ms' : 'seconds'})`);
+      let durationInSeconds: number;
+      {
+        const startedAtMs = (() => {
+          const v = runData.startTime || runData.start_time || runData.started_at;
+          if (!v) return null;
+          const d = new Date(v);
+          return isNaN(d.getTime()) ? null : d.getTime();
+        })();
+
+        if (startedAtMs !== null) {
+          const actualElapsedMs = Date.now() - startedAtMs;
+          // Pick whichever interpretation is closer to the real elapsed time
+          const diffAsMs  = Math.abs(rawDuration - actualElapsedMs);
+          const diffAsSec = Math.abs(rawDuration * 1000 - actualElapsedMs);
+          const treatedAsMs = rawDuration > 1000 && diffAsMs < diffAsSec;
+          durationInSeconds = treatedAsMs ? Math.round(rawDuration / 1000) : rawDuration;
+          console.log(`[POST /api/runs] Duration normalization (anchor): raw=${rawDuration} → ${durationInSeconds}s (treated as ${treatedAsMs ? 'ms' : 'seconds'}, actualElapsed=${Math.round(actualElapsedMs / 1000)}s)`);
+        } else {
+          // Fallback: the old heuristic (handles most runs > ~86 s)
+          const treatedAsMs = rawDuration > 86400;
+          durationInSeconds = treatedAsMs ? Math.round(rawDuration / 1000) : rawDuration;
+          console.log(`[POST /api/runs] Duration normalization (fallback): raw=${rawDuration} → ${durationInSeconds}s (was ${treatedAsMs ? 'ms' : 'seconds'})`);
+        }
+      }
+
+      // Detect if distance was sent in METERS instead of km.
+      // When the run is started on a Garmin watch (or some Android configurations) the app
+      // may send distance as raw GPS meters.  This produces an implied average speed that is
+      // physically impossible for a runner — we use that as the detector.
+      // Max realistic running speed ≈ 10 m/s (world-record sprint); cap detection at 15 m/s.
+      if (distance > 0 && durationInSeconds > 0) {
+        const impliedSpeedMs = (distance * 1000) / durationInSeconds; // km → m, then m/s
+        if (impliedSpeedMs > 15) {
+          const distanceKm = distance / 1000;
+          console.log(`[POST /api/runs] Distance detected as METERS (implied speed ${impliedSpeedMs.toFixed(1)} m/s > 15 m/s) — converting ${distance}m → ${distanceKm}km`);
+          distance = distanceKm;
+        }
+      }
       
       // Calculate TSS if not provided (needs duration in seconds)
       let tss = runData.tss || 0;
@@ -9277,11 +9319,34 @@ function transformRunForAndroid(run: any) {
     return getRunnerProfile(Number(uid)).catch(() => null);
   };
 
+  // Helper: resolve coachAccent and coachGender from the DB — overrides whatever the Android sends.
+  // This ensures the correct user voice preference is always used even if the Android caches stale values.
+  // Falls back gracefully to req.body values if the DB lookup fails or userId is absent.
+  const resolveVoiceSettings = async (body: any): Promise<{ coachGender: string; coachAccent: string }> => {
+    const uid = body.userId ?? body.user_id;
+    let coachGender: string = body.coachGender || 'female';
+    let coachAccent: string = body.coachAccent || 'british';
+    if (uid) {
+      try {
+        const user = await storage.getUser(String(uid));
+        if (user) {
+          if (user.coachGender) coachGender = user.coachGender;
+          if (user.coachAccent) coachAccent = user.coachAccent;
+        }
+      } catch { /* non-fatal — fall back to req.body values */ }
+    }
+    return { coachGender, coachAccent };
+  };
+
   // Pace Update Coaching with TTS
   app.post("/api/coaching/pace-update", async (req: Request, res: Response) => {
     try {
-      // Save original tone for consistent voice selection, use effectiveTone for AI personality only
-      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
+      // Resolve voice settings from DB — overrides stale Android values
+      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
+      const baseTone = req.body.coachTone;
+      // Use effectiveTone for AI personality only; voice selection stays on baseTone
       const effectiveTone = getPhaseTone(
         baseTone,
         req.body.distance,
@@ -9327,8 +9392,12 @@ function transformRunForAndroid(run: any) {
   // Struggle Coaching with TTS
   app.post("/api/coaching/struggle-coaching", async (req: Request, res: Response) => {
     try {
-      // Save original tone for consistent voice selection, use effectiveTone for AI personality only
-      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
+      // Resolve voice settings from DB — overrides stale Android values
+      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
+      const baseTone = req.body.coachTone;
+      // Use effectiveTone for AI personality only; voice selection stays on baseTone
       const effectiveTone = getPhaseTone(
         baseTone,
         req.body.distance,
@@ -9366,6 +9435,10 @@ function transformRunForAndroid(run: any) {
   // Cadence/Stride Coaching with TTS - analyzes overstriding/understriding
   app.post("/api/coaching/cadence-coaching", async (req: Request, res: Response) => {
     try {
+      // Resolve voice settings from DB — overrides stale Android values
+      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateCadenceCoaching({ ...req.body, runnerProfile });
@@ -9373,7 +9446,7 @@ function transformRunForAndroid(run: any) {
       // Generate TTS audio with user's voice settings (resilient - falls back to text-only)
       let base64Audio: string | null = null;
       try {
-        const { coachGender, coachAccent, coachTone } = req.body;
+        const { coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
         const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions, coachAccent, coachGender);
@@ -9396,6 +9469,10 @@ function transformRunForAndroid(run: any) {
   // Elevation Coaching with TTS
   app.post("/api/coaching/elevation-coaching", async (req: Request, res: Response) => {
     try {
+      // Resolve voice settings from DB — overrides stale Android values
+      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.getElevationCoaching({ ...req.body, runnerProfile });
@@ -9403,7 +9480,7 @@ function transformRunForAndroid(run: any) {
       // Generate TTS audio with user's voice settings
       let base64Audio: string | null = null;
       try {
-        const { coachGender, coachAccent, coachTone } = req.body;
+        const { coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
         const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions, coachAccent, coachGender);
@@ -9426,6 +9503,10 @@ function transformRunForAndroid(run: any) {
   // Elite Coaching with TTS — technique, milestones, positive reinforcement, target ETA, pace trends, elevation insights
   app.post("/api/coaching/elite-coaching", async (req: Request, res: Response) => {
     try {
+      // Resolve voice settings from DB — overrides stale Android values
+      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateEliteCoaching({ ...req.body, runnerProfile });
@@ -9438,7 +9519,7 @@ function transformRunForAndroid(run: any) {
       // Generate TTS audio with user's voice settings
       let base64Audio: string | null = null;
       try {
-        const { coachGender, coachAccent, coachTone } = req.body;
+        const { coachTone } = req.body;
         const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
         const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, req.body.coachName);
         const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions, coachAccent, coachGender);
@@ -9461,8 +9542,12 @@ function transformRunForAndroid(run: any) {
   // Phase Coaching with TTS
   app.post("/api/coaching/phase-coaching", async (req: Request, res: Response) => {
     try {
-      // Save original tone for consistent voice selection, use effectiveTone for AI personality only
-      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
+      // Resolve voice settings from DB — overrides stale Android values (fixes wrong accent/voice)
+      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
+      const baseTone = req.body.coachTone;
+      // Use effectiveTone for AI personality only; voice selection stays on baseTone for consistency
       const effectiveTone = getPhaseTone(
         baseTone,
         req.body.distance,
@@ -9501,7 +9586,11 @@ function transformRunForAndroid(run: any) {
   // Interval-specific coaching (work and recovery phases)
   app.post("/api/coaching/interval-coaching", async (req: Request, res: Response) => {
     try {
-      const { coachGender, coachAccent, coachTone: baseTone } = req.body;
+      // Resolve voice settings from DB — overrides stale Android values
+      const { coachGender, coachAccent } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
+      const baseTone = req.body.coachTone;
       
       const aiService = await import("./ai-service");
       const message = await aiService.generateIntervalCoaching(req.body);
