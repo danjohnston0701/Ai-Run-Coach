@@ -84,6 +84,56 @@ const accentDirective = (accent?: string): string => {
   }
 };
 
+/**
+ * normalizeRunUnits — canonical unit normalization for any run row read from the DB.
+ *
+ * Storage rule (enforced going forward): distance = km, duration = seconds.
+ * Legacy rows may have been written by Strava/Garmin importers with wrong units:
+ *   • distance in meters  (e.g. 3025.6 instead of 3.025)
+ *   • duration in ms      (e.g. 336000 instead of 336)
+ *
+ * We use avgPace ("M:SS" string) as the authoritative anchor because it is
+ * always computed and stored correctly at insert time.
+ *
+ * Strategy:
+ *  1. If distance > 100 → must be meters → divide by 1000.
+ *  2. If duration > 86400 → must be ms → divide by 1000.
+ *  3. Cross-check: if we have a valid avgPace, verify the implied pace
+ *     (duration/distance) and swap units if off by a factor of ~1000.
+ */
+export function normalizeRunUnits(run: {
+  distance?: number | null;
+  duration?: number | null;
+  avgPace?: string | null;
+}): { distanceKm: number; durationSec: number } {
+  let distanceKm  = (run.distance  ?? 0);
+  let durationSec = (run.duration  ?? 0);
+
+  // Step 1 — Threshold detection
+  if (distanceKm  > 100)   distanceKm  = distanceKm  / 1000;  // clearly meters
+  if (durationSec > 86400) durationSec = Math.round(durationSec / 1000); // clearly ms
+
+  // Step 2 — avgPace cross-check (most reliable anchor)
+  if (run.avgPace && distanceKm > 0 && durationSec > 0) {
+    const m = run.avgPace.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) {
+      const expectedPaceSec = parseInt(m[1]) * 60 + parseInt(m[2]); // e.g. 5:30 → 330 s/km
+      const actualPaceSec   = durationSec / distanceKm;
+      // If actual is 1000× too large, duration is still in ms
+      if (expectedPaceSec > 0 && actualPaceSec > expectedPaceSec * 500) {
+        durationSec = Math.round(durationSec / 1000);
+      }
+      // If actual pace implies impossibly fast running (< 120 s/km = 2 min/km), distance is in meters
+      const reCheck = durationSec / distanceKm;
+      if (reCheck < 120 && distanceKm > 0.5) {
+        distanceKm = distanceKm / 1000;
+      }
+    }
+  }
+
+  return { distanceKm, durationSec };
+}
+
 // Helper to format distance for coaching feedback
 // - Whole numbers: "5km" (0 decimals)
 // - With decimals: "3.6km" (1 decimal max, never 2+ decimals)
@@ -3728,7 +3778,17 @@ export async function generateComprehensiveRunAnalysis(params: {
   runnerProfile?: string | null;
 }): Promise<ComprehensiveRunAnalysis> {
   const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal } = params;
-  
+
+  // ── Normalize units — DB rule: distance = km, duration = seconds.
+  // Legacy rows from old Strava/Garmin importers may have been stored in meters/ms.
+  // normalizeRunUnits() uses avgPace as an anchor to detect and correct bad units.
+  const { distanceKm: runDistanceKm, durationSec: runDurationSec } = normalizeRunUnits(runData);
+  // Prefer Garmin activity distance/duration when present (authoritative source)
+  const effectiveDistanceKm = garminActivity?.distanceInMeters
+    ? garminActivity.distanceInMeters / 1000
+    : runDistanceKm;
+  const effectiveDurationSec = garminActivity?.durationInSeconds ?? runDurationSec;
+
   // Build comprehensive prompt with all available data
   let prompt = `You are ${coachName}, an expert running coach with a ${coachTone} coaching style.
 
@@ -3744,12 +3804,8 @@ Your role is to analyze this run and provide professional coaching feedback that
 Think of yourself analyzing a training session you coached in person - you'd understand the context, notice patterns, and guide them forward.
 
 ## RUN DATA:
-- Distance: ${
-  (runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters)
-    ? formatDistanceForCoaching((runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters || 0) / 1000)
-    : '?'
-}
-- Duration: ${runData.duration ? Math.floor(runData.duration / 60) : garminActivity?.durationInSeconds ? Math.floor(garminActivity.durationInSeconds / 60) : '?'} minutes
+- Distance: ${effectiveDistanceKm > 0 ? formatDistanceForCoaching(effectiveDistanceKm) : '?'}
+- Duration: ${effectiveDurationSec > 0 ? Math.floor(effectiveDurationSec / 60) : '?'} minutes
 - Average Pace: ${runData.avgPace || (garminActivity?.averagePace ? `${Math.floor(garminActivity.averagePace)}:${Math.floor((garminActivity.averagePace % 1) * 60).toString().padStart(2, '0')}` : 'N/A')}/km
 - Activity Type: ${runData.activityType || garminActivity?.activityType || 'Running'}
 - Elevation Gain: ${runData.elevationGain || garminActivity?.elevationGain || 0}m
@@ -4086,7 +4142,8 @@ Acknowledge how weather conditions impacted performance in your analysis.
 Use this to identify patterns in their running - pace trends, consistency, pacing strategy, heart rate patterns, etc.
 `;
     previousRuns.slice(0, 10).forEach((run, i) => {
-      prompt += `${i + 1}. ${run.distance ? formatDistanceForCoaching(run.distance) : '?'} at ${run.avgPace || 'N/A'}/km`;
+      const { distanceKm: prevDist } = normalizeRunUnits(run);
+      prompt += `${i + 1}. ${prevDist > 0 ? formatDistanceForCoaching(prevDist) : '?'} at ${run.avgPace || 'N/A'}/km`;
       if (run.avgHeartRate) prompt += `, ${run.avgHeartRate}bpm`;
       if (run.wasChallenging) prompt += ` [challenging]`;
       if (run.wasEasy) prompt += ` [easy]`;
@@ -4133,7 +4190,8 @@ Take these notes into account when assessing performance and writing your summar
   }
 
   // Add elevation-aware consistency context
-  const distanceKm = (runData.distanceInMeters || runData.distance || garminActivity?.distanceInMeters || 0) / 1000;
+  // Use the already-normalized effective distance (handles mixed meter/km legacy rows)
+  const distanceKm = effectiveDistanceKm;
   const elevationConsistencyAnalysis = buildElevationConsistencyContext({
     elevationGain: runData.elevationGain || garminActivity?.elevationGain || 0,
     elevationLoss: runData.elevationLoss || garminActivity?.elevationLoss || 0,

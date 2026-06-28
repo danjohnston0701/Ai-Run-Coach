@@ -281,8 +281,8 @@ async function createOrLinkRunFromGarminActivity(
       userId,
       externalId: activityDetail.activityId,
       externalSource: 'garmin',
-      distance: (activityDetail.distanceInMeters || 0) / 1000,
-      duration: (activityDetail.durationInSeconds || 0) * 1000,
+      distance: (activityDetail.distanceInMeters || 0) / 1000, // stored in km
+      duration: activityDetail.durationInSeconds || 0,         // stored in seconds
       
       avgHeartRate: activityDetail.averageHeartRateInBeatsPerMinute,
       maxHeartRate: activityDetail.maxHeartRateInBeatsPerMinute,

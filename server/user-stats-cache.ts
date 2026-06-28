@@ -13,13 +13,17 @@
  *   - onRunDeleted(userId)       → full recompute
  *   - recomputeForUser(userId)   → full recompute from scratch (backfill / recovery)
  *
- * UNIT CONVENTIONS (sourced from actual DB data):
- *   - runs.distance     → meters (e.g. 21248.13 for a 21.248km half marathon)
- *   - runs.duration     → seconds (e.g. 6276 = 104.6 minutes — NOT milliseconds)
+ * UNIT CONVENTIONS (canonical rule — enforced by all write paths):
+ *   - runs.distance     → km  (e.g. 5.19 for a 5.19km run)
+ *   - runs.duration     → seconds (e.g. 1520 = 25.3 minutes — NOT milliseconds)
  *   - km_splits[].time  → milliseconds per km split
- *   - pb_*_duration_ms  → milliseconds (we convert runs.duration × 1000 when storing)
- *   - total_distance_km → km (runs.distance / 1000)
+ *   - pb_*_duration_ms  → milliseconds (runs.duration × 1000 when storing)
+ *   - total_distance_km → km (runs.distance summed directly — no /1000 needed)
  *   - total_duration_s  → seconds (runs.duration summed directly)
+ *
+ * NOTE: Legacy rows written before the unit fix may store distance in meters.
+ * All SQL queries use CASE WHEN distance > 200 THEN distance/1000 ELSE distance END
+ * to normalize on-the-fly. Run the one-time migration SQL to fully clean up old rows.
  *
  * NOTE: Despite the "_ms" column suffix, historical rows may contain seconds if
  * written by old code. The recompute-all admin endpoint corrects all rows.
@@ -108,21 +112,30 @@ export async function onRunDeleted(userId: string): Promise<void> {
  * Full recompute from scratch using SQL aggregation.
  * Used for: all run saves, deletions, and admin backfill.
  *
- * UNIT NOTES:
- *   - runs.distance is in METERS → divide by 1000 for km columns
- *   - runs.duration is in SECONDS → store directly in total_duration_seconds
+ * UNIT NOTES (canonical rule — enforced by all write paths):
+ *   - runs.distance → km  (e.g. 5.19 for a 5.19km run)
+ *   - runs.duration → seconds (e.g. 1520 = 25.3 minutes)
  *   - pb_*_duration_ms columns store MILLISECONDS → runs.duration × 1000
+ *
+ * The DIST_KM SQL expression applies a safety-net CASE for any legacy rows
+ * that may still be in meters (distance > 200 is impossible for a single run
+ * in km, so it must be meters — divide by 1000).
+ * After the one-time Neon migration SQL has been run, this CASE never fires.
  */
+// Safety-net SQL expression: normalizes distance to km regardless of stored unit.
+// Any value > 200 km would be impossible for a single run, so treat as meters.
+const DIST_KM = sql<number>`CASE WHEN distance > 200 THEN distance / 1000.0 ELSE distance END`;
+
 export async function recomputeForUser(userId: string): Promise<void> {
   // ── Aggregate all-time totals in a single SQL query ──────────────────────
   const [agg] = await db.select({
     totalRuns:           count(),
-    totalDistanceM:      sum(runs.distance),      // meters — divide by 1000 for km
+    totalDistanceKm:     sql<number>`SUM(CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END)`,
     totalDurationSec:    sum(runs.duration),      // seconds — store as-is
     totalElevationGain:  sum(runs.elevationGain),
     totalCalories:       sum(runs.calories),
     totalActiveCalories: sum(runs.activeCalories),
-    longestRunM:         max(runs.distance),      // meters — divide by 1000 for km
+    longestRunKm:        sql<number>`MAX(CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END)`,
     // Highest elevation: prefer maxElevation column; fall back to elevationGain
     highestElevationM:   sql<number>`COALESCE(MAX(${runs.maxElevation}), MAX(${runs.elevationGain}), 0)`,
     // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
@@ -180,8 +193,11 @@ export async function recomputeForUser(userId: string): Promise<void> {
   // so that pb_*_duration_ms column names are accurate.
   for (const dist of PB_DISTANCES.filter(d => d.key !== '1k' && d.key !== 'mile')) {
     const cols = PB_COLUMNS[dist.key];
-    const minMeters = dist.minKm * 1000;
-    const maxMeters = dist.maxKm * 1000;
+    // Distance thresholds in km (canonical unit).
+    // The CASE expression normalizes any legacy meter rows on-the-fly so the
+    // WHERE clause works correctly regardless of which unit a row was stored in.
+    const minKm = dist.minKm;
+    const maxKm = dist.maxKm;
 
     // ── Check dedicated runs in the distance band ────────────────────────────
     const [pbRun] = await db
@@ -189,8 +205,8 @@ export async function recomputeForUser(userId: string): Promise<void> {
       .from(runs)
       .where(and(
         eq(runs.userId, userId),
-        gte(runs.distance, minMeters),
-        sql`${runs.distance} <= ${maxMeters}`,
+        sql`(CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END) >= ${minKm}`,
+        sql`(CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END) <= ${maxKm}`,
         isNotNull(runs.avgPace),
       ))
       .orderBy(runs.avgPace)   // fastest (lowest) pace first ("4:00" < "5:00" alphabetically ✓)
@@ -257,20 +273,21 @@ export async function recomputeForUser(userId: string): Promise<void> {
 
   // ── Upsert the cache row ─────────────────────────────────────────────────
   const totalRuns = Number(agg.totalRuns ?? 0);
-  // runs.distance is in METERS → divide by 1000 for km columns
-  const totalDistanceKm = Number(agg.totalDistanceM ?? 0) / 1000;
-  const longestRunKm    = Number(agg.longestRunM    ?? 0) / 1000;
-  // runs.duration is in SECONDS → store directly (column is total_duration_seconds)
+  // runs.distance is in KM (canonical rule). SQL already normalized via CASE expression.
+  const totalDistanceKm = Number(agg.totalDistanceKm ?? 0);
+  const longestRunKm    = Number(agg.longestRunKm    ?? 0);
+  // runs.duration is in SECONDS — store directly (column is total_duration_seconds)
   const totalDurationSeconds = Number(agg.totalDurationSec ?? 0);
 
   // Longest run time: duration of the run with the greatest distance (already in seconds)
+  // Order by normalized distance so legacy meter rows sort correctly
   let longestRunTimeSec = 0;
   if (totalRuns > 0) {
     const [longestRun] = await db
       .select({ duration: runs.duration })
       .from(runs)
       .where(eq(runs.userId, userId))
-      .orderBy(sql`${runs.distance} DESC NULLS LAST`)
+      .orderBy(sql`CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END DESC NULLS LAST`)
       .limit(1);
     longestRunTimeSec = Math.round(longestRun?.duration || 0);
   }
