@@ -137,8 +137,10 @@ class DataStreamer {
             var app = App.getApp();
             if (app != null && (app has :onHttpSuccess)) { app.onHttpSuccess(); }
 
-            // Deliver coaching cue to the active RunView if one was piggybacked on the response
-            if (data != null && data.get("coaching") != null) {
+            // Deliver coaching cue to the active RunView if one was piggybacked on the response.
+            // Guard with instanceof Lang.Dictionary — the callback types data as Dictionary or String
+            // or Null; calling .get() on a String throws a Symbol Not Found crash in Connect IQ.
+            if (data != null && (data instanceof Lang.Dictionary) && data.get("coaching") != null) {
                 var coachingText = data.get("coaching");
                 Sys.println("Coaching cue received: " + coachingText);
                 if (app has :onCoachingCue) { app.onCoachingCue(coachingText); }

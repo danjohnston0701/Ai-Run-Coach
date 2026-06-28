@@ -639,7 +639,12 @@ class RunView extends Ui.View {
             _isRunning        = false;
             _isPaused         = false;
             _phoneControlled  = false;
-            _isFinishing      = false;  // Reset for next run
+            // CRITICAL: set _isFinishing = true FIRST so any runUpdate messages
+            // already queued are blocked by the guard at the top of the runUpdate handler.
+            // Without this, a late runUpdate arriving after cleanup can restore
+            // _isRunning = true, causing onTick() to call Activity.getActivityInfo()
+            // on a stopped session — which is a Connect IQ runtime crash.
+            _isFinishing      = true;   // Block in-flight runUpdates during cleanup
             _sessionReadySent = false;  // Allow next session to send sessionReady again
             _overlayState     = OVERLAY_READY;
             if (_gpsListening) {
@@ -650,6 +655,7 @@ class RunView extends Ui.View {
             _stopSession();
             _vibeLong();
             Ui.requestUpdate();
+            _isFinishing = false;  // Reset AFTER cleanup — unblocks the next run
         }
     }
 
