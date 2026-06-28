@@ -2307,8 +2307,8 @@ ${(() => {
 
 RECENT RUN (Just Completed):
 - Workout Type: ${run.workoutType || 'general run'}
-- Distance: ${(run.distance / 1000).toFixed(2)} km
-- Duration: ${(run.duration / 60).toFixed(0)} minutes
+- Distance: ${(run.distance > 200 ? run.distance / 1000 : run.distance).toFixed(2)} km
+- Duration: ${(run.duration > 86400 ? run.duration / 1000 : run.duration / 60).toFixed(0)} minutes
 - Pace: ${run.avgPace || 'N/A'}
 - Avg Heart Rate: ${run.avgHeartRate || 'N/A'} bpm
 - Max Heart Rate: ${run.maxHeartRate || 'N/A'} bpm
@@ -2360,6 +2360,26 @@ Provide your assessment in JSON format:
           `[Plan Reassessment] Assessment for plan ${plan.id}:`,
           JSON.stringify(assessment, null, 2)
         );
+
+        // ── Persist the coaching insight to the run record ───────────────────
+        // Store reason + recommendation on the run regardless of whether plan
+        // adjustment is needed — these insights are shown in the post-run AI
+        // summary (even for users without a plan, this path only runs for plan
+        // users, but the insight is always valuable).
+        try {
+          await db.update(runs)
+            .set({ coachingInsight: {
+              reason:         assessment.reason         || null,
+              recommendation: assessment.recommendation || null,
+              adjustmentType: assessment.adjustmentType || 'none',
+              needsAdjustment: !!assessment.needsAdjustment,
+              generatedAt:    new Date().toISOString(),
+            } } as any)
+            .where(eq(runs.id, runId));
+          console.log(`[Plan Reassessment] Coaching insight saved to run ${runId}`);
+        } catch (insightErr: any) {
+          console.warn(`[Plan Reassessment] Could not save coaching insight to run: ${insightErr?.message}`);
+        }
 
         // If adjustments are needed, trigger plan adaptation
         // Pass session compliance + assessment context so the AI can generate specific, targeted changes

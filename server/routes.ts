@@ -2584,6 +2584,10 @@ function transformRunForAndroid(run: any) {
         })) : undefined,
         expectedSessionGoal: expectedSessionGoal,
         weatherImpactAnalysis: weatherImpactAnalysis || undefined,
+        // Plan reassessment insight — persisted to runs.coaching_insight after run save.
+        // Contains reason + recommendation from the AI coach's post-run training assessment.
+        // May be null for users without a training plan (inline assessment handles this).
+        coachingInsight: (run as any).coachingInsight ?? null,
       });
       const analysisEndTime = Date.now();
       console.log(`[comprehensive-analysis] AI analysis generated in ${analysisEndTime - analysisStartTime}ms for run ${runId}`);

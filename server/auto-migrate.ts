@@ -218,6 +218,13 @@ export async function runAutoMigrations(): Promise<void> {
       name: "segments.max_gradient",
       sql: "ALTER TABLE segments ADD COLUMN IF NOT EXISTS max_gradient REAL",
     },
+    // ── runs.coaching_insight — post-run AI coaching assessment ──────────────
+    // Stores the plan reassessment reason + recommendation for this specific run.
+    // Written by reassessTrainingPlansWithRunData() and read by comprehensive analysis.
+    {
+      name: "runs.coaching_insight",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS coaching_insight JSONB",
+    },
   ];
 
   let succeeded = 0;

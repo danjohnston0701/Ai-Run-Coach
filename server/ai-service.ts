@@ -3776,8 +3776,15 @@ export async function generateComprehensiveRunAnalysis(params: {
   }>;
   expectedSessionGoal?: string;
   runnerProfile?: string | null;
+  /** Coaching insight from plan reassessment (or null for users without a plan). */
+  coachingInsight?: {
+    reason: string;
+    recommendation: string;
+    adjustmentType: string;
+    needsAdjustment: boolean;
+  } | null;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal } = params;
+  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal, coachingInsight } = params;
 
   // ── Normalize units — DB rule: distance = km, duration = seconds.
   // Legacy rows from old Strava/Garmin importers may have been stored in meters/ms.
@@ -3977,6 +3984,40 @@ ${planProgressWeek && planProgressWeeks ? `- Week ${planProgressWeek} of ${planP
 ${planProgressWeek && planProgressWeeks ? `- Reference the week number and progression ("Week ${planProgressWeek} of ${planProgressWeeks}").` : ''}
 - If it's an easy/recovery workout, praise consistency and recovery focus. If it's a tempo or interval session, emphasize quality and progression.
 - Highlight how this specific run contributed to the overall plan progression.
+`;
+  }
+
+  // ── Coaching Insight from Plan Reassessment ────────────────────────────────
+  // When the runner has an active training plan, reassessTrainingPlansWithRunData()
+  // runs immediately after save and stores its reason + recommendation on the run.
+  // We surface that directly in the summary so the runner sees the coach's assessment.
+  // For users WITHOUT a plan, we ask the AI to generate the equivalent assessment inline
+  // (no extra API call — it's part of the same completion).
+  if (coachingInsight?.reason) {
+    prompt += `
+## TRAINING LOAD ASSESSMENT (AI Coach Analysis):
+Your training coach performed an immediate post-run analysis. Include these findings prominently in your summary:
+
+**Assessment**: ${coachingInsight.reason}
+
+**Coach's Recommendation**: ${coachingInsight.recommendation}
+
+${coachingInsight.needsAdjustment
+  ? `⚠️ **Action Required** (${coachingInsight.adjustmentType?.replace(/_/g, ' ')}): The coach flagged that training adjustments are needed based on this run. Make sure this is clearly communicated to the runner.`
+  : `✅ **Training on Track**: The coach assessed no immediate adjustments are needed, though the recommendation above should still be shared.`
+}
+
+Weave these coaching insights naturally into your analysis rather than quoting them verbatim.
+`;
+  } else {
+    // No plan reassessment ran (user has no training plan) — ask the AI to generate
+    // an equivalent insight as part of this analysis.
+    prompt += `
+## TRAINING LOAD ASSESSMENT (generate this as part of your analysis):
+Since this runner does not have a structured training plan, assess the training load of this specific run and provide:
+1. A brief assessment of whether the training load was appropriate (referencing HR, pace, duration, and any struggle data)
+2. One specific, actionable recommendation for their next session
+Make this feel like a natural part of the summary — not a separate section header.
 `;
   }
 
