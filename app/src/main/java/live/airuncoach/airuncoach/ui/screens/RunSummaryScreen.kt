@@ -5888,6 +5888,49 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
 }
 /* =================== RUN METRIC RINGS (at-a-glance KPI donuts) =================== */
 
+/**
+ * Returns the optimal cadence range (spm) for a given run, derived from average pace.
+ *
+ * Science basis: cadence should increase with pace — not by lengthening stride — so the
+ * target band scales continuously with how fast the user is running or walking.
+ *
+ * Pace tiers (speed in m/s → sec/km):
+ *   Walking        < 2.0 m/s  (>8:20/km)   → 100-120 spm
+ *   Very easy jog  2.0-2.5    (6:40-8:20)   → 148-162 spm
+ *   Easy run       2.5-3.0    (5:33-6:40)   → 158-168 spm
+ *   Moderate run   3.0-3.7    (4:30-5:33)   → 164-174 spm
+ *   Tempo/Threshold3.7-4.4    (3:47-4:30)   → 170-178 spm
+ *   Fast / race    > 4.4 m/s  (<3:47/km)   → 176-185 spm
+ */
+private fun computeOptimalCadenceRange(run: RunSession): IntRange {
+    val speedMs = when {
+        run.averageSpeed > 0f -> run.averageSpeed.toDouble()
+        run.distance > 0 && run.duration > 0 -> run.distance / (run.duration / 1000.0)
+        else -> 3.0  // default: moderate ~5:33/km if no data
+    }
+    return when {
+        speedMs < 2.0 -> 100..120   // Walking (>8:20/km)
+        speedMs < 2.5 -> 148..162   // Very easy jog (6:40–8:20/km)
+        speedMs < 3.0 -> 158..168   // Easy run (5:33–6:40/km)
+        speedMs < 3.7 -> 164..174   // Moderate run (4:30–5:33/km)
+        speedMs < 4.4 -> 170..178   // Tempo / threshold (3:47–4:30/km)
+        else          -> 176..185   // Fast / race pace (<3:47/km)
+    }
+}
+
+/**
+ * Returns a 0f–1f quality score for how close [actual] cadence is to [range].
+ * Full score (1f) if in range; degrades linearly with 30 spm tolerance window.
+ */
+private fun cadenceQualityScore(actual: Int, range: IntRange): Float {
+    if (actual <= 0) return 0f
+    return when {
+        actual in range          -> 1f
+        actual < range.first     -> (1f - (range.first - actual).toFloat() / 30f).coerceIn(0f, 1f)
+        else                     -> (1f - (actual - range.last).toFloat() / 30f).coerceIn(0f, 1f)
+    }
+}
+
 @Composable
 private fun RunMetricRingsRow(run: RunSession) {
     // ── Quality color palette (Excellent → Bad) ───────────────────────────────────────────
@@ -5925,29 +5968,32 @@ private fun RunMetricRingsRow(run: RunSession) {
         else                         -> "Zone 5"
     }
 
-    // ── Ring 2 fallback: CADENCE quality (when no HR data) ───────────────────────────────
-    val cadenceColor: Color = when {
-        run.cadence in 170..180          -> colorExcellent  // Optimal range
-        run.cadence in 165..170 ||
-        run.cadence in 181..185          -> colorGood        // Close to optimal
-        run.cadence in 160..165 ||
-        run.cadence in 186..190          -> colorAverage     // Acceptable
-        run.cadence in 155..160          -> colorCaution     // Below target
-        run.cadence > 0                  -> colorBad         // Well off target
-        else                             -> Colors.textMuted
+    // ── Ring 2 fallback: CADENCE quality (when no HR data) — pace-dynamic targets ──────────
+    // Optimal range is derived from this run's actual average speed, not a fixed 170-180 target
+    val optimalCadenceRange = remember(run.averageSpeed, run.distance, run.duration) {
+        computeOptimalCadenceRange(run)
     }
-    val cadenceFraction: Float? = if (!hasHr && run.cadence > 0) {
-        when {
-            run.cadence in 170..180 -> 1f
-            run.cadence < 170       -> (run.cadence / 170f).coerceIn(0f, 1f)
-            else                    -> (1f - ((run.cadence - 180).toFloat() / 60f)).coerceIn(0f, 1f)
-        }
-    } else null
+    val cadenceScore = remember(run.cadence, optimalCadenceRange) {
+        cadenceQualityScore(run.cadence, optimalCadenceRange)
+    }
+    val isWalking = (run.averageSpeed > 0f && run.averageSpeed < 2.0f) ||
+                    (run.averageSpeed <= 0f && run.distance > 0 && run.duration > 0 &&
+                     run.distance / (run.duration / 1000.0) < 2.0)
+    val cadenceFraction: Float? = if (!hasHr && run.cadence > 0) cadenceScore else null
+    val cadenceColor: Color = when {
+        run.cadence <= 0           -> Colors.textMuted
+        cadenceScore >= 0.90f      -> colorExcellent
+        cadenceScore >= 0.75f      -> colorGood
+        cadenceScore >= 0.55f      -> colorAverage
+        cadenceScore >= 0.35f      -> colorCaution
+        else                       -> colorBad
+    }
     val cadenceBadge = when {
-        run.cadence in 170..180 -> "Optimal"
-        run.cadence in 160..170 -> "Good"
-        run.cadence > 0         -> "Improve"
-        else                    -> ""
+        run.cadence <= 0                        -> ""
+        isWalking                               -> "Walking pace"
+        run.cadence in optimalCadenceRange      -> "Optimal"
+        run.cadence < optimalCadenceRange.first -> "Low for pace"
+        else                                    -> "High for pace"
     }
 
     // ── Ring 3: CONSISTENCY — quality-based color (78% = Solid = Light Green, not orange) ──
@@ -6026,6 +6072,9 @@ private fun RunMetricRingsRow(run: RunSession) {
                         label = "CADENCE",
                         value = cadenceFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
                         subLabel = if (run.cadence > 0) "${run.cadence} spm" else "No data",
+                        targetLabel = if (run.cadence > 0)
+                            "target ${optimalCadenceRange.first}-${optimalCadenceRange.last}"
+                        else null,
                         progress = cadenceFraction ?: 0f,
                         ringColor = cadenceColor,
                         badgeText = cadenceBadge
@@ -6059,6 +6108,7 @@ private fun MetricRing(
     label: String,
     value: String,
     subLabel: String,
+    targetLabel: String? = null,  // optional second line, e.g. "target 164-174"
     progress: Float, // 0f..1f
     ringColor: Color,
     badgeText: String = ""
@@ -6146,7 +6196,7 @@ private fun MetricRing(
             maxLines = 1
         )
 
-        // Sub-label (e.g. "113 bpm")
+        // Sub-label (e.g. "158 spm")
         Text(
             subLabel,
             style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold, fontSize = 11.sp),
@@ -6154,6 +6204,17 @@ private fun MetricRing(
             textAlign = TextAlign.Center,
             maxLines = 1
         )
+
+        // Optional secondary label (e.g. "target 164-174") — shown for cadence ring
+        if (targetLabel != null) {
+            Text(
+                targetLabel,
+                style = AppTextStyles.caption.copy(fontSize = 9.sp),
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
+        }
 
         // Quality badge pill
         if (badgeText.isNotEmpty()) {
