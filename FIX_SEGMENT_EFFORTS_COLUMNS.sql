@@ -24,15 +24,21 @@ ALTER TABLE segment_efforts ADD COLUMN IF NOT EXISTS avg_power    INTEGER;  -- w
 
 -- ── segments: add columns that may be missing ────────────────────────────────
 
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS effort_count INTEGER DEFAULT 0;
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS star_count   INTEGER DEFAULT 0;
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS avg_gradient REAL;
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS max_gradient REAL;
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS terrain_type TEXT;
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS city         TEXT;
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS country      TEXT;
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS category     TEXT DEFAULT 'community';
-ALTER TABLE segments ADD COLUMN IF NOT EXISTS is_verified  BOOLEAN DEFAULT FALSE;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS effort_count       INTEGER DEFAULT 0;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS star_count         INTEGER DEFAULT 0;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS avg_gradient       REAL;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS max_gradient       REAL;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS terrain_type       TEXT;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS city               TEXT;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS country            TEXT;
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS category           TEXT DEFAULT 'community';
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS is_verified        BOOLEAN DEFAULT FALSE;
+
+-- *** ROOT CAUSE OF "column created_by_user_id does not exist" (error 42703) ***
+-- Drizzle schema defines createdById: varchar("created_by_user_id") on the
+-- segments table but this ALTER was never run in production.  Every call to
+-- matchRunToSegments() (which does db.select().from(segments)) hits this error.
+ALTER TABLE segments ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR REFERENCES users(id);
 
 -- ── Indexes for performance ───────────────────────────────────────────────────
 

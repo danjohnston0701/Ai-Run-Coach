@@ -20,6 +20,7 @@ import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shar
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.network.model.*
+import retrofit2.HttpException
 import java.util.*
 import javax.inject.Inject
 
@@ -30,6 +31,19 @@ sealed class AiAnalysisState {
     data class Comprehensive(val analysis: ComprehensiveRunAnalysis) : AiAnalysisState()
     data class Basic(val insights: BasicRunInsights) : AiAnalysisState()
     data class Error(val message: String) : AiAnalysisState()
+
+    /**
+     * Shown when the user has exhausted their monthly AI analysis quota or their
+     * free trial has expired. Carries enough context to render a helpful upgrade card.
+     */
+    data class LimitReached(
+        val isTrialExpired: Boolean,  // true = 402 trial_expired, false = 429 quota hit
+        val currentTier: String,      // "free", "lite", "standard"
+        val used: Int,                // analyses used this month
+        val limit: Int,               // plan limit (0 when trial expired)
+        val resetMonth: String,       // "July 2026"  (empty when trial expired)
+        val isFreeUser: Boolean,
+    ) : AiAnalysisState()
 }
 
 @HiltViewModel
@@ -463,9 +477,46 @@ class RunSummaryViewModel @Inject constructor(
                     }
                 } catch (analysisError: Exception) {
                     Log.w("RunSummaryViewModel", "Comprehensive analysis failed: ${analysisError.message}", analysisError)
-                    _analysisState.value = AiAnalysisState.Error(
-                        "AI analysis unavailable. Tap to try again."
-                    )
+                    when (analysisError) {
+                        is HttpException -> {
+                            val body = try {
+                                analysisError.response()?.errorBody()?.string() ?: "{}"
+                            } catch (_: Exception) { "{}" }
+
+                            @Suppress("UNCHECKED_CAST")
+                            val json = try {
+                                gson.fromJson(body, Map::class.java) as? Map<String, Any> ?: emptyMap()
+                            } catch (_: Exception) { emptyMap<String, Any>() }
+
+                            when (analysisError.code()) {
+                                // ── 402: free trial has expired ───────────────────────────────────
+                                402 -> _analysisState.value = AiAnalysisState.LimitReached(
+                                    isTrialExpired = true,
+                                    currentTier = "free",
+                                    used = 0,
+                                    limit = 0,
+                                    resetMonth = "",
+                                    isFreeUser = true,
+                                )
+                                // ── 429: monthly quota exhausted ──────────────────────────────────
+                                429 -> _analysisState.value = AiAnalysisState.LimitReached(
+                                    isTrialExpired = false,
+                                    currentTier = (json["tier"] as? String)
+                                        ?: if (json["isFreeUser"] == true) "free" else "paid",
+                                    used = (json["used"] as? Double)?.toInt() ?: 0,
+                                    limit = (json["limit"] as? Double)?.toInt() ?: 0,
+                                    resetMonth = (json["resetMonth"] as? String) ?: "",
+                                    isFreeUser = json["isFreeUser"] == true,
+                                )
+                                else -> _analysisState.value = AiAnalysisState.Error(
+                                    "AI analysis failed (HTTP ${analysisError.code()}). Tap to try again."
+                                )
+                            }
+                        }
+                        else -> _analysisState.value = AiAnalysisState.Error(
+                            "AI analysis unavailable. Tap to try again."
+                        )
+                    }
                 }
 
             } catch (e: Exception) {

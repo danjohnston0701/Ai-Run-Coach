@@ -136,6 +136,7 @@ fun RunSummaryScreenFlagship(
     onNavigateBack: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {},
     onNavigateToShareImage: (String) -> Unit = {},
+    onNavigateToSubscription: () -> Unit = {},
     viewModel: RunSummaryViewModel = hiltViewModel(),
     lastRunForDelta: RunSession? = null, // optional: wire later from your VM/store
 ) {
@@ -304,6 +305,7 @@ fun RunSummaryScreenFlagship(
                             onRequestAiConsent = { showAiConsentSheet = true },
                             hasGroupRun = hasGroupRun,
                             hasDynamicsTab = hasDynamicsTab,
+                            onNavigateToSubscription = onNavigateToSubscription,
                         )
 
                         // Tab 1: Group Run leaderboard (only when run is linked to a group run)
@@ -1081,6 +1083,7 @@ private fun AiInsightsTabContent(
     aiConsentGranted: Boolean = true,
     onRequestAiConsent: () -> Unit = {},
     hasGroupRun: Boolean = false,
+    onNavigateToSubscription: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -1280,7 +1283,8 @@ private fun AiInsightsTabContent(
                         run = run,
                         isGarminConnected = isGarminConnected,
                         onEnrichWithGarmin = onEnrichWithGarmin,
-                        isEnrichingWithGarmin = isEnrichingWithGarmin
+                        isEnrichingWithGarmin = isEnrichingWithGarmin,
+                        onNavigateToSubscription = onNavigateToSubscription,
                     )
                 }
             }
@@ -1457,6 +1461,12 @@ private fun GraphsTabContent(
         item {
             RunTabsFlagship(selected = selectedTab, onSelected = onTabSelected, hasGroupRun = hasGroupRun, hasDynamicsTab = hasDynamicsTab)
         }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // RUN SCORE RINGS — Effort, Cadence & Consistency at a glance
+        // ═══════════════════════════════════════════════════════════════════════
+
+        item { RunMetricRingsRow(run = run) }
 
         // ═══════════════════════════════════════════════════════════════════════
         // CORE CHARTS — Pace, Elevation, Cadence, HR (always shown when GPS data exists)
@@ -2064,6 +2074,148 @@ private fun StatCardFlagship(tile: StatTile, modifier: Modifier = Modifier) {
     }
 }
 
+/* ─────────────────── AI LIMIT / UPGRADE CARD ─────────────────── */
+
+@Composable
+private fun AiAnalysisLimitCard(
+    state: AiAnalysisState.LimitReached,
+    onNavigateToSubscription: () -> Unit,
+) {
+    val tierLabel = when (state.currentTier.lowercase()) {
+        "lite" -> "Lite"
+        "standard" -> "Standard"
+        "free" -> "Free Trial"
+        else -> state.currentTier.replaceFirstChar { it.uppercaseChar() }
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.warning.copy(alpha = 0.5f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // ── Header ────────────────────────────────────────────────────────
+            Text(
+                text = if (state.isTrialExpired) "⏰" else "📊",
+                fontSize = 36.sp
+            )
+
+            Text(
+                text = if (state.isTrialExpired) "Free Trial Ended" else "Monthly Limit Reached",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                text = if (state.isTrialExpired)
+                    "Your 14-day free trial has ended. Upgrade to keep generating AI run insights after every run."
+                else
+                    "You've used all ${state.limit} AI run ${if (state.limit == 1) "analysis" else "analyses"} on your $tierLabel plan this month.",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary,
+                textAlign = TextAlign.Center
+            )
+
+            // ── Usage bar (quota-hit only) ─────────────────────────────────────
+            if (!state.isTrialExpired && state.limit > 0) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Colors.backgroundTertiary, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "AI Analyses used",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted
+                        )
+                        Text(
+                            "${state.used} / ${state.limit}",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.warning
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { 1f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = Colors.warning,
+                        trackColor = Colors.warning.copy(alpha = 0.2f),
+                    )
+                    if (state.resetMonth.isNotEmpty()) {
+                        Text(
+                            "Resets ${state.resetMonth}",
+                            style = AppTextStyles.caption,
+                            color = Colors.textMuted,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.End
+                        )
+                    }
+                }
+            }
+
+            // ── Upgrade prompt ────────────────────────────────────────────────
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.10f)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                val nextTier = if (state.isFreeUser || state.isTrialExpired) "Lite" else "Standard"
+                val nextLimit = if (state.isFreeUser || state.isTrialExpired) "15" else "50"
+                Text(
+                    "💡 Upgrade to $nextTier to get $nextLimit AI analyses per month + training plans, route generation and more.",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Medium),
+                    color = Colors.textPrimary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+
+            // ── CTA button ───────────────────────────────────────────────────
+            Button(
+                onClick = onNavigateToSubscription,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(
+                    "Upgrade Plan",
+                    style = AppTextStyles.body.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Colors.buttonText
+                    )
+                )
+            }
+
+            if (!state.isTrialExpired && state.resetMonth.isNotEmpty()) {
+                Text(
+                    "Or wait — your limit resets ${state.resetMonth}",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
 /* ---------------------------------- AI UI -------------------------------- */
 
 @Composable
@@ -2077,8 +2229,18 @@ private fun AiSectionFlagship(
     run: RunSession,
     isGarminConnected: Boolean = false,
     onEnrichWithGarmin: () -> Unit = {},
-    isEnrichingWithGarmin: Boolean = false
+    isEnrichingWithGarmin: Boolean = false,
+    onNavigateToSubscription: () -> Unit = {},
 ) {
+    // If quota/trial limit hit, replace the entire card with the limit card
+    if (analysisState is AiAnalysisState.LimitReached) {
+        AiAnalysisLimitCard(
+            state = analysisState,
+            onNavigateToSubscription = onNavigateToSubscription,
+        )
+        return
+    }
+
     Card(
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(18.dp),
@@ -2153,6 +2315,9 @@ private fun AiSectionFlagship(
                         onClick = onRetryAi
                     )
                 }
+
+                // LimitReached is handled before this Card renders (early return above)
+                is AiAnalysisState.LimitReached -> { /* unreachable — handled via early return */ }
 
                 AiAnalysisState.Idle -> {
                     Text(
@@ -5721,6 +5886,241 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
         }
     }
 }
+/* =================== RUN METRIC RINGS (at-a-glance KPI donuts) =================== */
+
+@Composable
+private fun RunMetricRingsRow(run: RunSession) {
+    // ── Effort: avg HR as % of estimated max HR (185 bpm default, matching existing code) ─��
+    val effortFraction: Float? = if (run.heartRate > 0) (run.heartRate / 185f).coerceIn(0f, 1f) else null
+
+    // ── Cadence: % of optimal 175 spm, full credit 170-180 range ──────────────────────────
+    val cadenceFraction: Float? = if (run.cadence > 0) {
+        val score = when {
+            run.cadence in 170..180 -> 1f
+            run.cadence < 170 -> (run.cadence / 170f).coerceIn(0f, 1f)
+            else -> (1f - ((run.cadence - 180).toFloat() / 60f)).coerceIn(0f, 1f)
+        }
+        score
+    } else null
+
+    // ── Consistency: coefficient of variation across km splits ────────────────────────────
+    val consistencyFraction: Float? = remember(run.kmSplits, run.paceData) {
+        // Prefer split times (ms), fall back to paceData floats
+        val samples: List<Double> = if (run.kmSplits.size >= 2) {
+            run.kmSplits.map { it.time.toDouble() }
+        } else {
+            val pd = run.paceData?.filter { it > 0 }.orEmpty()
+            if (pd.size >= 10) pd else emptyList()
+        }
+        if (samples.size >= 2) {
+            val mean = samples.average()
+            val stdDev = sqrt(samples.map { (it - mean).pow(2) }.average())
+            val cv = if (mean > 0) stdDev / mean else 0.0
+            // CV of 0 = 100%, CV of 0.20+ = 0%
+            (1f - (cv * 5f).toFloat()).coerceIn(0f, 1f)
+        } else null
+    }
+
+    // ── Dynamic color for effort based on HR zone ─────────────────────────────────────────
+    val effortColor = when {
+        effortFraction == null -> Colors.textMuted
+        effortFraction < 0.60f -> Colors.primary          // Zone 1 – cyan
+        effortFraction < 0.70f -> Colors.success          // Zone 2 – green
+        effortFraction < 0.80f -> Colors.warning          // Zone 3 – amber
+        effortFraction < 0.90f -> Colors.accent           // Zone 4 – orange
+        else -> Colors.error                              // Zone 5 – red
+    }
+    val effortBadge = when {
+        effortFraction == null -> "No HR"
+        effortFraction < 0.60f -> "Easy"
+        effortFraction < 0.70f -> "Zone 2"
+        effortFraction < 0.80f -> "Zone 3"
+        effortFraction < 0.90f -> "Zone 4"
+        else -> "Zone 5"
+    }
+
+    val cadenceBadge = when {
+        cadenceFraction == null -> ""
+        run.cadence in 170..180 -> "Optimal"
+        run.cadence >= 160 -> "Good"
+        run.cadence > 0 -> "Improve"
+        else -> ""
+    }
+
+    val consistencyBadge = when {
+        consistencyFraction == null -> ""
+        consistencyFraction >= 0.90f -> "Elite"
+        consistencyFraction >= 0.75f -> "Solid"
+        consistencyFraction >= 0.55f -> "Variable"
+        else -> "Uneven"
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(modifier = Modifier.padding(Spacing.lg)) {
+            Text(
+                "Run Score",
+                style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textMuted
+            )
+            Spacer(modifier = Modifier.height(Spacing.md))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Top
+            ) {
+                MetricRing(
+                    label = "EFFORT",
+                    value = effortFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
+                    subLabel = if (run.heartRate > 0) "${run.heartRate} bpm" else "No HR sensor",
+                    progress = effortFraction ?: 0f,
+                    ringColor = effortColor,
+                    badgeText = effortBadge
+                )
+                MetricRing(
+                    label = "CADENCE",
+                    value = cadenceFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
+                    subLabel = if (run.cadence > 0) "${run.cadence} spm" else "No data",
+                    progress = cadenceFraction ?: 0f,
+                    ringColor = if (cadenceFraction != null) Colors.success else Colors.textMuted,
+                    badgeText = cadenceBadge
+                )
+                MetricRing(
+                    label = "CONSISTENCY",
+                    value = consistencyFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
+                    subLabel = when {
+                        consistencyFraction == null -> "No data"
+                        consistencyFraction >= 0.90f -> "Very even"
+                        consistencyFraction >= 0.75f -> "Steady pace"
+                        consistencyFraction >= 0.55f -> "Variable"
+                        else -> "Uneven splits"
+                    },
+                    progress = consistencyFraction ?: 0f,
+                    ringColor = if (consistencyFraction != null) Colors.accent else Colors.textMuted,
+                    badgeText = consistencyBadge
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricRing(
+    label: String,
+    value: String,
+    subLabel: String,
+    progress: Float, // 0f..1f
+    ringColor: Color,
+    badgeText: String = ""
+) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+        label = "ring_$label"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+    ) {
+        // The donut ring
+        Box(
+            modifier = Modifier.size(90.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 9.dp.toPx()
+                val radius = (size.minDimension - strokeWidth) / 2
+                val arcSize = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
+                val topLeft = Offset(strokeWidth / 2, strokeWidth / 2)
+
+                // Track ring (background)
+                drawArc(
+                    color = Colors.backgroundTertiary,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                    topLeft = topLeft,
+                    size = arcSize
+                )
+
+                // Glow / halo layer for depth
+                if (animatedProgress > 0.01f) {
+                    drawArc(
+                        color = ringColor.copy(alpha = 0.20f),
+                        startAngle = -90f,
+                        sweepAngle = animatedProgress * 360f,
+                        useCenter = false,
+                        style = Stroke(width = strokeWidth * 2.4f, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                        topLeft = topLeft,
+                        size = arcSize
+                    )
+                }
+
+                // Main filled arc
+                if (animatedProgress > 0.01f) {
+                    drawArc(
+                        color = ringColor,
+                        startAngle = -90f,
+                        sweepAngle = animatedProgress * 360f,
+                        useCenter = false,
+                        style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                        topLeft = topLeft,
+                        size = arcSize
+                    )
+                }
+            }
+
+            // Center value
+            Text(
+                value,
+                style = AppTextStyles.small.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp
+                ),
+                color = if (progress > 0f) ringColor else Colors.textMuted,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        // Metric label (e.g. "CADENCE")
+        Text(
+            label,
+            style = AppTextStyles.caption.copy(letterSpacing = 0.8.sp, fontSize = 10.sp),
+            color = Colors.textMuted,
+            textAlign = TextAlign.Center
+        )
+
+        // Sub-label (actual value like "170 spm")
+        Text(
+            subLabel,
+            style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold, fontSize = 11.sp),
+            color = Colors.textSecondary,
+            textAlign = TextAlign.Center
+        )
+
+        // Badge pill
+        if (badgeText.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .background(ringColor.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    badgeText,
+                    style = AppTextStyles.caption.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                    color = ringColor
+                )
+            }
+        }
+    }
+}
+
 /* ------------------- INTENSITY DISTRIBUTION DONUT ------------------- */
 
 @Composable

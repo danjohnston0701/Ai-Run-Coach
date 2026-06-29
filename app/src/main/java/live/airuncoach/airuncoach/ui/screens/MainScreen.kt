@@ -676,7 +676,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     },
                     onNavigateToShareImage = { id ->
                         navController.navigate("share_image/$id")
-                    }
+                    },
+                    onNavigateToSubscription = {
+                        navController.navigate("subscription")
+                    },
                 )
             }
             composable("share_image/{runId}") { backStackEntry ->
