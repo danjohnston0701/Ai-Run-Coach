@@ -2068,7 +2068,11 @@ function transformRunForAndroid(run: any) {
           return res.status(200).json(transformRunForAndroid(rapidDup));
         }
 
-        // Case 2 — Garmin companion run created in the last 3 hours with similar distance
+        // Case 2 — Garmin companion run created in the last 3 hours with similar distance.
+        // The watch uploads a standalone session; the phone then uploads its richer copy
+        // (with watchHrSeries, full GPS track, coaching notes, etc).  Rather than
+        // discarding the phone's data, merge it into the watch's record — same logic as
+        // Case 0 — then return the now-enriched record.
         const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
         const garminCandidates = await db.select()
           .from(runs)
@@ -2083,8 +2087,62 @@ function transformRunForAndroid(run: any) {
           return rDist > 0 && Math.abs(rDist - distanceRounded) / Math.max(rDist, 0.1) < 0.1;
         });
         if (garminDup) {
-          console.log(`[POST /api/runs] Garmin-companion duplicate detected — phone run matches watch run ${garminDup.id}, returning watch record`);
-          return res.status(200).json(transformRunForAndroid(garminDup));
+          console.log(`[POST /api/runs] Case 2 — phone upload matches watch run ${garminDup.id} — merging phone data in`);
+
+          const c2Merge: Record<string, any> = {};
+
+          // heartRateData: phone's watchHrSeries (flat number[]) is far richer than the
+          // garmin_companion record which only has avgHeartRate with no per-sample array.
+          const c2ExistingHR = (garminDup as any).heartRateData;
+          const c2IncomingHRIsArray = Array.isArray(runData.heartRateData) && (runData.heartRateData as any[]).length > 0;
+          const c2ExistingHRIsArray = Array.isArray(c2ExistingHR) && (c2ExistingHR as any[]).length > 0;
+          if (c2IncomingHRIsArray && !c2ExistingHRIsArray) {
+            c2Merge.heartRateData = runData.heartRateData;
+            console.log(`[POST /api/runs] Case 2: upgrading heartRateData to phone watchHrSeries (${(runData.heartRateData as any[]).length} samples)`);
+          }
+
+          // GPS track: phone has full array with embedded HR/cadence per point
+          const c2ExistingGps = (garminDup as any).gpsTrack;
+          if (runData.gpsTrack != null && (!Array.isArray(c2ExistingGps) && Array.isArray(runData.gpsTrack))) {
+            c2Merge.gpsTrack = runData.gpsTrack;
+          }
+
+          // Coaching notes, struggle points, km splits (computed by phone only)
+          const c2IncomingNotes = runData.aiCoachingNotes;
+          if (Array.isArray(c2IncomingNotes) && c2IncomingNotes.length > 0 &&
+              (!(garminDup as any).aiCoachingNotes || (garminDup as any).aiCoachingNotes?.length === 0)) {
+            c2Merge.aiCoachingNotes = c2IncomingNotes;
+          }
+          if (runData.strugglePoints != null && (garminDup as any).strugglePoints == null) {
+            c2Merge.strugglePoints = runData.strugglePoints;
+          }
+          if (runData.kmSplits != null && (garminDup as any).kmSplits == null) {
+            c2Merge.kmSplits = runData.kmSplits;
+          }
+
+          // Cadence / altitude time-series
+          const c2CadArr = Array.isArray(runData.cadenceData) && (runData.cadenceData as any[]).length > 0;
+          if (c2CadArr && !(garminDup as any).cadenceData) c2Merge.cadenceData = runData.cadenceData;
+          const c2AltArr = Array.isArray(runData.altitudeData) && (runData.altitudeData as any[]).length > 0;
+          if (c2AltArr && !(garminDup as any).altitudeData) c2Merge.altitudeData = runData.altitudeData;
+
+          // Target / achievement
+          if (targetDistance != null && (garminDup as any).targetDistance == null) c2Merge.targetDistance = targetDistance;
+          if (targetTime    != null && (garminDup as any).targetTime    == null) c2Merge.targetTime    = targetTime;
+          if (wasTargetAchieved != null && (garminDup as any).wasTargetAchieved == null) c2Merge.wasTargetAchieved = wasTargetAchieved;
+
+          if (Object.keys(c2Merge).length > 0) {
+            await db.update(runs).set(c2Merge).where(eq(runs.id, garminDup.id));
+            console.log(`[POST /api/runs] Case 2 merge applied to run ${garminDup.id}:`, Object.keys(c2Merge).join(', '));
+          }
+
+          // Kick off profile refresh with the enriched data
+          refreshRunnerProfile(userId).catch((err: any) =>
+            console.error('[POST /api/runs] Case 2 merge: runner profile refresh failed:', err)
+          );
+
+          const [updated2] = await db.select().from(runs).where(eq(runs.id, garminDup.id)).limit(1);
+          return res.status(200).json(transformRunForAndroid(updated2 ?? garminDup));
         }
       } catch (dupErr) {
         console.warn('[POST /api/runs] Dedup check failed (non-fatal):', dupErr);
