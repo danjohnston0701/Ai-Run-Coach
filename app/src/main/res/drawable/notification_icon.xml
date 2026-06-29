@@ -1,60 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Notification small icon — monochrome, transparent background.
+
+    Android renders notification icons using ONLY the alpha channel, so:
+      • Background MUST be transparent (no background rect)
+      • All shapes MUST be white (#FFFFFF)
+
+    Viewport: 100×100 for precise path control, rendered at 24dp.
+    Shape: stylised running figure with three motion/speed lines,
+           matching the Ai Run Coach app logo.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- White background -->
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- ── Head ── -->
     <path
-        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"
+        android:pathData="M76,6 C81.5,6 86,10.5 86,16 C86,21.5 81.5,26 76,26 C70.5,26 66,21.5 66,16 C66,10.5 70.5,6 76,6 Z"
         android:fillColor="#FFFFFF" />
-    
-    <!-- Head -->
+
+    <!-- ── Upper-arm / shoulder sweep (left-bound arc) ──
+         Represents the forward arm reaching toward upper-left,
+         the distinctive horizontal ribbon of the logo. -->
     <path
-        android:pathData="M54,18 C60,18 64,22 64,28 C64,34 60,38 54,38 C48,38 44,34 44,28 C44,22 48,18 54,18 Z"
-        android:fillColor="#000000" />
-    
-    <!-- Upper body/torso -->
+        android:pathData="M70,28 C62,22 50,18 38,16 C28,14 18,15 12,18
+                          L14,24 C20,21 30,20 40,22 C52,25 62,30 68,35 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- ── Main body diagonal (torso / crossing ribbon) ──
+         The bold diagonal band that runs from the head area
+         down to the lower-right foot. -->
     <path
-        android:pathData="M54,38 L54,60" 
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#000000" />
-    
-    <!-- Left arm (up, running motion) -->
+        android:pathData="M72,30 C68,38 62,46 54,56 C47,65 40,72 36,78
+                          L44,82 C48,76 55,69 62,60 C70,50 76,42 78,34 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- ── Forward (right) foot ──
+         Short thick stroke extending lower-right from the body. -->
     <path
-        android:pathData="M54,42 L35,35"
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#000000" />
-    
-    <!-- Right arm (back, running motion) -->
+        android:pathData="M52,62 C55,70 58,78 60,88 L66,86 C64,76 61,68 57,60 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- ── Speed / motion lines (3 arcs, sweeping lower-left) ──
+         The most distinctive branding element of the logo.
+         Each line is a thin filled arc wedge. -->
+
+    <!-- Speed line 1 (topmost) -->
     <path
-        android:pathData="M54,42 L73,50"
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#000000" />
-    
-    <!-- Left leg (forward stride) -->
+        android:pathData="M38,54 C30,52 22,48 13,42 L15,48 C24,54 32,58 40,60 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Speed line 2 (middle) -->
     <path
-        android:pathData="M54,60 L42,85"
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#000000" />
-    
-    <!-- Right leg (back stride) -->
+        android:pathData="M32,64 C23,62 15,57 6,51 L8,57 C17,63 25,67 33,69 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Speed line 3 (bottommost) -->
     <path
-        android:pathData="M54,60 L66,85"
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#000000" />
+        android:pathData="M26,74 C17,72 9,67 2,61 L4,67 C11,73 19,77 27,79 Z"
+        android:fillColor="#FFFFFF" />
+
 </vector>

@@ -14,6 +14,7 @@ import com.garmin.android.connectiq.IQApp
 import com.garmin.android.connectiq.IQDevice
 import com.garmin.android.connectiq.exception.InvalidStateException
 import com.garmin.android.connectiq.exception.ServiceUnavailableException
+import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.repository.RunRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -151,7 +152,7 @@ class GarminWatchManager(
             )
 
             val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setSmallIcon(R.drawable.notification_icon)
                 .setContentTitle("Garmin run synced!")
                 .setContentText("Your offline run has been saved. Tap to view your summary.")
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -202,7 +203,7 @@ class GarminWatchManager(
             )
 
             val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_popup_sync)
+                .setSmallIcon(R.drawable.notification_icon)
                 .setContentTitle("Offline run detected from your watch")
                 .setContentText("Open the AI Run Coach watch app to sync your run")
                 .setStyle(NotificationCompat.BigTextStyle()
@@ -253,7 +254,7 @@ class GarminWatchManager(
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setSmallIcon(R.drawable.notification_icon)
                 .setContentTitle("Garmin Watch Run in Progress")
                 .setContentText("Your run is being recorded. Open Ai Run Coach to see your summary when you're done.")
                 .setPriority(NotificationCompat.PRIORITY_LOW)
