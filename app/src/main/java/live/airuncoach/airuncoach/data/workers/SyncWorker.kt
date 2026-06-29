@@ -227,7 +227,21 @@ class SyncWorker(
                 planProgressWeeks = run.planProgressWeeks,
                 workoutType = run.workoutType,
                 workoutIntensity = run.workoutIntensity,
-                workoutDescription = run.workoutDescription
+                workoutDescription = run.workoutDescription,
+                // ── Time-series chart data — critical for elevation, HR, pace, and cadence graphs ──
+                // These were previously missing from SyncWorker, meaning any run that failed its
+                // initial upload and was retried here would permanently lose all graph data.
+                heartRateData = run.heartRateData,
+                cadenceData = run.cadenceData,
+                altitudeData = run.altitudeData,
+                groundContactTimeData = run.groundContactTimeData,
+                groundContactBalanceData = run.groundContactBalanceData,
+                verticalOscillationData = run.verticalOscillationData,
+                verticalRatioData = run.verticalRatioData,
+                strideLengthData = run.strideLengthData,
+                runningPowerData = run.runningPowerData,
+                respirationRateData = run.respirationRateData,
+                bearingData = run.bearingData
             )
         }
     }

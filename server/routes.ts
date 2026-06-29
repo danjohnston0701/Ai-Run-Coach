@@ -2013,6 +2013,23 @@ function transformRunForAndroid(run: any) {
               mergeFields.kmSplits = runData.kmSplits;
             }
 
+            // Altitude time-series — prefer phone's flat float[] over any object-format stored
+            // by garmin_companion session/end (kmSplits-derived [{km, value}] which Gson
+            // can't deserialize as List<Float> in the Android app).
+            if (Array.isArray(runData.altitudeData) && (runData.altitudeData as any[]).length > 0) {
+              const existingAlt = (existingByExternalId as any).altitudeData;
+              const existingAltIsObjectArray = Array.isArray(existingAlt) &&
+                existingAlt.length > 0 && typeof existingAlt[0] === 'object';
+              if (!existingAlt || existingAltIsObjectArray) {
+                mergeFields.altitudeData = runData.altitudeData;
+              }
+            }
+            // Cadence time-series
+            if (Array.isArray(runData.cadenceData) && (runData.cadenceData as any[]).length > 0 &&
+                !(existingByExternalId as any).cadenceData) {
+              mergeFields.cadenceData = runData.cadenceData;
+            }
+
             // Weather data
             if (runData.weatherData != null && (existingByExternalId as any).weatherData == null) {
               mergeFields.weatherData = runData.weatherData;
@@ -2121,10 +2138,24 @@ function transformRunForAndroid(run: any) {
           }
 
           // Cadence / altitude time-series
+          // Always prefer phone's flat number[] over garminDup's possible object/kmSplit format.
+          // garmin_companion altitudeData is stored as [{km, value}] (kmSplits-derived) which Gson
+          // can't deserialize as List<Float> on Android — it silently becomes null, killing the chart.
           const c2CadArr = Array.isArray(runData.cadenceData) && (runData.cadenceData as any[]).length > 0;
-          if (c2CadArr && !(garminDup as any).cadenceData) c2Merge.cadenceData = runData.cadenceData;
+          const c2ExistingCadIsArray = Array.isArray((garminDup as any).cadenceData);
+          if (c2CadArr && !c2ExistingCadIsArray) c2Merge.cadenceData = runData.cadenceData;
+
           const c2AltArr = Array.isArray(runData.altitudeData) && (runData.altitudeData as any[]).length > 0;
-          if (c2AltArr && !(garminDup as any).altitudeData) c2Merge.altitudeData = runData.altitudeData;
+          const c2ExistingAlt = (garminDup as any).altitudeData;
+          // Force-overwrite if incoming is a flat number[] AND existing is either:
+          //   (a) absent/null, or
+          //   (b) an array of objects (kmSplits format) which Android can't deserialize as Float[]
+          const c2ExistingAltIsObjectArray = Array.isArray(c2ExistingAlt) &&
+            c2ExistingAlt.length > 0 && typeof c2ExistingAlt[0] === 'object';
+          if (c2AltArr && (!c2ExistingAlt || c2ExistingAltIsObjectArray)) {
+            c2Merge.altitudeData = runData.altitudeData;
+            console.log(`[POST /api/runs] Case 2: upgrading altitudeData from ${c2ExistingAltIsObjectArray ? 'kmSplits object format' : 'null'} to phone flat float array`);
+          }
 
           // Target / achievement
           if (targetDistance != null && (garminDup as any).targetDistance == null) c2Merge.targetDistance = targetDistance;
