@@ -226,12 +226,10 @@ export async function matchRunToSegments(
           achievementType,
         });
 
-        // Update segment effort count
+        // Update segment effort count (use Drizzle column reference, not raw string key)
         await db
           .update(segments)
-          .set({ 
-            effort_count: sql`${segments.effortCount} + 1` 
-          } as any)
+          .set({ effortCount: sql`${segments.effortCount} + 1` })
           .where(eq(segments.id, segment.id));
 
         matches.push({
