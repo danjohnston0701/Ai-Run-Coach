@@ -5890,22 +5890,68 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
 
 @Composable
 private fun RunMetricRingsRow(run: RunSession) {
-    // ── Effort: avg HR as % of estimated max HR (185 bpm default, matching existing code) ─��
-    val effortFraction: Float? = if (run.heartRate > 0) (run.heartRate / 185f).coerceIn(0f, 1f) else null
+    // ── Quality color palette (Excellent → Bad) ───────────────────────────────────────────
+    val colorExcellent = Color(0xFF00E676)       // Bright green
+    val colorGood      = Color(0xFF69F0AE)       // Light green
+    val colorAverage   = Color(0xFFFFEE58)       // Yellow
+    val colorCaution   = Color(0xFFFF9800)       // Orange
+    val colorBad       = Color(0xFFFF5252)       // Red
 
-    // ── Cadence: % of optimal 175 spm, full credit 170-180 range ──────────────────────────
-    val cadenceFraction: Float? = if (run.cadence > 0) {
-        val score = when {
+    // ── Ring 1: EFFORT — same TSS calculation as EffortScoreCard in Summary tab ──────────
+    val effortResult = remember(run) { calculateEffortScore(run) }
+    val effortFraction = (effortResult.score / 100f).coerceIn(0f, 1f)
+    // Reuse the same color as the Summary tab card for perfect consistency
+    val effortRingColor = effortResult.color
+
+    // ── Ring 2: HR ZONE quality (when HR available) — replaces Cadence ───────────────────
+    val hasHr = run.heartRate > 0
+    val hrFraction = if (hasHr) (run.heartRate / 185f).coerceIn(0f, 1f) else null
+
+    // Zone quality: Zone 2 (60-70%) is the aerobic sweet spot = Excellent
+    val hrZoneColor: Color = when {
+        hrFraction == null           -> Colors.textMuted
+        hrFraction in 0.60f..0.70f  -> colorExcellent  // Zone 2 = Excellent
+        hrFraction < 0.80f          -> colorGood        // Zone 3 = Good (tempo)
+        hrFraction < 0.60f          -> colorAverage     // Zone 1 = Average (very easy)
+        hrFraction < 0.90f          -> colorCaution     // Zone 4 = Caution
+        else                         -> colorBad         // Zone 5 = Bad (anaerobic overload)
+    }
+    val hrZoneBadge: String = when {
+        hrFraction == null          -> "No HR"
+        hrFraction < 0.60f          -> "Zone 1"
+        hrFraction < 0.70f          -> "Zone 2"
+        hrFraction < 0.80f          -> "Zone 3"
+        hrFraction < 0.90f          -> "Zone 4"
+        else                         -> "Zone 5"
+    }
+
+    // ── Ring 2 fallback: CADENCE quality (when no HR data) ───────────────────────────────
+    val cadenceColor: Color = when {
+        run.cadence in 170..180          -> colorExcellent  // Optimal range
+        run.cadence in 165..170 ||
+        run.cadence in 181..185          -> colorGood        // Close to optimal
+        run.cadence in 160..165 ||
+        run.cadence in 186..190          -> colorAverage     // Acceptable
+        run.cadence in 155..160          -> colorCaution     // Below target
+        run.cadence > 0                  -> colorBad         // Well off target
+        else                             -> Colors.textMuted
+    }
+    val cadenceFraction: Float? = if (!hasHr && run.cadence > 0) {
+        when {
             run.cadence in 170..180 -> 1f
-            run.cadence < 170 -> (run.cadence / 170f).coerceIn(0f, 1f)
-            else -> (1f - ((run.cadence - 180).toFloat() / 60f)).coerceIn(0f, 1f)
+            run.cadence < 170       -> (run.cadence / 170f).coerceIn(0f, 1f)
+            else                    -> (1f - ((run.cadence - 180).toFloat() / 60f)).coerceIn(0f, 1f)
         }
-        score
     } else null
+    val cadenceBadge = when {
+        run.cadence in 170..180 -> "Optimal"
+        run.cadence in 160..170 -> "Good"
+        run.cadence > 0         -> "Improve"
+        else                    -> ""
+    }
 
-    // ── Consistency: coefficient of variation across km splits ────────────────────────────
+    // ── Ring 3: CONSISTENCY — quality-based color (78% = Solid = Light Green, not orange) ──
     val consistencyFraction: Float? = remember(run.kmSplits, run.paceData) {
-        // Prefer split times (ms), fall back to paceData floats
         val samples: List<Double> = if (run.kmSplits.size >= 2) {
             run.kmSplits.map { it.time.toDouble() }
         } else {
@@ -5916,43 +5962,23 @@ private fun RunMetricRingsRow(run: RunSession) {
             val mean = samples.average()
             val stdDev = sqrt(samples.map { (it - mean).pow(2) }.average())
             val cv = if (mean > 0) stdDev / mean else 0.0
-            // CV of 0 = 100%, CV of 0.20+ = 0%
             (1f - (cv * 5f).toFloat()).coerceIn(0f, 1f)
         } else null
     }
-
-    // ── Dynamic color for effort based on HR zone ─────────────────────────────────────────
-    val effortColor = when {
-        effortFraction == null -> Colors.textMuted
-        effortFraction < 0.60f -> Colors.primary          // Zone 1 – cyan
-        effortFraction < 0.70f -> Colors.success          // Zone 2 – green
-        effortFraction < 0.80f -> Colors.warning          // Zone 3 – amber
-        effortFraction < 0.90f -> Colors.accent           // Zone 4 – orange
-        else -> Colors.error                              // Zone 5 – red
+    val consistencyColor: Color = when {
+        consistencyFraction == null     -> Colors.textMuted
+        consistencyFraction >= 0.90f    -> colorExcellent   // Very even = Excellent
+        consistencyFraction >= 0.75f    -> colorGood         // Solid = Good
+        consistencyFraction >= 0.55f    -> colorAverage      // Variable = Average
+        consistencyFraction >= 0.35f    -> colorCaution      // Uneven = Needs Improvement
+        else                             -> colorBad          // Erratic = Bad
     }
-    val effortBadge = when {
-        effortFraction == null -> "No HR"
-        effortFraction < 0.60f -> "Easy"
-        effortFraction < 0.70f -> "Zone 2"
-        effortFraction < 0.80f -> "Zone 3"
-        effortFraction < 0.90f -> "Zone 4"
-        else -> "Zone 5"
-    }
-
-    val cadenceBadge = when {
-        cadenceFraction == null -> ""
-        run.cadence in 170..180 -> "Optimal"
-        run.cadence >= 160 -> "Good"
-        run.cadence > 0 -> "Improve"
-        else -> ""
-    }
-
     val consistencyBadge = when {
-        consistencyFraction == null -> ""
-        consistencyFraction >= 0.90f -> "Elite"
-        consistencyFraction >= 0.75f -> "Solid"
-        consistencyFraction >= 0.55f -> "Variable"
-        else -> "Uneven"
+        consistencyFraction == null     -> ""
+        consistencyFraction >= 0.90f    -> "Excellent"
+        consistencyFraction >= 0.75f    -> "Solid"
+        consistencyFraction >= 0.55f    -> "Variable"
+        else                             -> "Uneven"
     }
 
     Card(
@@ -5970,37 +5996,56 @@ private fun RunMetricRingsRow(run: RunSession) {
             Spacer(modifier = Modifier.height(Spacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.Top
             ) {
+                // Ring 1: EFFORT (matches Summary tab Effort Score)
                 MetricRing(
+                    modifier = Modifier.weight(1f),
                     label = "EFFORT",
-                    value = effortFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
-                    subLabel = if (run.heartRate > 0) "${run.heartRate} bpm" else "No HR sensor",
-                    progress = effortFraction ?: 0f,
-                    ringColor = effortColor,
-                    badgeText = effortBadge
+                    value = "${effortResult.score}%",
+                    subLabel = effortResult.label,
+                    progress = effortFraction,
+                    ringColor = effortRingColor,
+                    badgeText = effortResult.label
                 )
+
+                // Ring 2: HR ZONE (if HR data) or CADENCE
+                if (hasHr && hrFraction != null) {
+                    MetricRing(
+                        modifier = Modifier.weight(1f),
+                        label = "HR ZONE",
+                        value = "${(hrFraction * 100).roundToInt()}%",
+                        subLabel = "${run.heartRate} bpm",
+                        progress = hrFraction,
+                        ringColor = hrZoneColor,
+                        badgeText = hrZoneBadge
+                    )
+                } else {
+                    MetricRing(
+                        modifier = Modifier.weight(1f),
+                        label = "CADENCE",
+                        value = cadenceFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
+                        subLabel = if (run.cadence > 0) "${run.cadence} spm" else "No data",
+                        progress = cadenceFraction ?: 0f,
+                        ringColor = cadenceColor,
+                        badgeText = cadenceBadge
+                    )
+                }
+
+                // Ring 3: CONSISTENCY
                 MetricRing(
-                    label = "CADENCE",
-                    value = cadenceFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
-                    subLabel = if (run.cadence > 0) "${run.cadence} spm" else "No data",
-                    progress = cadenceFraction ?: 0f,
-                    ringColor = if (cadenceFraction != null) Colors.success else Colors.textMuted,
-                    badgeText = cadenceBadge
-                )
-                MetricRing(
+                    modifier = Modifier.weight(1f),
                     label = "CONSISTENCY",
                     value = consistencyFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
                     subLabel = when {
-                        consistencyFraction == null -> "No data"
-                        consistencyFraction >= 0.90f -> "Very even"
-                        consistencyFraction >= 0.75f -> "Steady pace"
-                        consistencyFraction >= 0.55f -> "Variable"
-                        else -> "Uneven splits"
+                        consistencyFraction == null     -> "No data"
+                        consistencyFraction >= 0.90f    -> "Very even"
+                        consistencyFraction >= 0.75f    -> "Steady pace"
+                        consistencyFraction >= 0.55f    -> "Variable"
+                        else                             -> "Uneven splits"
                     },
                     progress = consistencyFraction ?: 0f,
-                    ringColor = if (consistencyFraction != null) Colors.accent else Colors.textMuted,
+                    ringColor = consistencyColor,
                     badgeText = consistencyBadge
                 )
             }
@@ -6010,6 +6055,7 @@ private fun RunMetricRingsRow(run: RunSession) {
 
 @Composable
 private fun MetricRing(
+    modifier: Modifier = Modifier,
     label: String,
     value: String,
     subLabel: String,
@@ -6024,12 +6070,15 @@ private fun MetricRing(
     )
 
     Column(
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.xs)
     ) {
-        // The donut ring
+        // Donut ring — clipped to its own circle so the glow never bleeds into adjacent rings
         Box(
-            modifier = Modifier.size(90.dp),
+            modifier = Modifier
+                .size(86.dp)
+                .clip(CircleShape),  // hard-clips the glow halo to the ring boundary
             contentAlignment = Alignment.Center
         ) {
             androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
@@ -6038,7 +6087,7 @@ private fun MetricRing(
                 val arcSize = androidx.compose.ui.geometry.Size(radius * 2, radius * 2)
                 val topLeft = Offset(strokeWidth / 2, strokeWidth / 2)
 
-                // Track ring (background)
+                // Track ring (dark background)
                 drawArc(
                     color = Colors.backgroundTertiary,
                     startAngle = -90f,
@@ -6049,20 +6098,20 @@ private fun MetricRing(
                     size = arcSize
                 )
 
-                // Glow / halo layer for depth
+                // Subtle glow — reduced to 1.5× to stay within the clipped circle
                 if (animatedProgress > 0.01f) {
                     drawArc(
-                        color = ringColor.copy(alpha = 0.20f),
+                        color = ringColor.copy(alpha = 0.18f),
                         startAngle = -90f,
                         sweepAngle = animatedProgress * 360f,
                         useCenter = false,
-                        style = Stroke(width = strokeWidth * 2.4f, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                        style = Stroke(width = strokeWidth * 1.5f, cap = androidx.compose.ui.graphics.StrokeCap.Round),
                         topLeft = topLeft,
                         size = arcSize
                     )
                 }
 
-                // Main filled arc
+                // Main arc
                 if (animatedProgress > 0.01f) {
                     drawArc(
                         color = ringColor,
@@ -6076,45 +6125,48 @@ private fun MetricRing(
                 }
             }
 
-            // Center value
+            // Center percentage value
             Text(
                 value,
                 style = AppTextStyles.small.copy(
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 15.sp
+                    fontSize = 14.sp
                 ),
                 color = if (progress > 0f) ringColor else Colors.textMuted,
                 textAlign = TextAlign.Center
             )
         }
 
-        // Metric label (e.g. "CADENCE")
+        // Ring label (e.g. "HR ZONE")
         Text(
             label,
             style = AppTextStyles.caption.copy(letterSpacing = 0.8.sp, fontSize = 10.sp),
             color = Colors.textMuted,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            maxLines = 1
         )
 
-        // Sub-label (actual value like "170 spm")
+        // Sub-label (e.g. "113 bpm")
         Text(
             subLabel,
             style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold, fontSize = 11.sp),
             color = Colors.textSecondary,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            maxLines = 1
         )
 
-        // Badge pill
+        // Quality badge pill
         if (badgeText.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .background(ringColor.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Text(
                     badgeText,
                     style = AppTextStyles.caption.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                    color = ringColor
+                    color = ringColor,
+                    maxLines = 1
                 )
             }
         }
