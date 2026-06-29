@@ -1171,9 +1171,22 @@ function filterAltitudeSpikes(altitudes: number[]): number[] {
  * runs where the watch didn't send that field).
  */
 function deriveFromGpsTrack(gpsTrack: any, field: string): number[] | null {
-  if (!Array.isArray(gpsTrack)) return null;
-  const values = (gpsTrack as any[])
-    .map((p: any) => (typeof p[field] === 'number' && p[field] > 0) ? p[field] : null)
+  // Unwrap Garmin cloud format { samples: [...] } or phone format (plain array)
+  const track: any[] = Array.isArray(gpsTrack)
+    ? gpsTrack
+    : (Array.isArray(gpsTrack?.samples) ? gpsTrack.samples : null);
+  if (!track) return null;
+  // Field aliases: Garmin cloud GPS samples use 'hr' for heart rate; Android uses 'heartRate'
+  const altField = field === 'heartRate' ? 'hr'
+                 : field === 'hr' ? 'heartRate'
+                 : null;
+  const values = track
+    .map((p: any) => {
+      const v = typeof p[field] === 'number' ? p[field]
+              : (altField && typeof p[altField] === 'number') ? p[altField]
+              : null;
+      return (v !== null && v > 0) ? v : null;
+    })
     .filter((v): v is number => v !== null);
   return values.length >= 10 ? values : null;
 }
@@ -1191,7 +1204,10 @@ function transformRunForAndroid(run: any) {
         if (typeof entry === "number") return entry;
         if (typeof entry?.value === "number") return entry.value;
         if (typeof entry?.bpm === "number") return entry.bpm;
+        // .heartRate is used by old Android format; .hr is used by Garmin cloud
+        // activity-processor samples ({ timestamp, hr: number })
         if (typeof entry?.heartRate === "number") return entry.heartRate;
+        if (typeof entry?.hr === "number") return entry.hr;
         if (typeof entry?.paceSeconds === "number") return entry.paceSeconds;
         if (typeof entry?.pace === "number") return entry.pace;
         if (typeof entry?.speed === "number") return entry.speed;
@@ -1961,13 +1977,28 @@ function transformRunForAndroid(run: any) {
               console.log(`[POST /api/runs] Merging ${incomingNotes.length} coaching note(s) into run ${existingByExternalId.id}`);
             }
 
-            // GPS track — phone has full track, watch may have sent a coarser version
-            if (runData.gpsTrack != null && (existingByExternalId as any).gpsTrack == null) {
+            // GPS track — phone has full array track; Garmin cloud stores { samples: [...] }
+            // Prefer the phone's array format (direct routePoints with embedded HR/cadence)
+            // over the Garmin cloud object format, which loses HR embedding on read.
+            const existingGps = (existingByExternalId as any).gpsTrack;
+            const incomingGpsIsArray = Array.isArray(runData.gpsTrack);
+            const existingGpsIsArray = Array.isArray(existingGps);
+            if (runData.gpsTrack != null && (existingGps == null || (!existingGpsIsArray && incomingGpsIsArray))) {
               mergeFields.gpsTrack = runData.gpsTrack;
             }
 
-            // Heart-rate and pace time-series
-            if (runData.heartRateData != null && (existingByExternalId as any).heartRateData == null) {
+            // Heart-rate time-series — prefer phone's flat number[] over Garmin cloud's
+            // { min, max, avg, samples: [{timestamp, hr}] } object format.
+            // The Garmin cloud format is non-null even with zero samples, so the old
+            // "if existing is null" guard silently discarded the phone's real watchHrSeries.
+            const existingHR = (existingByExternalId as any).heartRateData;
+            const incomingHRIsArray = Array.isArray(runData.heartRateData) && (runData.heartRateData as any[]).length > 0;
+            const existingHRIsArray = Array.isArray(existingHR) && (existingHR as any[]).length > 0;
+            if (incomingHRIsArray && !existingHRIsArray) {
+              // Phone has a real per-sample array; existing has null or a Garmin cloud object
+              mergeFields.heartRateData = runData.heartRateData;
+              console.log(`[POST /api/runs] Upgrading heartRateData to phone watchHrSeries (${(runData.heartRateData as any[]).length} samples)`);
+            } else if (runData.heartRateData != null && existingHR == null) {
               mergeFields.heartRateData = runData.heartRateData;
             }
             if (runData.paceData != null && (existingByExternalId as any).paceData == null) {
