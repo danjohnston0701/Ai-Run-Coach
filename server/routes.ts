@@ -10530,42 +10530,75 @@ function transformRunForAndroid(run: any) {
           }
 
           const now = new Date();
-          // ── Reconstruct chart data from km splits (standalone watch runs) ───
-          // When no per-second data points exist (phone-less run), km splits
-          // provide enough data to render pace, HR, and elevation charts.
+          // ── Build HR time-series from garminRealtimeData (standalone watch runs) ─
+          // The garminRealtimeData table contains full per-second HR data sent via HTTP
+          // during standalone runs (BT streaming is disabled when phone is connected, so
+          // this table is populated ONLY for standalone runs).  Use it to build a proper
+          // heartRateData flat number[] array — far better than the one-per-km kmSplits.
           let heartRateData: any[] | null = null;
           let paceData: any[] | null = null;
           let altitudeData: any[] | null = null;
           let storedKmSplits: any[] | null = null;
 
+          const allDataPoints = await db.select()
+            .from(garminRealtimeData)
+            .where(eq(garminRealtimeData.sessionId, sessionId))
+            .orderBy(garminRealtimeData.timestamp);
+
+          let gpsTrackFromData: any[] | null = null;
+
+          if (allDataPoints.length >= 10) {
+            // Build a flat number[] heartRateData from per-second rows (already ordered)
+            const hrSamples = allDataPoints
+              .filter(d => d.heartRate != null && d.heartRate > 20)
+              .map(d => d.heartRate as number);
+            if (hrSamples.length >= 5) heartRateData = hrSamples;
+
+            // Build pace array from stored pace values (sec/km)
+            const paceSamples = allDataPoints
+              .filter(d => d.pace != null && d.pace > 0)
+              .map(d => d.pace as number);
+            if (paceSamples.length >= 5) paceData = paceSamples;
+
+            // Build GPS track — same format as phone uploads:
+            // array of {latitude, longitude, heartRate?, cadence?, altitude?, speed?}
+            const gpsSamples = allDataPoints.filter(d => d.latitude != null && d.longitude != null);
+            if (gpsSamples.length >= 3) {
+              gpsTrackFromData = gpsSamples.map(d => ({
+                latitude:  d.latitude,
+                longitude: d.longitude,
+                altitude:  d.altitude   ?? null,
+                speed:     d.speed      ?? null,
+                heartRate: d.heartRate  ?? null,
+                cadence:   d.cadence    ?? null,
+              }));
+            }
+          }
+
+          // Fall back to km splits for any series not already built from garminRealtimeData
           if (kmSplits && Array.isArray(kmSplits) && kmSplits.length > 0) {
             storedKmSplits = kmSplits;
 
-            // Build simple time-series arrays from km splits for chart rendering.
-            // Each entry is placed at the midpoint of the km (elapsed seconds).
+            // Only build from kmSplits if garminRealtimeData didn't provide better data
             let elapsed = 0;
-            heartRateData = [];
-            paceData      = [];
-            altitudeData  = [];
+            const kmHr: any[]   = [];
+            const kmPace: any[] = [];
+            const kmAlt: any[]  = [];
             for (const split of kmSplits) {
               const midpoint = elapsed + Math.round((split.duration || 0) / 2);
-              if (split.hr != null) {
-                heartRateData.push({ time: midpoint, value: split.hr });
-              }
-              if (split.pace != null && split.pace > 0) {
-                paceData.push({ time: midpoint, value: split.pace });
-              }
+              if (split.hr != null)   kmHr.push({ time: midpoint, value: split.hr });
+              if (split.pace != null && split.pace > 0) kmPace.push({ time: midpoint, value: split.pace });
               elapsed += (split.duration || 0);
             }
-            // Build cumulative elevation series
             let cumAscent = 0;
             for (const split of kmSplits) {
               cumAscent += (split.elevGain || 0);
-              altitudeData.push({ km: split.km, value: cumAscent });
+              kmAlt.push({ km: split.km, value: cumAscent });
             }
-            if (heartRateData.length === 0) heartRateData = null;
-            if (paceData.length === 0)      paceData      = null;
-            if (altitudeData.length === 0)  altitudeData  = null;
+            // Prefer garminRealtimeData series; fall back to kmSplits series
+            if (!heartRateData && kmHr.length > 0)    heartRateData = kmHr;
+            if (!paceData     && kmPace.length > 0)   paceData      = kmPace;
+            if (kmAlt.length > 0)                     altitudeData  = kmAlt;
           }
 
           const [newRun] = await db.insert(runs).values({
@@ -10604,6 +10637,8 @@ function transformRunForAndroid(run: any) {
             heartRateData: heartRateData,
             paceData: paceData,
             altitudeData: altitudeData,
+            // GPS track built from garminRealtimeData per-second points (standalone runs)
+            gpsTrack: gpsTrackFromData,
           }).returning();
 
           newRunId = newRun.id;
