@@ -40,6 +40,18 @@ class SyncWorker(
         try {
             Log.d("SyncWorker", "🔄 Starting sync worker")
 
+            // ── Housekeeping before we process the queue ──────────────────────────
+            // 1. Reset any entries stuck in "syncing" state from a previous app crash.
+            //    These have isSyncing = 1 but no worker is actively uploading them,
+            //    so they'd never be picked up by getNextPendingSync() and would keep
+            //    the sync banner visible indefinitely.
+            syncQueue.resetStuckSyncs()
+
+            // 2. Prune entries that have exceeded the maximum retry count.
+            //    Permanently-failing uploads (e.g. server rejects for a non-transient
+            //    reason) should not block the banner from clearing forever.
+            syncQueue.pruneExhaustedSyncs()
+
             var successCount = 0
             var failureCount = 0
 

@@ -70,4 +70,22 @@ interface PendingSyncDao {
     /** Clear ALL pending syncs. Returns rows deleted. */
     @Query("DELETE FROM pending_syncs")
     suspend fun clear(): Int
+
+    /**
+     * Reset all entries stuck in the "syncing" state (isSyncing = 1).
+     * These are entries that were being uploaded when the app was killed.
+     * Called at the start of every SyncWorker run so they get retried.
+     * Returns rows reset.
+     */
+    @Query("UPDATE pending_syncs SET isSyncing = 0 WHERE isSyncing = 1")
+    suspend fun resetStuckSyncing(): Int
+
+    /**
+     * Delete all entries that have exceeded the maximum retry count.
+     * These entries will never succeed (e.g. permanent server rejection that
+     * is not worth retrying) and should not keep showing the sync banner.
+     * Returns rows deleted.
+     */
+    @Query("DELETE FROM pending_syncs WHERE retryCount >= :maxRetries")
+    suspend fun pruneExhausted(maxRetries: Int): Int
 }

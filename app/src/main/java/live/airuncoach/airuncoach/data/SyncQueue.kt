@@ -14,6 +14,11 @@ import live.airuncoach.airuncoach.domain.model.RunSession
  */
 class SyncQueue(private val context: Context) {
 
+    companion object {
+        /** After this many consecutive upload failures, give up and remove the entry. */
+        const val MAX_RETRY_LIMIT = 8
+    }
+
     private val database = AiRunCoachDatabase.getInstance(context)
     private val dao = database.pendingSyncDao()
     private val gson = Gson()
@@ -127,6 +132,38 @@ class SyncQueue(private val context: Context) {
             dao.getAllPendingSyncs().size
         } catch (e: Exception) {
             Log.e("SyncQueue", "❌ Failed to get sync count: ${e.message}")
+            0
+        }
+    }
+
+    /**
+     * Reset all entries stuck in the "syncing" state from a previous app crash.
+     * Safe to call at the start of every SyncWorker run — entries are moved back
+     * to the pending state so they will be retried normally.
+     */
+    suspend fun resetStuckSyncs(): Int {
+        return try {
+            val reset = dao.resetStuckSyncing()
+            if (reset > 0) Log.w("SyncQueue", "⚠️  Reset $reset stuck sync(s) from previous session")
+            reset
+        } catch (e: Exception) {
+            Log.e("SyncQueue", "❌ Failed to reset stuck syncs: ${e.message}")
+            0
+        }
+    }
+
+    /**
+     * Remove entries that have exceeded [maxRetries] attempts.
+     * These will never succeed and would otherwise keep showing the sync banner
+     * indefinitely. Logs a warning for each pruned run ID.
+     */
+    suspend fun pruneExhaustedSyncs(maxRetries: Int = MAX_RETRY_LIMIT): Int {
+        return try {
+            val pruned = dao.pruneExhausted(maxRetries)
+            if (pruned > 0) Log.w("SyncQueue", "🗑️  Pruned $pruned sync entry/entries that exceeded $maxRetries retries")
+            pruned
+        } catch (e: Exception) {
+            Log.e("SyncQueue", "❌ Failed to prune exhausted syncs: ${e.message}")
             0
         }
     }

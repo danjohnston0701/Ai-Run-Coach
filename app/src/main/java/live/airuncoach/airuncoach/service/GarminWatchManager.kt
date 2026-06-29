@@ -701,8 +701,17 @@ class GarminWatchManager(
 
                     // When the watch starts a run, clear the cached prepared-run payload
                     // so it isn't re-sent to the watch on the NEXT watchReady / reconnect.
+                    // Also clear any stale hasPendingWatchSync flag — the run that was pending
+                    // was either the one that just started (not really offline) or has already
+                    // been handled.  If a genuine offline batch still exists, the watch will
+                    // re-signal via "pendingSync" once the run ends and it tries to upload.
                     if (action == "start") {
                         cachedPreparedRunPayload = null
+                        if (_hasPendingWatchSync.value) {
+                            Log.d(TAG, "Watch START received — clearing stale hasPendingWatchSync flag")
+                            _hasPendingWatchSync.value = false
+                            dismissPendingSyncNotification()
+                        }
                         Log.d(TAG, "Watch START received — cleared cached preparedRun payload")
                     }
 
