@@ -60,6 +60,10 @@ class RunSummaryViewModel @Inject constructor(
     private val _runSession = MutableStateFlow<RunSession?>(null)
     val runSession: StateFlow<RunSession?> = _runSession.asStateFlow()
 
+    /** Current user — loaded from SharedPrefs on every run load. Used for age/height-based metric personalisation. */
+    private val _currentUser = MutableStateFlow<User?>(null)
+    val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
+
     private var currentRunId: String? = null // Stored for API calls
 
     private val _strugglePoints = MutableStateFlow<List<StrugglePoint>>(emptyList())
@@ -168,7 +172,8 @@ class RunSummaryViewModel @Inject constructor(
             try {
                 val session = runRepository.getRunById(runId)  // ⚡ Use repository (cached)
                 _runSession.value = session
-                
+                _currentUser.value = getUserFromPrefs()  // Refresh user profile for personalised metric targets
+
                 // Initialize struggle points + comments from run payload (if available)
                 _strugglePoints.value = session.strugglePoints.ifEmpty { inferStrugglePointsFromSplits(session) }
                 _userPostRunComments.value = session.userComments.orEmpty()

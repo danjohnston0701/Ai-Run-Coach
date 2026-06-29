@@ -152,6 +152,10 @@ fun RunSummaryScreenFlagship(
     val userPostRunComments by viewModel.userPostRunComments.collectAsState()
     val strugglePoints by viewModel.strugglePoints.collectAsState()
     val isAdmin = viewModel.isAdminUser()
+    // User profile — for personalised metric targets (Tanaka max HR, cadence by height+age)
+    val currentUser by viewModel.currentUser.collectAsState()
+    val userAge = currentUser?.age
+    val userHeightCm = currentUser?.height  // stored in cm on server
     val isGarminConnected by viewModel.isGarminConnected.collectAsState()
     val runPersonalBests by viewModel.runPersonalBests.collectAsState()
     // Group run leaderboard
@@ -333,6 +337,7 @@ fun RunSummaryScreenFlagship(
                             personalBests = runPersonalBests,
                             hasGroupRun = hasGroupRun,
                             hasDynamicsTab = hasDynamicsTab,
+                            userAge = userAge,
                         )
 
                         selectedTab == 2 + groupRunTabOffset -> GraphsTabContent(
@@ -342,6 +347,8 @@ fun RunSummaryScreenFlagship(
                             onTabSelected = { selectedTab = it },
                             hasGroupRun = hasGroupRun,
                             hasDynamicsTab = hasDynamicsTab,
+                            userAge = userAge,
+                            userHeightCm = userHeightCm,
                         )
 
                         // Dynamics tab — only shown when run has Garmin watch data
@@ -1354,6 +1361,7 @@ private fun SummaryTabContent(
     personalBests: List<String> = emptyList(),
     hasGroupRun: Boolean = false,
     hasDynamicsTab: Boolean = false,
+    userAge: Int? = null,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -1407,7 +1415,7 @@ private fun SummaryTabContent(
         }
 
         // Effort Score / Training Load
-        item { EffortScoreCard(run = run) }
+        item { EffortScoreCard(run = run, userAge = userAge) }
 
         // Delete run button at the bottom of the tab
         item {
@@ -1446,6 +1454,8 @@ private fun GraphsTabContent(
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = false,
     hasDynamicsTab: Boolean = false,
+    userAge: Int? = null,
+    userHeightCm: Double? = null,
 ) {
     // State for collapsible sections — only used when Garmin data IS available
     var dynamicsExpanded by remember { mutableStateOf(true) }
@@ -1466,7 +1476,7 @@ private fun GraphsTabContent(
         // RUN SCORE RINGS — Effort, Cadence & Consistency at a glance
         // ═══════════════════════════════════════════════════════════════════════
 
-        item { RunMetricRingsRow(run = run) }
+        item { RunMetricRingsRow(run = run, userAge = userAge, userHeightCm = userHeightCm) }
 
         // ═══════════════════════════════════════════════════════════════════════
         // CORE CHARTS — Pace, Elevation, Cadence, HR (always shown when GPS data exists)
@@ -5508,9 +5518,9 @@ private fun KmSplitsVisualChart(kmSplits: List<KmSplit>) {
 /* ----------------------- EFFORT SCORE / TRAINING LOAD ---------------------- */
 
 @Composable
-private fun EffortScoreCard(run: RunSession) {
-    val (effortScore, label, color, breakdown) = remember(run) {
-        calculateEffortScore(run)
+private fun EffortScoreCard(run: RunSession, userAge: Int? = null) {
+    val (effortScore, label, color, breakdown) = remember(run, userAge) {
+        calculateEffortScore(run, userAge)
     }
 
     Card(
@@ -5621,7 +5631,7 @@ private data class EffortResult(
     val breakdown: List<Pair<String, String>>
 )
 
-private fun calculateEffortScore(run: RunSession): EffortResult {
+private fun calculateEffortScore(run: RunSession, userAge: Int? = null): EffortResult {
     // Multi-factor effort score:
     // 1. Duration factor (longer = harder)
     // 2. Pace factor (faster = harder)
@@ -5657,9 +5667,10 @@ private fun calculateEffortScore(run: RunSession): EffortResult {
     }
 
     // Heart Rate: 0-20 pts (if available)
+    // Uses Tanaka max HR (same formula as RunningMetricsConfig + server heart-rate-zones.ts)
     val hrScore = if (run.heartRate > 0) {
-        // Assume max HR ~190 for generalization
-        val hrPercent = (run.heartRate.toDouble() / 190.0) * 100.0
+        val maxHr = tanakaMaxHr(userAge).toDouble()
+        val hrPercent = (run.heartRate.toDouble() / maxHr) * 100.0
         ((hrPercent - 50) / 50.0 * 20.0).coerceIn(0.0, 20.0)
     } else {
         10.0 // neutral if no HR data
@@ -5889,50 +5900,75 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
 /* =================== RUN METRIC RINGS (at-a-glance KPI donuts) =================== */
 
 /**
- * Returns the optimal cadence range (spm) for a given run, derived from average pace.
+ * Kotlin port of the server's `calculateOptimalCadenceRange` in ai-service.ts.
  *
- * Science basis: cadence should increase with pace — not by lengthening stride — so the
- * target band scales continuously with how fast the user is running or walking.
+ * Uses the same biomechanical formula: optimal = (speed / stepLength) × 60
+ * where stepLength = heightM × stepLengthRatio(speed).
  *
- * Pace tiers (speed in m/s → sec/km):
- *   Walking        < 2.0 m/s  (>8:20/km)   → 100-120 spm
- *   Very easy jog  2.0-2.5    (6:40-8:20)   → 148-162 spm
- *   Easy run       2.5-3.0    (5:33-6:40)   → 158-168 spm
- *   Moderate run   3.0-3.7    (4:30-5:33)   → 164-174 spm
- *   Tempo/Threshold3.7-4.4    (3:47-4:30)   → 170-178 spm
- *   Fast / race    > 4.4 m/s  (<3:47/km)   → 176-185 spm
+ * Key insight: a 160 cm runner needs ~20 spm MORE than a 190 cm runner at the same pace,
+ * because their legs are shorter. Generic 170-180 targets are wrong for most users.
+ *
+ * Falls back to height=170 cm and no age adjustment if user profile is absent.
  */
-private fun computeOptimalCadenceRange(run: RunSession): IntRange {
+private fun computeOptimalCadenceRange(
+    run: RunSession,
+    userHeightCm: Double?,
+    userAge: Int?
+): IntRange {
     val speedMs = when {
         run.averageSpeed > 0f -> run.averageSpeed.toDouble()
         run.distance > 0 && run.duration > 0 -> run.distance / (run.duration / 1000.0)
-        else -> 3.0  // default: moderate ~5:33/km if no data
+        else -> 3.0
     }
-    return when {
-        speedMs < 2.0 -> 100..120   // Walking (>8:20/km)
-        speedMs < 2.5 -> 148..162   // Very easy jog (6:40–8:20/km)
-        speedMs < 3.0 -> 158..168   // Easy run (5:33–6:40/km)
-        speedMs < 3.7 -> 164..174   // Moderate run (4:30–5:33/km)
-        speedMs < 4.4 -> 170..178   // Tempo / threshold (3:47–4:30/km)
-        else          -> 176..185   // Fast / race pace (<3:47/km)
+
+    // Walking — biomechanical cadence formula doesn't apply
+    if (speedMs < 2.0) return 100..120
+
+    // Clamp pace (same as server)
+    val paceSecPerKm = (1000.0 / speedMs).coerceIn(180.0, 900.0)
+    val speed = 1000.0 / paceSecPerKm   // m/s, clamped
+
+    // Step length ratio — linear interpolation calibrated against research norms
+    // At 6:00/km (2.78 m/s): ratio=0.58 | At 4:00/km (4.17 m/s): ratio=0.80
+    val height = (userHeightCm ?: 170.0).coerceIn(140.0, 220.0)
+    val heightM = height / 100.0
+    val stepLengthRatio = (0.58 + (speed - 2.78) * 0.16).coerceIn(0.45, 0.95)
+    val stepLength = stepLengthRatio * heightM
+
+    var optimal = ((speed / stepLength) * 60.0).roundToInt()
+
+    // Age adjustment: >50 runners have reduced lower-limb reactivity (max –6 spm)
+    val age = userAge ?: 0
+    if (age > 50) {
+        val adj = minOf(6, ((age - 50) / 5.0).roundToInt())
+        optimal = maxOf(150, optimal - adj)
     }
+
+    return (optimal - 8)..(optimal + 6)
 }
 
 /**
+ * Tanaka (2001) max HR formula — identical to RunningMetricsConfig and server heart-rate-zones.ts.
+ * HRmax = 208 − (0.7 × age). Falls back to 185 bpm if user age is unknown.
+ */
+private fun tanakaMaxHr(userAge: Int?): Int =
+    userAge?.let { (208 - (0.7 * it)).toInt().coerceIn(155, 210) } ?: 185
+
+/**
  * Returns a 0f–1f quality score for how close [actual] cadence is to [range].
- * Full score (1f) if in range; degrades linearly with 30 spm tolerance window.
+ * Full score (1f) if in range; degrades linearly within a 30 spm tolerance window.
  */
 private fun cadenceQualityScore(actual: Int, range: IntRange): Float {
     if (actual <= 0) return 0f
     return when {
-        actual in range          -> 1f
-        actual < range.first     -> (1f - (range.first - actual).toFloat() / 30f).coerceIn(0f, 1f)
-        else                     -> (1f - (actual - range.last).toFloat() / 30f).coerceIn(0f, 1f)
+        actual in range      -> 1f
+        actual < range.first -> (1f - (range.first - actual).toFloat() / 30f).coerceIn(0f, 1f)
+        else                 -> (1f - (actual - range.last).toFloat() / 30f).coerceIn(0f, 1f)
     }
 }
 
 @Composable
-private fun RunMetricRingsRow(run: RunSession) {
+private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightCm: Double? = null) {
     // ── Quality color palette (Excellent → Bad) ───────────────────────────────────────────
     val colorExcellent = Color(0xFF00E676)       // Bright green
     val colorGood      = Color(0xFF69F0AE)       // Light green
@@ -5940,38 +5976,51 @@ private fun RunMetricRingsRow(run: RunSession) {
     val colorCaution   = Color(0xFFFF9800)       // Orange
     val colorBad       = Color(0xFFFF5252)       // Red
 
+    // ── Shared: user-personalised max HR via Tanaka formula (same as RunningMetricsConfig) ─
+    val maxHr = remember(userAge) { tanakaMaxHr(userAge) }
+
     // ── Ring 1: EFFORT — same TSS calculation as EffortScoreCard in Summary tab ──────────
-    val effortResult = remember(run) { calculateEffortScore(run) }
+    val effortResult = remember(run, userAge) { calculateEffortScore(run, userAge) }
     val effortFraction = (effortResult.score / 100f).coerceIn(0f, 1f)
-    // Reuse the same color as the Summary tab card for perfect consistency
     val effortRingColor = effortResult.color
 
-    // ── Ring 2: HR ZONE quality (when HR available) — replaces Cadence ───────────────────
+    // ── Ring 2: HR ZONE quality (when HR available) — uses user-personalised max HR ───────
     val hasHr = run.heartRate > 0
-    val hrFraction = if (hasHr) (run.heartRate / 185f).coerceIn(0f, 1f) else null
-
-    // Zone quality: Zone 2 (60-70%) is the aerobic sweet spot = Excellent
-    val hrZoneColor: Color = when {
-        hrFraction == null           -> Colors.textMuted
-        hrFraction in 0.60f..0.70f  -> colorExcellent  // Zone 2 = Excellent
-        hrFraction < 0.80f          -> colorGood        // Zone 3 = Good (tempo)
-        hrFraction < 0.60f          -> colorAverage     // Zone 1 = Average (very easy)
-        hrFraction < 0.90f          -> colorCaution     // Zone 4 = Caution
-        else                         -> colorBad         // Zone 5 = Bad (anaerobic overload)
+    // Compute zone boundaries from user's Tanaka max HR
+    val hrZoneThresholds = remember(maxHr) {
+        listOf(
+            (maxHr * 0.60).toInt(),   // Z1 upper (< 60%)
+            (maxHr * 0.70).toInt(),   // Z2 upper (60-70%)
+            (maxHr * 0.80).toInt(),   // Z3 upper (70-80%)
+            (maxHr * 0.90).toInt(),   // Z4 upper (80-90%)
+            maxHr                     // Z5 upper (90-100%)
+        )
     }
-    val hrZoneBadge: String = when {
-        hrFraction == null          -> "No HR"
-        hrFraction < 0.60f          -> "Zone 1"
-        hrFraction < 0.70f          -> "Zone 2"
-        hrFraction < 0.80f          -> "Zone 3"
-        hrFraction < 0.90f          -> "Zone 4"
-        else                         -> "Zone 5"
-    }
+    val hrZoneNumber: Int? = if (hasHr) {
+        when {
+            run.heartRate < hrZoneThresholds[0] -> 1
+            run.heartRate < hrZoneThresholds[1] -> 2
+            run.heartRate < hrZoneThresholds[2] -> 3
+            run.heartRate < hrZoneThresholds[3] -> 4
+            else                                -> 5
+        }
+    } else null
+    // Ring fraction = % of max HR (0..1) — now relative to THIS user's max
+    val hrFraction = if (hasHr) (run.heartRate.toFloat() / maxHr.toFloat()).coerceIn(0f, 1f) else null
 
-    // ── Ring 2 fallback: CADENCE quality (when no HR data) — pace-dynamic targets ──────────
-    // Optimal range is derived from this run's actual average speed, not a fixed 170-180 target
-    val optimalCadenceRange = remember(run.averageSpeed, run.distance, run.duration) {
-        computeOptimalCadenceRange(run)
+    val hrZoneColor: Color = when (hrZoneNumber) {
+        null -> Colors.textMuted
+        2    -> colorExcellent  // Zone 2 = aerobic sweet spot = Excellent
+        3    -> colorGood       // Zone 3 = tempo = Good
+        1    -> colorAverage    // Zone 1 = very easy = Average
+        4    -> colorCaution    // Zone 4 = threshold = Caution
+        else -> colorBad        // Zone 5 = anaerobic overload = Bad
+    }
+    val hrZoneBadge: String = if (hrZoneNumber != null) "Zone $hrZoneNumber" else "No HR"
+
+    // ── Ring 2 fallback: CADENCE quality (when no HR data) — user height + age personalised ─
+    val optimalCadenceRange = remember(run.averageSpeed, run.distance, run.duration, userHeightCm, userAge) {
+        computeOptimalCadenceRange(run, userHeightCm, userAge)
     }
     val cadenceScore = remember(run.cadence, optimalCadenceRange) {
         cadenceQualityScore(run.cadence, optimalCadenceRange)
@@ -6062,6 +6111,7 @@ private fun RunMetricRingsRow(run: RunSession) {
                         label = "HR ZONE",
                         value = "${(hrFraction * 100).roundToInt()}%",
                         subLabel = "${run.heartRate} bpm",
+                        targetLabel = "max ${maxHr} bpm",
                         progress = hrFraction,
                         ringColor = hrZoneColor,
                         badgeText = hrZoneBadge
