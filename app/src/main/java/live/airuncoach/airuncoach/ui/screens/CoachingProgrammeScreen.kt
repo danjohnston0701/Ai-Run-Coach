@@ -67,16 +67,15 @@ fun CoachingProgrammeScreen(
     val state by trainingPlanViewModel.plansListState.collectAsState()
     val selectedTab by trainingPlanViewModel.selectedTab.collectAsState()
     val subscriptionTier = subscriptionViewModel.getSubscriptionTier()
+    // Free-tier users cannot CREATE new plans, but they MUST still be able to VIEW
+    // any plans they created during a trial or paid period.  Only the create action
+    // is gated — the list itself is always visible.
     val isFreeTier = subscriptionTier == "free"
 
     // Reload the plans list whenever this screen becomes the active destination.
-    // Using LaunchedEffect(isActiveDestination) is more reliable than a lifecycle
-    // observer in Compose Navigation — it fires every time the value flips true
-    // (i.e. when we pop back from training_plan or any child screen).
-    // For free users, skip loading plans entirely to avoid unnecessary API calls
-    val tabStatusMap = mapOf(0 to "active", 1 to "completed", 2 to "cancelled")
+    // Load for ALL users — free-tier users may have existing plans from a paid/trial period.
     LaunchedEffect(isActiveDestination) {
-        if (isActiveDestination && !isFreeTier) {
+        if (isActiveDestination) {
             // Always select the "active" tab (tab 0) when returning to this screen
             // This ensures newly created plans are shown immediately
             trainingPlanViewModel.selectTab(0)
@@ -101,65 +100,71 @@ fun CoachingProgrammeScreen(
             )
         },
         floatingActionButton = {
-            // Hide FAB for free tier users
-            if (!isFreeTier) {
-                FloatingActionButton(onClick = onCreatePlan, containerColor = Colors.primary) {
-                    Icon(painterResource(R.drawable.icon_plus_vector), "New plan", tint = Colors.buttonText)
-                }
+            // Always show the FAB — the onCreatePlan flow checks feature availability and shows
+            // an upsell screen if the user has hit their limit or is on the free tier.
+            FloatingActionButton(onClick = onCreatePlan, containerColor = Colors.primary) {
+                Icon(painterResource(R.drawable.icon_plus_vector), "New plan", tint = Colors.buttonText)
             }
         },
         containerColor = Colors.backgroundRoot,
         contentWindowInsets = WindowInsets(0)
     ) { padding ->
-        // Show locked state for free tier users
-        if (isFreeTier) {
-            FreeUserCoachingPlanPlaceholder(onUpgradeClick = onNavigateToSubscription)
-        } else {
-            Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
-                // Tab Row: Active / Completed / Abandoned
-                TabRow(
-                    selectedTabIndex = selectedTab,
-                    containerColor = Colors.backgroundRoot,
-                    contentColor = Colors.primary,
-                    indicator = { tabPositions ->
-                        if (selectedTab < tabPositions.size) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .wrapContentSize(Alignment.BottomStart)
-                                    .offset(x = tabPositions[selectedTab].left)
-                                    .width(tabPositions[selectedTab].width)
-                                    .padding(horizontal = Spacing.lg)
-                                    .height(3.dp)
-                                    .background(Colors.primary)
+        // Always show the plans UI — never gate on tier here.
+        // Existing plans (active, completed, cancelled) must always be visible.
+        Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
+            // Tab Row: Active / Completed / Cancelled
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Colors.backgroundRoot,
+                contentColor = Colors.primary,
+                indicator = { tabPositions ->
+                    if (selectedTab < tabPositions.size) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .wrapContentSize(Alignment.BottomStart)
+                                .offset(x = tabPositions[selectedTab].left)
+                                .width(tabPositions[selectedTab].width)
+                                .padding(horizontal = Spacing.lg)
+                                .height(3.dp)
+                                .background(Colors.primary)
+                        )
+                    }
+                },
+                divider = { HorizontalDivider(color = Colors.backgroundSecondary, thickness = 1.dp) }
+            ) {
+                val tabs = listOf("Active", "Completed", "Cancelled")
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { trainingPlanViewModel.selectTab(index) },
+                        selectedContentColor = Colors.primary,
+                        unselectedContentColor = Colors.textMuted
+                    ) {
+                        Text(
+                            text = title,
+                            style = AppTextStyles.body.copy(
+                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
                             )
-                        }
-                    },
-                    divider = { HorizontalDivider(color = Colors.backgroundSecondary, thickness = 1.dp) }
-                ) {
-                    val tabs = listOf("Active", "Completed", "Cancelled")
-                    tabs.forEachIndexed { index, title ->
-                        Tab(
-                            selected = selectedTab == index,
-                            onClick = { trainingPlanViewModel.selectTab(index) },
-                            selectedContentColor = Colors.primary,
-                            unselectedContentColor = Colors.textMuted
-                        ) {
-                            Text(
-                                text = title,
-                                style = AppTextStyles.body.copy(
-                                    fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
-                                )
-                            )
-                        }
+                        )
                     }
                 }
+            }
 
-                Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 when (val s = state) {
                     is PlansListState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Colors.primary)
 
-                    is PlansListState.Empty -> NoPlanState(onCreatePlan)
+                    is PlansListState.Empty -> {
+                        // Empty state: distinguish between "can't create (free tier)" and "no plans yet"
+                        if (isFreeTier) {
+                            // Free-tier user with no existing plans — show upgrade prompt
+                            FreeUserCoachingPlanPlaceholder(onUpgradeClick = onNavigateToSubscription)
+                        } else {
+                            // Paid/trial user with no plans yet — invite them to create one
+                            NoPlanState(onCreatePlan)
+                        }
+                    }
 
                     is PlansListState.Error -> Column(
                         modifier = Modifier.align(Alignment.Center).padding(Spacing.xl),
@@ -177,9 +182,46 @@ fun CoachingProgrammeScreen(
                         contentPadding = PaddingValues(Spacing.lg),
                         verticalArrangement = Arrangement.spacedBy(Spacing.md)
                     ) {
-                        item {
-                            Text("Active Plans", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                            Spacer(modifier = Modifier.height(Spacing.sm))
+                        // Informational banner for free-tier users who still have existing plans
+                        // (e.g. plans created during a trial or paid period).
+                        if (isFreeTier) {
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(Spacing.md),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Lock,
+                                            contentDescription = null,
+                                            tint = Colors.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(Spacing.sm))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "View only — upgrade to create new plans",
+                                                style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                                                color = Colors.textPrimary
+                                            )
+                                            Text(
+                                                "Your existing plans are always accessible.",
+                                                style = AppTextStyles.small,
+                                                color = Colors.textMuted
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(Spacing.sm))
+                                        TextButton(onClick = onNavigateToSubscription) {
+                                            Text("Upgrade", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(Spacing.sm))
+                            }
                         }
                         items(s.plans) { plan ->
                             PlanSummaryCard(
@@ -188,7 +230,6 @@ fun CoachingProgrammeScreen(
                             )
                         }
                     }
-                }
                 }
             }
         }
