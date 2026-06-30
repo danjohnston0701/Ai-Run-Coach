@@ -3704,6 +3704,129 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // Invite a user to a group run (send notification)
+  // Host uses this to invite specific users to their group run
+  app.post("/api/group-runs/:id/invite", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { groupRunId } = req.params;
+      const { invitedUserIds } = req.body; // Array of user IDs to invite
+      
+      if (!invitedUserIds || !Array.isArray(invitedUserIds) || invitedUserIds.length === 0) {
+        return res.status(400).json({ error: "invitedUserIds array is required" });
+      }
+
+      // Verify the current user is the host of this group run
+      const groupRun = await storage.getGroupRun(groupRunId);
+      if (!groupRun) {
+        return res.status(404).json({ error: "Group run not found" });
+      }
+      if (groupRun.hostUserId !== req.user!.userId) {
+        return res.status(403).json({ error: "Only the host can invite users" });
+      }
+
+      // Get host details for the invitation message
+      const hostUser = await storage.getUser(req.user!.userId);
+      const hostName = hostUser?.name || "Someone";
+      const runName = groupRun.name || "a group run";
+      const plannedDate = groupRun.plannedStartAt 
+        ? new Date(groupRun.plannedStartAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : "soon";
+
+      // Send invitation to each user with push notification
+      const notificationService = await import("./notification-service");
+      const results = { invited: 0, failed: 0 };
+
+      for (const invitedUserId of invitedUserIds) {
+        // Skip if user is already a participant
+        const existingParticipant = await db
+          .select()
+          .from(groupRunParticipants)
+          .where(and(
+            eq(groupRunParticipants.groupRunId, groupRunId),
+            eq(groupRunParticipants.userId, invitedUserId)
+          ))
+          .limit(1);
+
+        if (existingParticipant.length > 0) {
+          console.log(`[GroupRunInvite] User ${invitedUserId} already a participant in group run ${groupRunId}`);
+          continue;
+        }
+
+        try {
+          // Add user as participant with "invited" status (they can then accept/decline)
+          await db.insert(groupRunParticipants).values({
+            groupRunId,
+            userId: invitedUserId,
+            status: "invited", // pending acceptance
+            invitedByUserId: req.user!.userId,
+            invitedAt: new Date(),
+          });
+
+          // Send push notification
+          const pushSent = await notificationService.sendFirebasePush(
+            invitedUserId,
+            `You're invited to a group run!`,
+            `${hostName} invited you to run "${runName}" on ${plannedDate}`,
+            { 
+              type: "group_run_invite",
+              groupRunId,
+              hostUserId: groupRun.hostUserId,
+              runName
+            }
+          );
+
+          console.log(`[GroupRunInvite] Invited user ${invitedUserId} to group run ${groupRunId} (push sent: ${pushSent})`);
+          results.invited++;
+        } catch (error: any) {
+          console.error(`[GroupRunInvite] Failed to invite user ${invitedUserId}:`, error);
+          results.failed++;
+        }
+      }
+
+      res.json({ 
+        success: true, 
+        message: `Invited ${results.invited} user(s)`,
+        invited: results.invited,
+        failed: results.failed
+      });
+    } catch (error: any) {
+      console.error("Group run invite error:", error);
+      res.status(500).json({ error: "Failed to invite users" });
+    }
+  });
+
+  // Accept or decline a group run invitation
+  app.post("/api/group-runs/:id/respond-invite", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { groupRunId } = req.params;
+      const { accept } = req.body; // true to accept, false to decline
+
+      if (typeof accept !== "boolean") {
+        return res.status(400).json({ error: "accept (boolean) is required" });
+      }
+
+      // Update participant status
+      const newStatus = accept ? "accepted" : "declined";
+      await db
+        .update(groupRunParticipants)
+        .set({ 
+          status: newStatus,
+          respondedAt: new Date()
+        })
+        .where(and(
+          eq(groupRunParticipants.groupRunId, groupRunId),
+          eq(groupRunParticipants.userId, req.user!.userId)
+        ));
+
+      console.log(`[GroupRunInvite] User ${req.user!.userId} ${newStatus} invitation to group run ${groupRunId}`);
+
+      res.json({ success: true, status: newStatus });
+    } catch (error: any) {
+      console.error("Respond to invite error:", error);
+      res.status(500).json({ error: "Failed to respond to invitation" });
+    }
+  });
+
   // ==================== AI ENDPOINTS (Direct OpenAI) ====================
   
   app.post("/api/ai/coach", async (req: Request, res: Response) => {

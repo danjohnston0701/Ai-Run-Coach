@@ -119,11 +119,15 @@ class MainActivity : ComponentActivity() {
         // Friend request notification
         val launchToFriends = intent?.getBooleanExtra("deeplink_friends", false) == true
 
+        // Group run invitation notification
+        val groupRunId = intent?.getStringExtra("deeplink_group_run_id")
+
         // Store inner-nav destinations so MainScreen can handle them once its
         // NavHost is ready. run_summary and run_session are NOT in the root NavHost.
         when {
             launchToActiveRun -> pendingDeepLink.value = "run_session"
             observerSessionId != null -> pendingDeepLink.value = "observer_session/$observerSessionId"
+            groupRunId != null && groupRunId.isNotEmpty() -> pendingDeepLink.value = "group_run_detail/$groupRunId"
             anyRunId != null  -> pendingDeepLink.value = "run_summary/$anyRunId"
             launchToFriends   -> pendingDeepLink.value = "friends"
         }
