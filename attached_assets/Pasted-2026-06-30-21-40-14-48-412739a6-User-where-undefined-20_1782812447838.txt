@@ -1,0 +1,140 @@
+2026-06-30 21:40:14.48
+412739a6
+User
+where: undefined,
+
+
+2026-06-30 21:40:14.48
+412739a6
+User
+Get group runs error: error: column "creator_id" does not exist
+
+2026-06-30 21:40:14.48
+412739a6
+User
+detail: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at /home/runner/workspace/node_modules/pg-pool/index.js:45:11
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at async file:///home/runner/workspace/server_dist/index.js:23984:26 {
+
+2026-06-30 21:40:14.48
+412739a6
+User
+hint: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+
+2026-06-30 21:40:14.48
+412739a6
+User
+internalQuery: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+position: '37',
+
+2026-06-30 21:40:14.48
+412739a6
+User
+severity: 'ERROR',
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at async file:///home/runner/workspace/node_modules/drizzle-orm/node-postgres/session.js:83:22
+
+2026-06-30 21:40:14.48
+412739a6
+User
+schema: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+table: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+code: '42703',
+
+2026-06-30 21:40:14.48
+412739a6
+User
+internalPosition: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+length: 110,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+where: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+table: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+Get group runs error: error: column "creator_id" does not exist
+
+2026-06-30 21:40:14.48
+412739a6
+User
+detail: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at /home/runner/workspace/node_modules/pg-pool/index.js:45:11
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at async file:///home/runner/workspace/server_dist/index.js:23984:26 {
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+
+2026-06-30 21:40:14.48
+412739a6
+User
+internalQuery: undefined,
+
+2026-06-30 21:40:14.48
+412739a6
+User
+position: '37',
+
+2026-06-30 21:40:14.48
+412739a6
+User
+severity: 'ERROR',
+
+2026-06-30 21:40:14.48
+412739a6
+User
+at async file:///home/runner/workspace/node_modules/drizzle-orm/node-postgres/session.js:83:22
+
+2026-06-30 21:40:14.48
+412739a6
+User
+schema: undefined,
