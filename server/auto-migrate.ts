@@ -155,6 +155,52 @@ export async function runAutoMigrations(): Promise<void> {
       sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_user ON group_run_participants(user_id)",
     },
 
+    // ── group_runs — add columns that were missing when the table was first created ──
+    // The original table was created without several columns that are now in the schema.
+    // CREATE TABLE IF NOT EXISTS silently skips when the table already exists, so we
+    // need explicit ALTER TABLEs to add the missing columns to existing tables.
+    {
+      name: "group_runs.name",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT 'Group Run'",
+    },
+    {
+      name: "group_runs.description",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "group_runs.meeting_point",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS meeting_point TEXT",
+    },
+    {
+      name: "group_runs.meeting_lat",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS meeting_lat REAL",
+    },
+    {
+      name: "group_runs.meeting_lng",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS meeting_lng REAL",
+    },
+    {
+      name: "group_runs.max_participants",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS max_participants INTEGER DEFAULT 10",
+    },
+    {
+      name: "group_runs.invite_token",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS invite_token TEXT UNIQUE DEFAULT gen_random_uuid()::text",
+    },
+    {
+      name: "group_runs.updated_at",
+      sql: "ALTER TABLE group_runs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+    },
+    // group_run_participants extra columns
+    {
+      name: "group_run_participants.ready_to_start",
+      sql: "ALTER TABLE group_run_participants ADD COLUMN IF NOT EXISTS ready_to_start BOOLEAN NOT NULL DEFAULT FALSE",
+    },
+    {
+      name: "group_run_participants.run_id",
+      sql: "ALTER TABLE group_run_participants ADD COLUMN IF NOT EXISTS run_id VARCHAR REFERENCES runs(id)",
+    },
+
     // ── users.default_session_type ────────────────────────────────────────────
     // Added to allow users to set a preferred activity type (run/walk/interval).
     // Column was added to shared/schema.ts but DB migration was not applied.
