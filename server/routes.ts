@@ -11589,53 +11589,62 @@ function transformRunForAndroid(run: any) {
 
   // ─── Helper: build a full group run response object ─────────────────────────
   async function buildGroupRunResponse(gr: any, currentUserId: string) {
-    const host = await storage.getUser(gr.hostUserId);
-    const allParticipants = await db.select().from(groupRunParticipants)
-      .where(eq(groupRunParticipants.groupRunId, gr.id));
+    if (!gr || !gr.id) return null;
+    try {
+      // Support both old field names (hostUserId/title/targetDistance/plannedStartAt)
+      // and current schema field names (creatorId/name/distance/dateTime)
+      const creatorId = gr.creatorId || gr.hostUserId || null;
+      const host = creatorId ? await storage.getUser(creatorId) : null;
+      const allParticipants = await db.select().from(groupRunParticipants)
+        .where(eq(groupRunParticipants.groupRunId, gr.id));
 
-    const participantDetails = await Promise.all(
-      allParticipants.map(async (p) => {
-        const u = await storage.getUser(p.userId);
-        return {
-          userId: p.userId,
-          userName: u?.name || 'Unknown',
-          profilePic: u?.profilePic || null,
-          invitationStatus: p.invitationStatus,
-          role: p.role,
-          runId: p.runId || null,
-          readyToStart: p.readyToStart || false,
-        };
-      })
-    );
+      const participantDetails = await Promise.all(
+        allParticipants.map(async (p) => {
+          const u = await storage.getUser(p.userId);
+          return {
+            userId: p.userId,
+            userName: u?.name || 'Unknown',
+            profilePic: u?.profilePic || null,
+            invitationStatus: p.invitationStatus,
+            role: p.role,
+            runId: p.runId || null,
+            readyToStart: p.readyToStart || false,
+          };
+        })
+      );
 
-    const myParticipant = allParticipants.find(p => p.userId === currentUserId);
-    const acceptedCount = allParticipants.filter(p => p.invitationStatus === 'accepted').length;
+      const myParticipant = allParticipants.find(p => p.userId === currentUserId);
+      const acceptedCount = allParticipants.filter(p => p.invitationStatus === 'accepted').length;
 
-    return {
-      id: gr.id,
-      name: gr.title || 'Group Run',
-      description: gr.description || '',
-      creatorId: gr.hostUserId,
-      creatorName: host?.name || 'Unknown',
-      meetingPoint: gr.meetingPoint || null,
-      meetingLat: gr.meetingLat || null,
-      meetingLng: gr.meetingLng || null,
-      distance: gr.targetDistance || 5.0,
-      dateTime: gr.plannedStartAt?.toISOString() || new Date().toISOString(),
-      maxParticipants: gr.maxParticipants || 10,
-      currentParticipants: acceptedCount,
-      isPublic: gr.isPublic !== false,
-      status: gr.status || 'upcoming',
-      isJoined: !!myParticipant && myParticipant.invitationStatus === 'accepted',
-      isOrganiser: gr.hostUserId === currentUserId,
-      myInvitationStatus: myParticipant?.invitationStatus || null,
-      participants: participantDetails,
-      inviteToken: gr.inviteToken,
-      createdAt: gr.createdAt?.toISOString() || new Date().toISOString(),
-    };
+      return {
+        id: gr.id,
+        name: gr.name || gr.title || 'Group Run',
+        description: gr.description || '',
+        creatorId,
+        creatorName: host?.name || 'Unknown',
+        meetingPoint: gr.meetingPoint || null,
+        meetingLat: gr.meetingLat || null,
+        meetingLng: gr.meetingLng || null,
+        distance: gr.distance || gr.targetDistance || 5.0,
+        dateTime: (gr.dateTime || gr.plannedStartAt)?.toISOString?.() || new Date().toISOString(),
+        maxParticipants: gr.maxParticipants || 10,
+        currentParticipants: acceptedCount,
+        isPublic: gr.isPublic !== false,
+        status: gr.status || 'upcoming',
+        isJoined: !!myParticipant && myParticipant.invitationStatus === 'accepted',
+        isOrganiser: creatorId === currentUserId,
+        myInvitationStatus: myParticipant?.invitationStatus || null,
+        participants: participantDetails,
+        inviteToken: gr.inviteToken || null,
+        createdAt: gr.createdAt?.toISOString?.() || new Date().toISOString(),
+      };
+    } catch (err) {
+      console.error(`[buildGroupRunResponse] error for gr.id=${gr?.id}:`, err);
+      return null;
+    }
   }
 
-  // REMOVED: Duplicate /api/group-runs endpoint (now handled by line 3605)
+  // NOTE: Duplicate /api/group-runs endpoint removed — it's now handled above (line 3631)
 
   // Get a single group run with full detail
   app.get("/api/group-runs/:groupRunId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
