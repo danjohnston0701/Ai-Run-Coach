@@ -1,0 +1,17 @@
+2026-06-30 21:48:36.892 28221-28283 RetrofitClient          live.airuncoach.airuncoach           D  📡 Response from /api/group-runs: 200
+2026-06-30 21:48:36.893 28221-28221 GroupRunsViewModel      live.airuncoach.airuncoach           E  ❌ Error loading group runs: java.lang.IllegalStateException: Expected BEGIN_OBJECT but was BEGIN_ARRAY at line 1 column 2 path $ (Fix with AI)
+                                                                                                    com.google.gson.JsonSyntaxException: java.lang.IllegalStateException: Expected BEGIN_OBJECT but was BEGIN_ARRAY at line 1 column 2 path $
+                                                                                                    	at com.google.gson.internal.bind.ReflectiveTypeAdapterFactory$Adapter.read(ReflectiveTypeAdapterFactory.java:226)
+                                                                                                    	at retrofit2.converter.gson.GsonResponseBodyConverter.convert(GsonResponseBodyConverter.java:40)
+                                                                                                    	at retrofit2.converter.gson.GsonResponseBodyConverter.convert(GsonResponseBodyConverter.java:27)
+                                                                                                    	at retrofit2.OkHttpCall.parseResponse(OkHttpCall.java:243)
+                                                                                                    	at retrofit2.OkHttpCall$1.onResponse(OkHttpCall.java:153)
+                                                                                                    	at okhttp3.internal.connection.RealCall$AsyncCall.run(RealCall.kt:519)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1154)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:652)
+                                                                                                    	at java.lang.Thread.run(Thread.java:1563)
+                                                                                                    Caused by: java.lang.IllegalStateException: Expected BEGIN_OBJECT but was BEGIN_ARRAY at line 1 column 2 path $
+                                                                                                    	at com.google.gson.stream.JsonReader.beginObject(JsonReader.java:384)
+                                                                                                    	at com.google.gson.internal.bind.ReflectiveTypeAdapterFactory$Adapter.read(ReflectiveTypeAdapterFactory.java:215)
+                                                                                                    	... 8 more
+2026-06-30 21:48:48.391 28221-28227 oach.airuncoach         live.airuncoach.airuncoach           W  userfaultfd: MOVE ioctl seems unsupported: Connection timed out

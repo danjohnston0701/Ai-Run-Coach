@@ -3601,16 +3601,7 @@ function transformRunForAndroid(run: any) {
   });
 
   // ==================== GROUP RUNS ====================
-  
-  app.get("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const groupRuns = await storage.getGroupRuns();
-      res.json(groupRuns);
-    } catch (error: any) {
-      console.error("Get group runs error:", error);
-      res.status(500).json({ error: "Failed to get group runs" });
-    }
-  });
+  // (handler is registered below with full Android-compatible wrapped response)
 
   app.get("/api/group-runs/:id", async (req: Request, res: Response) => {
     try {
