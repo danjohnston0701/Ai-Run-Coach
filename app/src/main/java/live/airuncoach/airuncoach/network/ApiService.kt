@@ -140,6 +140,14 @@ interface ApiService {
     @POST("/api/coaching/start-run-audio")
     suspend fun getStartRunAudio(@Body request: StartRunAudioRequest): StartRunAudioResponse
 
+    /**
+     * Pre-generates Polly TTS audio for a batch of coaching trigger messages.
+     * Called right after the coaching plan is fetched so all in-run cues are cached
+     * locally before the run starts — ensuring zero-latency Polly audio mid-run.
+     */
+    @POST("/api/coaching/batch-tts")
+    suspend fun batchGenerateTTS(@Body request: BatchTTSRequest): Response<BatchTTSResponse>
+
     @POST("/api/coaching/cadence-coaching")
     suspend fun getCadenceCoaching(@Body request: CadenceCoachingRequest): CadenceCoachingResponse
 

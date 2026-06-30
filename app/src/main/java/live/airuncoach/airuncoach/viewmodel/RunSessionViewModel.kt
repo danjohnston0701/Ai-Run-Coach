@@ -16,11 +16,15 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import android.util.Base64
+import kotlinx.coroutines.Dispatchers
 import live.airuncoach.airuncoach.data.HealthConnectRepository
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.WeatherRepository
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.BatchTTSRequest
+import live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan
 import live.airuncoach.airuncoach.network.model.PreRunBriefingRequest
 import live.airuncoach.airuncoach.network.model.StartLocation
 import live.airuncoach.airuncoach.network.model.TalkToCoachRequest
@@ -42,6 +46,8 @@ import live.airuncoach.airuncoach.utils.SpeechStatus
 import live.airuncoach.airuncoach.utils.WakeWordDetector
 import live.airuncoach.airuncoach.util.NavigationRouteHolder
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
+import java.io.File
+import java.security.MessageDigest
 import java.util.Locale
 import javax.inject.Inject
 
@@ -228,13 +234,31 @@ class RunSessionViewModel @Inject constructor(
             Log.d("RunSessionViewModel", "Coaching already generated for $workoutId — skipping")
             return
         }
+        generateCoachingInternal(workoutId, force = false)
+    }
 
+    /**
+     * Force-regenerate the AI coaching plan for a workout, bypassing both the local
+     * cached-generation guard and the server-side plan cache.
+     *
+     * Use this when the previously generated plan appears incorrect (e.g. wrong phase
+     * transitions, missing interval cues, or an Irish female voice speaking as a British
+     * male). The server will generate a fresh plan and the stale cache is overwritten.
+     */
+    fun regenerateCoachingForWorkout(workoutId: String) {
+        Log.d("RunSessionViewModel", "Force-regenerating AI coaching plan for $workoutId")
+        activeSessionCoachingPlan = null
+        coachingGeneratedForWorkoutId = null
+        generateCoachingInternal(workoutId, force = true)
+    }
+
+    private fun generateCoachingInternal(workoutId: String, force: Boolean) {
         viewModelScope.launch {
             _coachingGenerationState.value = CoachingGenerationState.GENERATING
-            Log.d("RunSessionViewModel", "Generating AI coaching for workout $workoutId...")
+            Log.d("RunSessionViewModel", "${if (force) "Force-generating" else "Generating"} AI coaching for workout $workoutId...")
 
             try {
-                val response = apiService.prepareSessionCoaching(workoutId)
+                val response = apiService.prepareSessionCoaching(workoutId, forceRegenerate = force)
                 if (response.isSuccessful) {
                     val body = response.body()
                     activeSessionCoachingPlan = body?.plan
@@ -244,6 +268,12 @@ class RunSessionViewModel @Inject constructor(
                         "AI coaching ready for $workoutId: ${body?.phasesCount} phases, " +
                         "strategy=${body?.cueingStrategy}, tone=${body?.coachingTone}"
                     )
+                    // Pre-generate Polly audio for every trigger message in the background.
+                    // This ensures zero-latency, same-voice Polly audio for all in-run coaching
+                    // cues (no Android TTS fallback, no network call mid-run).
+                    body?.plan?.let { plan ->
+                        launch(Dispatchers.IO) { preGenerateCoachingAudio(workoutId, plan) }
+                    }
                 } else {
                     Log.w("RunSessionViewModel", "Coaching API returned ${response.code()} — marking FAILED")
                     _coachingGenerationState.value = CoachingGenerationState.FAILED
@@ -259,6 +289,85 @@ class RunSessionViewModel @Inject constructor(
     fun resetCoachingState() {
         _coachingGenerationState.value = CoachingGenerationState.IDLE
         coachingGeneratedForWorkoutId = null
+    }
+
+    /**
+     * Pre-generates AWS Polly MP3 audio for every coaching message in [plan] and writes
+     * them to `cacheDir/coaching_audio/{workoutId}/{md5(text)}.mp3`.
+     *
+     * Must be called on a background dispatcher (Dispatchers.IO).
+     *
+     * The RunTrackingService reads these files via `getPreCachedPollyAudio()` when each trigger
+     * fires, so every in-run coaching cue plays instantly with the Polly voice rather than
+     * falling back to the Android system TTS engine.
+     */
+    private suspend fun preGenerateCoachingAudio(workoutId: String, plan: DynamicSessionCoachingPlan) {
+        try {
+            // Collect STATIC (template-free) coaching texts only.
+            //
+            // Messages with {hr}, {cadence}, {pace}, {repNum} etc. are EXCLUDED here because
+            // they contain live-data placeholders that are only resolved at run time.
+            // If we sent "Heart rate at {hr} right now" to Polly, it would say "{hr}" aloud.
+            // Those messages use a real-time Polly call at trigger-fire time instead
+            // (see RunTrackingService.fireDynamicTrigger / getRealtimePollyAudio).
+            val textSet = linkedSetOf<String>()
+            plan.preRunBrief?.takeIf { it.isNotBlank() }?.trim()?.let { textSet.add(it) }
+            for (trigger in plan.triggers.orEmpty()) {
+                val msgs = listOfNotNull(trigger.message) + (trigger.alternativeMessages ?: emptyList())
+                msgs.forEach { text ->
+                    val trimmed = text.trim()
+                    if (trimmed.isNotBlank() && !trimmed.contains('{')) {
+                        // No template variables — safe to pre-generate
+                        textSet.add(trimmed)
+                    }
+                }
+            }
+            if (textSet.isEmpty()) {
+                Log.d("RunSessionViewModel", "All coaching messages contain template variables — skipping batch pre-gen")
+                return
+            }
+
+            Log.d("RunSessionViewModel",
+                "Pre-generating Polly audio for ${textSet.size} static coaching messages (${user?.coachAccent}/${user?.coachGender})")
+
+            val response = apiService.batchGenerateTTS(
+                BatchTTSRequest(
+                    texts = textSet.toList(),
+                    accent = user?.coachAccent,
+                    gender = user?.coachGender
+                )
+            )
+
+            if (!response.isSuccessful) {
+                Log.w("RunSessionViewModel", "Batch TTS API returned ${response.code()} — in-run coaching will use Android TTS as fallback")
+                return
+            }
+
+            val audioDir = File(context.cacheDir, "coaching_audio/$workoutId").apply { mkdirs() }
+            var saved = 0
+            for (result in response.body()?.audios.orEmpty()) {
+                val audioB64 = result.audio ?: continue
+                val file = File(audioDir, "${textMd5(result.text)}.mp3")
+                file.writeBytes(Base64.decode(audioB64, Base64.DEFAULT))
+                saved++
+            }
+            Log.d("RunSessionViewModel",
+                "Polly audio pre-generation complete: $saved/${textSet.size} files cached for $workoutId")
+
+        } catch (e: Exception) {
+            // Non-fatal: RunTrackingService falls back to Android TTS if files are missing
+            Log.w("RunSessionViewModel", "Audio pre-generation failed (will use TTS fallback): ${e.message}")
+        }
+    }
+
+    /**
+     * Returns the MD5 hex string of [text] — used as the filename for pre-cached Polly audio.
+     * Must match the identical function in [RunTrackingService] so files are found at run time.
+     */
+    internal fun textMd5(text: String): String {
+        val md = MessageDigest.getInstance("MD5")
+        return md.digest(text.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
     }
 
     // ── Watch standby flag ───────────────────────────────────────────────────

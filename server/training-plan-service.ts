@@ -32,6 +32,15 @@ interface WorkoutTemplate {
   duration?: number;
   targetPace?: string;
   intervalCount?: number;
+  intervalDistanceMeters?: number;
+  intervalDurationSeconds?: number;
+  // Per-phase coaching targets — used by session coaching engine
+  restDurationSeconds?: number;       // walk/recovery phase duration
+  intervalHeartRateMin?: number;      // work phase min HR bpm
+  intervalHeartRateMax?: number;      // work phase max HR bpm
+  restHeartRateMax?: number;          // recovery phase max HR bpm
+  intervalTargetPace?: string;        // work phase pace "mm:ss"
+  restTargetPace?: string;            // recovery phase pace "mm:ss"
   sessionGoal?: string; // "build_fitness", "develop_speed", "active_recovery", "endurance"
   sessionIntent?: string;
 }
@@ -1032,8 +1041,32 @@ Return your complete coaching plan as JSON with this structure:
           "intervalCount": 6,
           "intervalDistanceMeters": 400,
           "intervalDurationSeconds": null,
+          "restDurationSeconds": 90,
+          "intervalHeartRateMin": 155,
+          "intervalHeartRateMax": 170,
+          "restHeartRateMax": 135,
+          "intervalTargetPace": "4:30",
+          "restTargetPace": null,
           "description": "Personalised session description",
           "instructions": "Specific coaching instructions for this athlete"
+        },
+        {
+          "dayOfWeek": 6,
+          "workoutType": "walk_run",
+          "duration": 1800,
+          "targetPace": null,
+          "intensity": "z2",
+          "intervalCount": 5,
+          "intervalDurationSeconds": 180,
+          "restDurationSeconds": 120,
+          "intervalHeartRateMin": 125,
+          "intervalHeartRateMax": 145,
+          "restHeartRateMax": 120,
+          "intervalTargetPace": "6:30",
+          "restTargetPace": "8:00",
+          "sessionGoal": "build_fitness",
+          "description": "Walk-run intervals — personalised to this athlete",
+          "instructions": "Specific coaching instructions for this walk-run athlete"
         }
       ]
     }
@@ -1047,7 +1080,8 @@ OUTPUT NOTES:
 - coachingApproach: name the methodology chosen (e.g. polarised, threshold-focused, time-on-feet) and why it suits this athlete.
 - weekDescription: name the specific training phase — not generic phrases like "continue building fitness".
 - estimatedWeeklyMileage: peak weekly volume, not starting volume.
-- For athletes with no run history: use stated fitness level — do not default to overly conservative language unless genuinely warranted.`;
+- For athletes with no run history: use stated fitness level — do not default to overly conservative language unless genuinely warranted.
+- For "walk_run" and "intervals" workoutTypes: you MUST include intervalCount, intervalDurationSeconds (for time-based) OR intervalDistanceMeters (for distance-based), restDurationSeconds (recovery phase duration), intervalHeartRateMin/Max (work phase HR targets), restHeartRateMax (recovery phase max HR), and intervalTargetPace/restTargetPace where applicable. These fields power the in-run AI coaching engine — without them the athlete will not receive any in-run coaching cues.`;
 
     // Fetch AI runner profile for richer personalisation
     const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
@@ -1423,6 +1457,17 @@ App capabilities available in every session: real-time GPS pace/distance, live a
             description: workout.description,
             instructions: workout.instructions,
             isCompleted: false,
+            // Interval/rep structure
+            intervalCount:          workout.intervalCount ?? null,
+            intervalDistanceMeters: workout.intervalDistanceMeters ?? null,
+            intervalDurationSeconds: workout.intervalDurationSeconds ?? null,
+            // Per-phase coaching targets (walk_run + interval sessions)
+            restDurationSeconds:    workout.restDurationSeconds ?? null,
+            intervalHeartRateMin:   workout.intervalHeartRateMin ?? null,
+            intervalHeartRateMax:   workout.intervalHeartRateMax ?? null,
+            restHeartRateMax:       workout.restHeartRateMax ?? null,
+            intervalTargetPace:     workout.intervalTargetPace ?? null,
+            restTargetPace:         workout.restTargetPace ?? null,
             sessionGoal: workout.sessionGoal, // "build_fitness", "develop_speed", etc
             sessionIntent: workout.sessionIntent,
           })
@@ -1686,6 +1731,15 @@ STRUCTURAL CONSTRAINTS:
         intervalCount: workout.intervalCount ?? null,
         intervalDistanceMeters: workout.intervalDistanceMeters ?? null,
         intervalDurationSeconds: workout.intervalDurationSeconds ?? null,
+        // Per-phase coaching targets (walk_run + interval sessions)
+        restDurationSeconds:    workout.restDurationSeconds ?? null,
+        intervalHeartRateMin:   workout.intervalHeartRateMin ?? null,
+        intervalHeartRateMax:   workout.intervalHeartRateMax ?? null,
+        restHeartRateMax:       workout.restHeartRateMax ?? null,
+        intervalTargetPace:     workout.intervalTargetPace ?? null,
+        restTargetPace:         workout.restTargetPace ?? null,
+        sessionGoal:            workout.sessionGoal ?? null,
+        sessionIntent:          workout.sessionIntent ?? null,
         isCompleted: false,
       }).returning({ id: plannedWorkouts.id });
 

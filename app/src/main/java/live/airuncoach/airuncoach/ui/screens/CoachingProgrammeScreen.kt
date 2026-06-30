@@ -753,7 +753,13 @@ fun PlanDashboardContent(
         onViewWorkoutDetail(w)
     }
 
-    LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(Spacing.lg)) {
+    // Calculate the actual current week BEFORE the LazyColumn so it can be used
+    // by OverallProgressCard (progress tile) and the week list simultaneously.
+    val actualCurrentWeek = remember(details.plan.createdAt) {
+        calculateActualCurrentWeek(details.plan.createdAt)
+    }
+
+    LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(start = Spacing.lg, end = Spacing.lg, top = 0.dp, bottom = Spacing.lg)) {
 
         // ── AI Summary: What we know about you and what we're working on ──────
         item {
@@ -763,7 +769,7 @@ fun PlanDashboardContent(
 
         // ── Overall progress card ─────────────────────────────────────────────
         item {
-            OverallProgressCard(progress)
+            OverallProgressCard(progress, currentWeek = actualCurrentWeek)
             Spacer(modifier = Modifier.height(Spacing.lg))
         }
 
@@ -959,8 +965,7 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
 
-        // Calculate the actual current week based on plan creation date and today
-        val actualCurrentWeek = calculateActualCurrentWeek(details.plan.createdAt)
+        // actualCurrentWeek is calculated before the LazyColumn — reuse it here.
         val currentWeekIndex = (actualCurrentWeek - 1).coerceAtLeast(0)
         val currentWeek = details.weeks.getOrNull(currentWeekIndex) ?: details.weeks.firstOrNull()
         if (currentWeek != null) {
@@ -1046,7 +1051,11 @@ fun PlanDashboardContent(
 }
 
 @Composable
-fun OverallProgressCard(progress: TrainingPlanProgress) {
+fun OverallProgressCard(progress: TrainingPlanProgress, currentWeek: Int? = null) {
+    // Use the date-calculated current week if provided; fall back to backend value.
+    // The backend's currentWeek can lag behind if sessions were missed, so we always
+    // prefer the calendar-based week calculated from the plan's creation date.
+    val displayWeek = currentWeek ?: progress.currentWeek
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
@@ -1055,7 +1064,7 @@ fun OverallProgressCard(progress: TrainingPlanProgress) {
         Column(modifier = Modifier.padding(Spacing.lg)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text("Week ${progress.currentWeek} of ${progress.totalWeeks}", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                    Text("Week $displayWeek of ${progress.totalWeeks}", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                     Text(formatGoalType(progress.goalType), style = AppTextStyles.small, color = Colors.textMuted)
                 }
                 if (progress.targetTime != null) {
@@ -1261,8 +1270,10 @@ fun ExpandableWeekCard(
     var isExpanded by remember { mutableStateOf(isCurrent) }
     var showChangeScheduleDialog by remember { mutableStateOf(false) }
     val actionLoading by (viewModel?.actionLoading?.collectAsState() ?: remember { mutableStateOf(false) })
-    val skippedCount = week.workouts.count { it.isSkipped() }
-    val completedCount = week.workouts.count { it.isCompleted && !it.isSkipped() }
+    // Count ALL isCompleted=true workouts as completed, regardless of whether they have a run ID.
+    // The isSkipped() heuristic (isCompleted && no runId) cannot reliably distinguish a manual
+    // "Mark Done" from an explicit skip, so we avoid using it for the completed count.
+    val completedCount = week.workouts.count { it.isCompleted }
     
     // Calculate scheduled vs missed based on date (device local timezone)
     // A workout is "scheduled" if it's today or in the future
@@ -1367,25 +1378,16 @@ fun ExpandableWeekCard(
                 HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(horizontal = Spacing.lg))
                 
                 Column(modifier = Modifier.padding(Spacing.lg)) {
-                    // Summary stats — only show Skipped tile if there are skipped sessions
+                    // Summary stats: Scheduled, Completed, Missed
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = Spacing.md),
                         horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                     ) {
-                        if (skippedCount > 0) {
-                            // 4 chips: Scheduled, Completed, Missed, Skipped (each 1/4 width)
-                            WeekStatChip("Scheduled", scheduledCount, Colors.primary, modifier = Modifier.weight(1f))
-                            WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
-                            WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
-                            WeekStatChip("Skipped", skippedCount, Colors.textMuted, modifier = Modifier.weight(1f))
-                        } else {
-                            // 3 chips: Scheduled, Completed, Missed (each 1/3 width)
-                            WeekStatChip("Scheduled", scheduledCount, Colors.primary, modifier = Modifier.weight(1f))
-                            WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
-                            WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
-                        }
+                        WeekStatChip("Scheduled", scheduledCount, Colors.primary, modifier = Modifier.weight(1f))
+                        WeekStatChip("Completed", completedCount, Colors.success, modifier = Modifier.weight(1f))
+                        WeekStatChip("Missed", missedCount, Colors.warning, modifier = Modifier.weight(1f))
                     }
 
                     HorizontalDivider(color = Colors.backgroundTertiary, thickness = 1.dp, modifier = Modifier.padding(vertical = Spacing.md))

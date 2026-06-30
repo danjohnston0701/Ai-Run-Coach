@@ -52,6 +52,8 @@ import com.google.maps.android.PolyUtil
 import com.google.maps.android.SphericalUtil
 import dagger.hilt.android.EntryPointAccessors
 import retrofit2.HttpException
+import android.util.Base64
+import java.io.File
 import java.security.MessageDigest
 import java.util.*
 import kotlin.collections.ArrayList
@@ -3968,14 +3970,29 @@ class RunTrackingService : Service(), SensorEventListener {
         Log.d("RunTrackingService", "🎯 Session trigger [$eventType] phase=$eventPhase: $message")
         _latestCoachingText.value = message
 
+        // Record in coaching history so legacy session phase triggers appear in ai_coaching_notes.
+        coachingHistory.add(AiCoachingNote(
+            time = getActiveRunDuration(),
+            message = "[$eventType] $message"
+        ))
+
         serviceScope.launch {
             try {
                 if (!isMuted) {
-                    // Use CoachingAudioQueue with TTS fallback
+                    // Same Polly routing as fireDynamicTrigger: pre-cached → real-time → Android TTS
+                    val base64Audio: String?
+                    val audioFormat: String?
+                    if (!message.contains('{')) {
+                        base64Audio = getPreCachedPollyAudio(message)
+                        audioFormat = if (base64Audio != null) "mp3" else null
+                    } else {
+                        base64Audio = getRealtimePollyAudio(message)
+                        audioFormat = if (base64Audio != null) "mp3" else null
+                    }
                     CoachingAudioQueue.enqueue(
                         context = this@RunTrackingService,
-                        base64Audio = null,
-                        format = null,
+                        base64Audio = base64Audio,
+                        format = audioFormat,
                         fallbackText = message,
                         accent = currentUser?.coachAccent,
                         gender = currentUser?.coachGender,
@@ -4051,54 +4068,197 @@ class RunTrackingService : Service(), SensorEventListener {
         for (trigger in plan.triggers) {
             if (hasCoachingFiredThisTick) return
 
-            // Skip triggers whose IDs have already fired for "once" frequency
+            // Phase-transition triggers are handled entirely by evaluateDynamicPhase() — skip here
+            if (trigger.type in listOf("phase_start", "phase_end", "rep_start", "rep_end", "recovery_start")) continue
+
+            // Skip "once" triggers that already fired
             if (trigger.frequency == "once" && triggerFiredOnce.contains(trigger.id)) continue
 
-            // Respect per-trigger cooldown for reactive triggers
             val lastFiredMs = triggerLastFiredMs[trigger.id] ?: 0L
+
+            // ── Periodic triggers ──────────────────────────────────────────────
+            // OpenAI sets frequency = "periodic" and frequencySeconds = N.
+            // The engine fires these every N seconds regardless of live-data conditions.
+            // OpenAI uses this for regular check-ins like HR updates, effort summaries, etc.
+            if (trigger.frequency == "periodic") {
+                val periodMs = (trigger.frequencySeconds ?: 120) * 1_000L
+                // Don't fire periodic triggers in the first 60 seconds (warmup grace period)
+                if (getActiveRunDuration() < 60_000L) continue
+                if ((now - lastFiredMs) < periodMs) continue
+                // Evaluate optional condition (OpenAI may restrict to certain phases)
+                if (trigger.condition.isNotBlank() &&
+                    trigger.condition != "always" &&
+                    !evaluateConditionExpression(trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm)) continue
+
+                val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax)
+                triggerLastFiredMs[trigger.id] = now
+                Log.d("RunTrackingService", "⏱️ Periodic trigger [${trigger.type}] ${trigger.id}: $message")
+                fireDynamicTrigger(message, trigger.type, dynamicCurrentPhaseName ?: "unknown")
+                continue
+            }
+
+            // ── Reactive / condition-based triggers ────────────────────────────
+            // OpenAI defines the condition expression using our metric vocabulary.
+            // We evaluate it against live data — no hardcoded trigger-type logic.
             val cooldown = if (trigger.frequency == "once") 0L else REACTIVE_TRIGGER_COOLDOWN_MS
             if ((now - lastFiredMs) < cooldown) continue
 
-            // Evaluate the trigger condition
             val conditionMet = when (trigger.type) {
-                "hr_zone_high" -> {
-                    currentHeartRate > 0 && phaseHRMax != null && currentHeartRate > phaseHRMax
-                }
-                "hr_zone_low" -> {
-                    currentHeartRate > 0 && phaseHRMin != null && currentHeartRate < phaseHRMin &&
-                    getActiveRunDuration() > 120_000L // Only after 2 min — ignore warmup lag
-                }
-                "pace_too_fast" -> {
-                    currentPaceSecPerKm > 0 && phasePaceMin != null &&
-                    currentPaceSecPerKm < (phasePaceMin - 15)
-                }
-                "pace_too_slow" -> {
-                    currentPaceSecPerKm > 0 && phasePaceMax != null &&
-                    currentPaceSecPerKm > (phasePaceMax + 15)
-                }
+                // Legacy milestone type — distance-pct condition evaluated separately
                 "milestone" -> {
                     val td = targetDistance ?: 0.0
                     if (td <= 0) false
                     else evaluateMilestoneCondition(trigger.condition, currentDistanceKm, td / 1000.0)
                 }
-                "phase_start", "phase_end", "rep_start", "rep_end", "recovery_start" -> {
-                    // These are fired by evaluateDynamicPhase() directly — skip here
-                    false
+                // ALL other trigger types (hr_zone_high, hr_zone_low, pace_too_slow, cadence_low,
+                // effort_check, form_alert, performance_check — whatever OpenAI named them)
+                // are evaluated via the flexible condition language:
+                else -> {
+                    // Require 2 min elapsed for reactive triggers — prevents premature firing at run start
+                    if (getActiveRunDuration() < 120_000L) false
+                    else evaluateConditionExpression(
+                        trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm
+                    )
                 }
-                else -> false
             }
 
             if (!conditionMet) continue
 
-            // Pick the message — rotate through alternativeMessages for variety
-            val message = pickTriggerMessage(trigger)
-
-            // Fire it
+            val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax)
             triggerLastFiredMs[trigger.id] = now
             if (trigger.frequency == "once") triggerFiredOnce.add(trigger.id)
 
             Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id}: $message")
             fireDynamicTrigger(message, trigger.type, dynamicCurrentPhaseName ?: "unknown")
+        }
+    }
+
+    /**
+     * Flexible condition expression evaluator.
+     *
+     * OpenAI writes condition strings using our metric vocabulary. The engine resolves metric
+     * names to live values and evaluates the expression. This means OpenAI has complete control
+     * over WHAT is monitored — we just need to be able to measure it.
+     *
+     * Supported metrics:
+     *   hr            — current heart rate (bpm)
+     *   pace          — current pace (sec/km)
+     *   cadence       — current cadence (spm)
+     *   distance      — total distance (km)
+     *   distance_pct  — % of target distance complete (0–100)
+     *   elapsed_min   — elapsed run time (minutes)
+     *   targetHRMax   — plan-level target HR max (falls back to phase-level)
+     *   targetHRMin   — plan-level target HR min
+     *   targetPaceMax — plan-level target pace max (sec/km)
+     *   targetPaceMin — plan-level target pace min (sec/km)
+     *
+     * Condition syntax:
+     *   Single:   "hr > 150", "cadence < 165", "elapsed_min > 20"
+     *   Compound: "hr > 145 AND cadence < 165", "pace < 330 AND elapsed_min > 5"
+     *   Shorthand for plan targets: "hr > targetHRMax", "pace > targetPaceMax + 15"
+     */
+    private fun evaluateConditionExpression(
+        condition: String,
+        phaseHRMin: Int?,
+        phaseHRMax: Int?,
+        phasePaceMin: Int?,
+        phasePaceMax: Int?,
+        currentDistanceKm: Double,
+    ): Boolean {
+        if (condition.isBlank() || condition == "always") return true
+
+        // Split on AND — all clauses must be true
+        val clauses = condition.split(Regex("\\bAND\\b", RegexOption.IGNORE_CASE))
+        return clauses.all { clause -> evaluateSingleClause(
+            clause.trim(), phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm
+        ) }
+    }
+
+    /**
+     * Evaluate a single comparison clause e.g. "hr > 145" or "cadence < 165".
+     * Resolves metric names and target keywords to live or configured values.
+     */
+    private fun evaluateSingleClause(
+        clause: String,
+        phaseHRMin: Int?,
+        phaseHRMax: Int?,
+        phasePaceMin: Int?,
+        phasePaceMax: Int?,
+        currentDistanceKm: Double,
+    ): Boolean {
+        // Tokenize: "metric  op  value"
+        // Supports: "hr > 150", "hr > targetHRMax", "pace > targetPaceMax + 15", "cadence < 165"
+        val tokenRegex = Regex("""^(\w+)\s*([><=!]+)\s*(.+)$""")
+        val match = tokenRegex.find(clause) ?: return false
+        val (metricToken, op, valueExpr) = match.destructured
+
+        // Resolve left-hand metric to live value (returns null if metric has no data yet)
+        val lhsValue: Double = when (metricToken.lowercase()) {
+            "hr"             -> if (currentHeartRate > 0) currentHeartRate.toDouble() else return false
+            "pace"           -> { val p = parsePaceToSeconds(currentPace); if (p > 0) p.toDouble() else return false }
+            "cadence"        -> if (currentCadence > 0) currentCadence.toDouble() else return false
+            "distance"       -> currentDistanceKm
+            "distance_pct"   -> {
+                val td = (targetDistance ?: 0.0) / 1000.0
+                if (td > 0) (currentDistanceKm / td * 100.0) else return false
+            }
+            "elapsed_min"    -> getActiveRunDuration() / 60_000.0
+            else             -> return false   // Unknown metric — skip trigger safely
+        }
+
+        // Resolve right-hand value expression (may reference plan targets or be a plain number)
+        // Examples: "150", "targetHRMax", "targetPaceMax + 15", "165"
+        val rhsValue: Double = resolveRhsExpression(
+            valueExpr.trim(), phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax
+        ) ?: return false
+
+        return when (op) {
+            ">"  -> lhsValue > rhsValue
+            ">=" -> lhsValue >= rhsValue
+            "<"  -> lhsValue < rhsValue
+            "<=" -> lhsValue <= rhsValue
+            "==" -> lhsValue == rhsValue
+            "!=" -> lhsValue != rhsValue
+            else -> false
+        }
+    }
+
+    /**
+     * Resolve a right-hand side value expression to a Double.
+     * Handles plan target keywords with optional arithmetic:
+     *   "150"              → 150.0
+     *   "targetHRMax"      → phaseHRMax (or null if not set)
+     *   "targetHRMax - 10" → phaseHRMax - 10
+     *   "targetPaceMax + 15" → phasePaceMax + 15
+     */
+    private fun resolveRhsExpression(
+        expr: String,
+        phaseHRMin: Int?,
+        phaseHRMax: Int?,
+        phasePaceMin: Int?,
+        phasePaceMax: Int?,
+    ): Double? {
+        // Try plain number first
+        expr.toDoubleOrNull()?.let { return it }
+
+        // Try "keyword [ +/- number ]" pattern
+        val arithRegex = Regex("""^(\w+)\s*([+\-])\s*(\d+(?:\.\d+)?)$""")
+        val arithMatch = arithRegex.find(expr)
+        val keyword = arithMatch?.groupValues?.get(1) ?: expr
+        val arithOp  = arithMatch?.groupValues?.get(2)
+        val arithVal = arithMatch?.groupValues?.get(3)?.toDoubleOrNull() ?: 0.0
+
+        val base: Double = when (keyword.lowercase()) {
+            "targethrmax",   "targetHRMax"   -> phaseHRMax?.toDouble() ?: return null
+            "targethrmin",   "targetHRMin"   -> phaseHRMin?.toDouble() ?: return null
+            "targetpacemax", "targetPaceMax" -> phasePaceMax?.toDouble() ?: return null
+            "targetpacemin", "targetPaceMin" -> phasePaceMin?.toDouble() ?: return null
+            else -> return null
+        }
+        return when (arithOp) {
+            "+" -> base + arithVal
+            "-" -> base - arithVal
+            else -> base
         }
     }
 
@@ -4215,16 +4375,24 @@ class RunTrackingService : Service(), SensorEventListener {
             dynamicCurrentPhaseName = resolvedPhaseName
             dynamicPhaseDistanceStartKm = currentDistanceKm
 
+            // "walk", "recovery", "rest", and "float" are rest/recovery phases.
+            // NOTE: "jog" is intentionally NOT classified as recovery — in walk-run interval
+            // sessions the jog is the WORK phase (even if easy), and misclassifying it as
+            // recovery causes the wrong trigger type ("recovery_start" instead of "rep_start")
+            // to be matched, which can produce incorrect coaching cues ("lightly jog" instead
+            // of "start your easy jog" for the work phase).
             val isRecovery = resolvedPhase.name.lowercase().let {
-                it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("jog")
+                it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("float")
             }
 
-            // Reset reactive trigger cooldowns on every phase transition.
+            // Reset ALL reactive ("on_condition") trigger cooldowns on every phase transition.
             // Each new interval phase (jog → walk → jog → walk…) deserves fresh HR/pace monitoring.
             // Without this, a 90-second cooldown from the previous phase would block reactive
             // feedback during the next interval even if conditions warrant it immediately.
+            // NOTE: We reset ALL on_condition triggers — not just specific type names — because
+            // OpenAI can name reactive triggers anything (hr_drift, cadence_alert, effort_check, etc.)
             plan.triggers
-                .filter { t -> t.type in listOf("hr_zone_high", "hr_zone_low", "pace_too_fast", "pace_too_slow") }
+                .filter { t -> t.frequency == "on_condition" }
                 .forEach { t -> triggerLastFiredMs.remove(t.id) }
 
             Log.d("RunTrackingService",
@@ -4251,7 +4419,11 @@ class RunTrackingService : Service(), SensorEventListener {
 
             if (phaseStartTrigger != null && !hasCoachingFiredThisTick &&
                 canFireCoaching(bypassDistanceGate = true)) {
-                val msg = pickTriggerMessage(phaseStartTrigger)
+                val msg = pickTriggerMessage(
+                    phaseStartTrigger, repNumber, totalReps,
+                    phaseHRMin = resolvedPhase.targetHRMin,
+                    phaseHRMax = resolvedPhase.targetHRMax,
+                )
                 // Mark "once" triggers as fired; leave repeating triggers unfired so they rotate
                 if (phaseStartTrigger.frequency == "once") triggerFiredOnce.add(phaseStartTrigger.id)
                 triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
@@ -4285,7 +4457,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     if (t.frequency == "once") !triggerFiredOnce.contains(t.id) else true
                 }
                 if (phaseEndTrigger != null && canFireCoaching(bypassDistanceGate = true)) {
-                    val msg = pickTriggerMessage(phaseEndTrigger)
+                    val msg = pickTriggerMessage(
+                        phaseEndTrigger, repNumber, totalReps,
+                        phaseHRMin = resolvedPhase.targetHRMin,
+                        phaseHRMax = resolvedPhase.targetHRMax,
+                    )
                     if (phaseEndTrigger.frequency == "once") triggerFiredOnce.add(phaseEndTrigger.id)
                     fireDynamicTrigger(msg, "phase_end", resolvedPhaseName)
                 }
@@ -4307,21 +4483,146 @@ class RunTrackingService : Service(), SensorEventListener {
     /**
      * Pick the best message for a trigger — rotates through alternativeMessages
      * so the runner doesn't hear the exact same phrase every time.
+     *
+     * After selecting the message, live-data template variables are resolved so the
+     * athlete hears actual numbers (e.g. "Your heart rate is at {hr}" → "Your heart rate is at 148").
      */
-    private fun pickTriggerMessage(trigger: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger): String {
+    private fun pickTriggerMessage(
+        trigger: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger,
+        repNum: Int = 1,
+        totalReps: Int = 1,
+        phaseHRMin: Int? = null,
+        phaseHRMax: Int? = null,
+    ): String {
         val alts = trigger.alternativeMessages
-        if (alts.isNullOrEmpty()) return trigger.message
-
-        val allMessages = listOf(trigger.message) + alts
+        val allMessages = if (alts.isNullOrEmpty()) listOf(trigger.message)
+                          else listOf(trigger.message) + alts
         val idx = triggerAltMessageIndex.getOrDefault(trigger.id, 0)
-        val message = allMessages[idx % allMessages.size]
+        val raw = allMessages[idx % allMessages.size]
         triggerAltMessageIndex[trigger.id] = (idx + 1) % allMessages.size
-        return message
+        return resolveTemplateVariables(raw, repNum, totalReps, phaseHRMin, phaseHRMax)
     }
 
     /**
-     * Fire a dynamic trigger message — delivers audio/TTS and logs the event.
+     * Resolve live-data template variables in a coaching message string.
+     *
+     * Supported tokens:
+     *  {hr}          — current heart rate (bpm)
+     *  {hrZone}      — current HR zone (1–5)
+     *  {pace}        — current pace formatted as "m:ss"
+     *  {cadence}     — current cadence (spm)
+     *  {repNum}      — current interval rep number (1-indexed)
+     *  {totalReps}   — total reps in this interval group
+     *  {repsLeft}    — reps remaining (totalReps - repNum)
+     *  {elapsedMin}  — elapsed run time in whole minutes
+     *  {distKm}      — total distance covered in km (1 d.p.)
+     *  {targetHRMax} — target HR max for the current phase
+     *  {targetHRMin} — target HR min for the current phase
      */
+    private fun resolveTemplateVariables(
+        template: String,
+        repNum: Int = 1,
+        totalReps: Int = 1,
+        phaseHRMin: Int? = null,
+        phaseHRMax: Int? = null,
+    ): String {
+        if (!template.contains('{')) return template  // fast path — no templates
+
+        val hrZone = when {
+            currentHeartRate <= 0    -> "unknown"
+            currentHeartRate < 115   -> "1"
+            currentHeartRate < 135   -> "2"
+            currentHeartRate < 152   -> "3"
+            currentHeartRate < 168   -> "4"
+            else                     -> "5"
+        }
+        val elapsedMin = (getActiveRunDuration() / 60_000L).toInt()
+        val distKmStr  = String.format("%.1f", totalDistance / 1_000.0)
+        val paceStr    = currentPace.ifBlank { "—" }
+
+        return template
+            .replace("{hr}",          if (currentHeartRate > 0) "$currentHeartRate" else "—")
+            .replace("{hrZone}",      hrZone)
+            .replace("{pace}",        paceStr)
+            .replace("{cadence}",     if (currentCadence > 0) "$currentCadence" else "—")
+            .replace("{repNum}",      "$repNum")
+            .replace("{totalReps}",   "$totalReps")
+            .replace("{repsLeft}",    "${(totalReps - repNum).coerceAtLeast(0)}")
+            .replace("{elapsedMin}",  "$elapsedMin")
+            .replace("{distKm}",      distKmStr)
+            .replace("{targetHRMax}", phaseHRMax?.toString() ?: "—")
+            .replace("{targetHRMin}", phaseHRMin?.toString() ?: "—")
+    }
+
+    // ── Polly audio cache helpers ────────────────────────���─────────────────────
+
+    /**
+     * Looks up a pre-generated Polly MP3 file for [text] from the coaching audio cache
+     * that the ViewModel wrote at "Prepare Run" time.
+     *
+     * ONLY call this for messages that had no `{template}` variables at prepare time.
+     * Template-containing messages (e.g. "Heart rate at {hr} right now") are resolved to
+     * their live values at runtime and therefore cannot be matched to pre-generated files —
+     * use [getRealtimePollyAudio] for those.
+     *
+     * Returns the file's bytes as a Base64 string (ready to pass to [CoachingAudioQueue])
+     * or `null` if the file isn't cached (service falls back to Android TTS).
+     */
+    private fun getPreCachedPollyAudio(text: String): String? {
+        val workoutId = planWorkoutId ?: return null
+        return try {
+            val file = File(applicationContext.cacheDir, "coaching_audio/$workoutId/${textMd5(text)}.mp3")
+            if (file.exists()) {
+                Base64.encodeToString(file.readBytes(), Base64.DEFAULT)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Could not read cached Polly audio: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Makes a real-time Polly TTS call for [resolvedText] (a message whose live-data
+     * template variables have already been substituted, e.g. "Heart rate at 148 right now").
+     *
+     * Called from [fireDynamicTrigger] and [fireSessionPhaseTrigger] for messages that
+     * contain `{template}` variables — these could not be pre-generated at prepare time
+     * because the live values weren't known.
+     *
+     * The existing `/api/tts/generate` endpoint tries Polly first, then falls back to
+     * OpenAI TTS, giving us the user's correct voice for every template-containing message.
+     *
+     * Expected latency: ~200-500ms (Polly neural) — barely perceptible during a run.
+     * Returns null if the call fails; caller falls back to Android TTS.
+     */
+    private suspend fun getRealtimePollyAudio(resolvedText: String): String? {
+        return try {
+            val response = apiService.generateTts(
+                GenerateTtsRequest(
+                    text = resolvedText,
+                    coachAccent = currentUser?.coachAccent,
+                    coachGender = currentUser?.coachGender
+                )
+            )
+            response.audio
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Real-time Polly call failed (using Android TTS): ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * MD5 hex of [text] — must match the identical function in RunSessionViewModel so the
+     * ViewModel-written files are found by the service at run time.
+     */
+    private fun textMd5(text: String): String {
+        val md = MessageDigest.getInstance("MD5")
+        return md.digest(text.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }
+
     private fun fireDynamicTrigger(message: String, triggerType: String, phaseName: String) {
         if (hasCoachingFiredThisTick) return
         hasCoachingFiredThisTick = true
@@ -4330,13 +4631,43 @@ class RunTrackingService : Service(), SensorEventListener {
         Log.d("RunTrackingService", "🎯 Dynamic trigger [$triggerType] phase=$phaseName: $message")
         _latestCoachingText.value = message
 
+        // Record in coaching history so messages appear in the post-run summary and saved JSON.
+        // Without this, dynamic trigger cues (phase transitions, HR/pace alerts) are invisible
+        // in ai_coaching_notes even though the runner heard them during the session.
+        coachingHistory.add(AiCoachingNote(
+            time = getActiveRunDuration(),
+            message = "[$triggerType] $message"
+        ))
+
         serviceScope.launch {
             try {
                 if (!isMuted) {
+                    // ── Polly audio routing ─────────────────────────────────────────────
+                    // STATIC messages (no {template} vars at generate time) → pre-cached file
+                    // TEMPLATE messages (live data substituted) → real-time Polly call
+                    // FALLBACK (Polly unavailable / network failure) → Android TTS
+                    val base64Audio: String?
+                    val audioFormat: String?
+                    if (!message.contains('{')) {
+                        // Static message — look up the file that was written at prepare time
+                        base64Audio = getPreCachedPollyAudio(message)
+                        audioFormat = if (base64Audio != null) "mp3" else null
+                        if (base64Audio != null) {
+                            Log.d("RunTrackingService", "🎵 Using pre-cached Polly audio for: ${message.take(40)}")
+                        }
+                    } else {
+                        // Template message — real-time Polly call with live data already substituted
+                        // (message here is already resolved — e.g. "Heart rate at 148 right now")
+                        base64Audio = getRealtimePollyAudio(message)
+                        audioFormat = if (base64Audio != null) "mp3" else null
+                        if (base64Audio != null) {
+                            Log.d("RunTrackingService", "🎵 Real-time Polly audio for: ${message.take(40)}")
+                        }
+                    }
                     CoachingAudioQueue.enqueue(
                         context = this@RunTrackingService,
-                        base64Audio = null,
-                        format = null,
+                        base64Audio = base64Audio,
+                        format = audioFormat,
                         fallbackText = message,
                         accent = currentUser?.coachAccent,
                         gender = currentUser?.coachGender,
@@ -5026,16 +5357,23 @@ class RunTrackingService : Service(), SensorEventListener {
 
                 if (!isMuted) {
                     try {
+                        // Include user's voice preferences so server-side Polly TTS selects the
+                        // closest matching voice to the user's configured coach voice — this keeps
+                        // the opening brief consistent with all subsequent coaching audio.
                         val audioResponse = apiService.getStartRunAudio(
                             live.airuncoach.airuncoach.network.model.StartRunAudioRequest(
-                                motivationalText = startPrompt
+                                motivationalText = startPrompt,
+                                coachAccent = currentUser?.coachAccent,
+                                coachGender = currentUser?.coachGender,
+                                coachName   = currentUser?.coachName
                             )
                         )
 
                         if (audioResponse.audio != null && audioResponse.format != null) {
-                            Log.d("RunTrackingService", "Start coaching audio via Polly TTS (plan=${planPreRunBrief != null})")
+                            Log.d("RunTrackingService", "Start coaching audio via Polly TTS (plan=${planPreRunBrief != null}, accent=${currentUser?.coachAccent}, gender=${currentUser?.coachGender})")
                             playCoachingAudio(audioResponse.audio, audioResponse.format, startPrompt)
                         } else {
+                            // Polly returned no audio — fall back to device TTS with user's voice settings
                             playCoachingAudio(null, null, startPrompt)
                         }
                     } catch (e: Exception) {

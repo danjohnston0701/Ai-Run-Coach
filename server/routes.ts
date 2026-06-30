@@ -9228,6 +9228,59 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // ── Batch TTS pre-generation ────────────────────────────────────────────────
+  // Pre-generates Polly audio for ALL coaching trigger messages at "Prepare Run" time
+  // so that every in-run coaching cue plays instantly with the Polly voice (no Android TTS
+  // fallback, no network latency mid-run). Called by the Android app after the coaching
+  // plan is fetched and before the user taps Start.
+  //
+  // Request body: { texts: string[], accent?: string, gender?: string }
+  // Response:     { audios: Array<{ text, audio: string (base64 mp3) | null, format }> }
+  app.post("/api/coaching/batch-tts", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { texts, accent: clientAccent, gender: clientGender } = req.body;
+
+      if (!Array.isArray(texts) || texts.length === 0) {
+        return res.status(400).json({ error: "texts must be a non-empty array" });
+      }
+      if (texts.length > 150) {
+        return res.status(400).json({ error: "max 150 texts per batch" });
+      }
+
+      // Use user's stored voice settings as the source of truth
+      const user = await storage.getUser(req.user!.userId);
+      const accent = clientAccent || user?.coachAccent || "british";
+      const gender = clientGender || user?.coachGender || "female";
+
+      console.log(`[Batch TTS] Generating Polly audio for ${texts.length} coaching messages (${accent}/${gender})`);
+
+      const { synthesizeSpeech } = await import("./polly-service");
+
+      // Generate all audios in parallel — Polly handles concurrency well
+      const settled = await Promise.allSettled(
+        texts.map(async (text: string) => {
+          if (!text || text.trim().length === 0) return { text, audio: null, format: "mp3" };
+          const buffer = await synthesizeSpeech(text.trim(), accent, gender);
+          return { text: text.trim(), audio: buffer.toString("base64"), format: "mp3" };
+        })
+      );
+
+      const audios = settled.map((result, i) => {
+        if (result.status === "fulfilled") return result.value;
+        console.warn(`[Batch TTS] Failed for text[${i}]: "${texts[i]?.substring(0, 60)}" — ${(result as PromiseRejectedResult).reason?.message}`);
+        return { text: texts[i], audio: null, format: "mp3" };
+      });
+
+      const successCount = audios.filter(a => a.audio !== null).length;
+      console.log(`[Batch TTS] Done: ${successCount}/${texts.length} succeeded`);
+
+      res.json({ audios });
+    } catch (error: any) {
+      console.error("[Batch TTS] Error:", error);
+      res.status(500).json({ error: "Failed to generate batch TTS audio" });
+    }
+  });
+
   // Enhanced pre-run briefing with TTS audio
   // Uses AI-powered generateWellnessAwarePreRunBriefing() for intelligent, personalized content,
   // then generates OpenAI TTS audio from the AI response. Best of both worlds.

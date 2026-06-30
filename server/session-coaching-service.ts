@@ -567,7 +567,9 @@ export async function getOrGenerateSessionCoaching(
   // Current plan schema version — bump this whenever the plan format changes in a way that
   // requires existing cached plans to be regenerated (e.g. new fields, prompt improvements).
   // Plans cached at an older version are silently regenerated on next access.
-  const CURRENT_PLAN_VERSION = "2.1";
+  // v2.3 — OpenAI designs all triggers using full metric vocabulary (hr, pace, cadence, elapsed_min, distance_pct);
+  //         periodic trigger support; compound AND conditions; {template} variable substitution in messages
+  const CURRENT_PLAN_VERSION = "2.3";
 
   // 1. Check cache — return existing plan if available, up-to-date, and not forced to regenerate
   if (!forceRegenerate) {
@@ -593,26 +595,37 @@ export async function getOrGenerateSessionCoaching(
     }
   }
 
-  // 2. Load workout details
-  const workout = await db
-    .select()
-    .from(plannedWorkouts)
-    .where(eq(plannedWorkouts.id, plannedWorkoutId))
-    .then((rows) => rows[0]);
+  // 2. Load workout details, user profile, AI runner profile, and recent runs in parallel
+  const [workout, user, aiRunnerProfileResult] = await Promise.all([
+    db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, plannedWorkoutId)).then(r => r[0]),
+    db.select().from(users).where(eq(users.id, userId)).then(r => r[0]),
+    getRunnerProfile(userId).catch(() => null),
+  ]);
 
-  if (!workout) {
-    throw new Error(`Planned workout not found: ${plannedWorkoutId}`);
-  }
+  if (!workout) throw new Error(`Planned workout not found: ${plannedWorkoutId}`);
+  if (!user) throw new Error(`User not found: ${userId}`);
 
-  // 3. Load user profile
-  const user = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .then((rows) => rows[0]);
+  const aiRunnerProfile = aiRunnerProfileResult?.profile ?? null;
 
-  if (!user) {
-    throw new Error(`User not found: ${userId}`);
+  // Fetch last 5 runs for recent context (non-blocking — if it fails we proceed without)
+  let recentRuns: Array<{ distanceKm: number; durationMinutes: number; avgPaceSecPerKm: number; avgHR?: number; workoutType?: string }> = [];
+  try {
+    const rawRuns = await db.select().from(runs).where(eq(runs.userId, userId)).orderBy(desc(runs.completedAt)).limit(5);
+    recentRuns = rawRuns.map(r => {
+      const distKm  = (r.distance ?? 0) / 1000;   // stored in metres
+      const durMin  = Math.round((r.duration ?? 0) / 60);
+      const durSec  = r.duration ?? 0;
+      const paceSecPerKm = distKm > 0 ? Math.round(durSec / distKm) : 0;
+      return {
+        distanceKm:        distKm,
+        durationMinutes:   durMin,
+        avgPaceSecPerKm:   paceSecPerKm,
+        avgHR:             r.avgHeartRate ?? undefined,
+        workoutType:       (r as any).workoutType ?? undefined,
+      };
+    }).filter(r => r.distanceKm > 0);
+  } catch (e) {
+    console.warn("[getOrGenerateSessionCoaching] Could not fetch recent runs:", e);
   }
 
   // 4. Parse target pace from "mm:ss" string to sec/km integer
@@ -636,10 +649,19 @@ export async function getOrGenerateSessionCoaching(
     targetHRMin:           workout.hrZoneMinBpm ?? undefined,
     targetHRMax:           workout.hrZoneMaxBpm ?? undefined,
     sessionInstructions:   workout.instructions ?? workout.description ?? undefined,
-    // Interval-specific rep structure — enables GPT to generate accurate per-phase durationMinutes
+    // Interval/walk-run rep structure
     intervalCount:             workout.intervalCount ?? undefined,
     intervalDistanceMeters:    workout.intervalDistanceMeters ?? undefined,
     intervalDurationSeconds:   workout.intervalDurationSeconds ?? undefined,
+    // Recovery/walk phase duration — critical for walk_run and interval sessions
+    recoveryDurationSeconds:   (workout as any).restDurationSeconds ?? undefined,
+    // Per-phase HR targets — enables accurate phase-specific reactive coaching
+    intervalHRMin:             (workout as any).intervalHeartRateMin ?? undefined,
+    intervalHRMax:             (workout as any).intervalHeartRateMax ?? undefined,
+    recoveryHRMax:             (workout as any).restHeartRateMax ?? undefined,
+    // Per-phase pace targets
+    intervalTargetPaceSecPerKm: paceStringToSecPerKm((workout as any).intervalTargetPace),
+    recoveryTargetPaceSecPerKm: paceStringToSecPerKm((workout as any).restTargetPace),
     runnerProfile: {
       age:                  (user as any).age ?? undefined,
       gender:               (user as any).gender ?? undefined,
@@ -649,13 +671,19 @@ export async function getOrGenerateSessionCoaching(
       injuries:             (user as any).injuryHistory ? [(user as any).injuryHistory] : [],
       weeklyMileageKm:      (user as any).averageWeeklyMileage ?? undefined,
     },
-    coachName:  (user as any).coachName  ?? "Coach",
-    coachTone:  (user as any).coachTone  ?? "motivational",
-    coachAccent: (user as any).coachAccent ?? undefined,
+    coachName:        (user as any).coachName  ?? "Coach",
+    coachTone:        (user as any).coachTone  ?? "motivational",
+    coachAccent:      (user as any).coachAccent ?? undefined,
+    aiRunnerProfile,  // "What I know about you" personalisation block
+    recentRuns,       // Last 5 runs for pacing/HR context
   };
 
   // 6. Generate the bespoke coaching plan
-  console.log(`[getOrGenerateSessionCoaching] Generating plan for ${workout.workoutType} workout ${plannedWorkoutId}`);
+  console.log(
+    `[getOrGenerateSessionCoaching] Generating plan for ${workout.workoutType} workout ${plannedWorkoutId}`,
+    `intervals=${params.intervalCount} jogSec=${params.intervalDurationSeconds} walkSec=${params.recoveryDurationSeconds}`,
+    `hrWork=${params.intervalHRMin}–${params.intervalHRMax} hrWalk<${params.recoveryHRMax}`,
+  );
   const plan = await generateSessionCoaching(params);
 
   // 7. Persist to DB — upsert into sessionInstructions

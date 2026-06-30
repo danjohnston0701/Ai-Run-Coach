@@ -182,16 +182,51 @@ data class DynamicCoachingPhase(
 /**
  * A trigger that fires a coaching cue during the run.
  * Evaluated against live metrics by the run tracking engine.
+ *
+ * ## Trigger types supported by the engine:
+ * - `phase_start`    — fires once when a phase begins
+ * - `phase_end`      — fires 5-12 seconds before a time-based phase ends
+ * - `rep_start`      — fires at the start of each work-interval rep
+ * - `rep_end`        — fires when a work-interval rep ends
+ * - `recovery_start` — fires at the start of each recovery phase
+ * - `hr_zone_high`   — fires when live HR > targetHRMax for current phase
+ * - `hr_zone_low`    — fires when live HR < targetHRMin for current phase
+ * - `pace_too_fast`  — fires when pace is faster than target by >15 sec/km
+ * - `pace_too_slow`  — fires when pace is slower than target by >15 sec/km
+ * - `cadence_low`    — fires when cadence < targetCadence for current phase (if set)
+ * - `periodic`       — fires every `frequencySeconds` seconds regardless of conditions
+ * - `milestone`      — fires at key distance percentages (e.g. distance_pct > 50)
+ *
+ * ## Message templates — live data substitution:
+ * Messages may include these placeholders which the engine replaces with live values:
+ * - `{hr}`           → current heart rate in bpm  (e.g. "142")
+ * - `{hrZone}`       → current HR zone (1-5)       (e.g. "3")
+ * - `{pace}`         → current pace formatted       (e.g. "5:30")
+ * - `{cadence}`      → current cadence in spm       (e.g. "168")
+ * - `{repNum}`       → current rep number           (e.g. "2")
+ * - `{totalReps}`    → total reps in this interval  (e.g. "4")
+ * - `{repsLeft}`     → reps remaining               (e.g. "2")
+ * - `{elapsedMin}`   → elapsed run time in minutes  (e.g. "12")
+ * - `{distKm}`       → distance covered in km       (e.g. "1.8")
+ * - `{targetHRMax}`  → target HR max for this phase (e.g. "145")
+ * - `{targetHRMin}`  → target HR min for this phase (e.g. "120")
+ *
+ * ## Frequency:
+ * - `"once"`          → fires the first time only (phase_start, milestones)
+ * - `"on_condition"`  → fires whenever condition is true, max once per 90 seconds
+ * - `"periodic"`      → fires every `frequencySeconds` seconds (requires `frequencySeconds` set)
  */
 data class DynamicCoachingTrigger(
-    val id: String,                         // Unique identifier
-    val type: String,                       // "phase_start" | "phase_end" | "pace_deviation" | "hr_zone" | "milestone"
-    val condition: String,                  // e.g. "pace > targetPaceMax + 30" or "phase == warmup"
-    val message: String,                    // Coaching cue to display/speak
-    val frequency: String,                  // "once" | "on_condition" | "repeating_Nmin"
-    val alternativeMessages: List<String>?, // Optional variations to rotate through
-    val alertType: String?,                 // "vibrate" | "audio" | "none"
-    val suppressWhenIntensity: List<String>? // e.g. ["z1"] = don't fire during recovery
+    val id: String,                           // Unique identifier
+    val type: String,                         // See trigger types above
+    val condition: String,                    // e.g. "pace > targetPaceMax + 30" or "phase == warmup"
+    val message: String,                      // Coaching cue — may include {hr}, {pace}, {cadence} etc.
+    val frequency: String,                    // "once" | "on_condition" | "periodic"
+    val frequencySeconds: Int? = null,        // For "periodic" triggers: seconds between fires (e.g. 120)
+    val alternativeMessages: List<String>?,   // Variations to rotate through — may also use templates
+    val alertType: String?,                   // "vibrate" | "audio" | "none"
+    val suppressWhenIntensity: List<String>?, // e.g. ["z1"] = don't fire during recovery phases
+    val targetCadence: Int? = null            // For cadence_low triggers: minimum spm threshold
 )
 
 /**

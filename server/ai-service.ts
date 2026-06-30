@@ -5028,7 +5028,7 @@ Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface GenerateSessionCoachingParams {
-  sessionType: string;          // "easy", "intervals", "tempo", "long_run", "hill_repeats", etc.
+  sessionType: string;          // "easy", "intervals", "tempo", "long_run", "hill_repeats", "walk_run", etc.
   sessionGoal: string;          // "speed", "endurance", "recovery", "threshold", "power"
   targetDurationMinutes: number;
   targetDistanceKm: number;
@@ -5037,10 +5037,17 @@ export interface GenerateSessionCoachingParams {
   targetHRMin?: number;         // BPM
   targetHRMax?: number;         // BPM
   sessionInstructions?: string; // Full AI-generated session instructions text
-  // Interval-specific fields — present when the session has structured repeating reps
+  // Interval/repeat-specific fields — present when the session has structured repeating reps
   intervalCount?: number;           // Number of repetitions (e.g. 10)
   intervalDistanceMeters?: number;  // Distance per work interval in meters (e.g. 400)
-  intervalDurationSeconds?: number; // Duration per work interval in seconds (e.g. 60 for 1 min)
+  intervalDurationSeconds?: number; // Duration per work interval in seconds (e.g. 300 for 5-min jog)
+  recoveryDurationSeconds?: number; // Duration per recovery/walk phase in seconds (e.g. 120 for 2-min walk)
+  // Per-phase HR and pace targets — enables per-phase coaching accuracy
+  intervalHRMin?: number;               // Min HR for work intervals (BPM)
+  intervalHRMax?: number;               // Max HR for work intervals (BPM)
+  recoveryHRMax?: number;               // Max HR during recovery phase — if exceeded, coach prompts to slow down
+  intervalTargetPaceSecPerKm?: number;  // Target pace for work intervals (sec/km)
+  recoveryTargetPaceSecPerKm?: number;  // Target pace for recovery phase (sec/km)
   runnerProfile: {
     age?: number;
     gender?: string;
@@ -5109,10 +5116,11 @@ export interface SessionCoachingPhase {
 
 export interface SessionCoachingTrigger {
   id: string;
-  type: string;
-  condition: string;
-  message: string;
-  frequency: string;
+  type: string;           // Descriptive name chosen by OpenAI — e.g. "hr_drift", "cadence_check", "rep_start"
+  condition: string;      // Metric expression — e.g. "hr > targetHRMax AND elapsed_min > 2"
+  message: string;        // May contain {hr}, {pace}, {cadence}, {repNum}, {repsLeft}, {targetHRMax} etc.
+  frequency: string;      // "once" | "on_condition" | "periodic"
+  frequencySeconds?: number;   // For "periodic" triggers: seconds between fires
   alternativeMessages?: string[];
   alertType?: string;
   suppressWhenIntensity?: string[];
@@ -5176,6 +5184,12 @@ export async function generateSessionCoaching(
     intervalCount,
     intervalDistanceMeters,
     intervalDurationSeconds,
+    recoveryDurationSeconds,
+    intervalHRMin,
+    intervalHRMax,
+    recoveryHRMax,
+    intervalTargetPaceSecPerKm,
+    recoveryTargetPaceSecPerKm,
     runnerProfile,
     coachName = "Coach",
     coachTone = "motivational",
@@ -5202,21 +5216,53 @@ Runner Profile:
       ).join("\n")
     : "\nRecent Runs: No data available";
 
-  // Build interval-specific context string when the session has defined rep structure
+  // Build interval-specific context string with full rep+recovery structure
   const intervalContext = (() => {
-    const { intervalCount, intervalDistanceMeters, intervalDurationSeconds } = params;
     if (!intervalCount) return "";
-    const repDetails: string[] = [];
+
+    const workDetails: string[] = [];
+    const recDetails: string[] = [];
+
     if (intervalDurationSeconds) {
       const mins = Math.floor(intervalDurationSeconds / 60);
       const secs = intervalDurationSeconds % 60;
-      repDetails.push(secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`);
+      workDetails.push(secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`);
     }
-    if (intervalDistanceMeters) {
-      repDetails.push(`${intervalDistanceMeters}m`);
+    if (intervalDistanceMeters) workDetails.push(`${intervalDistanceMeters}m`);
+    if (intervalTargetPaceSecPerKm) workDetails.push(`target ${formatPaceForPrompt(intervalTargetPaceSecPerKm)}/km`);
+    if (intervalHRMin || intervalHRMax) {
+      workDetails.push(`HR ${intervalHRMin ?? "—"}–${intervalHRMax ?? "—"} bpm`);
     }
-    const repDesc = repDetails.length > 0 ? ` (${repDetails.join(" / ")} per rep)` : "";
-    return `\n- Interval Structure: ${intervalCount} repetitions${repDesc}`;
+
+    if (recoveryDurationSeconds) {
+      const mins = Math.floor(recoveryDurationSeconds / 60);
+      const secs = recoveryDurationSeconds % 60;
+      recDetails.push(secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`);
+    }
+    if (recoveryTargetPaceSecPerKm) recDetails.push(`target ${formatPaceForPrompt(recoveryTargetPaceSecPerKm)}/km`);
+    if (recoveryHRMax) recDetails.push(`HR recovery target: below ${recoveryHRMax} bpm`);
+
+    const workDesc = workDetails.length > 0 ? ` (${workDetails.join(", ")})` : "";
+    const recDesc = recDetails.length > 0 ? ` / Recovery${recDetails.length > 0 ? ` (${recDetails.join(", ")})` : ""}` : "";
+    return `\n- Interval Structure: ${intervalCount} × work${workDesc}${recDesc}`;
+  })();
+
+  // Build per-phase HR/pace targets summary for context
+  const perPhaseTargets = (() => {
+    const lines: string[] = [];
+    if (intervalHRMin || intervalHRMax) {
+      lines.push(`- Work Phase HR Zone: ${intervalHRMin ?? "—"}–${intervalHRMax ?? "—"} bpm`);
+    }
+    if (recoveryHRMax) {
+      lines.push(`- Recovery Phase HR Target: drop below ${recoveryHRMax} bpm before next rep`);
+    }
+    if (intervalTargetPaceSecPerKm) {
+      lines.push(`- Work Phase Pace: ${formatPaceForPrompt(intervalTargetPaceSecPerKm)}/km`);
+    }
+    if (recoveryTargetPaceSecPerKm) {
+      lines.push(`- Recovery Pace: ${formatPaceForPrompt(recoveryTargetPaceSecPerKm)}/km (easy walk/jog)`);
+    }
+    return lines.length > 0 ? `\nPer-Phase Targets:\n${lines.join("\n")}` : "";
   })();
 
   // Build session context
@@ -5226,11 +5272,13 @@ Session Details:
 - Goal: ${sessionGoal}
 - Target Duration: ${targetDurationMinutes} minutes
 - Target Distance: ${targetDistanceKm} km
-- Target Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
-- Target HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm${intervalContext}
+- Overall Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
+- Overall HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm${intervalContext}${perPhaseTargets}
 ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
 
-  const systemPrompt = `You are ${coachName}, an elite AI running coach delivering a world-class, hyper-personalised coaching experience for a single training session. Your mission is to make this athlete feel like they have a dedicated personal coach running beside them — reading their performance in real time and delivering exactly the right guidance at exactly the right moment.
+  const systemPrompt = `You are ${coachName}, an elite AI running coach delivering a world-class, hyper-personalised coaching experience for a single training session. Your mission is to make this athlete feel like they have a dedicated personal coach running beside them — not a robot rattling off commands.
+
+THE GOLDEN RULE: Never say "run now", "walk now", "speed up", "slow down" as isolated commands. Your competitors do this and runners hate it. Instead, coach like a real human: acknowledge what the athlete is doing, give a specific cue, and say something encouraging. Every message should feel personal, warm, and specific to this session.
 
 You have full creative authority over how you design this session's coaching plan. Choose the phase structure, coaching approach, tone, and messaging that YOU believe will give this specific athlete the best performance and experience in this specific session. Do not default to a generic template.
 
@@ -5243,45 +5291,116 @@ Your coaching plan must include:
 
 COACHING PRINCIPLES:
 - Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
-- Trigger messages must be SHORT (under 20 words), direct, conversational, and actionable — like a coach talking in your ear
+- Trigger messages must be SHORT (under 20 words), direct, conversational, and actionable — like a coach talking in your ear mid-run
+- CRITICAL: NEVER use robotic commands like "Run now", "Walk now", "Speed up", "Slow down" in isolation. That's what every other app does. We are better than that.
+  * Instead of "Walk now" → "Nice work — take your recovery walk, let that heart rate settle"
+  * Instead of "Start jogging" → "Right, let's get going — easy jog, find your rhythm"
+  * Instead of "Speed up" → "Just a fraction more effort here — you've got plenty left"
+  * Instead of "Heart rate too high" → "Ease back slightly — let that heart rate come down before the next rep"
 - The coaching engine evaluates triggers continuously (~1/sec on GPS tick), so reactive triggers fire immediately when conditions are met
-- Provide 3-5 alternativeMessages for every repeating trigger so the athlete hears varied language across the session
-- The preRunBrief must reference the actual session targets (distance, pace, effort zones, rep structure)
+- Provide 3-5 alternativeMessages for every repeating trigger so the athlete hears DIFFERENT language at each rep — never the same phrase twice
+- The preRunBrief must name the actual HR targets and pace targets for each phase. The athlete should know EXACTLY what they're aiming for before they start.
 - Match coaching tone to the session's demands — not just the athlete's general preference:
-  * Recovery/easy/aerobic: calm, supportive, conversational — focus on effort feel and zone adherence
-  * Intervals/hills/speed: direct, energetic, motivating — emphasise rep quality and recovery discipline
-  * Tempo/threshold: focused, technical, steady — help the athlete lock into and maintain the target effort
-  * Long run: supportive, milestone-aware — manage pacing and mental engagement over distance
+  * Walk-run/beginner builds: warm, supportive, clear — tell them what's coming and why it helps them
+  * Recovery/easy/aerobic: calm, conversational — focus on how it should feel, not numbers
+  * Intervals/hills/speed: energetic, focused — celebrate rep completion, motivate the next effort
+  * Tempo/threshold: technical, steady — help the athlete lock in and hold the target zone
+  * Long run: milestone-aware, narrative — manage pacing and keep them mentally engaged over distance
+
+WALK-RUN SESSIONS (sessionType = "walk_run"):
+This is a critical session type for beginners and returning runners. The coaching here can make or break someone's experience.
+- MUST use cueingStrategy "interval"
+- MUST use time-based phases (durationMinutes) — NOT distance-based
+- The jog phase is the WORK phase. Name it "jog" or "jog_interval". Set HR/pace targets for it.
+- The walk phase is RECOVERY. Name it "recovery_walk". Set a HR recovery target (aim to bring HR down below recoveryHRMax before next rep).
+- preRunBrief must include: (1) the rep structure, (2) target HR for jog intervals, (3) what a good recovery walk feels like
+- Jog phase triggers (rep_start) should be encouraging, not commanding — acknowledge the effort, give a specific cue, motivate the rep
+- Walk phase triggers (recovery_start) should be warm and affirming — celebrate completing the rep, give HR guidance, preview the next jog
+- HR reactive triggers on the jog phase — if HR spikes above intervalHRMax, coach the athlete to ease back (don't stop, just ease off)
+- EXAMPLE of good walk-run coaching messages:
+  * Jog rep start: "Lovely — time to pick it up again. Easy jog, keep that heart rate under control."
+  * Walk recovery start: "Brilliant effort! Walk it out now — let that heart rate settle below 120 before the next one."
+  * Jog rep 3 of 4: "Halfway through — you're doing great. One more after this and you're done."
+  * HR too high during jog: "Heart rate's getting up there — ease back just a fraction, you don't need to push that hard yet."
 
 CUEING STRATEGY — choose the one that best fits this session:
-- "interval" — sessions with structured repeating effort phases (intervals, hill reps, fartlek blocks)
+- "interval" — sessions with structured repeating effort phases (walk_run, intervals, hill reps, fartlek blocks) — REQUIRED for walk_run
 - "threshold" — sustained continuous hard effort (tempo, threshold)
 - "paced" — sessions targeting a specific pace throughout (race pace, progression run)
 - "freerun" — continuous aerobic sessions where effort/zone adherence is the primary focus (easy, recovery, long run)
 
-APP TRIGGER CAPABILITIES — these are the trigger types the coaching runtime supports:
-- "phase_start": fires once when a phase begins — always include for every phase
-- "phase_end": fires once 50-100m before a phase ends — use as a transition heads-up
-- "rep_start": fires at the start of each work interval rep
-- "rep_end": fires when an interval rep ends — tell the athlete what's next
-- "recovery_start": fires at the start of a recovery phase — give pace target and duration
-- "hr_zone_high": REACTIVE — fires when live HR exceeds targetHRMax — instruct athlete to ease off
-- "hr_zone_low": REACTIVE — fires when live HR drops below targetHRMin — instruct athlete to push more
-- "pace_too_fast": REACTIVE — fires when live pace is faster than targetPaceMin by >15 sec/km
-- "pace_too_slow": REACTIVE — fires when live pace is slower than targetPaceMax by >15 sec/km
-- "milestone": fires once at key distance milestones (halfway, 75%, etc.)
+──────────────────────────────────────────────────────────────────
+YOU DESIGN THE COACHING PROGRAMME — WE JUST EXECUTE IT
+──────────────────────────────────────────────────────────────────
+You are the coaching brain. You decide what to monitor, when to give feedback, and what data to include in each message. The app is the voice.
 
-TRIGGER CONDITION SYNTAX (evaluated by the runtime engine):
-- HR: "hr > {number}", "hr < {number}", "hr > targetHRMax", "hr < targetHRMin"
-- Pace (sec/km): "pace > targetPaceMax + 15", "pace < targetPaceMin - 15"
-- Phase: "phase == warmup", "phase == main_effort"
-- Rep: "rep_start", "rep_end"
-- Distance: "distance_pct > 50" (percentage of total session distance)
+Think like a real coach who has sensor data in front of them: heart rate, pace, cadence, time elapsed, distance. What would you actually say to THIS athlete at THIS moment in THIS session? Design triggers for every coaching moment that matters — not just phase transitions.
+
+AVAILABLE LIVE METRICS (use these in conditions and in {template} variables in messages):
+  hr              — current heart rate in bpm
+  pace            — current pace in sec/km (e.g. 360 = 6:00/km)
+  cadence         — current running cadence in steps per minute
+  distance        — total distance covered in km
+  distance_pct    — percentage of total session distance complete (0–100)
+  elapsed_min     — elapsed run time in minutes
+  targetHRMax     — the target HR ceiling for the current phase
+  targetHRMin     — the target HR floor for the current phase
+  targetPaceMax   — the target pace ceiling (sec/km) for the current phase
+  targetPaceMin   — the target pace floor (sec/km) for the current phase
+
+CONDITION SYNTAX — evaluated by the runtime engine each GPS tick:
+  Single:   "hr > 150",  "cadence < 165",  "elapsed_min > 20",  "distance_pct > 50"
+  With plan targets: "hr > targetHRMax",  "pace > targetPaceMax + 15"
+  Compound (AND): "hr > 145 AND cadence < 160",  "pace < 330 AND elapsed_min > 5"
+  Phase-based: "phase == jog",  "phase == recovery_walk"
+  Always (for periodic): "always"
+
+MESSAGE TEMPLATES — embed live data directly in coaching messages:
+  {hr}          — current heart rate in bpm        "Your heart rate is at {hr} right now"
+  {hrZone}      — current HR zone (1–5)             "You're in Zone {hrZone}"
+  {pace}        — current pace as "m:ss"            "Pace is {pace} per kilometre"
+  {cadence}     — current cadence in spm            "Cadence is {cadence} steps per minute"
+  {repNum}      — current rep number                "That's rep {repNum} done"
+  {totalReps}   — total reps in this block          "out of {totalReps}"
+  {repsLeft}    — reps remaining                    "{repsLeft} more to go after this"
+  {elapsedMin}  — elapsed minutes (whole number)    "{elapsedMin} minutes in"
+  {distKm}      — distance covered in km            "{distKm} kilometres covered"
+  {targetHRMax} — target HR ceiling for this phase  "keep it under {targetHRMax}"
+  {targetHRMin} — target HR floor for this phase    "aim for at least {targetHRMin}"
+
+TRIGGER TYPES — you name them descriptively (the engine doesn't care about the name, only the condition):
+  Phase-based (fired by engine at exact phase boundary — no condition needed):
+    "phase_start"     — fires once when a named phase begins
+    "phase_end"       — fires 5–12 seconds before a time-based phase ends
+    "rep_start"       — fires at the start of each work interval rep
+    "rep_end"         — fires when a work interval rep ends
+    "recovery_start"  — fires at the start of each recovery phase
+
+  Reactive (fired whenever condition evaluates true, max once per 90 seconds):
+    Name these anything descriptive — "hr_too_high", "cadence_alert", "drift_check", etc.
+    The engine evaluates the condition expression you write against live data.
+
+  Periodic (fired on a time interval, regardless of conditions):
+    Set frequency: "periodic" and frequencySeconds: N
+    Use for regular check-ins OpenAI judges are useful — e.g. every 2 minutes during a long jog
+
+  Milestone (distance-based, fires once):
+    Set type: "milestone", condition: "distance_pct > 50" (or 75, 90, etc.)
 
 TRIGGER FREQUENCY:
-- "once": fires only the first time (use for phase_start, milestones, rep_start/end)
-- "on_condition": fires whenever condition is true, max once per 90 seconds (use for reactive HR/pace triggers)
+  "once"        — fires the first time only (use for phase_start, rep_start, milestones)
+  "on_condition" — fires whenever condition is true, max once per 90 seconds
+  "periodic"    — fires every frequencySeconds seconds; requires frequencySeconds field
 
+DESIGN GUIDANCE — think like a coach, not a robot:
+- Design triggers for every coaching moment that actually matters: HR drift, cadence drop, pace slip, rep progress, half-way point, final push, recovery quality
+- Use periodic triggers for regular check-ins with live data (e.g. every 2 minutes: "Heart rate sitting at {hr} — that's right where we want it")
+- Use compound conditions (AND) for precise, contextual alerts (e.g. "hr > targetHRMax AND elapsed_min > 3" — don't alert in the warmup)
+- Embed {hr}, {cadence}, {pace} in messages so the athlete gets ACTUAL data, not abstract advice
+- 4–5 alternativeMessages per repeating trigger — rotate so each rep sounds different
+- Phase-end triggers should preview what comes next (for interval sessions, tell them the recovery is coming; for jog phases, tell them the walk is nearly there)
+- Periodic triggers during recovery phases can check HR recovery ("Heart rate down to {hr} — good recovery")
+- For cadence: 170–180 spm is optimal for most runners; coach toward this but never command it
 
 ${getPaceContextDirective(runnerProfile.recentPaceAvgSecPerKm, runnerProfile.fitnessLevel, targetPaceMin, sessionType || 'run')}
 ${toneDirective(coachTone)}
@@ -5289,88 +5408,69 @@ ${accentDirective(params.coachAccent)}
 ${runnerProfileBlock(params.aiRunnerProfile)}
 You must respond with ONLY valid JSON (no markdown, no code blocks).`;
 
+  // Build a walk-run specific scaffold for GPT — gives exact durations but lets GPT design all the triggers
+  const walkRunScaffold = (sessionType === "walk_run" && intervalCount && intervalDurationSeconds && recoveryDurationSeconds)
+    ? `
+SESSION STRUCTURE SCAFFOLD for this ${intervalCount}× walk-run session:
+- Jog phase: ${intervalDurationSeconds/60} minutes, HR target ${intervalHRMin ?? targetHRMin ?? '?'}–${intervalHRMax ?? targetHRMax ?? '?'} bpm
+- Walk phase: ${recoveryDurationSeconds/60} minutes, HR recovery target: below ${recoveryHRMax ?? (targetHRMax ? targetHRMax - 20 : '?')} bpm
+- Use these EXACT durationMinutes values in the jog and recovery_walk phases.
+- YOU decide what triggers to fire, how often, and what data to include in messages.
+`
+    : "";
+
   const userPrompt = `${runnerContext}
 
 ${recentRunsContext}
 
 ${sessionContext}
+${walkRunScaffold}
+Design a complete, bespoke coaching plan for this specific athlete and session.
 
-Design a complete coaching plan for this session.
+You are the coaching brain. Decide what to monitor, when to intervene, and what live data to include in messages. Think: what would a world-class coach actually say to THIS person at each moment of THIS run? Include data in messages using {hr}, {cadence}, {pace}, {repNum}, {repsLeft}, {targetHRMax} etc. where helpful.
 
-Return ONLY valid JSON in this exact format:
+For reactive and periodic triggers — you decide what makes sense to monitor for this session. Don't limit yourself to the obvious. Consider:
+- Is cadence likely to be an issue for this athlete at this pace?
+- Should there be periodic HR check-ins during jog intervals (every 90 seconds)?  
+- Is there a moment 30 seconds before each walk where a heads-up would help?
+- Should the recovery walk get a HR check at the 60-second mark to confirm recovery?
+- Would a mid-session morale boost at 60% completion feel right?
+You decide. We execute.
+
+Return ONLY valid JSON matching this schema exactly:
 {
   "sessionType": "${sessionType}",
   "sessionGoal": "${sessionGoal}",
   "coachingTone": "calm|motivational|energetic|technical|supportive",
   "cueingStrategy": "interval|threshold|paced|freerun",
-  "preRunBrief": "2-4 sentence motivating brief specific to this session and its targets",
-  "whyThisSession": "1-2 sentences explaining training benefit",
+  "preRunBrief": "2-4 sentence brief — name the specific structure, HR targets, what it should feel like. Speak directly to the athlete as 'you'.",
+  "whyThisSession": "1-2 sentences — why this session matters for their specific goal",
   "phases": [
     {
-      "name": "warmup",
+      "name": "phase_name",
       "order": 0,
-      "durationMinutes": 10,
-      "distanceKm": 1.5,
-      "targetPaceMin": 390,
-      "targetPaceMax": 420,
-      "targetHRMin": 110,
-      "targetHRMax": 130,
-      "effort": "easy",
-      "coachingFocus": "relaxation",
-      "phaseInstructions": "Easy jog to warm up muscles and elevate heart rate gently"
+      "durationMinutes": 5.0,
+      "distanceKm": null,
+      "targetPaceMin": null,
+      "targetPaceMax": null,
+      "targetHRMin": ${intervalHRMin ?? targetHRMin ?? null},
+      "targetHRMax": ${intervalHRMax ?? targetHRMax ?? null},
+      "effort": "easy|moderate|threshold|hard|max",
+      "coachingFocus": "relaxation|rhythm|power|endurance|recovery",
+      "phaseInstructions": "What this phase requires from the athlete",
+      "repetitions": 1
     }
   ],
   "triggers": [
     {
-      "id": "warmup_start",
-      "type": "phase_start",
-      "condition": "phase == warmup",
-      "message": "Start easy — loosen up and find your rhythm",
-      "frequency": "once",
-      "alternativeMessages": [],
-      "alertType": "none",
-      "suppressWhenIntensity": []
-    },
-    {
-      "id": "main_effort_pace_too_slow",
-      "type": "pace_too_slow",
-      "condition": "pace > targetPaceMax + 15",
-      "message": "Pick it up — you're drifting slower than target pace",
-      "frequency": "on_condition",
-      "alternativeMessages": [
-        "Just a touch quicker — hold that target pace",
-        "You're dropping off pace — push a little",
-        "Lift your effort slightly, pace is slipping"
-      ],
-      "alertType": "vibrate",
-      "suppressWhenIntensity": ["z1"]
-    },
-    {
-      "id": "main_effort_hr_zone_high",
-      "type": "hr_zone_high",
-      "condition": "hr > targetHRMax",
-      "message": "Heart rate too high — ease off and slow down",
-      "frequency": "on_condition",
-      "alternativeMessages": [
-        "Back off — HR above zone, slow your pace now",
-        "HR creeping up — ease back to stay in zone",
-        "Slow down a touch, keep that heart rate in check"
-      ],
-      "alertType": "vibrate",
-      "suppressWhenIntensity": []
-    },
-    {
-      "id": "main_effort_hr_zone_low",
-      "type": "hr_zone_low",
-      "condition": "hr < targetHRMin",
-      "message": "HR dropping below zone — push a little harder",
-      "frequency": "on_condition",
-      "alternativeMessages": [
-        "Pick up the effort — HR is below your target zone",
-        "A bit more intensity — heart rate is too low",
-        "Push a little, you need to be working harder than this"
-      ],
-      "alertType": "none",
+      "id": "unique_trigger_id",
+      "type": "descriptive_type_name",
+      "condition": "metric op value [AND metric op value]",
+      "message": "Coach message — include {hr}, {cadence}, {pace}, {repNum} etc. where relevant. Under 18 words.",
+      "frequency": "once|on_condition|periodic",
+      "frequencySeconds": null,
+      "alternativeMessages": ["Variation 1 — different wording", "Variation 2", "Variation 3", "Variation 4"],
+      "alertType": "none|vibrate",
       "suppressWhenIntensity": []
     }
   ],
@@ -5379,13 +5479,13 @@ Return ONLY valid JSON in this exact format:
     "totalDistanceKm": ${targetDistanceKm},
     "primaryMetric": "pace|heart_rate|effort|distance|time",
     "secondaryMetric": "pace|heart_rate|cadence|null",
-    "mainEffortPaceMin": ${targetPaceMin ?? null},
-    "mainEffortPaceMax": ${targetPaceMax ?? null},
-    "mainEffortHRMin": ${targetHRMin ?? null},
-    "mainEffortHRMax": ${targetHRMax ?? null},
+    "mainEffortPaceMin": ${intervalTargetPaceSecPerKm ?? targetPaceMin ?? null},
+    "mainEffortPaceMax": ${intervalTargetPaceSecPerKm ? intervalTargetPaceSecPerKm + 30 : (targetPaceMax ?? null)},
+    "mainEffortHRMin": ${intervalHRMin ?? targetHRMin ?? null},
+    "mainEffortHRMax": ${intervalHRMax ?? targetHRMax ?? null},
     "structure": "continuous|repeats|progression|threshold_block",
     "isSpeedWork": false,
-    "isEnduranceWork": false,
+    "isEnduranceWork": true,
     "isStrengthWork": false,
     "isRecovery": false
   }
@@ -5399,21 +5499,25 @@ Design the phase structure that genuinely fits this session. You choose the numb
 - Zone-based sessions benefit from reactive HR triggers throughout to keep the athlete in the target zone
 
 CRITICAL — Phase duration and repetitions:
-- For time-based phases, set durationMinutes to the EXACT duration in minutes (e.g. 1 for a 1-minute jog). The live engine uses this to detect phase transitions in real time.
+- For time-based phases, set durationMinutes to the EXACT duration in minutes (e.g. 5 for a 5-minute jog). The live engine uses this to detect phase transitions in real time.
 - For distance-based phases (warmup/cooldown by distance), set distanceKm.
-- INTERVAL SESSIONS: use the "repetitions" field instead of generating one phase per rep. Set repetitions > 1 on consecutive work/recovery phases — the engine interleaves them automatically. Example for "1 min jog + 2 min walk × 10 reps":
-  { "name": "jog", "order": 1, "durationMinutes": 1, "repetitions": 10 }
-  { "name": "recovery_walk", "order": 2, "durationMinutes": 2, "repetitions": 10 }
-  This produces: jog rep 1 → walk rep 1 → jog rep 2 → walk rep 2 → … × 10
+- INTERVAL SESSIONS: use the "repetitions" field instead of generating one phase per rep. Set repetitions > 1 on consecutive work/recovery phases — the engine interleaves them automatically. Example for "5 min jog + 2 min walk × 4 reps":
+  { "name": "jog", "order": 0, "durationMinutes": 5, "repetitions": 4 }
+  { "name": "recovery_walk", "order": 1, "durationMinutes": 2, "repetitions": 4 }
+  This produces: jog rep 1 → walk rep 1 → jog rep 2 → walk rep 2 → … × 4
+- WALK-RUN: do NOT include a warmup or cooldown phase unless the workout explicitly states one — the walk phases serve as built-in recovery. The jog phase named "jog" is the work phase.
 - Name recovery phases starting with "recovery_" so the runtime detects them as recovery.
 
-TRIGGERS for interval sessions with repetitions:
-- Add "rep_start" and "recovery_start" triggers referencing the phase name (e.g. id: "jog_rep_start", condition: "phase == jog"). The engine fires these at the start of EACH rep automatically.
-- Use alternativeMessages (3-5 variations) on rep triggers so the athlete hears varied language across 10 reps — never the same phrase twice.
-- Always add a phase_start trigger for the first occurrence of every phase.
+MESSAGE QUALITY RULES — every trigger message must pass these tests:
+1. Would a real coach say this? Not a robot?
+2. Does it acknowledge what the athlete just did or is doing?
+3. Does it give ONE specific, actionable cue?
+4. Is it under 15 words?
+5. Does it vary across alternativeMessages (no phrase repeated, no word repeated for same trigger)?
 
-TRIGGER ids must be unique. Format: "{phase_name}_{trigger_type}". Keep messages under 15 words.
-For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with varied wording.`;
+TRIGGER ids must be unique. Format: "{phase_name}_{trigger_type}".
+For rep triggers: include 4-5 alternativeMessages with varied language — the athlete will hear these across multiple reps.
+For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely different wording.`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -5422,8 +5526,9 @@ For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with varied wordi
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.7,
-      max_tokens: 4000,  // Raised from 2500 — interval sessions with many reps + triggers need headroom
+      temperature: 0.75,  // Slightly higher for more natural/varied language
+      max_tokens: 6000,  // Generous headroom — complex plans with 12+ triggers × 5 alternativeMessages each
+                         // can produce 4500-5500 tokens. Truncation = invalid JSON = silent fallback to generic plan.
       response_format: { type: "json_object" },
     });
 
@@ -5487,22 +5592,117 @@ function buildFallbackSessionCoaching(
   params: GenerateSessionCoachingParams
 ): SessionCoachingPlan {
   const { sessionType, sessionGoal, targetDurationMinutes, targetDistanceKm,
-          targetPaceMin, targetPaceMax, targetHRMin, targetHRMax } = params;
+          targetPaceMin, targetPaceMax, targetHRMin, targetHRMax,
+          intervalCount, intervalDurationSeconds, recoveryDurationSeconds,
+          intervalHRMin, intervalHRMax, recoveryHRMax } = params;
 
+  const isWalkRun  = sessionType === "walk_run";
   const isInterval = sessionType === "intervals" || sessionType === "hill_repeats";
   const isTempo    = sessionType === "tempo" || sessionType === "threshold";
   const isRecovery = sessionType === "recovery" || sessionType === "easy";
-  const isLongRun  = sessionType === "long_run";
 
-  const strategy = isInterval ? "interval"
+  const strategy = (isWalkRun || isInterval) ? "interval"
     : isTempo     ? "threshold"
     : sessionType === "race_pace" || sessionType === "progression_run" ? "paced"
     : "freerun";
 
   const tone = isRecovery ? "calm"
-    : isInterval   ? "motivational"
+    : (isWalkRun || isInterval) ? "supportive"
     : isTempo      ? "technical"
     : "encouraging";
+
+  // ── Walk-run fallback ───────────────────────────────────────────────────────
+  // Build a proper time-based interval plan so the run engine gets phase transitions
+  // even when the AI call failed.
+  if (isWalkRun && intervalCount && intervalDurationSeconds) {
+    const jogMinutes = intervalDurationSeconds / 60;
+    const walkMinutes = recoveryDurationSeconds ? recoveryDurationSeconds / 60 : 2;
+    const jogHRMax = intervalHRMax ?? targetHRMax ?? 150;
+    const jogHRMin = intervalHRMin ?? targetHRMin ?? 120;
+    const walkHRTarget = recoveryHRMax ?? (jogHRMax - 20);
+
+    const walkRunPhases: SessionCoachingPhase[] = [
+      {
+        name: "jog", order: 0, durationMinutes: jogMinutes,
+        targetHRMin: jogHRMin, targetHRMax: jogHRMax,
+        effort: "moderate", coachingFocus: "rhythm",
+        phaseInstructions: `Easy jog for ${jogMinutes} minutes — controlled effort, heart rate ${jogHRMin}–${jogHRMax} bpm`,
+        repetitions: intervalCount,
+      },
+      {
+        name: "recovery_walk", order: 1, durationMinutes: walkMinutes,
+        targetHRMax: walkHRTarget,
+        effort: "easy", coachingFocus: "recovery",
+        phaseInstructions: `Recovery walk for ${walkMinutes} minutes — let heart rate settle below ${walkHRTarget} bpm`,
+        repetitions: intervalCount,
+      },
+    ];
+
+    const walkRunTriggers: SessionCoachingTrigger[] = [
+      {
+        id: "jog_rep_start", type: "rep_start",
+        condition: "phase == jog",
+        message: "Right, let's pick it up — easy jog, find your rhythm",
+        frequency: "once", alertType: "none",
+        alternativeMessages: [
+          "Off we go — keep it comfortable, don't rush it",
+          "Time to jog — settle in and breathe easy",
+          "Here we go again — controlled and comfortable",
+          "Pick it up — nice easy jog, you've got this",
+        ],
+      },
+      {
+        id: "recovery_walk_start", type: "recovery_start",
+        condition: "phase == recovery_walk",
+        message: "Great work! Walk it out — let that heart rate settle",
+        frequency: "once", alertType: "none",
+        alternativeMessages: [
+          `Lovely rep — recovery walk now, heart rate below ${walkHRTarget}`,
+          "Well done! Use this walk to recover for the next one",
+          "Brilliant — walk and relax, shake it out",
+          "Nice effort! Walk it off, breathe easy",
+        ],
+      },
+      {
+        id: "jog_hr_zone_high", type: "hr_zone_high",
+        condition: `hr > ${jogHRMax}`,
+        message: "Heart rate's up — ease back just a little, stay comfortable",
+        frequency: "on_condition", alertType: "vibrate",
+        alternativeMessages: [
+          "Back off slightly — no need to push that hard yet",
+          "Let that heart rate settle — ease your pace a touch",
+          "You're working hard enough — ease it back a fraction",
+        ],
+      },
+      {
+        id: "halfway_milestone", type: "milestone",
+        condition: "distance_pct > 50",
+        message: "Halfway through! You're doing brilliantly — keep it up",
+        frequency: "once", alertType: "none",
+      },
+    ];
+
+    return {
+      sessionType, sessionGoal: sessionGoal ?? "build_fitness",
+      coachingTone: "supportive",
+      cueingStrategy: "interval",
+      preRunBrief: `Today you're doing ${intervalCount} rounds of ${jogMinutes} minutes jogging and ${walkMinutes} minutes walking. Keep your heart rate between ${jogHRMin} and ${jogHRMax} beats per minute during the jogs, and use the walks to fully recover. You don't need to go fast — consistency is everything here.`,
+      whyThisSession: "Walk-run training builds your aerobic base safely and is one of the most effective ways to progress as a runner.",
+      phases: walkRunPhases,
+      triggers: walkRunTriggers,
+      targetMetrics: {
+        totalDurationMinutes: targetDurationMinutes,
+        totalDistanceKm: targetDistanceKm,
+        primaryMetric: "heart_rate",
+        secondaryMetric: "time",
+        mainEffortHRMin: jogHRMin,
+        mainEffortHRMax: jogHRMax,
+        structure: "repeats",
+        isSpeedWork: false, isEnduranceWork: true,
+        isStrengthWork: false, isRecovery: false,
+      },
+    };
+  }
 
   const phases: SessionCoachingPhase[] = [
     {

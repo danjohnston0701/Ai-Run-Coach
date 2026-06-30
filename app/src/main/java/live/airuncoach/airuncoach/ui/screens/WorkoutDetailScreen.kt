@@ -12,8 +12,11 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.rememberScrollState
@@ -452,7 +455,8 @@ fun WorkoutDetailScreen(
                 // ── AI Coaching generation banner ──────────────────────────
                 AiCoachingGenerationBanner(
                     state = coachingState,
-                    modifier = Modifier.padding(bottom = Spacing.sm)
+                    modifier = Modifier.padding(bottom = Spacing.sm),
+                    onRegenerate = { runSessionViewModel.regenerateCoachingForWorkout(workout.id) }
                 )
 
                 // "Prepare Run on Watch" — only shown when companion app is installed on watch
@@ -564,13 +568,17 @@ fun WorkoutDetailScreen(
  * States:
  *  - IDLE / not shown (handled externally)
  *  - GENERATING → pulsing cyan banner "Generating your AI coaching plan…"
- *  - READY       → green banner "AI coaching ready" (auto-hides after short display)
- *  - FAILED      → subtle amber notice "Coaching unavailable — run will still be tracked"
+ *  - READY       → green banner "AI coaching ready" (long-press to regenerate if plan seems wrong)
+ *  - FAILED      → amber notice with a "Retry" button to regenerate
+ *
+ * @param onRegenerate Called when the user requests a fresh coaching plan (bypasses server cache).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AiCoachingGenerationBanner(
     state: RunSessionViewModel.CoachingGenerationState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRegenerate: () -> Unit = {},
 ) {
     if (state == RunSessionViewModel.CoachingGenerationState.IDLE) return
 
@@ -588,42 +596,59 @@ private fun AiCoachingGenerationBanner(
     val accentColor: Color
     val icon: String
     val message: String
+    val subMessage: String?
+    val showRetry: Boolean
     when (state) {
         RunSessionViewModel.CoachingGenerationState.GENERATING -> {
             bgColor     = Color(0xFF001A2E)
             accentColor = Color(0xFF00E5FF)
             icon        = "⚡"
             message     = "Generating your AI coaching plan…"
+            subMessage  = "Preparing phases, triggers & pacing targets for this session"
+            showRetry   = false
         }
         RunSessionViewModel.CoachingGenerationState.READY -> {
             bgColor     = Color(0xFF001A14)
             accentColor = Color(0xFF00FF88)
             icon        = "✓"
             message     = "AI coaching ready"
+            subMessage  = null
+            showRetry   = false
         }
         RunSessionViewModel.CoachingGenerationState.FAILED -> {
             bgColor     = Color(0xFF1A1200)
             accentColor = Color(0xFFFFB300)
             icon        = "⚠"
             message     = "Coaching unavailable — run will still be tracked"
+            subMessage  = null
+            showRetry   = true
         }
         else -> return
     }
 
     val dynamicAlpha = if (state == RunSessionViewModel.CoachingGenerationState.GENERATING) pulse else 1f
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(bgColor)
-            .border(
-                width = 1.dp,
-                color = accentColor.copy(alpha = dynamicAlpha),
-                shape = RoundedCornerShape(12.dp)
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-    ) {
+    // Long-press on the READY banner to force-regenerate (e.g. when the plan sounded wrong).
+    val bannerModifier = modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(12.dp))
+        .background(bgColor)
+        .border(
+            width = 1.dp,
+            color = accentColor.copy(alpha = dynamicAlpha),
+            shape = RoundedCornerShape(12.dp)
+        )
+        .then(
+            if (state == RunSessionViewModel.CoachingGenerationState.READY) {
+                Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = onRegenerate
+                )
+            } else Modifier
+        )
+        .padding(horizontal = 16.dp, vertical = 12.dp)
+
+    Box(modifier = bannerModifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -637,20 +662,34 @@ private fun AiCoachingGenerationBanner(
             } else {
                 Text(icon, fontSize = 14.sp, color = accentColor)
             }
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     message,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = accentColor.copy(alpha = dynamicAlpha)
                 )
-                if (state == RunSessionViewModel.CoachingGenerationState.GENERATING) {
+                if (subMessage != null) {
                     Text(
-                        "Preparing phases, triggers & pacing targets for this session",
+                        subMessage,
                         fontSize = 11.sp,
                         color = accentColor.copy(alpha = 0.6f)
                     )
                 }
+            }
+            // Retry button shown when coaching generation failed
+            if (showRetry) {
+                Text(
+                    "Retry",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(accentColor.copy(alpha = 0.15f))
+                        .clickable(onClick = onRegenerate)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
             }
         }
     }
