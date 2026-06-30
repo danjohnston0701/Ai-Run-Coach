@@ -664,6 +664,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Unified device token registration endpoint (supports iOS and Android)
+  // iOS calls this with platform: "ios", Android can call this with platform: "android"
+  // Firebase automatically bridges FCM tokens to APNs for iOS, so we store a single fcmToken
+  // The platform field is logged for debugging but the actual token is stored as fcmToken
+  app.post("/api/notifications/register-device", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { deviceToken, platform, fcmToken } = req.body;
+      const token = deviceToken || fcmToken; // Accept either field name
+      
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ error: "deviceToken or fcmToken is required" });
+      }
+      
+      const platformStr = platform || "unknown";
+      console.log(`[RegisterDevice] User ${req.user!.userId} registered ${platformStr} token: ${token.substring(0, 30)}...`);
+      
+      // Store as fcmToken (Firebase bridges to APNs for iOS automatically)
+      await storage.updateUser(req.user!.userId, { fcmToken: token });
+      res.json({ success: true, platform: platformStr });
+    } catch (error: any) {
+      console.error("Register device error:", error);
+      res.status(500).json({ error: "Failed to register device token" });
+    }
+  });
+
   app.put("/api/users/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       if (req.user?.userId !== req.params.id) {
