@@ -326,6 +326,9 @@ class LoginViewModel @Inject constructor(
                 
                 _loginState.update { it.copy(isLoading = false, error = null, isLoginSuccessful = true) }
                 android.util.Log.d("LoginViewModel", "🎉 Registration complete and verified!")
+
+                // Upload FCM token now that we're authenticated (same as login)
+                uploadFcmToken()
             } catch (e: retrofit2.HttpException) {
                 val errorBody = e.response()?.errorBody()?.string()
                 android.util.Log.e("LoginViewModel", "❌ Registration HTTP Error ${e.code()}: $errorBody", e)

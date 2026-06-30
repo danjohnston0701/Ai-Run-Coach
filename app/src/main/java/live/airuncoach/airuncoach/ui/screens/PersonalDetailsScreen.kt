@@ -15,14 +15,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.data.SessionManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
@@ -33,6 +33,63 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.PersonalDetailsViewModel
 import live.airuncoach.airuncoach.viewmodel.PersonalDetailsViewModelFactory
+
+/**
+ * Visual transformation for dd/mm/yyyy date format
+ * Handles cursor positioning correctly by only storing digits in the state
+ */
+class DateOfBirthTransformation : VisualTransformation {
+    override fun filter(text: androidx.compose.ui.text.AnnotatedString): TransformedText {
+        val digitsOnly = text.text.filter { it.isDigit() }
+        val formatted = when {
+            digitsOnly.length <= 2 -> digitsOnly
+            digitsOnly.length <= 4 -> "${digitsOnly.take(2)}/${digitsOnly.drop(2)}"
+            digitsOnly.length <= 8 -> "${digitsOnly.take(2)}/${digitsOnly.drop(2).take(2)}/${digitsOnly.drop(4)}"
+            else -> "${digitsOnly.take(2)}/${digitsOnly.drop(2).take(2)}/${digitsOnly.drop(4).take(4)}"
+        }
+
+        return TransformedText(
+            text = androidx.compose.ui.text.AnnotatedString(formatted),
+            offsetMapping = DateOffsetMapping(digitsOnly)
+        )
+    }
+}
+
+/**
+ * Maps cursor positions from formatted text (with slashes) to original text (digits only)
+ */
+private class DateOffsetMapping(private val digitsOnly: String) : OffsetMapping {
+    override fun originalToTransformed(offset: Int): Int {
+        // Map cursor position from digits-only to formatted
+        var digitCount = 0
+        var formattedPosition = 0
+        val maxOffset = minOf(offset, digitsOnly.length)
+
+        for (i in 0 until maxOffset) {
+            digitCount++
+            formattedPosition = when (digitCount) {
+                2 -> 3 // Position after "dd/"
+                4 -> 6 // Position after "dd/mm/"
+                else -> i + (digitCount / 2)
+            }
+        }
+
+        return formattedPosition
+    }
+
+    override fun transformedToOriginal(offset: Int): Int {
+        // Map cursor position from formatted to digits-only
+        // This counts how many digits appear before this position in the formatted string
+        var digitCount = 0
+        for (i in 0 until minOf(offset, offset)) {
+            when (i) {
+                2, 5 -> {} // Skip slashes
+                else -> digitCount++
+            }
+        }
+        return digitCount
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,13 +124,45 @@ fun PersonalDetailsScreen(
             )
         },
         containerColor = Colors.backgroundRoot,
-        contentWindowInsets = WindowInsets(0) // outer Scaffold already applies nav bar insets
+        contentWindowInsets = WindowInsets(0), // outer Scaffold already applies nav bar insets
+        bottomBar = {
+            // Sticky save button at the bottom
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Colors.backgroundRoot,
+                shadowElevation = 8.dp
+            ) {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            viewModel.saveDetails()
+                            // Clear profile setup flag and navigate accordingly
+                            sessionManager.setNeedsProfileSetup(false)
+                            if (sessionManager.needsCoachSetup()) {
+                                onNavigateToCoachSettings()
+                            } else {
+                                onNavigateBack()
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                        .height(50.dp),
+                    shape = RoundedCornerShape(BorderRadius.lg),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                }
+            }
+        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(Spacing.lg)
+                .padding(horizontal = Spacing.lg)
+                .padding(bottom = Spacing.lg) // Add bottom padding so content doesn't hide behind button
         ) {
             item {
                 SectionTitle(title = "Full Name")
@@ -117,6 +206,7 @@ fun PersonalDetailsScreen(
                     label = { Text("dd/mm/yyyy") },
                     placeholder = { Text("01/01/1990") },
                     modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = DateOfBirthTransformation(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Colors.textPrimary,
                         unfocusedTextColor = Colors.textPrimary,
@@ -217,30 +307,6 @@ fun PersonalDetailsScreen(
                     )
                 )
                 Spacer(modifier = Modifier.height(Spacing.lg))
-            }
-
-            item {
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            viewModel.saveDetails()
-                            // Clear profile setup flag and navigate accordingly
-                            sessionManager.setNeedsProfileSetup(false)
-                            if (sessionManager.needsCoachSetup()) {
-                                onNavigateToCoachSettings()
-                            } else {
-                                onNavigateBack()
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(BorderRadius.lg),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
-                ) {
-                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
-                }
             }
         }
     }

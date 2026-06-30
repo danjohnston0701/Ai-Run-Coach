@@ -870,11 +870,51 @@ export class DatabaseStorage implements IStorage {
 
   // Group Runs
   async getGroupRuns(): Promise<GroupRun[]> {
-    return db.select().from(groupRuns).orderBy(desc(groupRuns.createdAt));
+    return db.select({
+      id: groupRuns.id,
+      hostUserId: groupRuns.hostUserId,
+      routeId: groupRuns.routeId,
+      mode: groupRuns.mode,
+      title: groupRuns.title,
+      description: groupRuns.description,
+      targetDistance: groupRuns.targetDistance,
+      targetPace: groupRuns.targetPace,
+      inviteToken: groupRuns.inviteToken,
+      status: groupRuns.status,
+      plannedStartAt: groupRuns.plannedStartAt,
+      startedAt: groupRuns.startedAt,
+      completedAt: groupRuns.completedAt,
+      createdAt: groupRuns.createdAt,
+      meetingPoint: groupRuns.meetingPoint,
+      meetingLat: groupRuns.meetingLat,
+      meetingLng: groupRuns.meetingLng,
+      maxParticipants: groupRuns.maxParticipants,
+      isPublic: groupRuns.isPublic,
+    }).from(groupRuns).orderBy(desc(groupRuns.createdAt));
   }
 
   async getGroupRun(id: string): Promise<GroupRun | undefined> {
-    const [groupRun] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
+    const [groupRun] = await db.select({
+      id: groupRuns.id,
+      hostUserId: groupRuns.hostUserId,
+      routeId: groupRuns.routeId,
+      mode: groupRuns.mode,
+      title: groupRuns.title,
+      description: groupRuns.description,
+      targetDistance: groupRuns.targetDistance,
+      targetPace: groupRuns.targetPace,
+      inviteToken: groupRuns.inviteToken,
+      status: groupRuns.status,
+      plannedStartAt: groupRuns.plannedStartAt,
+      startedAt: groupRuns.startedAt,
+      completedAt: groupRuns.completedAt,
+      createdAt: groupRuns.createdAt,
+      meetingPoint: groupRuns.meetingPoint,
+      meetingLat: groupRuns.meetingLat,
+      meetingLng: groupRuns.meetingLng,
+      maxParticipants: groupRuns.maxParticipants,
+      isPublic: groupRuns.isPublic,
+    }).from(groupRuns).where(eq(groupRuns.id, id));
     return groupRun || undefined;
   }
 

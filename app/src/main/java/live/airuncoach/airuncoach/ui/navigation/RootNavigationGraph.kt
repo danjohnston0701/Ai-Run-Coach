@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import live.airuncoach.airuncoach.AppRoutes
 import live.airuncoach.airuncoach.data.AiConsentManager
+import live.airuncoach.airuncoach.data.SessionManager
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import live.airuncoach.airuncoach.ui.screens.AiConsentScreen
@@ -73,12 +74,14 @@ fun RootNavigationGraph(navController: NavHostController) {
                     navController.popBackStack()
                 },
                 onNavigateToProfile = {
-                    navController.navigate("personal_details") {
+                    // New user: must do permissions FIRST before profile setup
+                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 },
                 onNavigateToCoachSettings = {
-                    navController.navigate("coach_settings") {
+                    // User completed profile: must do permissions FIRST if not already done
+                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 }
@@ -86,17 +89,34 @@ fun RootNavigationGraph(navController: NavHostController) {
         }
 
         composable(AppRoutes.LOCATION_PERMISSION) {
+            val sessionManager = remember { SessionManager(context) }
             LocationPermissionScreen(
                 onPermissionGranted = {
-                    // After permissions, check if user has seen the AI consent screen.
-                    // If not, show it now (mandatory once per install).
-                    if (consentManager.hasSeenConsent()) {
-                        navController.navigate(AppRoutes.MAIN) {
-                            popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
+                    // After permissions, check if user is in onboarding flow
+                    when {
+                        sessionManager.needsProfileSetup() -> {
+                            // New user: proceed to personal details
+                            navController.navigate("personal_details") {
+                                popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
+                            }
                         }
-                    } else {
-                        navController.navigate(AppRoutes.AI_CONSENT) {
-                            popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
+                        sessionManager.needsCoachSetup() -> {
+                            // User completed profile: proceed to coach settings
+                            navController.navigate("coach_settings") {
+                                popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
+                            }
+                        }
+                        else -> {
+                            // Existing user: check if they've seen the AI consent screen
+                            if (consentManager.hasSeenConsent()) {
+                                navController.navigate(AppRoutes.MAIN) {
+                                    popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
+                                }
+                            } else {
+                                navController.navigate(AppRoutes.AI_CONSENT) {
+                                    popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
+                                }
+                            }
                         }
                     }
                 }

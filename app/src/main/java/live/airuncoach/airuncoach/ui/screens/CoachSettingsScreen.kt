@@ -1,6 +1,8 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -32,6 +35,7 @@ import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModel
 import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModelFactory
 import live.airuncoach.airuncoach.viewmodel.CoachingTone
 import androidx.compose.ui.text.style.TextAlign
+import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,6 +51,25 @@ fun CoachSettingsScreen(
     val accent by viewModel.accent.collectAsState()
     val coachingTone by viewModel.coachingTone.collectAsState()
     val coroutineScope = rememberCoroutineScope()
+
+    // Notification permission launcher
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted: Boolean ->
+            if (isGranted) {
+                android.util.Log.d("CoachSettingsScreen", "Notification permission granted ✅")
+            } else {
+                android.util.Log.d("CoachSettingsScreen", "Notification permission denied")
+            }
+        }
+    )
+
+    // Request notification permission on first load if needed (new user onboarding)
+    LaunchedEffect(Unit) {
+        if (NotificationPermissionHelper.shouldRequestPermission()) {
+            notificationPermissionLauncher.launch(NotificationPermissionHelper.getPermissionString())
+        }
+    }
 
     // Master AI toggle + consent sheet visibility
     val masterAiEnabled by viewModel.masterAiEnabled.collectAsState()

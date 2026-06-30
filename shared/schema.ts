@@ -1880,20 +1880,24 @@ export type InsertMonthlyUsage = typeof monthlyUsage.$inferInsert;
 
 export const groupRuns = pgTable("group_runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
+  hostUserId: varchar("host_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  routeId: varchar("route_id"),
+  mode: text("mode"),
+  title: text("title"),
   description: text("description").notNull().default(""),
-  creatorId: varchar("creator_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  targetDistance: real("target_distance"),
+  targetPace: text("target_pace"),
+  inviteToken: text("invite_token"),
+  status: text("status").notNull().default("upcoming"),
+  plannedStartAt: timestamp("planned_start_at"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
   meetingPoint: text("meeting_point"),
   meetingLat: real("meeting_lat"),
   meetingLng: real("meeting_lng"),
-  distance: real("distance").notNull().default(5.0),        // km
-  dateTime: timestamp("date_time").notNull(),               // scheduled start time
   maxParticipants: integer("max_participants").default(10),
   isPublic: boolean("is_public").notNull().default(true),
-  status: text("status").notNull().default("upcoming"),     // upcoming|active|completed|cancelled
-  inviteToken: text("invite_token").unique().default(sql`gen_random_uuid()::text`),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export type GroupRun = typeof groupRuns.$inferSelect;

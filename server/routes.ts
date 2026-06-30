@@ -3604,8 +3604,37 @@ function transformRunForAndroid(run: any) {
   
   app.get("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const groupRuns = await storage.getGroupRuns();
-      res.json(groupRuns);
+      const userId = req.user!.userId;
+      
+      // Get all group runs, filter in memory
+      const allGroupRuns = await db
+        .select()
+        .from(groupRuns);
+
+      // Get participant IDs for the current user
+      const participantRunIds = await db
+        .select({ groupRunId: groupRunParticipants.groupRunId })
+        .from(groupRunParticipants)
+        .where(eq(groupRunParticipants.userId, userId));
+
+      const participantRunIdSet = new Set(participantRunIds.map(r => r.groupRunId));
+
+      // Filter to runs the user hosts or participates in, and upcoming runs only
+      const upcomingGroupRuns = allGroupRuns
+        .filter(run => run.hostUserId === userId || participantRunIdSet.has(run.id))
+        .filter(run => !run.startedAt) // Only runs that haven't started
+        .sort((a, b) => {
+          const aTime = a.plannedStartAt ? new Date(a.plannedStartAt).getTime() : Infinity;
+          const bTime = b.plannedStartAt ? new Date(b.plannedStartAt).getTime() : Infinity;
+          return aTime - bTime;
+        });
+
+      // Return wrapped response matching Android GroupRunsResponse model
+      res.json({
+        groupRuns: upcomingGroupRuns,
+        count: upcomingGroupRuns.length,
+        total: upcomingGroupRuns.length,
+      });
     } catch (error: any) {
       console.error("Get group runs error:", error);
       res.status(500).json({ error: "Failed to get group runs" });
@@ -11581,38 +11610,7 @@ function transformRunForAndroid(run: any) {
     };
   }
 
-  // Get group runs (Android format)
-  app.get("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { status: statusFilter, my_groups } = req.query;
-      const userId = req.user!.userId;
-
-      const allGroupRuns = await storage.getGroupRuns();
-
-      const groupRunsWithDetails = await Promise.all(
-        allGroupRuns.map((gr) => buildGroupRunResponse(gr, userId))
-      );
-
-      let filteredRuns = groupRunsWithDetails;
-
-      if (statusFilter) {
-        filteredRuns = filteredRuns.filter(gr => gr.status === statusFilter);
-      }
-
-      if (my_groups === 'true') {
-        filteredRuns = filteredRuns.filter(gr => gr.isOrganiser || gr.isJoined || gr.myInvitationStatus === 'pending');
-      }
-
-      res.json({
-        groupRuns: filteredRuns,
-        count: filteredRuns.length,
-        total: groupRunsWithDetails.length,
-      });
-    } catch (error: any) {
-      console.error("Get group runs error:", error);
-      res.status(500).json({ error: "Failed to get group runs" });
-    }
-  });
+  // REMOVED: Duplicate /api/group-runs endpoint (now handled by line 3605)
 
   // Get a single group run with full detail
   app.get("/api/group-runs/:groupRunId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -14701,7 +14699,22 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   /** Helper: build the full GroupRun JSON object with computed per-user fields */
   async function buildGroupRunResponse(groupRunId: string, requestingUserId: string) {
-    const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, groupRunId));
+    const [gr] = await db.select({
+      id: groupRuns.id,
+      hostUserId: groupRuns.hostUserId,
+      title: groupRuns.title,
+      description: groupRuns.description,
+      meetingPoint: groupRuns.meetingPoint,
+      meetingLat: groupRuns.meetingLat,
+      meetingLng: groupRuns.meetingLng,
+      targetDistance: groupRuns.targetDistance,
+      plannedStartAt: groupRuns.plannedStartAt,
+      maxParticipants: groupRuns.maxParticipants,
+      isPublic: groupRuns.isPublic,
+      status: groupRuns.status,
+      inviteToken: groupRuns.inviteToken,
+      createdAt: groupRuns.createdAt,
+    }).from(groupRuns).where(eq(groupRuns.id, groupRunId));
     if (!gr) return null;
 
     const participants = await db
@@ -14719,19 +14732,22 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       .where(eq(groupRunParticipants.groupRunId, groupRunId));
 
     const myParticipant = participants.find(p => p.userId === requestingUserId);
-    const creator = await db.select({ name: users.name }).from(users).where(eq(users.id, gr.creatorId)).limit(1);
+    const host = await db.select({ name: users.name }).from(users).where(eq(users.id, gr.hostUserId)).limit(1);
 
     return {
       id: gr.id,
-      name: gr.name,
+      name: gr.title ?? "Group Run",
+      title: gr.title ?? "Group Run",
       description: gr.description,
-      creatorId: gr.creatorId,
-      creatorName: creator[0]?.name ?? "Unknown",
+      creatorId: gr.hostUserId,
+      hostUserId: gr.hostUserId,
+      creatorName: host[0]?.name ?? "Unknown",
       meetingPoint: gr.meetingPoint,
       meetingLat: gr.meetingLat,
       meetingLng: gr.meetingLng,
-      distance: gr.distance,
-      dateTime: gr.dateTime?.toISOString() ?? "",
+      distance: gr.targetDistance ?? 5.0,
+      dateTime: gr.plannedStartAt?.toISOString() ?? "",
+      plannedStartAt: gr.plannedStartAt?.toISOString() ?? null,
       maxParticipants: gr.maxParticipants,
       currentParticipants: participants.filter(p => p.invitationStatus === "accepted").length,
       isPublic: gr.isPublic,
@@ -14739,7 +14755,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       inviteToken: gr.inviteToken,
       createdAt: gr.createdAt?.toISOString() ?? null,
       isJoined: !!myParticipant && myParticipant.invitationStatus === "accepted",
-      isOrganiser: gr.creatorId === requestingUserId,
+      isOrganiser: gr.hostUserId === requestingUserId,
       myInvitationStatus: myParticipant?.invitationStatus ?? null,
       participants: participants.map(p => ({
         userId: p.userId,
@@ -14753,44 +14769,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     };
   }
 
-  // GET /api/group-runs — list group runs visible to the user
-  app.get("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const userId = req.user!.userId;
-      // Fetch all upcoming + active public runs, plus any runs the user is in
-      const allRuns = await db
-        .select({ id: groupRuns.id })
-        .from(groupRuns)
-        .where(
-          or(
-            eq(groupRuns.isPublic, true),
-            eq(groupRuns.creatorId, userId)
-          )
-        )
-        .orderBy(desc(groupRuns.dateTime));
-
-      // Also fetch runs user is a participant of (private invites)
-      const participatingRunIds = await db
-        .select({ groupRunId: groupRunParticipants.groupRunId })
-        .from(groupRunParticipants)
-        .where(eq(groupRunParticipants.userId, userId));
-
-      const allIds = new Set([
-        ...allRuns.map(r => r.id),
-        ...participatingRunIds.map(p => p.groupRunId),
-      ]);
-
-      const groupRunsData = await Promise.all(
-        [...allIds].map(id => buildGroupRunResponse(id, userId))
-      );
-      const valid = groupRunsData.filter(Boolean);
-
-      res.json({ groupRuns: valid, count: valid.length, total: valid.length });
-    } catch (error: any) {
-      console.error("[GET /api/group-runs]", error);
-      res.status(500).json({ error: "Failed to fetch group runs" });
-    }
-  });
+  // REMOVED: Another duplicate /api/group-runs endpoint (now handled by line 3605)
 
   // GET /api/group-runs/:id
   app.get("/api/group-runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -14853,9 +14832,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const userId = req.user!.userId;
       const { userIds } = req.body as { userIds: string[] };
 
-      const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
+      const [gr] = await db.select({ id: groupRuns.id, hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id));
       if (!gr) return res.status(404).json({ error: "Group run not found" });
-      if (gr.creatorId !== userId) return res.status(403).json({ error: "Only the organiser can invite" });
+      if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can invite" });
 
       for (const uid of (userIds ?? [])) {
         // Upsert — don't re-invite if already a participant
@@ -14934,11 +14913,11 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { id } = req.params;
       const userId = req.user!.userId;
 
-      const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
+      const [gr] = await db.select({ id: groupRuns.id, hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id));
       if (!gr) return res.status(404).json({ error: "Group run not found" });
-      if (gr.creatorId !== userId) return res.status(403).json({ error: "Only the organiser can start the run" });
+      if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can start the run" });
 
-      await db.update(groupRuns).set({ status: "active", updatedAt: new Date() }).where(eq(groupRuns.id, id));
+      await db.update(groupRuns).set({ status: "active" }).where(eq(groupRuns.id, id));
 
       const updated = await buildGroupRunResponse(id, userId);
       res.json(updated);
@@ -14965,9 +14944,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       }
 
       // If organiser, mark whole run as completed
-      const [gr] = await db.select().from(groupRuns).where(eq(groupRuns.id, id));
-      if (gr?.creatorId === userId) {
-        await db.update(groupRuns).set({ status: "completed", updatedAt: new Date() }).where(eq(groupRuns.id, id));
+      const [gr] = await db.select({ hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id));
+      if (gr?.hostUserId === userId) {
+        await db.update(groupRuns).set({ status: "completed" }).where(eq(groupRuns.id, id));
       }
 
       const updated = await buildGroupRunResponse(id, userId);
@@ -14988,10 +14967,10 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const groupRunId = runRow?.groupRunId;
       if (!groupRunId) return res.status(404).json({ error: "Not a group run" });
 
-      const [gr] = await db.select({ id: groupRuns.id, name: groupRuns.name }).from(groupRuns).where(eq(groupRuns.id, groupRunId));
+      const [gr] = await db.select({ id: groupRuns.id, title: groupRuns.title }).from(groupRuns).where(eq(groupRuns.id, groupRunId));
       if (!gr) return res.status(404).json({ error: "Group run not found" });
 
-      res.json({ groupRunId: gr.id, groupRunName: gr.name });
+      res.json({ groupRunId: gr.id, groupRunName: gr.title });
     } catch (error: any) {
       console.error("[GET /api/group-runs/by-run/:runId]", error);
       res.status(500).json({ error: "Failed to look up group run" });
@@ -15004,7 +14983,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { id } = req.params;
       const userId = req.user!.userId;
 
-      const [gr] = await db.select({ name: groupRuns.name }).from(groupRuns).where(eq(groupRuns.id, id));
+      const [gr] = await db.select({ title: groupRuns.title }).from(groupRuns).where(eq(groupRuns.id, id));
 
       const participants = await db
         .select({
@@ -15047,7 +15026,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         })
       );
 
-      res.json({ groupRunId: id, groupRunName: gr?.name ?? null, results });
+      res.json({ groupRunId: id, groupRunName: gr?.title ?? null, results });
     } catch (error: any) {
       console.error("[GET /api/group-runs/:id/results]", error);
       res.status(500).json({ error: "Failed to get results" });
@@ -15077,7 +15056,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const userId = req.user!.userId;
 
       // Fetch the group run
-      const groupRun = await db.select().from(groupRuns).where(eq(groupRuns.id, id)).limit(1);
+      const groupRun = await db.select({ id: groupRuns.id, title: groupRuns.title, hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id)).limit(1);
       if (groupRun.length === 0) return res.status(404).json({ error: "Group run not found" });
       const gr = groupRun[0];
 
@@ -15132,7 +15111,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       const prompt = `You are an elite running coach giving a personalised post-run debrief after a group run.
 
-GROUP RUN: "${gr.name || 'Group Run'}"
+GROUP RUN: "${gr.title || 'Group Run'}"
 Total participants who finished: ${finishers.length}
 Current user "${currentUser.name}" finished rank ${userRank} of ${finishers.length}
 

@@ -65,15 +65,9 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     }
 
     fun onDateOfBirthChanged(dob: String) {
-        // Format as dd/mm/yyyy
-        val digitsOnly = dob.filter { it.isDigit() }
-        val formatted = when {
-            digitsOnly.length <= 2 -> digitsOnly
-            digitsOnly.length <= 4 -> "${digitsOnly.substring(0, 2)}/${digitsOnly.substring(2)}"
-            digitsOnly.length <= 8 -> "${digitsOnly.substring(0, 2)}/${digitsOnly.substring(2, 4)}/${digitsOnly.substring(4)}"
-            else -> "${digitsOnly.substring(0, 2)}/${digitsOnly.substring(2, 4)}/${digitsOnly.substring(4, 8)}"
-        }
-        _dateOfBirth.value = formatted
+        // Store only digits — visual transformation handles formatting display
+        val digitsOnly = dob.filter { it.isDigit() }.take(8)
+        _dateOfBirth.value = digitsOnly
     }
     
     fun onGenderChanged(gender: String) {
