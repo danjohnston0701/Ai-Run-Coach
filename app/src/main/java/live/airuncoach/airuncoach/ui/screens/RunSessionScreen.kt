@@ -129,6 +129,7 @@ fun RunSessionScreen(
     hasRoute: Boolean,
     onEndRun: (String) -> Unit,
     onCancel: () -> Unit = {},
+    groupRunId: String? = null,  // Optional group run context
     viewModel: RunSessionViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -147,6 +148,11 @@ fun RunSessionScreen(
 
     val isGarminConnected = remember(runSession) {
         false // wire later
+    }
+
+    // Pass group run ID to ViewModel if present
+    LaunchedEffect(groupRunId) {
+        groupRunId?.let { viewModel.setGroupRunId(it) }
     }
 
     // Navigate to run summary when upload completes

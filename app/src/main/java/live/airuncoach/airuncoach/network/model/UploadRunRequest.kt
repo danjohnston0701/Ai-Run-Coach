@@ -62,6 +62,8 @@ data class UploadRunRequest(
     val workoutType: String? = null,
     val workoutIntensity: String? = null,
     val workoutDescription: String? = null,
+    // Group run context (if this run is part of a group run)
+    val groupRunId: String? = null,
     // Garmin device info — set to true if run was completed on Garmin companion watch
     val hasGarminData: Boolean = false,
     val garminDeviceName: String? = null,

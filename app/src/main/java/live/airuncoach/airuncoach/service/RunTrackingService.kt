@@ -599,6 +599,8 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_PLAN_GOAL_TYPE = "EXTRA_PLAN_GOAL_TYPE"
         const val EXTRA_PLAN_WEEK_NUMBER = "EXTRA_PLAN_WEEK_NUMBER"
         const val EXTRA_PLAN_TOTAL_WEEKS = "EXTRA_PLAN_TOTAL_WEEKS"
+        // Group run context
+        const val EXTRA_GROUP_RUN_ID = "EXTRA_GROUP_RUN_ID"
         // Session coaching: full AI-generated instructions passed as JSON string
         const val EXTRA_SESSION_INSTRUCTIONS_JSON = "EXTRA_SESSION_INSTRUCTIONS_JSON"
         // Dynamic coaching plan (rich model from prepare-coaching) — primary coaching source during coached runs
@@ -898,6 +900,8 @@ class RunTrackingService : Service(), SensorEventListener {
         planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
         planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
         planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
+        // Group run context
+        val groupRunId = intent?.getStringExtra(EXTRA_GROUP_RUN_ID)
         // Deserialize AI-generated session instructions from JSON if present (legacy plan)
         val sessionJson = intent?.getStringExtra(EXTRA_SESSION_INSTRUCTIONS_JSON)
         if (sessionJson != null) {
@@ -3321,6 +3325,8 @@ class RunTrackingService : Service(), SensorEventListener {
             workoutType = runSession.workoutType,
             workoutIntensity = runSession.workoutIntensity,
             workoutDescription = runSession.workoutDescription,
+            // Group run context if this run is part of a group
+            groupRunId = groupRunId,
             // Mark as Garmin data if run was completed on the watch
             hasGarminData = isWatchRun,
             garminDeviceName = deviceName,

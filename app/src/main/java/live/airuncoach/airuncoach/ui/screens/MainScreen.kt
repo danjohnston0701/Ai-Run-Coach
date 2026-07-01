@@ -664,6 +664,24 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     }
                 )
             }
+            // Run session for a group run
+            composable("run_session/group/{groupRunId}") { backStackEntry ->
+                val groupRunId = backStackEntry.arguments?.getString("groupRunId") ?: ""
+                RunSessionScreen(
+                    hasRoute = false,
+                    groupRunId = groupRunId,  // Pass group run context to the session
+                    onEndRun = { runId ->
+                        navController.navigate("run_summary/$runId") {
+                            popUpTo("run_session/group/{groupRunId}") { inclusive = true }
+                        }
+                    },
+                    onCancel = {
+                        // Clear run config and go back to group run detail
+                        RunConfigHolder.clearConfig()
+                        navController.popBackStack()
+                    }
+                )
+            }
             composable("run_summary/{runId}") { backStackEntry ->
                 val runId = backStackEntry.arguments?.getString("runId")
                 RunSummaryScreenFlagship(
@@ -1093,9 +1111,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 GroupRunDetailScreen(
                     groupRunId = groupRunId,
                     onNavigateBack = { navController.popBackStack() },
-                    onStartRun = { _ ->
-                        // TODO: Start run with groupRunId context — pass groupRunId to RunSession
-                        navController.navigate("run_session")
+                    onStartRun = { grId ->
+                        // Navigate to run session with group run context
+                        navController.navigate("run_session/group/$grId")
                     },
                     onViewResults = { grId ->
                         navController.navigate("group_run_results/$grId")

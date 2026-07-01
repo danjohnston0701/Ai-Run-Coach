@@ -125,6 +125,14 @@ class RunSessionViewModel @Inject constructor(
     /** Intended distance for the upcoming run — used as a hint for route recognition. */
     var intendedDistanceKm: Double? = null
 
+    /** Optional group run ID if this run is part of a group */
+    var groupRunId: String? = null
+        private set
+
+    fun setGroupRunId(id: String) {
+        groupRunId = id
+    }
+
     init {
         // Observe the first GPS fix from RunTrackingService and trigger route recognition
         viewModelScope.launch {
@@ -1319,6 +1327,8 @@ class RunSessionViewModel @Inject constructor(
                     it.planWeekNumber?.let { w -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
                     it.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
                 }
+                // Pass group run context if present
+                groupRunId?.let { grId -> putExtra(RunTrackingService.EXTRA_GROUP_RUN_ID, grId) }
                 // Pass AI session instructions as JSON so RunTrackingService can use them (legacy plan)
                 sessionInstructions?.let { instructions ->
                     try {
