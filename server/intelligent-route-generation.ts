@@ -1048,11 +1048,16 @@ async function fetchCandidates(
 
 // ==================== MAIN ROUTE GENERATION ====================
 
-export async function generateIntelligentRoute(request: RouteRequest): Promise<GeneratedRoute[]> {
+export async function generateIntelligentRoute(request: RouteRequest & { userId?: string | null }): Promise<GeneratedRoute[]> {
   const { latitude, longitude, distanceKm, preferTrails = true } = request;
   const distanceMeters = distanceKm * 1000;
   
   if (!GRAPHHOPPER_API_KEY) throw new Error("GRAPHHOPPER_API_KEY is not set in environment variables");
+
+  // Track GraphHopper route generation cost (fire-and-forget)
+  import("./cost-tracking-service").then(({ trackGraphHopperCost }) => {
+    trackGraphHopperCost(request.userId ?? null, "route_generation", 1);
+  }).catch(() => {});
   
   console.log(`🗺️ Generating ${distanceKm}km scenic route at (${latitude}, ${longitude})`);
   console.log(`📊 Request details:`, { latitude, longitude, distanceKm, preferTrails, distanceMeters });

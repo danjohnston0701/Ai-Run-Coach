@@ -294,7 +294,15 @@ export default function AdminAIConfig() {
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <h1 className="text-lg font-semibold">AI Control Centre</h1>
-          <div className="w-10" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setLocation("/admin/costs")}
+            className="text-xs border-cyan-800 text-cyan-400 hover:bg-cyan-950"
+            data-testid="button-cost-dashboard"
+          >
+            💰 Costs
+          </Button>
         </div>
       </header>
 
