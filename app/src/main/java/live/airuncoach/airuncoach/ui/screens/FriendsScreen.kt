@@ -94,7 +94,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                  */
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Search by name or email address",
+                    text = "Search by name or user ID",
                     style = AppTextStyles.caption,
                     color = Colors.textMuted
                 )
@@ -123,7 +123,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                             onValueChange = { searchQuery = it },
                             placeholder = {
                                 Text(
-                                    "Search by name or email",
+                                    "Search by name or user ID",
                                     style = AppTextStyles.body,
                                     color = Colors.textMuted
                                 )
@@ -551,12 +551,12 @@ fun SearchUserCard(
                 Spacer(modifier = Modifier.width(Spacing.md))
                 Column {
                     Text(
-                        text = (user.name as? String) ?: "User",
+                        text = user.name.ifEmpty { "User" },
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
                     Text(
-                        text = (user.email as? String) ?: "",
+                        text = "ID: ${user.shortUserId ?: ""}",
                         style = AppTextStyles.caption,
                         color = Colors.textSecondary
                     )
@@ -756,7 +756,7 @@ fun FriendCard(friend: Friend) {
 
             Spacer(modifier = Modifier.width(Spacing.md))
 
-            // Name and Email
+            // Name and Short ID
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = friend.name,
@@ -765,7 +765,7 @@ fun FriendCard(friend: Friend) {
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = friend.email,
+                    text = "ID: ${friend.shortUserId ?: ""}",
                     style = AppTextStyles.caption,
                     color = Colors.textSecondary
                 )

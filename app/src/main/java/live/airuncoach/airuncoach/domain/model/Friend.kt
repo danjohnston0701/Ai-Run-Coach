@@ -7,6 +7,7 @@ data class Friend(
     val profilePic: String? = null,
     val fitnessLevel: String? = null,
     val distanceScale: String? = null,
+    val shortUserId: String? = null,  // Short ID for display (e.g., "12345678")
     // Search result enrichment — null when not a search result
     val friendRequestStatus: String? = null,  // "pending", "declined", "withdrawn", "accepted", "received_pending", null
     val friendRequestId: String? = null

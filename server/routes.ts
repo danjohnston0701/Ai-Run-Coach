@@ -131,9 +131,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(friendUsers.map(f => ({
         id: f.id,
         name: f.name,
-        email: f.email,
         profilePic: f.profilePic,
         userCode: f.userCode,
+        shortUserId: f.shortUserId,
       })));
     } catch (error: any) {
       console.error("[GET /api/users/:userId/friends] Error:", error);
@@ -595,7 +595,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return {
           id: u.id,
           name: u.name,
-          email: u.email,
           profilePic: u.profilePic,
           userCode: u.userCode,
           shortUserId: u.shortUserId,
