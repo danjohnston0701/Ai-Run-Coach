@@ -11730,7 +11730,7 @@ function transformRunForAndroid(run: any) {
       const validGenders = ['male', 'female'];
       const validAccents = [
         'British', 'American', 'Australian', 'Irish', 'Scottish', 'New Zealand',
-        'South African', 'Canadian', 'Welsh', 'Caribbean', 'Scandinavian'
+        'Canadian', 'Welsh', 'Caribbean', 'Scandinavian'
       ];
       const validTones = [
         'Energetic', 'Motivational', 'Friendly', 'Instructive', 'Tough Love',

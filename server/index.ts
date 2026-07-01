@@ -423,15 +423,6 @@ function setupErrorHandler(app: express.Application) {
       app.use(express.static(expoDistPath));
     }
 
-    // Health check endpoint
-    app.get("/api/health", (_req, res) => {
-      res.json({ 
-        status: "ok", 
-        service: "AI Run Coach API",
-        version: "2.0.0"
-      });
-    });
-
     // SPA fallback: serve web app for browsers, Expo build for mobile
     app.get("*", (req: Request, res: Response) => {
       if (req.path.startsWith("/api")) return res.status(404).json({ error: "Not found" });

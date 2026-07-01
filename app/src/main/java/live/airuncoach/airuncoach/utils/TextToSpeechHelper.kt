@@ -87,7 +87,7 @@ class TextToSpeechHelper(context: Context) : TextToSpeech.OnInitListener {
      */
     private fun setAccentLocale(accent: String) {
         val locale = when (accent.lowercase()) {
-            "south_african", "south african" -> Locale("en", "ZA")  // South African English
+            "scottish", "scottish english" -> Locale.UK  // Scottish accent uses British English
             "new_zealand", "new zealand" -> Locale("en", "NZ")  // New Zealand English
             "australian", "aussie" -> Locale("en", "AU")  // Australian English
             "irish" -> Locale("en", "IE")  // Irish English

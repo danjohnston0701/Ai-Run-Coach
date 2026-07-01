@@ -1,5 +1,5 @@
 export type CoachGender = 'male' | 'female';
-export type CoachAccent = 'british' | 'australian' | 'american' | 'irish' | 'south_african' | 'new_zealand';
+export type CoachAccent = 'british' | 'australian' | 'american' | 'irish' | 'scottish' | 'new_zealand';
 export type CoachTone = 'energetic' | 'motivational' | 'instructive' | 'factual' | 'abrupt';
 
 export interface AiCoachSettings {
@@ -102,7 +102,7 @@ export const accentLabels: Record<CoachAccent, string> = {
   australian: 'Australian',
   american: 'American',
   irish: 'Irish',
-  south_african: 'South African',
+  scottish: 'Scottish',
   new_zealand: 'New Zealand',
 };
 
@@ -132,7 +132,7 @@ export function getTTSVoice(settings: AiCoachSettings): TTSVoice {
     australian: { male: 'echo', female: 'shimmer' },
     american: { male: 'onyx', female: 'alloy' },
     irish: { male: 'ash', female: 'coral' },
-    south_african: { male: 'echo', female: 'shimmer' },
+    scottish: { male: 'fable', female: 'nova' },
     new_zealand: { male: 'echo', female: 'shimmer' },
   };
   
@@ -152,7 +152,7 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     australian: ['Lee', 'Gordon', 'Aaron', 'Google UK English Male'],
     american: ['Alex', 'Fred', 'Tom', 'Aaron', 'Google US English Male'],
     irish: ['Daniel', 'James', 'Google UK English Male'],
-    south_african: ['Ayanda', 'Google African English Male'],
+    scottish: ['Daniel', 'James', 'Arthur', 'Google UK English Male'],
     new_zealand: ['Lee', 'Google NZ English Male'],
   };
   
@@ -161,7 +161,7 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     australian: ['Karen', 'Catherine', 'Google UK English Female'],
     american: ['Samantha', 'Victoria', 'Allison', 'Susan', 'Ava', 'Google US English Female'],
     irish: ['Moira', 'Kate', 'Google UK English Female'],
-    south_african: ['Ayanda', 'Google African English Female'],
+    scottish: ['Kate', 'Serena', 'Martha', 'Google UK English Female'],
     new_zealand: ['Aria', 'Google NZ English Female'],
   };
   
@@ -170,7 +170,7 @@ export function getVoicePreferences(settings: AiCoachSettings): {
     australian: 'en-AU',
     american: 'en-US',
     irish: 'en-IE',
-    south_african: 'en-ZA',
+    scottish: 'en-GB',  // Scottish accent uses British English locale
     new_zealand: 'en-NZ',
   };
   

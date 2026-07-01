@@ -9,12 +9,16 @@
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { trackPollyCost } from "./cost-tracking-service";
 
-// Regional availability of Neural voices (as of 2024):
-//   us-east-1      — ALL neural voices supported (default fallback)
-//   eu-west-1      — British, Irish, South African
-//   ap-southeast-2  — Australian (Olivia), New Zealand (Aria)
+// Regional availability of Neural voices (as of 2025):
+// All major neural voices (Brian, Amy, Stephen, Olivia, Sean, Niamh, Matthew, Joanna)
+// are available across: us-east-1, eu-west-1, ap-southeast-2
 //
-// We route each accent to its optimal region for best availability and latency
+// We route each accent to its OPTIMAL region for LATENCY:
+//   eu-west-1      — British, Irish, Scottish (closest to UK)
+//   ap-southeast-2  — Australian, New Zealand (closest to Australia/NZ)
+//   us-east-1      — American (closest to US, also fallback for any)
+//
+// NOTE: Scottish accent is provided using British English (en-GB) voices with Scottish tone
 const credentials = {
   accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
@@ -30,7 +34,7 @@ function getRegionForAccent(accent: string | undefined): string {
     // EU accents → eu-west-1 (Dublin)
     british: process.env.AWS_REGION_BRITISH || "eu-west-1",
     irish: process.env.AWS_REGION_IRISH || "eu-west-1",
-    south_african: process.env.AWS_REGION_SOUTH_AFRICAN || "eu-west-1",
+    scottish: process.env.AWS_REGION_SCOTTISH || "eu-west-1",
     
     // AP accents → ap-southeast-2 (Sydney)
     australian: process.env.AWS_REGION_AUSTRALIAN || "ap-southeast-2",
@@ -85,9 +89,9 @@ export function mapAccentToPollyVoice(
       male: "Sean",       // en-IE Neural male
       female: "Niamh",    // en-IE Neural female
     },
-    south_african: {
-      male: "Ayanda",     // en-ZA Neural (only one SA Neural voice)
-      female: "Ayanda",   // en-ZA Neural female
+    scottish: {
+      male: "Brian",      // en-GB Neural male (Scottish accent uses British voices)
+      female: "Amy",      // en-GB Neural female (Scottish accent uses British voices)
     },
     new_zealand: {
       male: "Aria",       // en-NZ — no male Neural voice exists, Aria is gender-neutral enough
@@ -110,7 +114,7 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
     american: "en-US",
     australian: "en-AU",
     irish: "en-IE",
-    south_african: "en-ZA",
+    scottish: "en-GB",  // Scottish accent uses British English language code
     new_zealand: "en-NZ",
   };
 
@@ -319,7 +323,7 @@ export function getAvailableVoices(accent: string): {
     american: { male: "Matthew", female: "Joanna" },
     australian: { male: "Stephen", female: "Olivia" },
     irish: { male: "Sean", female: "Niamh" },
-    south_african: { male: "Ayanda", female: "Ayanda" },
+    scottish: { male: "Brian", female: "Amy" },
     indian: { male: "Kajal", female: "Kajal" },
     new_zealand: { male: "Aria", female: "Aria" },
   };

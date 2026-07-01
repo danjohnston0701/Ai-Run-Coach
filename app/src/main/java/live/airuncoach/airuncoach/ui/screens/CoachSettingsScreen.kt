@@ -212,10 +212,10 @@ fun CoachSettingsScreen(
                                         modifier = Modifier.padding(start = Spacing.lg, end = Spacing.md)
                                     )
                                 }
-                                accentName.equals("South African", ignoreCase = true) -> {
+                                accentName.equals("Scottish", ignoreCase = true) -> {
                                     Spacer(modifier = Modifier.height(Spacing.sm))
                                     Text(
-                                        text = "ℹ️ South African only has one voice (gender neutral)",
+                                        text = "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scottish accent uses British English voices",
                                         style = AppTextStyles.caption,
                                         color = Colors.textSecondary,
                                         modifier = Modifier.padding(start = Spacing.lg, end = Spacing.md)
