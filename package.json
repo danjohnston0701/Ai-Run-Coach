@@ -15,7 +15,7 @@
     "check:types": "tsc --noEmit",
     "check:format": "prettier --check \"**/*.{js,ts,tsx,css,json}\"",
     "format": "prettier --write \"**/*.{js,ts,tsx,css,json}\"",
-    "build": "npm run server:build",
+    "build": "npx vite build && npm run server:build",
     "start": "NODE_ENV=production node server_dist/index.js"
   },
   "dependencies": {
