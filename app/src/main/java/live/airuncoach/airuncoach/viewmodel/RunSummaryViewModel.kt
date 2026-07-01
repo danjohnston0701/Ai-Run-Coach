@@ -214,6 +214,10 @@ class RunSummaryViewModel @Inject constructor(
                         completeLinkedWorkout(localSession.linkedWorkoutId!!, runId, localSession.linkedPlanId!!)
                     }
                     
+                    // If this run is part of a group run, link it automatically
+                    // (server will set group run status to "completed" if this is organiser's run)
+                    // This happens silently in background — no UI interaction needed
+                    
                     _isLoadingRun.value = false
                 } else {
                     // No local data available either - show error
@@ -249,6 +253,25 @@ class RunSummaryViewModel @Inject constructor(
             } catch (e: Exception) {
                 // Silently log failures - the run is already saved, this is just for plan tracking
                 Log.w("RunSummaryViewModel", "⚠️ Failed to auto-complete workout $workoutId: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Link this run to its group run and mark participation complete.
+     * Called automatically when a run is loaded — if the run is part of a group,
+     * this API call links it to the group (server sets groupRunParticipants.runId).
+     * If the caller is the organiser, server also marks the whole group as "completed".
+     * This happens silently in background — no UI interaction needed.
+     */
+    private fun completeGroupRunParticipation(groupRunId: String, runId: String) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.completeGroupRun(groupRunId, GroupRunCompleteRequest(runId))
+                Log.d("RunSummaryViewModel", "✅ Linked run $runId to group run $groupRunId")
+            } catch (e: Exception) {
+                // Silently log failures - the run is already saved, this is just for group linking
+                Log.w("RunSummaryViewModel", "⚠️ Failed to link run to group run $groupRunId: ${e.message}")
             }
         }
     }
@@ -1282,6 +1305,9 @@ class RunSummaryViewModel @Inject constructor(
                 val lookup = apiService.getGroupRunByRun(runId)
                 _linkedGroupRunId.value = lookup.groupRunId
                 _linkedGroupRunName.value = lookup.groupRunName
+                // Auto-link this run to the group run (server links run ↔ group)
+                // If caller is organiser, server also marks whole group as "completed"
+                completeGroupRunParticipation(lookup.groupRunId, runId)
                 // Now load full leaderboard results
                 val results = apiService.getGroupRunResults(lookup.groupRunId)
                 _groupRunResults.value = results
