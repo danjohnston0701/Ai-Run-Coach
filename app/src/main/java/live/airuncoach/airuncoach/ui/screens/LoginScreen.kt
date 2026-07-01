@@ -12,9 +12,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.focus.onFocusEvent
@@ -53,6 +55,7 @@ fun LoginScreen(
     onNavigateToMain: () -> Unit = {},
     onNavigateToSignUp: () -> Unit = {},
     onNavigateToForgotPassword: () -> Unit = {},
+    onNavigateToObserverLogin: () -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -393,6 +396,39 @@ fun LoginScreen(
                 text = annotatedString,
                 style = AppTextStyles.body,
                 modifier = Modifier.clickable { onNavigateToSignUp() }
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.lg))
+
+            // Divider
+            Divider(color = Colors.primary.copy(alpha = 0.2f))
+
+            Spacer(modifier = Modifier.height(Spacing.lg))
+
+            // Observer button for non-registered users
+            OutlinedButton(
+                onClick = onNavigateToObserverLogin,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Colors.primary
+                ),
+                border = BorderStroke(1.dp, Colors.primary)
+            ) {
+                Text(
+                    "🏃 Observe Live Run",
+                    style = AppTextStyles.body,
+                    color = Colors.primary
+                )
+            }
+
+            Text(
+                "Invited to watch a run? Enter your token",
+                style = AppTextStyles.small,
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 8.dp)
             )
 
             Spacer(modifier = Modifier.height(Spacing.xxxl))

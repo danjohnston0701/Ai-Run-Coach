@@ -146,6 +146,13 @@ fun ObserverRunSessionScreen(
                         )
                     }
                 }
+                liveSession?.isActive == false -> {
+                    // Run has ended — show the finished screen
+                    RunFinishedScreen(
+                        runnerName = liveSession?.runnerName ?: "The runner",
+                        onNavigateBack = onNavigateBack
+                    )
+                }
                 liveSession?.hasStarted != true -> {
                     // Waiting state - runner hasn't started yet
                     WaitingForRunnerScreen(
@@ -393,6 +400,57 @@ fun formatTime(seconds: Int): String {
     }
 }
 
+/**
+ * Shown to the observer when the runner has ended their session.
+ * Registered users see a "Go to Dashboard" button; non-registered see a simple close message.
+ */
+@Composable
+fun RunFinishedScreen(
+    runnerName: String,
+    onNavigateBack: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Colors.backgroundRoot)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            Text("✅", fontSize = 56.sp)
+
+            Text(
+                "Run finished!",
+                style = AppTextStyles.h3,
+                color = Colors.textPrimary,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                "${runnerName}'s run has ended. Great job cheering them on!",
+                style = AppTextStyles.body,
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onNavigateBack,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+            ) {
+                Text("Go Back to Dashboard", fontSize = 16.sp, color = Color.White)
+            }
+        }
+    }
+}
+
 // Data class for observer view of a live session
 data class ObserverLiveRunSession(
     val id: String,
@@ -405,6 +463,7 @@ data class ObserverLiveRunSession(
     val currentPace: String?,
     val currentHeartRate: Int?,
     val hasStarted: Boolean,
+    val isActive: Boolean = true,  // false means run has ended
     val startedAt: Long?,
     val routeId: String?,
     val gpsTrack: List<GpsPoint>?

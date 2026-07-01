@@ -3569,9 +3569,11 @@ function transformRunForAndroid(run: any) {
   app.post("/api/live-sessions/:sessionId/invite-observer", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { sessionId } = req.params;
-      const { runnerId, friendId } = req.body;
+      // runnerId comes from the authenticated session, NOT the request body
+      const runnerId = req.user!.userId;
+      const { friendId, email } = req.body;
 
-      // Validate session exists and belongs to runnerId
+      // Validate session exists and belongs to the authenticated runner
       const session = await storage.getLiveSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: "Session not found" });
@@ -3580,48 +3582,166 @@ function transformRunForAndroid(run: any) {
         return res.status(403).json({ error: "Unauthorized: session does not belong to this user" });
       }
 
-      // Validate friendship
-      const isFriend = await storage.checkFriendship(runnerId, friendId);
-      if (!isFriend) {
-        return res.status(403).json({ error: "Users are not friends" });
-      }
-
-      // Invite observer
-      const updatedSession = await storage.inviteObserver(sessionId, friendId);
-      if (!updatedSession) {
-        return res.status(500).json({ error: "Failed to invite observer" });
-      }
-
-      // Get friend's info for notification
-      const friend = await storage.getUser(friendId);
+      // Get runner info
       const runner = await storage.getUser(runnerId);
-
-      if (!friend || !runner) {
-        return res.status(500).json({ error: "Could not fetch user information" });
+      if (!runner) {
+        return res.status(500).json({ error: "Runner not found" });
       }
 
-      // Send push notification to friend
       const notificationService = await import("./notification-service");
-      const pushSent = await notificationService.sendFirebasePush(
-        friendId,
-        `${runner.name} invited you to watch their run`,
-        "Watch their live location and route in real-time",
-        {
-          type: "live_run_invite",
+      const emailService = await import("./email-service");
+
+      // FLOW 1: Invite registered friend
+      if (friendId) {
+        // Validate friendship
+        const isFriend = await storage.checkFriendship(runnerId, friendId);
+        if (!isFriend) {
+          return res.status(403).json({ error: "Users are not friends" });
+        }
+
+        // Invite observer
+        const updatedSession = await storage.inviteObserver(sessionId, friendId);
+        if (!updatedSession) {
+          return res.status(500).json({ error: "Failed to invite observer" });
+        }
+
+        // Get friend's info for notification
+        const friend = await storage.getUser(friendId);
+        if (!friend) {
+          return res.status(500).json({ error: "Friend not found" });
+        }
+
+        // Send push notification to friend
+        const pushSent = await notificationService.sendFirebasePush(
+          friendId,
+          `${runner.name} invited you to watch their run`,
+          "Watch their live location and route in real-time",
+          {
+            type: "live_run_invite",
+            sessionId,
+            runnerId,
+            runnerName: runner.name || "A runner",
+            routeId: session.routeId || "",
+            hasStarted: session.hasStarted ? "true" : "false",
+          }
+        );
+
+        console.log(`[Live Sessions] Invited ${friendId} to watch ${runnerId}'s run (session ${sessionId}). Push sent: ${pushSent}`);
+
+        return res.json({ success: true, type: "registered", pushSent });
+      }
+
+      // FLOW 2: Invite non-registered user via email
+      else if (email) {
+        const trimmedEmail = email.toLowerCase().trim();
+
+        // Validate email format
+        if (!trimmedEmail.includes("@")) {
+          return res.status(400).json({ error: "Invalid email address" });
+        }
+
+        // Check if email is registered
+        const existingUser = await storage.getUserByEmail(trimmedEmail);
+        if (existingUser) {
+          // Treat as registered friend
+          const isFriend = await storage.checkFriendship(runnerId, existingUser.id);
+          if (!isFriend) {
+            return res.status(403).json({ error: "User is not your friend" });
+          }
+
+          const updatedSession = await storage.inviteObserver(sessionId, existingUser.id);
+          if (!updatedSession) {
+            return res.status(500).json({ error: "Failed to invite observer" });
+          }
+
+          const pushSent = await notificationService.sendFirebasePush(
+            existingUser.id,
+            `${runner.name} invited you to watch their run`,
+            "Watch their live location and route in real-time",
+            {
+              type: "live_run_invite",
+              sessionId,
+              runnerId,
+              runnerName: runner.name || "A runner",
+              routeId: session.routeId || "",
+              hasStarted: session.hasStarted ? "true" : "false",
+            }
+          );
+
+          console.log(`[Live Sessions] Invited registered user ${existingUser.id} (${trimmedEmail}) via email. Push sent: ${pushSent}`);
+
+          return res.json({ success: true, type: "registered", pushSent });
+        }
+
+        // Email is not registered - create invitation
+        const invitation = await storage.createObserverInvitation({
           sessionId,
           runnerId,
-          runnerName: runner.name || "A runner",
-          routeId: session.routeId || "",
-          hasStarted: session.hasStarted ? "true" : "false",
-        }
-      );
+          email: trimmedEmail,
+        });
 
-      console.log(`[Live Sessions] Invited ${friendId} to watch ${runnerId}'s run (session ${sessionId}). Push sent: ${pushSent}`);
+        // Send invitation email
+        const emailSent = await emailService.sendObserverInvitationEmail(
+          trimmedEmail,
+          runner.name || "A runner",
+          sessionId,
+          invitation.token
+        );
 
-      res.json({ success: true, pushSent });
+        console.log(`[Live Sessions] Invited non-registered user ${trimmedEmail} to watch ${runnerId}'s run (session ${sessionId}). Email sent: ${emailSent}`);
+
+        return res.json({
+          success: true,
+          type: "email",
+          emailSent,
+          invitationToken: invitation.token,
+        });
+      } else {
+        return res.status(400).json({ error: "friendId or email is required" });
+      }
     } catch (error: any) {
       console.error("Invite observer error:", error);
       res.status(500).json({ error: "Failed to invite observer" });
+    }
+  });
+
+  // Public endpoint for non-registered observers to access live sessions
+  app.get("/api/observe/:token", async (req: Request, res: Response) => {
+    try {
+      const { token } = req.params;
+
+      // Get invitation by token
+      const invitation = await storage.getObserverInvitation(token);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invalid or expired link" });
+      }
+
+      // Check if token is expired
+      if (invitation.expiresAt && invitation.expiresAt < new Date()) {
+        return res.status(410).json({
+          error: "Link expired",
+          isExpired: true,
+          message: "This invite link has expired. Please ask the runner to send a new invite.",
+        });
+      }
+
+      // Load session data
+      const session = await storage.getLiveSession(invitation.sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Run session not found or has ended" });
+      }
+
+      // Mark invitation as viewed
+      await storage.updateObserverInvitation(invitation.id, { viewedAt: new Date() });
+
+      // Return session data for observer
+      res.json({
+        sessionData: session,
+        isExpired: false,
+      });
+    } catch (error: any) {
+      console.error("Get observe session error:", error);
+      res.status(500).json({ error: "Failed to load session" });
     }
   });
 

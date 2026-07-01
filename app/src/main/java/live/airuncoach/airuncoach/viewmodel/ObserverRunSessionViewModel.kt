@@ -65,13 +65,18 @@ class ObserverRunSessionViewModel @Inject constructor(
     private fun startPollingUpdates(sessionId: String) {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
-            while (isActive && _liveSession.value?.hasStarted == true) {
+            while (isActive && _liveSession.value?.isActive != false) {
                 try {
                     delay(2000)  // Poll every 2 seconds
                     val updated = apiService.getLiveSession(sessionId)
                     val uiSession = convertToObserverSession(updated)
                     _liveSession.value = uiSession
-                    Log.d("ObserverVM", "Updated session: distance=${uiSession.distanceCovered}km, time=${uiSession.elapsedTime}s")
+                    Log.d("ObserverVM", "Updated session: distance=${uiSession.distanceCovered}km, time=${uiSession.elapsedTime}s, active=${uiSession.isActive}")
+                    // Stop polling once the run has ended
+                    if (!uiSession.isActive) {
+                        Log.d("ObserverVM", "Run ended — stopping poll")
+                        break
+                    }
                 } catch (e: Exception) {
                     Log.w("ObserverVM", "Failed to fetch updates: ${e.message}")
                     // Continue polling on error
@@ -137,6 +142,7 @@ class ObserverRunSessionViewModel @Inject constructor(
                 else -> null
             },
             hasStarted = apiResponse.hasStarted ?: false,
+            isActive = apiResponse.isActive ?: true,
             startedAt = when (apiResponse.startedAt) {
                 is Long -> apiResponse.startedAt
                 is String -> (apiResponse.startedAt as String).toLongOrNull()

@@ -569,6 +569,20 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   isActive: boolean("is_active").default(true),
 });
 
+// Observer Invitations table (for non-registered users)
+export const observerInvitations = pgTable("observer_invitations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull().references(() => liveRunSessions.id),
+  runnerId: varchar("runner_id").notNull().references(() => users.id),
+  email: varchar("email").notNull(),
+  token: varchar("token").notNull().unique(),
+  status: text("status").default("sent"),  // 'sent', 'viewed', 'expired'
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at"),
+  viewedAt: timestamp("viewed_at"),
+  clickedAt: timestamp("clicked_at"),
+});
+
 // Route Ratings table
 export const routeRatings = pgTable("route_ratings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1591,6 +1605,7 @@ export type Notification = typeof notifications.$inferSelect;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type NotificationPreference = typeof notificationPreferences.$inferSelect;
 export type LiveRunSession = typeof liveRunSessions.$inferSelect;
+export type ObserverInvitation = typeof observerInvitations.$inferSelect;
 export type GroupRun = typeof groupRuns.$inferSelect;
 export type GroupRunParticipant = typeof groupRunParticipants.$inferSelect;
 export type Event = typeof events.$inferSelect;

@@ -198,3 +198,55 @@ export async function sendPasswordResetEmail(to: string, resetToken: string): Pr
     text: `Reset your AI Run Coach password\n\nClick this link to reset your password (expires in 1 hour):\n${resetUrl}\n\nIf you didn't request this, you can safely ignore this email.`,
   });
 }
+
+export async function sendObserverInvitationEmail(
+  email: string,
+  runnerName: string,
+  sessionId: string,
+  token: string
+): Promise<boolean> {
+  try {
+    const { client, fromEmail } = await getResendClient();
+    
+    // Deep link for opening app directly (iOS/Android)
+    const deepLink = `airuncoach://observe/${token}`;
+    
+    // Fallback web link with token (for manual entry on login screen)
+    const webLink = `https://airuncoach.live/invite/${token}`;
+
+    await client.emails.send({
+      from: `AI Run Coach <${fromEmail}>`,
+      to: email,
+      subject: `${runnerName} invited you to watch their run`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">🏃 You're Invited!</h1>
+          </div>
+          <div style="padding: 40px 32px;">
+            <h2 style="margin: 0 0 16px; font-size: 20px; color: #ffffff;">Watch ${runnerName}'s live run</h2>
+            <p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6;">${runnerName} has invited you to watch their run in real-time.</p>
+            <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">See their live location, route, and metrics as they run — no account needed!</p>
+            <a href="${deepLink}" style="display: inline-block; background: #00D4FF; color: #0A0A1A; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 999px; text-decoration: none; letter-spacing: 1px; text-transform: uppercase;">Watch Live Run →</a>
+            <p style="margin: 24px 0 0; color: #94a3b8; line-height: 1.6; font-size: 14px;">If that doesn't work, you can also:</p>
+            <ol style="margin: 12px 0; color: #94a3b8; padding-left: 20px;">
+              <li style="margin: 6px 0;">Download AI Run Coach from the app store</li>
+              <li style="margin: 6px 0;">On the login screen, tap "Observe Live Run"</li>
+              <li style="margin: 6px 0;">Enter this token: <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #00D4FF;">${token}</code></li>
+            </ol>
+            <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">This token will expire in 7 days.</p>
+            <hr style="border: none; border-top: 1px solid #1a1a2e; margin: 32px 0; opacity: 0.5;" />
+            <p style="margin: 0; color: #64748b; font-size: 12px;">AI Run Coach — Your personal running coach</p>
+          </div>
+        </div>
+      `,
+      text: `${runnerName} invited you to watch their run!\n\nSee their live location, route, and metrics as they run — no account needed!\n\nOption 1: Click this link to open the app\n${deepLink}\n\nOption 2: Download the app and manually enter the token\n1. Download AI Run Coach from the app store\n2. On the login screen, tap "Observe Live Run"\n3. Enter token: ${token}\n\nThis token will expire in 7 days.\n\n---\nAI Run Coach — Your personal running coach`,
+    });
+
+    console.log(`[Email] Observer invitation sent to ${email} for session ${sessionId}`);
+    return true;
+  } catch (error) {
+    console.error(`[Email] Failed to send observer invitation to ${email}:`, error);
+    return false;
+  }
+}

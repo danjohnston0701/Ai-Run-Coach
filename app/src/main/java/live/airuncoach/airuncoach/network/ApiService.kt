@@ -673,6 +673,10 @@ interface ApiService {
      */
     @GET("/api/live-sessions/{sessionId}")
     suspend fun getLiveSession(@Path("sessionId") sessionId: String): live.airuncoach.airuncoach.viewmodel.LiveSessionApiResponse
+
+    // Observer endpoint - public access (no auth required) for non-registered users to watch live runs
+    @GET("/api/observe/{token}")
+    suspend fun getObserveSession(@Path("token") token: String): ObserveSessionResponse
 }
 
 data class RefreshWatchTokenRequest(
@@ -683,6 +687,36 @@ data class RefreshWatchTokenRequest(
 data class RefreshWatchTokenResponse(
     val token: String,
     val expiresIn: Long
+)
+
+// Observer session response - returned by GET /api/observe/{token}
+data class ObserveSessionResponse(
+    val sessionData: ObserveSessionData,
+    val isExpired: Boolean
+)
+
+data class ObserveSessionData(
+    val id: String,
+    val userId: String,
+    val runnerName: String,
+    val currentLat: Double? = null,
+    val currentLng: Double? = null,
+    val distanceCovered: Double = 0.0,
+    val elapsedTime: Int = 0,
+    val currentPace: String? = null,
+    val currentHeartRate: Int? = null,
+    val hasStarted: Boolean = false,
+    val isActive: Boolean = true,
+    val startedAt: Long? = null,
+    val routeId: String? = null,
+    val gpsTrack: List<GpsPoint>? = null
+)
+
+data class GpsPoint(
+    val lat: Double,
+    val lng: Double,
+    val timestamp: Long,
+    val altitude: Double? = null
 )
 
 /**

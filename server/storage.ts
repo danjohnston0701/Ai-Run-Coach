@@ -1,6 +1,6 @@
 import {
   users, friends, friendRequests, runs, routes, goals,
-  notifications, notificationPreferences, liveRunSessions,
+  notifications, notificationPreferences, liveRunSessions, observerInvitations,
   groupRuns, groupRunParticipants, events, routeRatings, runAnalyses,
   connectedDevices, deviceData, garminWellnessMetrics, activityMergeLog, garminActivities,
   oauthStateStore, webhookFailureQueue, garminWebhookEvents, passwordResetTokens,
@@ -8,13 +8,14 @@ import {
   type User, type InsertUser, type Run, type InsertRun,
   type Route, type InsertRoute, type Goal, type InsertGoal,
   type Friend, type FriendRequest, type Notification, type NotificationPreference,
-  type LiveRunSession, type GroupRun, type GroupRunParticipant, type Event,
+  type LiveRunSession, type ObserverInvitation, type GroupRun, type GroupRunParticipant, type Event,
   type RouteRating, type RunAnalysis, type ConnectedDevice, type DeviceData,
   type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent, type PasswordResetToken,
   type MonthlyUsage, type InsertInterestRegistration, type InterestRegistration
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min } from "drizzle-orm";
+import crypto from "crypto";
 
 // Aggregated run statistics — computed via SQL, not JavaScript
 export interface UserRunStats {
@@ -97,6 +98,12 @@ export interface IStorage {
   endLiveSession(sessionKey: string): Promise<void>;
   inviteObserver(sessionId: string, observerId: string): Promise<LiveRunSession | undefined>;
   checkFriendship(userId1: string, userId2: string): Promise<boolean>;
+  
+  // Observer Invitations (for non-registered users)
+  createObserverInvitation(data: { sessionId: string; runnerId: string; email: string }): Promise<ObserverInvitation>;
+  getObserverInvitation(token: string): Promise<ObserverInvitation | undefined>;
+  updateObserverInvitation(id: string, updates: Partial<ObserverInvitation>): Promise<ObserverInvitation | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   
   // Events
   getEvents(): Promise<Event[]>;
@@ -856,6 +863,57 @@ export class DatabaseStorage implements IStorage {
       )
       .limit(1);
     return !!friendship;
+  }
+
+  // Observer Invitations (for non-registered users)
+  async createObserverInvitation(data: {
+    sessionId: string;
+    runnerId: string;
+    email: string;
+  }): Promise<ObserverInvitation> {
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    const [invitation] = await db
+      .insert(observerInvitations)
+      .values({
+        ...data,
+        token,
+        expiresAt,
+        status: "sent",
+        createdAt: new Date(),
+      })
+      .returning();
+
+    return invitation!;
+  }
+
+  async getObserverInvitation(token: string): Promise<ObserverInvitation | undefined> {
+    const [invitation] = await db
+      .select()
+      .from(observerInvitations)
+      .where(eq(observerInvitations.token, token));
+    return invitation || undefined;
+  }
+
+  async updateObserverInvitation(
+    id: string,
+    updates: Partial<ObserverInvitation>
+  ): Promise<ObserverInvitation | undefined> {
+    const [updated] = await db
+      .update(observerInvitations)
+      .set(updates)
+      .where(eq(observerInvitations.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email.toLowerCase()));
+    return user || undefined;
   }
 
   // Events

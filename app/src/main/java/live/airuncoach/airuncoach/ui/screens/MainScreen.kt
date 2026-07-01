@@ -715,6 +715,22 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
+            
+            // Observer login for non-registered users (via email invite token)
+            composable("observer_login/{token}") { backStackEntry ->
+                val token = backStackEntry.arguments?.getString("token") ?: ""
+                ObserverLoginScreen(
+                    initialToken = token,
+                    onObserverSessionStarted = { sessionId ->
+                        // Navigate to observer session with the validated token
+                        navController.navigate("observer_session/$sessionId") {
+                            popUpTo("observer_login/$token") { inclusive = true }
+                        }
+                    },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            
             composable("previous_runs") {
                 val currentBackStack by navController.currentBackStackEntryAsState()
                 PreviousRunsScreen(

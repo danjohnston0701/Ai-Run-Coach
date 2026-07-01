@@ -106,15 +106,18 @@ class MainActivity : ComponentActivity() {
         // Active-run notification (tap on the ongoing run notification)
         val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
 
-        // Observer session invitation (live_run_invite notification)
+        // Observer session invitation (live_run_invite notification from registered users)
         val observerSessionId = intent?.getStringExtra("deeplink_observer_session_id")
+
+        // Observer invite token (email link for non-registered observers)
+        val observerInviteToken = intent?.getStringExtra("observer_invite_token")
 
         // Garmin watch update notification
         val isGarminUpdateNotification = intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE
         val garminUpdateVersion     = if (isGarminUpdateNotification) intent?.getStringExtra("version")     ?: "" else null
         val garminUpdateReleaseNote = if (isGarminUpdateNotification) intent?.getStringExtra("releaseNote") ?: "" else null
 
-        Log.d("MainActivity", "Deep link — uriRun=$uriRunId notifRun=$notifRunId activeRun=$launchToActiveRun observerSession=$observerSessionId garminUpdate=$garminUpdateVersion")
+        Log.d("MainActivity", "Deep link — uriRun=$uriRunId notifRun=$notifRunId activeRun=$launchToActiveRun observerSession=$observerSessionId observerToken=$observerInviteToken garminUpdate=$garminUpdateVersion")
 
         // Friend request notification
         val launchToFriends = intent?.getBooleanExtra("deeplink_friends", false) == true
@@ -127,6 +130,7 @@ class MainActivity : ComponentActivity() {
         when {
             launchToActiveRun -> pendingDeepLink.value = "run_session"
             observerSessionId != null -> pendingDeepLink.value = "observer_session/$observerSessionId"
+            observerInviteToken != null -> pendingDeepLink.value = "observer_login/$observerInviteToken"  // NEW: Observer login with token
             groupRunId != null && groupRunId.isNotEmpty() -> pendingDeepLink.value = "group_run_detail/$groupRunId"
             anyRunId != null  -> pendingDeepLink.value = "run_summary/$anyRunId"
             launchToFriends   -> pendingDeepLink.value = "friends"
@@ -357,6 +361,19 @@ class MainActivity : ComponentActivity() {
             if (!runId.isNullOrBlank()) {
                 Log.d("MainActivity", "Extracted runId from custom scheme: $runId")
                 return runId
+            }
+        }
+
+        // Observer invite deep link: airuncoach://observe/{token}
+        // Non-registered users can observe live runs without an account
+        if (uri.scheme == "airuncoach" && uri.host == "observe") {
+            val observerToken = uri.pathSegments?.firstOrNull()
+            if (!observerToken.isNullOrBlank()) {
+                Log.d("MainActivity", "Observer invitation token detected: $observerToken")
+                intent?.putExtra("observer_invite_token", observerToken)
+                // The MainActivity will handle this as a pending deep link
+                // This will be handled in the onCreate deep link routing section
+                return null  // Don't return runId, let the observer path handle it
             }
         }
 
