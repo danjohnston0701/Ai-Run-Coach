@@ -818,6 +818,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var planWeekNumber: Int? = null
     private var planTotalWeeks: Int? = null
     
+    // Group run context (if this run is part of a group run)
+    private var groupRunId: String? = null
+    
     // ========== Session Coaching Context ==========
     // AI-generated session plan: phases, coaching triggers, tone — passed from ViewModel
     private var sessionInstructions: SessionInstructionsResponse? = null
@@ -901,7 +904,7 @@ class RunTrackingService : Service(), SensorEventListener {
         planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
         planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
         // Group run context
-        val groupRunId = intent?.getStringExtra(EXTRA_GROUP_RUN_ID)
+        groupRunId = intent?.getStringExtra(EXTRA_GROUP_RUN_ID)
         // Deserialize AI-generated session instructions from JSON if present (legacy plan)
         val sessionJson = intent?.getStringExtra(EXTRA_SESSION_INSTRUCTIONS_JSON)
         if (sessionJson != null) {
