@@ -30,14 +30,18 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.suspendCancellableCoroutine
 import live.airuncoach.airuncoach.R
+import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WatchSendState
+import live.airuncoach.airuncoach.ui.dialogs.FriendPickerDialog
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
+import live.airuncoach.airuncoach.viewmodel.FriendsUiState
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
@@ -78,6 +82,12 @@ fun MapMyRunSetupScreen(
     val runState by runSessionViewModel.runState.collectAsState()
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
     var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
+    
+    // For friend picker in Live Tracking
+    val friendsViewModel: FriendsViewModel = remember { 
+        FriendsViewModel(context)
+    }
+    val friendsState by friendsViewModel.friendsState.collectAsState()
 
     // Minor metadata
     var activityMode by remember { mutableStateOf(ActivityMode.RUN) }
@@ -264,11 +274,16 @@ fun MapMyRunSetupScreen(
 
             // Social — redesigned into a single clean section
             item {
+                val friends = when (friendsState) {
+                    is FriendsUiState.Success -> (friendsState as FriendsUiState.Success).friends
+                    else -> emptyList()
+                }
                 SocialSection(
                     liveTrackingEnabled = isLiveTrackingEnabled,
                     onToggleLiveTracking = { isLiveTrackingEnabled = it },
                     liveTrackingObservers = liveTrackingObservers,
                     onObserversChanged = { liveTrackingObservers = it },
+                    friends = friends,
 
                     groupRunEnabled = isGroupRunEnabled,
                     onToggleGroupRun = { isGroupRunEnabled = it }
@@ -999,6 +1014,7 @@ private fun SocialSection(
     onToggleLiveTracking: (Boolean) -> Unit,
     liveTrackingObservers: List<String>,
     onObserversChanged: (List<String>) -> Unit,
+    friends: List<Friend>,
 
     groupRunEnabled: Boolean,
     onToggleGroupRun: (Boolean) -> Unit
@@ -1032,7 +1048,8 @@ private fun SocialSection(
                         Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
                         LiveTrackingObserverSection(
                             observers = liveTrackingObservers,
-                            onObserversChanged = onObserversChanged
+                            onObserversChanged = onObserversChanged,
+                            friends = friends
                         )
                     }
                 }
@@ -1108,10 +1125,24 @@ private fun SocialRowToggle(
 @Composable
 private fun LiveTrackingObserverSection(
     observers: List<String>,
-    onObserversChanged: (List<String>) -> Unit
+    onObserversChanged: (List<String>) -> Unit,
+    friends: List<Friend>
 ) {
     var showFriendPicker by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf("") }
+    
+    // Friend picker dialog
+    if (showFriendPicker) {
+        FriendPickerDialog(
+            friends = friends,
+            onFriendsSelected = { selectedFriendIds ->
+                // Add selected friends to observers list
+                onObserversChanged(observers + selectedFriendIds)
+            },
+            onDismiss = { showFriendPicker = false },
+            initialSelected = observers.filter { it !in observers.map { it } }  // Show already selected
+        )
+    }
 
     Column(
         modifier = Modifier
