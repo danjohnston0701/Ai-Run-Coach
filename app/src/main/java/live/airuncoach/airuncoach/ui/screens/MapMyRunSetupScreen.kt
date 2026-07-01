@@ -92,6 +92,7 @@ fun MapMyRunSetupScreen(
 
     // Social toggles
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
+    var liveTrackingObservers by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs for invited observers
     var isGroupRunEnabled by remember { mutableStateOf(false) } // visual toggle only for now
     var isAiCoachEnabled by remember { mutableStateOf(initialAiCoachEnabled) } // Initialize from dashboard preference
 
@@ -266,11 +267,11 @@ fun MapMyRunSetupScreen(
                 SocialSection(
                     liveTrackingEnabled = isLiveTrackingEnabled,
                     onToggleLiveTracking = { isLiveTrackingEnabled = it },
-                    onManageLiveTracking = { /* Navigate to observers */ },
+                    liveTrackingObservers = liveTrackingObservers,
+                    onObserversChanged = { liveTrackingObservers = it },
 
                     groupRunEnabled = isGroupRunEnabled,
-                    onToggleGroupRun = { isGroupRunEnabled = it },
-                    onManageGroupRun = { /* Navigate to group run setup */ }
+                    onToggleGroupRun = { isGroupRunEnabled = it }
                 )
             }
 /*Hide AI Pre-Summary text
@@ -368,7 +369,7 @@ fun MapMyRunSetupScreen(
                                             targetMinutes = minutesInt,
                                             targetSeconds = secondsInt,
                                             liveTrackingEnabled = isLiveTrackingEnabled,
-                                            liveTrackingObservers = emptyList(),
+                                            liveTrackingObservers = liveTrackingObservers,
                                             isGroupRun = isGroupRunEnabled,
                                             groupRunParticipants = emptyList()
                                         )
@@ -413,7 +414,7 @@ fun MapMyRunSetupScreen(
                                             targetMinutes = minutesInt,
                                             targetSeconds = secondsInt,
                                             liveTrackingEnabled = isLiveTrackingEnabled,
-                                            liveTrackingObservers = emptyList(),
+                                            liveTrackingObservers = liveTrackingObservers,
                                             isGroupRun = isGroupRunEnabled,
                                             groupRunParticipants = emptyList()
                                         )
@@ -996,11 +997,11 @@ private fun AiCoachToggleSection(
 private fun SocialSection(
     liveTrackingEnabled: Boolean,
     onToggleLiveTracking: (Boolean) -> Unit,
-    onManageLiveTracking: () -> Unit,
+    liveTrackingObservers: List<String>,
+    onObserversChanged: (List<String>) -> Unit,
 
     groupRunEnabled: Boolean,
-    onToggleGroupRun: (Boolean) -> Unit,
-    onManageGroupRun: () -> Unit
+    onToggleGroupRun: (Boolean) -> Unit
 ) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Text(
@@ -1017,13 +1018,24 @@ private fun SocialSection(
         ) {
             Column(modifier = Modifier.padding(vertical = 6.dp)) {
 
-                SocialRowToggle(
-                    title = "Live Tracking",
-                    subtitle = "Share your live location",
-                    enabled = liveTrackingEnabled,
-                    onToggle = { onToggleLiveTracking(it) },
-                    onManage = onManageLiveTracking
-                )
+                // Live Tracking toggle + expandable observer picker
+                Column {
+                    SocialRowToggle(
+                        title = "Live Tracking",
+                        subtitle = "Share your live location",
+                        enabled = liveTrackingEnabled,
+                        onToggle = { onToggleLiveTracking(it) }
+                    )
+
+                    // Expandable observer section (shown when Live Tracking is enabled)
+                    if (liveTrackingEnabled) {
+                        Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
+                        LiveTrackingObserverSection(
+                            observers = liveTrackingObservers,
+                            onObserversChanged = onObserversChanged
+                        )
+                    }
+                }
 
                 Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
 
@@ -1031,8 +1043,7 @@ private fun SocialSection(
                     title = "Group Run",
                     subtitle = "Invite friends to join",
                     enabled = groupRunEnabled,
-                    onToggle = { onToggleGroupRun(it) },
-                    onManage = onManageGroupRun
+                    onToggle = { onToggleGroupRun(it) }
                 )
             }
         }
@@ -1044,8 +1055,7 @@ private fun SocialRowToggle(
     title: String,
     subtitle: String,
     enabled: Boolean,
-    onToggle: (Boolean) -> Unit,
-    onManage: () -> Unit
+    onToggle: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1088,20 +1098,147 @@ private fun SocialRowToggle(
             checked = enabled,
             onCheckedChange = onToggle
         )
-/*
-        Spacer(modifier = Modifier.width(8.dp))
+    }
+}
 
-        // Manage chevron (only useful when enabled)
-        val manageAlpha = if (enabled) 1f else 0.35f
-        Icon(
-            painter = painterResource(id = R.drawable.icon_play_vector),
-            contentDescription = "Manage",
-            tint = Colors.textMuted.copy(alpha = manageAlpha),
-            modifier = Modifier
-                .size(22.dp)
-                .clickable(enabled = enabled) { onManage() }
+/* =====================================================================================
+   LIVE TRACKING — Observer Picker (expanded when Live Tracking enabled)
+===================================================================================== */
+
+@Composable
+private fun LiveTrackingObserverSection(
+    observers: List<String>,
+    onObserversChanged: (List<String>) -> Unit
+) {
+    var showFriendPicker by remember { mutableStateOf(false) }
+    var emailInput by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg, vertical = 12.dp)
+    ) {
+        // Header: "Who can watch?"
+        Text(
+            text = "Who can watch?",
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+            color = Colors.textPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
         )
-        */
+
+        // Add friend button
+        Button(
+            onClick = { showFriendPicker = !showFriendPicker },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Colors.backgroundTertiary.copy(alpha = 0.7f)
+            )
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_people_vector),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = Colors.primary
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Add Friend",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.textPrimary
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Email input field
+        TextField(
+            value = emailInput,
+            onValueChange = { emailInput = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            placeholder = {
+                Text(
+                    "Add email address",
+                    style = AppTextStyles.small,
+                    color = Colors.textMuted
+                )
+            },
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.5f),
+                unfocusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.3f),
+                focusedIndicatorColor = Colors.primary,
+                unfocusedIndicatorColor = Colors.backgroundTertiary.copy(alpha = 0.5f)
+            ),
+            textStyle = AppTextStyles.small,
+            singleLine = true,
+            trailingIcon = {
+                if (emailInput.isNotEmpty()) {
+                    IconButton(
+                        onClick = {
+                            val trimmed = emailInput.trim()
+                            if (trimmed.contains("@") && trimmed.isNotEmpty()) {
+                                onObserversChanged(observers + trimmed)
+                                emailInput = ""
+                            }
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_check_vector),
+                            contentDescription = "Add",
+                            tint = Colors.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        )
+
+        if (observers.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Display added observers
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Colors.backgroundTertiary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                observers.forEach { observer ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = observer,
+                            style = AppTextStyles.small,
+                            color = Colors.textPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                onObserversChanged(observers.filter { it != observer })
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_close_vector),
+                                contentDescription = "Remove",
+                                tint = Colors.textMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
