@@ -3704,6 +3704,64 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // Invite a registered friend to join a group run session (sends push notification)
+  app.post("/api/live-sessions/:sessionId/invite-participant", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const runnerId = req.user!.userId;
+      const { participantId } = req.body;
+
+      if (!participantId) {
+        return res.status(400).json({ error: "participantId is required" });
+      }
+
+      // Validate session exists and belongs to the authenticated runner
+      const session = await storage.getLiveSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      if (session.userId !== runnerId) {
+        return res.status(403).json({ error: "Unauthorized: session does not belong to this user" });
+      }
+
+      // Validate friendship
+      const isFriend = await storage.checkFriendship(runnerId, participantId);
+      if (!isFriend) {
+        return res.status(403).json({ error: "Users are not friends" });
+      }
+
+      // Get runner info for notification
+      const runner = await storage.getUser(runnerId);
+      if (!runner) {
+        return res.status(500).json({ error: "Runner not found" });
+      }
+
+      const notificationService = await import("./notification-service");
+
+      // Send push notification to participant
+      const pushSent = await notificationService.sendFirebasePush(
+        participantId,
+        `${runner.name || "A runner"} invited you to join their group run`,
+        "Tap to join their live run",
+        {
+          type: "group_run_invite",
+          sessionId,
+          runnerId,
+          runnerName: runner.name || "A runner",
+          routeId: session.routeId || "",
+          hasStarted: session.hasStarted ? "true" : "false",
+        }
+      );
+
+      console.log(`[Group Run] Invited participant ${participantId} to join ${runnerId}'s run (session ${sessionId}). Push sent: ${pushSent}`);
+
+      return res.json({ success: true, pushSent });
+    } catch (error: any) {
+      console.error("Invite participant error:", error);
+      res.status(500).json({ error: "Failed to invite participant" });
+    }
+  });
+
   // Public endpoint for non-registered observers to access live sessions
   app.get("/api/observe/:token", async (req: Request, res: Response) => {
     try {

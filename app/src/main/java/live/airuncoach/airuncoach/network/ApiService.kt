@@ -704,13 +704,13 @@ interface ApiService {
      * Sends push notification to the participant.
      *
      * @param sessionId The live session ID
-     * @param participantId The friend's user ID
+     * @param body Contains the participantId (friend's user ID)
      * @return Response with success status
      */
     @POST("/api/live-sessions/{sessionId}/invite-participant")
     suspend fun inviteGroupRunParticipant(
         @Path("sessionId") sessionId: String,
-        @Path("participantId") participantId: String
+        @Body body: InviteParticipantRequest
     ): InviteParticipantResponse
 }
 
@@ -769,7 +769,11 @@ data class InviteObserverResponse(
     val error: String? = null
 )
 
-// Request body for inviting a group run participant (just the participant ID)
+// Request body for inviting a group run participant
+data class InviteParticipantRequest(
+    val participantId: String
+)
+
 // Response from inviting a group run participant
 data class InviteParticipantResponse(
     val success: Boolean,

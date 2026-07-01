@@ -25,6 +25,7 @@ import live.airuncoach.airuncoach.data.WeatherRepository
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.InviteObserverRequest
+import live.airuncoach.airuncoach.network.InviteParticipantRequest
 import live.airuncoach.airuncoach.network.model.BatchTTSRequest
 import live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan
 import live.airuncoach.airuncoach.network.model.PreRunBriefingRequest
@@ -1475,7 +1476,7 @@ class RunSessionViewModel @Inject constructor(
                     try {
                         val response = apiService.inviteGroupRunParticipant(
                             sessionId = sessionId,
-                            participantId = participantId
+                            body = InviteParticipantRequest(participantId = participantId)
                         )
                         if (response.success) {
                             Log.d("RunSessionViewModel", "✅ Group run invite sent to participant: $participantId (push: ${response.pushSent})")

@@ -479,9 +479,9 @@ fun MapMyRunSetupScreen(
                                     targetMinutes = minutesInt,
                                     targetSeconds = secondsInt,
                                     liveTrackingEnabled = isLiveTrackingEnabled,
-                                    liveTrackingObservers = emptyList(),
+                                    liveTrackingObservers = liveTrackingObservers,
                                     isGroupRun = isGroupRunEnabled,
-                                    groupRunParticipants = emptyList()
+                                    groupRunParticipants = groupRunParticipants
                                 )
                                 runSessionViewModel.setRunConfig(config)
                                 runSessionViewModel.fetchWellnessData()
@@ -1153,11 +1153,11 @@ private fun GroupRunParticipantSection(
         FriendPickerDialog(
             friends = friends,
             onFriendsSelected = { selectedFriendIds ->
-                // Add selected friends to participants list
-                onParticipantsChanged(participants + selectedFriendIds)
+                // Replace with the full selection from the dialog (already de-duped by Set)
+                onParticipantsChanged(selectedFriendIds)
             },
             onDismiss = { showFriendPicker = false },
-            initialSelected = emptyList()  // Can't pre-select since we just added them
+            initialSelected = participants  // Pre-check already-selected participants
         )
     }
 
@@ -1258,16 +1258,19 @@ private fun LiveTrackingObserverSection(
     var showFriendPicker by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf("") }
     
-    // Friend picker dialog
+    // Friend picker dialog — only shows friend IDs (emails are added separately)
     if (showFriendPicker) {
+        // Pre-select the friend IDs already in the list (emails excluded)
+        val alreadySelectedFriendIds = observers.filter { !it.contains("@") }
         FriendPickerDialog(
             friends = friends,
             onFriendsSelected = { selectedFriendIds ->
-                // Add selected friends to observers list
-                onObserversChanged(observers + selectedFriendIds)
+                // Replace friend IDs in the list; preserve existing email entries
+                val existingEmails = observers.filter { it.contains("@") }
+                onObserversChanged(existingEmails + selectedFriendIds)
             },
             onDismiss = { showFriendPicker = false },
-            initialSelected = observers.filter { it !in observers.map { it } }  // Show already selected
+            initialSelected = alreadySelectedFriendIds
         )
     }
 
@@ -1367,6 +1370,12 @@ private fun LiveTrackingObserverSection(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 observers.forEach { observer ->
+                    // For emails show as-is; for friend IDs resolve to name
+                    val displayName = if (observer.contains("@")) {
+                        observer
+                    } else {
+                        friends.find { it.id == observer }?.name ?: observer
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1375,7 +1384,7 @@ private fun LiveTrackingObserverSection(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = observer,
+                            text = displayName,
                             style = AppTextStyles.small,
                             color = Colors.textPrimary,
                             modifier = Modifier.weight(1f)
