@@ -13,6 +13,7 @@ import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -23,6 +24,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.WeatherRepository
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.InviteObserverRequest
 import live.airuncoach.airuncoach.network.model.BatchTTSRequest
 import live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan
 import live.airuncoach.airuncoach.network.model.PreRunBriefingRequest
@@ -1366,11 +1368,86 @@ class RunSessionViewModel @Inject constructor(
             
             _runState.update { it.copy(isRunning = true, isPaused = false) }
             Log.d("RunSessionViewModel", "Run tracking service started")
+            
+            // Send observer invites if Live Tracking is enabled
+            runConfig?.let { config ->
+                if (config.liveTrackingEnabled && config.liveTrackingObservers.isNotEmpty()) {
+                    sendObserverInvites(config.liveTrackingObservers)
+                }
+            }
         } catch (e: Exception) {
             Log.e("RunSessionViewModel", "Failed to start run tracking service", e)
             _runState.update { it.copy(
                 coachText = "Failed to start run. Please try again."
             )}
+        }
+    }
+
+    private fun sendObserverInvites(observers: List<String>) {
+        viewModelScope.launch {
+            // Wait a brief moment for the live session to be created and synced
+            delay(500)
+            
+            try {
+                // Get the current live session ID from the active session
+                val sessionId = getCurrentRunningSessionId()
+                if (sessionId.isNullOrBlank()) {
+                    Log.w("RunSessionViewModel", "No active session ID available for observer invites")
+                    return@launch
+                }
+                
+                Log.d("RunSessionViewModel", "Sending observer invites for session: $sessionId")
+                
+                observers.forEach { observer ->
+                    try {
+                        if (observer.contains("@")) {
+                            // Email address
+                            val response = apiService.inviteObserver(
+                                sessionId = sessionId,
+                                body = InviteObserverRequest(email = observer)
+                            )
+                            if (response.success) {
+                                Log.d("RunSessionViewModel", "✅ Observer email invite sent: $observer")
+                            } else {
+                                Log.w("RunSessionViewModel", "Observer email invite failed: ${response.error}")
+                            }
+                        } else {
+                            // User ID (friend)
+                            val response = apiService.inviteObserver(
+                                sessionId = sessionId,
+                                body = InviteObserverRequest(friendId = observer)
+                            )
+                            if (response.success) {
+                                Log.d("RunSessionViewModel", "✅ Observer friend invite sent: $observer (push: ${response.pushSent})")
+                            } else {
+                                Log.w("RunSessionViewModel", "Observer friend invite failed: ${response.error}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("RunSessionViewModel", "Failed to invite observer $observer: ${e.message}", e)
+                        // Continue with other invites even if one fails
+                    }
+                }
+                
+                Log.d("RunSessionViewModel", "✅ All observer invites processed")
+            } catch (e: Exception) {
+                Log.e("RunSessionViewModel", "Error sending observer invites: ${e.message}", e)
+            }
+        }
+    }
+    
+    /**
+     * Get the current running session ID.
+     * Polls the /api/users/{userId}/live-session endpoint to retrieve the active session.
+     */
+    private suspend fun getCurrentRunningSessionId(): String? {
+        return try {
+            val userId = SessionManager(context).getUserId() ?: return null
+            val session = apiService.getUserLiveSession(userId)
+            session?.id
+        } catch (e: Exception) {
+            Log.w("RunSessionViewModel", "Failed to get live session ID: ${e.message}")
+            null
         }
     }
 

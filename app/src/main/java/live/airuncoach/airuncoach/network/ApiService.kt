@@ -674,9 +674,30 @@ interface ApiService {
     @GET("/api/live-sessions/{sessionId}")
     suspend fun getLiveSession(@Path("sessionId") sessionId: String): live.airuncoach.airuncoach.viewmodel.LiveSessionApiResponse
 
+    /**
+     * Get the current active live session for a user.
+     * Used to retrieve session ID after a run starts.
+     */
+    @GET("/api/users/{userId}/live-session")
+    suspend fun getUserLiveSession(@Path("userId") userId: String): ObserveSessionData?
+
     // Observer endpoint - public access (no auth required) for non-registered users to watch live runs
     @GET("/api/observe/{token}")
     suspend fun getObserveSession(@Path("token") token: String): ObserveSessionResponse
+
+    /**
+     * Invite an observer to watch a live run session.
+     * Can invite by friendId (registered user) or email (any email address).
+     *
+     * @param sessionId The live session ID
+     * @param body Contains either friendId or email
+     * @return Response with success status
+     */
+    @POST("/api/live-sessions/{sessionId}/invite-observer")
+    suspend fun inviteObserver(
+        @Path("sessionId") sessionId: String,
+        @Body body: InviteObserverRequest
+    ): InviteObserverResponse
 }
 
 data class RefreshWatchTokenRequest(
@@ -717,6 +738,21 @@ data class GpsPoint(
     val lng: Double,
     val timestamp: Long,
     val altitude: Double? = null
+)
+
+// Request body for inviting observers to a live session
+data class InviteObserverRequest(
+    val friendId: String? = null,  // User ID of a registered friend
+    val email: String? = null       // Email address (can be registered or non-registered user)
+)
+
+// Response from inviting an observer
+data class InviteObserverResponse(
+    val success: Boolean,
+    val type: String? = null,       // "registered" or "email"
+    val pushSent: Boolean = false,
+    val emailSent: Boolean = false,
+    val error: String? = null
 )
 
 /**
