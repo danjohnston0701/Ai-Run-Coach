@@ -698,6 +698,20 @@ interface ApiService {
         @Path("sessionId") sessionId: String,
         @Body body: InviteObserverRequest
     ): InviteObserverResponse
+
+    /**
+     * Invite a friend to participate in a group run session.
+     * Sends push notification to the participant.
+     *
+     * @param sessionId The live session ID
+     * @param participantId The friend's user ID
+     * @return Response with success status
+     */
+    @POST("/api/live-sessions/{sessionId}/invite-participant")
+    suspend fun inviteGroupRunParticipant(
+        @Path("sessionId") sessionId: String,
+        @Path("participantId") participantId: String
+    ): InviteParticipantResponse
 }
 
 data class RefreshWatchTokenRequest(
@@ -752,6 +766,14 @@ data class InviteObserverResponse(
     val type: String? = null,       // "registered" or "email"
     val pushSent: Boolean = false,
     val emailSent: Boolean = false,
+    val error: String? = null
+)
+
+// Request body for inviting a group run participant (just the participant ID)
+// Response from inviting a group run participant
+data class InviteParticipantResponse(
+    val success: Boolean,
+    val pushSent: Boolean = false,
     val error: String? = null
 )
 

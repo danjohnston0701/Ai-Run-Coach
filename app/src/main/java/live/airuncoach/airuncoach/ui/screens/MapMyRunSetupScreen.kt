@@ -103,7 +103,8 @@ fun MapMyRunSetupScreen(
     // Social toggles
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
     var liveTrackingObservers by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs for invited observers
-    var isGroupRunEnabled by remember { mutableStateOf(false) } // visual toggle only for now
+    var isGroupRunEnabled by remember { mutableStateOf(false) }
+    var groupRunParticipants by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs for group run participants
     var isAiCoachEnabled by remember { mutableStateOf(initialAiCoachEnabled) } // Initialize from dashboard preference
 
     // GPS State
@@ -286,7 +287,9 @@ fun MapMyRunSetupScreen(
                     friends = friends,
 
                     groupRunEnabled = isGroupRunEnabled,
-                    onToggleGroupRun = { isGroupRunEnabled = it }
+                    onToggleGroupRun = { isGroupRunEnabled = it },
+                    groupRunParticipants = groupRunParticipants,
+                    onParticipantsChanged = { groupRunParticipants = it }
                 )
             }
 /*Hide AI Pre-Summary text
@@ -386,7 +389,7 @@ fun MapMyRunSetupScreen(
                                             liveTrackingEnabled = isLiveTrackingEnabled,
                                             liveTrackingObservers = liveTrackingObservers,
                                             isGroupRun = isGroupRunEnabled,
-                                            groupRunParticipants = emptyList()
+                                            groupRunParticipants = groupRunParticipants
                                         )
                                         runSessionViewModel.setRunConfig(config)
                                         runSessionViewModel.fetchWellnessData()
@@ -431,7 +434,7 @@ fun MapMyRunSetupScreen(
                                             liveTrackingEnabled = isLiveTrackingEnabled,
                                             liveTrackingObservers = liveTrackingObservers,
                                             isGroupRun = isGroupRunEnabled,
-                                            groupRunParticipants = emptyList()
+                                            groupRunParticipants = groupRunParticipants
                                         )
                                         runSessionViewModel.setRunConfig(config)
                                         runSessionViewModel.fetchWellnessData()
@@ -1017,7 +1020,9 @@ private fun SocialSection(
     friends: List<Friend>,
 
     groupRunEnabled: Boolean,
-    onToggleGroupRun: (Boolean) -> Unit
+    onToggleGroupRun: (Boolean) -> Unit,
+    groupRunParticipants: List<String>,
+    onParticipantsChanged: (List<String>) -> Unit
 ) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Text(
@@ -1056,12 +1061,25 @@ private fun SocialSection(
 
                 Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
 
-                SocialRowToggle(
-                    title = "Group Run",
-                    subtitle = "Invite friends to join",
-                    enabled = groupRunEnabled,
-                    onToggle = { onToggleGroupRun(it) }
-                )
+                // Group Run toggle + expandable participant picker
+                Column {
+                    SocialRowToggle(
+                        title = "Group Run",
+                        subtitle = "Invite friends to join",
+                        enabled = groupRunEnabled,
+                        onToggle = { onToggleGroupRun(it) }
+                    )
+
+                    // Expandable participant section (shown when Group Run is enabled)
+                    if (groupRunEnabled) {
+                        Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
+                        GroupRunParticipantSection(
+                            participants = groupRunParticipants,
+                            onParticipantsChanged = onParticipantsChanged,
+                            friends = friends
+                        )
+                    }
+                }
             }
         }
     }
@@ -1115,6 +1133,115 @@ private fun SocialRowToggle(
             checked = enabled,
             onCheckedChange = onToggle
         )
+    }
+}
+
+/* =====================================================================================
+   GROUP RUN — Participant Picker (expanded when Group Run enabled)
+===================================================================================== */
+
+@Composable
+private fun GroupRunParticipantSection(
+    participants: List<String>,
+    onParticipantsChanged: (List<String>) -> Unit,
+    friends: List<Friend>
+) {
+    var showFriendPicker by remember { mutableStateOf(false) }
+
+    // Friend picker dialog
+    if (showFriendPicker) {
+        FriendPickerDialog(
+            friends = friends,
+            onFriendsSelected = { selectedFriendIds ->
+                // Add selected friends to participants list
+                onParticipantsChanged(participants + selectedFriendIds)
+            },
+            onDismiss = { showFriendPicker = false },
+            initialSelected = emptyList()  // Can't pre-select since we just added them
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg, vertical = 12.dp)
+    ) {
+        // Header: "Who's running with you?"
+        Text(
+            text = "Who's running with you?",
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+            color = Colors.textPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        // Add friends button
+        Button(
+            onClick = { showFriendPicker = !showFriendPicker },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Colors.backgroundTertiary.copy(alpha = 0.7f)
+            )
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_people_vector),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = Colors.primary
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "Add Friends",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.textPrimary
+            )
+        }
+
+        if (participants.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Display added participants
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Colors.backgroundTertiary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                participants.forEach { participantId ->
+                    val participantName = friends.find { it.id == participantId }?.name ?: participantId
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = participantName,
+                            style = AppTextStyles.small,
+                            color = Colors.textPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                onParticipantsChanged(participants.filter { it != participantId })
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_close_vector),
+                                contentDescription = "Remove",
+                                tint = Colors.textMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

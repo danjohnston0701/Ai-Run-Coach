@@ -1374,6 +1374,11 @@ class RunSessionViewModel @Inject constructor(
                 if (config.liveTrackingEnabled && config.liveTrackingObservers.isNotEmpty()) {
                     sendObserverInvites(config.liveTrackingObservers)
                 }
+                
+                // Send group run invites if Group Run is enabled
+                if (config.isGroupRun && config.groupRunParticipants.isNotEmpty()) {
+                    sendGroupRunInvites(config.groupRunParticipants)
+                }
             }
         } catch (e: Exception) {
             Log.e("RunSessionViewModel", "Failed to start run tracking service", e)
@@ -1448,6 +1453,45 @@ class RunSessionViewModel @Inject constructor(
         } catch (e: Exception) {
             Log.w("RunSessionViewModel", "Failed to get live session ID: ${e.message}")
             null
+        }
+    }
+
+    private fun sendGroupRunInvites(participantIds: List<String>) {
+        viewModelScope.launch {
+            // Wait a brief moment for the live session to be created and synced
+            delay(500)
+            
+            try {
+                // Get the current live session ID from the active session
+                val sessionId = getCurrentRunningSessionId()
+                if (sessionId.isNullOrBlank()) {
+                    Log.w("RunSessionViewModel", "No active session ID available for group run invites")
+                    return@launch
+                }
+                
+                Log.d("RunSessionViewModel", "Sending group run invites for session: $sessionId")
+                
+                participantIds.forEach { participantId ->
+                    try {
+                        val response = apiService.inviteGroupRunParticipant(
+                            sessionId = sessionId,
+                            participantId = participantId
+                        )
+                        if (response.success) {
+                            Log.d("RunSessionViewModel", "✅ Group run invite sent to participant: $participantId (push: ${response.pushSent})")
+                        } else {
+                            Log.w("RunSessionViewModel", "Group run invite failed: ${response.error}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("RunSessionViewModel", "Failed to invite participant $participantId: ${e.message}", e)
+                        // Continue with other invites even if one fails
+                    }
+                }
+                
+                Log.d("RunSessionViewModel", "✅ All group run invites processed")
+            } catch (e: Exception) {
+                Log.e("RunSessionViewModel", "Error sending group run invites: ${e.message}", e)
+            }
         }
     }
 
