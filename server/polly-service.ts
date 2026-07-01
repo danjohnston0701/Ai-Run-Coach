@@ -7,6 +7,7 @@
  */
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
+import { trackPollyCost } from "./cost-tracking-service";
 
 // Regional availability of Neural voices (as of 2024):
 //   us-east-1      — ALL neural voices supported (default fallback)
@@ -248,6 +249,7 @@ export async function synthesizeSpeech(
       offset += chunk.length;
     }
 
+    trackPollyCost(enhancedText, null);
     return audioBuffer;
   } catch (error: any) {
     console.error("Polly TTS synthesis error:", {

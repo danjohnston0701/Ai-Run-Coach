@@ -1945,3 +1945,38 @@ export const interestRegistrations = pgTable("interest_registrations", {
 export const insertInterestRegistrationSchema = createInsertSchema(interestRegistrations).omit({ id: true, createdAt: true });
 export type InsertInterestRegistration = z.infer<typeof insertInterestRegistrationSchema>;
 export type InterestRegistration = typeof interestRegistrations.$inferSelect;
+
+// ─── API Cost Logs ────────────────────────────────────────────────────────────
+// Tracks every paid API call made by the platform.
+// Used by the admin cost dashboard to show real spend broken down by service.
+//
+// service values: 'openai_chat' | 'openai_tts' | 'polly' | 'graphhopper'
+// operation examples: 'coaching', 'post_run_analysis', 'training_plan', 'tts', 'route_generation'
+export const apiCostLogs = pgTable("api_cost_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  service: text("service").notNull(),
+  operation: text("operation").notNull(),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  characters: integer("characters"),
+  requests: integer("requests").notNull().default(1),
+  estimatedCostUsd: real("estimated_cost_usd").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type ApiCostLog = typeof apiCostLogs.$inferSelect;
+export type InsertApiCostLog = typeof apiCostLogs.$inferInsert;
+
+// ─── Infrastructure Cost Overrides ────────────────────────────────────────────
+// Admin can manually enter monthly Replit and Neon costs here.
+// These can't be tracked programmatically so they're entered by hand each month.
+export const infraCosts = pgTable("infra_costs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  yearMonth: text("year_month").notNull().unique(),
+  replitCostUsd: real("replit_cost_usd").default(0),
+  neonCostUsd: real("neon_cost_usd").default(0),
+  otherCostUsd: real("other_cost_usd").default(0),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});

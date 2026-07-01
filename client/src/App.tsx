@@ -20,6 +20,7 @@ import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
 import AdminAIConfig from "@/pages/AdminAIConfig";
+import AdminCostDashboard from "@/pages/AdminCostDashboard";
 import Routes from "@/pages/Routes";
 import Events from "@/pages/Events";
 import PreEvent from "@/pages/PreEvent";
@@ -120,6 +121,7 @@ function Router() {
           <Route path="/notifications" component={Notifications} />
           <Route path="/notifications/manage" component={ManageNotifications} />
           <Route path="/admin/ai-config" component={AdminAIConfig} />
+          <Route path="/admin/costs" component={AdminCostDashboard} />
           <Route path="/routes" component={Routes} />
           <Route path="/events" component={Events} />
           <Route path="/event/:id" component={PreEvent} />

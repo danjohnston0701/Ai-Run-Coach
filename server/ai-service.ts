@@ -2269,6 +2269,12 @@ export async function generateTTS(
   });
 
   const buffer = Buffer.from(await response.arrayBuffer());
+
+  // Track OpenAI TTS cost (fire-and-forget)
+  import("./cost-tracking-service").then(({ trackOpenAITtsCost }) => {
+    trackOpenAITtsCost(text, null);
+  }).catch(() => {});
+
   return buffer;
 }
 

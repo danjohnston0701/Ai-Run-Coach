@@ -15,7 +15,7 @@ import {
   achievements, userAchievements, goals, users, notificationPreferences,
   sharedRuns, webhookFailureQueue, garminMoveIQ, garminBloodPressure,
   garminEpochsRaw, garminEpochsAggregate, garminHealthSnapshots, garminSkinTemperature,
-  friendRequests, userStats
+  friendRequests, userStats, apiCostLogs, infraCosts, monthlyUsage
 } from "@shared/schema";
 import { DateTime } from "luxon";
 import polylineCodec from "@mapbox/polyline";
@@ -15480,6 +15480,367 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
     } catch (error: any) {
       console.error("[POST /api/group-runs/:id/debrief]", error);
       res.status(500).json({ error: "Failed to generate debrief" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN COST DASHBOARD ROUTES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/admin/costs/overview
+   * Company-wide cost summary for the selected month (default: current).
+   * Admin-only.
+   */
+  app.get("/api/admin/costs/overview", async (req: Request, res: Response) => {
+    try {
+      const userProfile = req.headers["x-user-profile"];
+      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
+      const profile = JSON.parse(userProfile as string);
+      const user = await storage.getUser(profile.id);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
+
+      const yearMonth = (req.query.yearMonth as string) || (() => {
+        const now = new Date();
+        return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+      })();
+
+      // Company-wide API cost totals from api_cost_logs
+      const [startDate] = [new Date(`${yearMonth}-01T00:00:00Z`)];
+      const endDate = new Date(startDate);
+      endDate.setUTCMonth(endDate.getUTCMonth() + 1);
+
+      const costRows = await db
+        .select({
+          service: apiCostLogs.service,
+          totalCostUsd: sql<number>`COALESCE(SUM(${apiCostLogs.estimatedCostUsd}), 0)`,
+          totalInputTokens: sql<number>`COALESCE(SUM(${apiCostLogs.inputTokens}), 0)`,
+          totalOutputTokens: sql<number>`COALESCE(SUM(${apiCostLogs.outputTokens}), 0)`,
+          totalCharacters: sql<number>`COALESCE(SUM(${apiCostLogs.characters}), 0)`,
+          totalRequests: sql<number>`COALESCE(SUM(${apiCostLogs.requests}), 0)`,
+          callCount: sql<number>`COUNT(*)`,
+        })
+        .from(apiCostLogs)
+        .where(and(
+          gte(apiCostLogs.createdAt, startDate),
+          lt(apiCostLogs.createdAt, endDate)
+        ))
+        .groupBy(apiCostLogs.service);
+
+      // Infra costs (manually entered)
+      const infraRow = await db
+        .select()
+        .from(infraCosts)
+        .where(eq(infraCosts.yearMonth, yearMonth))
+        .limit(1);
+
+      // User counts by tier
+      const tierCounts = await db
+        .select({
+          tier: users.subscriptionTier,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(users)
+        .groupBy(users.subscriptionTier);
+
+      // Total active users this month (had runs)
+      const activeUsersRow = await db
+        .select({ count: sql<number>`COUNT(DISTINCT ${runs.userId})` })
+        .from(runs)
+        .where(and(
+          gte(runs.completedAt, startDate),
+          lt(runs.completedAt, endDate)
+        ));
+
+      const totalUsers = await db
+        .select({ count: sql<number>`COUNT(*)` })
+        .from(users);
+
+      const apiCosts = Object.fromEntries(costRows.map(r => [r.service, r]));
+      const infra = infraRow[0] ?? { replitCostUsd: 0, neonCostUsd: 0, otherCostUsd: 0 };
+
+      const openaiChatCost = Number(apiCosts["openai_chat"]?.totalCostUsd ?? 0);
+      const openaiTtsCost = Number(apiCosts["openai_tts"]?.totalCostUsd ?? 0);
+      const pollyCost = Number(apiCosts["polly"]?.totalCostUsd ?? 0);
+      const graphhopperCost = Number(apiCosts["graphhopper"]?.totalCostUsd ?? 0);
+      const replitCost = Number(infra.replitCostUsd ?? 0);
+      const neonCost = Number(infra.neonCostUsd ?? 0);
+      const otherCost = Number(infra.otherCostUsd ?? 0);
+
+      const totalApiCost = openaiChatCost + openaiTtsCost + pollyCost + graphhopperCost;
+      const totalInfraCost = replitCost + neonCost + otherCost;
+      const totalCost = totalApiCost + totalInfraCost;
+
+      res.json({
+        yearMonth,
+        summary: {
+          totalCostUsd: totalCost,
+          totalApiCostUsd: totalApiCost,
+          totalInfraCostUsd: totalInfraCost,
+          openaiChatUsd: openaiChatCost,
+          openaiTtsUsd: openaiTtsCost,
+          pollyUsd: pollyCost,
+          graphhopperUsd: graphhopperCost,
+          replitUsd: replitCost,
+          neonUsd: neonCost,
+          otherUsd: otherCost,
+        },
+        serviceBreakdown: costRows,
+        infra: infra,
+        users: {
+          total: Number(totalUsers[0]?.count ?? 0),
+          activeThisMonth: Number(activeUsersRow[0]?.count ?? 0),
+          byTier: tierCounts,
+        },
+        pricing: {
+          openaiInputPer1MTokens: 0.15,
+          openaiOutputPer1MTokens: 0.60,
+          openaiTtsPer1MChars: 15.0,
+          pollyNeuralPer1MChars: 16.0,
+          graphhopperPerRequest: 0.01,
+        },
+      });
+    } catch (error: any) {
+      console.error("[GET /api/admin/costs/overview]", error);
+      res.status(500).json({ error: "Failed to load cost overview" });
+    }
+  });
+
+  /**
+   * GET /api/admin/costs/users
+   * Per-user cost breakdown using monthly_usage counters + estimated cost multipliers.
+   * Admin-only.
+   */
+  app.get("/api/admin/costs/users", async (req: Request, res: Response) => {
+    try {
+      const userProfile = req.headers["x-user-profile"];
+      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
+      const profile = JSON.parse(userProfile as string);
+      const user = await storage.getUser(profile.id);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
+
+      const yearMonth = (req.query.yearMonth as string) || (() => {
+        const now = new Date();
+        return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+      })();
+
+      // Get per-user API cost logs
+      const [startDate] = [new Date(`${yearMonth}-01T00:00:00Z`)];
+      const endDate = new Date(startDate);
+      endDate.setUTCMonth(endDate.getUTCMonth() + 1);
+
+      const userApiCosts = await db
+        .select({
+          userId: apiCostLogs.userId,
+          service: apiCostLogs.service,
+          totalCostUsd: sql<number>`COALESCE(SUM(${apiCostLogs.estimatedCostUsd}), 0)`,
+          callCount: sql<number>`COUNT(*)`,
+        })
+        .from(apiCostLogs)
+        .where(and(
+          gte(apiCostLogs.createdAt, startDate),
+          lt(apiCostLogs.createdAt, endDate),
+          isNotNull(apiCostLogs.userId)
+        ))
+        .groupBy(apiCostLogs.userId, apiCostLogs.service);
+
+      // Get monthly usage per user (existing table — used to estimate TTS + route costs from users without direct API logs yet)
+      const usageRows = await db
+        .select()
+        .from(monthlyUsage)
+        .where(eq(monthlyUsage.yearMonth, yearMonth));
+
+      // Get all users (basic info)
+      const allUsers = await db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          subscriptionTier: users.subscriptionTier,
+          subscriptionStatus: users.subscriptionStatus,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .orderBy(desc(users.createdAt));
+
+      // Build per-user cost map from direct API logs
+      const directCostMap: Record<string, { openai_chat: number; openai_tts: number; polly: number; graphhopper: number }> = {};
+      for (const row of userApiCosts) {
+        if (!row.userId) continue;
+        if (!directCostMap[row.userId]) {
+          directCostMap[row.userId] = { openai_chat: 0, openai_tts: 0, polly: 0, graphhopper: 0 };
+        }
+        const s = row.service as keyof typeof directCostMap[string];
+        if (s in directCostMap[row.userId]) {
+          directCostMap[row.userId][s] = Number(row.totalCostUsd);
+        }
+      }
+
+      // Build per-user estimated costs from monthly_usage (for users without direct tracking yet)
+      // Estimates: 1 TTS call per coaching km (~300 chars avg), 1 GraphHopper call per route
+      const estimatedCostMap: Record<string, {
+        aiCoachingKm: number;
+        routesGenerated: number;
+        postRunAnalyses: number;
+        trainingPlansGenerated: number;
+        estimatedTtsCostUsd: number;
+        estimatedRouteCostUsd: number;
+        estimatedAnalysisCostUsd: number;
+        estimatedPlanCostUsd: number;
+      }> = {};
+      const AVG_TTS_CHARS_PER_COACHING_KM = 400;
+      const AVG_TOKENS_PER_ANALYSIS = 2000;
+      const AVG_TOKENS_PER_PLAN = 5000;
+      for (const u of usageRows) {
+        const ttsCost = (u.aiCoachingKm * AVG_TTS_CHARS_PER_COACHING_KM / 1_000_000) * 16.0;
+        const routeCost = u.routesGenerated * 0.01;
+        const analysisCost = (u.postRunAnalyses * AVG_TOKENS_PER_ANALYSIS / 1_000_000) * 0.60;
+        const planCost = (u.trainingPlansGenerated * AVG_TOKENS_PER_PLAN / 1_000_000) * 0.60;
+        estimatedCostMap[u.userId] = {
+          aiCoachingKm: u.aiCoachingKm,
+          routesGenerated: u.routesGenerated,
+          postRunAnalyses: u.postRunAnalyses,
+          trainingPlansGenerated: u.trainingPlansGenerated,
+          estimatedTtsCostUsd: ttsCost,
+          estimatedRouteCostUsd: routeCost,
+          estimatedAnalysisCostUsd: analysisCost,
+          estimatedPlanCostUsd: planCost,
+        };
+      }
+
+      const userList = allUsers.map(u => {
+        const direct = directCostMap[u.id] ?? { openai_chat: 0, openai_tts: 0, polly: 0, graphhopper: 0 };
+        const estimated = estimatedCostMap[u.id] ?? {
+          aiCoachingKm: 0, routesGenerated: 0, postRunAnalyses: 0, trainingPlansGenerated: 0,
+          estimatedTtsCostUsd: 0, estimatedRouteCostUsd: 0, estimatedAnalysisCostUsd: 0, estimatedPlanCostUsd: 0,
+        };
+        const directTotal = direct.openai_chat + direct.openai_tts + direct.polly + direct.graphhopper;
+        const estimatedTotal = estimated.estimatedTtsCostUsd + estimated.estimatedRouteCostUsd +
+          estimated.estimatedAnalysisCostUsd + estimated.estimatedPlanCostUsd;
+
+        return {
+          ...u,
+          directCosts: direct,
+          directTotalUsd: directTotal,
+          usage: estimated,
+          estimatedTotalUsd: estimatedTotal,
+          combinedTotalUsd: Math.max(directTotal, estimatedTotal),
+        };
+      });
+
+      res.json({
+        yearMonth,
+        users: userList.sort((a, b) => b.combinedTotalUsd - a.combinedTotalUsd),
+      });
+    } catch (error: any) {
+      console.error("[GET /api/admin/costs/users]", error);
+      res.status(500).json({ error: "Failed to load user costs" });
+    }
+  });
+
+  /**
+   * GET /api/admin/costs/timeline
+   * Daily cost breakdown for the last 30 days.
+   * Admin-only.
+   */
+  app.get("/api/admin/costs/timeline", async (req: Request, res: Response) => {
+    try {
+      const userProfile = req.headers["x-user-profile"];
+      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
+      const profile = JSON.parse(userProfile as string);
+      const user = await storage.getUser(profile.id);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
+
+      const days = Math.min(90, parseInt(req.query.days as string) || 30);
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      since.setHours(0, 0, 0, 0);
+
+      const dailyRows = await db
+        .select({
+          date: sql<string>`DATE(${apiCostLogs.createdAt})`,
+          service: apiCostLogs.service,
+          totalCostUsd: sql<number>`COALESCE(SUM(${apiCostLogs.estimatedCostUsd}), 0)`,
+          callCount: sql<number>`COUNT(*)`,
+        })
+        .from(apiCostLogs)
+        .where(gte(apiCostLogs.createdAt, since))
+        .groupBy(sql`DATE(${apiCostLogs.createdAt})`, apiCostLogs.service)
+        .orderBy(sql`DATE(${apiCostLogs.createdAt})`);
+
+      // Pivot into per-date objects
+      const dateMap: Record<string, Record<string, number>> = {};
+      for (const row of dailyRows) {
+        if (!dateMap[row.date]) dateMap[row.date] = { openai_chat: 0, openai_tts: 0, polly: 0, graphhopper: 0, total: 0 };
+        dateMap[row.date][row.service] = Number(row.totalCostUsd);
+        dateMap[row.date].total += Number(row.totalCostUsd);
+      }
+
+      const timeline = Object.entries(dateMap)
+        .map(([date, costs]) => ({ date, ...costs }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      res.json({ timeline, days });
+    } catch (error: any) {
+      console.error("[GET /api/admin/costs/timeline]", error);
+      res.status(500).json({ error: "Failed to load cost timeline" });
+    }
+  });
+
+  /**
+   * GET /api/admin/costs/infra
+   * Get infrastructure costs for a given month.
+   */
+  app.get("/api/admin/costs/infra", async (req: Request, res: Response) => {
+    try {
+      const userProfile = req.headers["x-user-profile"];
+      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
+      const profile = JSON.parse(userProfile as string);
+      const user = await storage.getUser(profile.id);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
+
+      const yearMonth = (req.query.yearMonth as string) || (() => {
+        const now = new Date();
+        return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+      })();
+
+      const row = await db.select().from(infraCosts).where(eq(infraCosts.yearMonth, yearMonth)).limit(1);
+      res.json(row[0] ?? { yearMonth, replitCostUsd: 0, neonCostUsd: 0, otherCostUsd: 0, notes: "" });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to load infra costs" });
+    }
+  });
+
+  /**
+   * POST /api/admin/costs/infra
+   * Save or update infrastructure costs for a month.
+   */
+  app.post("/api/admin/costs/infra", async (req: Request, res: Response) => {
+    try {
+      const userProfile = req.headers["x-user-profile"];
+      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
+      const profile = JSON.parse(userProfile as string);
+      const user = await storage.getUser(profile.id);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
+
+      const { yearMonth, replitCostUsd = 0, neonCostUsd = 0, otherCostUsd = 0, notes = "" } = req.body;
+      if (!yearMonth) return res.status(400).json({ error: "yearMonth is required" });
+
+      await db.insert(infraCosts).values({
+        yearMonth,
+        replitCostUsd,
+        neonCostUsd,
+        otherCostUsd,
+        notes,
+      }).onConflictDoUpdate({
+        target: infraCosts.yearMonth,
+        set: { replitCostUsd, neonCostUsd, otherCostUsd, notes, updatedAt: new Date() },
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[POST /api/admin/costs/infra]", error);
+      res.status(500).json({ error: "Failed to save infra costs" });
     }
   });
 
