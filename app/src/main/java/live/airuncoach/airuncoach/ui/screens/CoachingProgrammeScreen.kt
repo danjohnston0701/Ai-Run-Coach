@@ -532,7 +532,7 @@ fun TrainingPlanDashboardScreen(
                 onShowAbandonDialog = { showAbandonDialog = true },
                 onAddInjury = { showAddInjuryDialog = true },
                 onViewAdaptations = { onViewAdaptations(planId) },
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 pendingAdaptationsCount = pendingAdaptationsCount,
                 viewModel = viewModel,
                 blockStatus = blockStatus,
@@ -738,20 +738,33 @@ fun PlanDashboardContent(
 ) {
     // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
     // This allows WorkoutDetailScreen → run_session to build a plan-aware RunSetupConfig.
-    val planContext = WorkoutPlanContext(
-        planId = details.plan.id,
-        goalType = details.plan.goalType,
-        weekNumber = progress.currentWeek,
-        totalWeeks = progress.totalWeeks
-    )
+    //
+    // weekNumberForWorkout: look up the workout's actual week from the plan structure rather
+    // than using progress.currentWeek. This ensures overdue sessions (completed in a later week)
+    // are stamped with the week they BELONG to, not the week the user happens to be in today.
+    fun weekNumberForWorkout(workoutId: String): Int =
+        details.weeks.firstOrNull { week -> week.workouts.any { it.id == workoutId } }?.weekNumber
+            ?: progress.currentWeek
+
     val startWithContext: (WorkoutDetails) -> Unit = { w ->
-        WorkoutHolder.planContext = planContext
+        WorkoutHolder.planContext = WorkoutPlanContext(
+            planId = details.plan.id,
+            goalType = details.plan.goalType,
+            weekNumber = weekNumberForWorkout(w.id),
+            totalWeeks = progress.totalWeeks
+        )
         onStartWorkout(w)
     }
     val viewWithContext: (WorkoutDetails) -> Unit = { w ->
-        WorkoutHolder.planContext = planContext
+        WorkoutHolder.planContext = WorkoutPlanContext(
+            planId = details.plan.id,
+            goalType = details.plan.goalType,
+            weekNumber = weekNumberForWorkout(w.id),
+            totalWeeks = progress.totalWeeks
+        )
         onViewWorkoutDetail(w)
     }
+
 
     // Calculate the actual current week BEFORE the LazyColumn so it can be used
     // by OverallProgressCard (progress tile) and the week list simultaneously.
@@ -900,17 +913,28 @@ fun PlanDashboardContent(
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("You have a session you haven't completed yet. Complete it now or it will be skipped.", style = AppTextStyles.small, color = Colors.textSecondary, maxLines = 3)
                             Spacer(modifier = Modifier.height(Spacing.md))
-                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), modifier = Modifier.fillMaxWidth()) {
-                                workout.distance?.let {
-                                    PlanStatChip(R.drawable.icon_target_vector, "${it}km", modifier = Modifier.weight(1f))
+                            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                                // Row 1: Distance or Duration
+                                if (isTimeBasedWorkout(workout)) {
+                                    workout.duration?.let { duration ->
+                                        formatWorkoutDuration(duration)?.let { formatted ->
+                                            PlanStatChip(R.drawable.icon_clock_vector, formatted)
+                                        }
+                                    }
+                                } else {
+                                    workout.distance?.let {
+                                        PlanStatChip(R.drawable.icon_target_vector, "${it}km")
+                                    }
                                 }
-                                workout.targetPace?.let { raw ->
-                                    val paceValue = raw.replace("/km", "").trim()
-                                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km", modifier = Modifier.weight(1f))
-                                }
+                                // Row 2: Intensity
                                 workout.intensity?.let {
                                     val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
-                                    PlanStatChip(R.drawable.icon_heart_vector, zoneLabel, modifier = Modifier.weight(1f))
+                                    PlanStatChip(R.drawable.icon_heart_vector, zoneLabel)
+                                }
+                                // Row 3: Pace (if available)
+                                workout.targetPace?.let { raw ->
+                                    val paceValue = raw.replace("/km", "").trim()
+                                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
                                 }
                             }
                             Spacer(modifier = Modifier.height(Spacing.md))
@@ -932,7 +956,7 @@ fun PlanDashboardContent(
                                 ) {
                                     Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(16.dp), tint = Colors.buttonText)
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Start Now", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                                    Text("Begin Session", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
                                 }
                             }
                         }
@@ -1130,18 +1154,26 @@ fun TodayWorkoutCard(
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.lg)) {
-                workout.distance?.let { PlanStatChip(R.drawable.icon_target_vector, "${it}km") }
-                workout.targetPace?.let { raw ->
-                    // targetPace from DB already contains "/km" (e.g. "5:30/km") — strip it
-                    // so we can append the friendly label "min/km"
-                    val paceValue = raw.replace("/km", "").trim()
-                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                // Row 1: Distance or Duration
+                if (isTimeBasedWorkout(workout)) {
+                    workout.duration?.let { duration ->
+                        formatWorkoutDuration(duration)?.let { formatted ->
+                            PlanStatChip(R.drawable.icon_clock_vector, formatted)
+                        }
+                    }
+                } else {
+                    workout.distance?.let { PlanStatChip(R.drawable.icon_target_vector, "${it}km") }
                 }
-                workout.intensity?.let { 
-                    // Convert "z1" to "Zone 1", "z2" to "Zone 2", etc.
+                // Row 2: Intensity
+                workout.intensity?.let {
                     val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
                     PlanStatChip(R.drawable.icon_heart_vector, zoneLabel)
+                }
+                // Row 3: Pace (if available)
+                workout.targetPace?.let { raw ->
+                    val paceValue = raw.replace("/km", "").trim()
+                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
                 }
             }
 
@@ -1231,15 +1263,25 @@ fun WorkoutRow(workout: WorkoutDetails, onClick: () -> Unit) {
                 style = AppTextStyles.small,
                 color = Colors.textPrimary
             )
-            // Distance + pace instructions below the description
-            if (workout.distance != null || workout.targetPace != null) {
+            // Duration/distance + pace instructions below the description
+            if ((isTimeBasedWorkout(workout) && workout.duration != null) || 
+                (!isTimeBasedWorkout(workout) && workout.distance != null) || 
+                workout.targetPace != null) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    workout.distance?.let {
-                        Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
+                    if (isTimeBasedWorkout(workout)) {
+                        workout.duration?.let { duration ->
+                            formatWorkoutDuration(duration)?.let { formatted ->
+                                Text(formatted, style = AppTextStyles.small, color = Colors.textMuted)
+                            }
+                        }
+                    } else {
+                        workout.distance?.let {
+                            Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
+                        }
                     }
                     workout.targetPace?.let { raw ->
                         val paceValue = raw.replace("/km", "").trim()
@@ -1957,6 +1999,36 @@ fun planStatusColor(status: String) = when (status) {
     "paused" -> Colors.warning
     "completed" -> Colors.primary
     else -> Colors.textMuted
+}
+
+/**
+ * Determine if a workout should display duration (time-based) vs distance
+ * A workout is time-based if it has interval/duration info or if distance is null/zero
+ */
+fun isTimeBasedWorkout(workout: WorkoutDetails): Boolean {
+    // If it has interval or rest duration, it's time-based
+    if (workout.intervalDurationSeconds != null || workout.restDurationSeconds != null) {
+        return true
+    }
+    // If distance is null or very small (< 0.5km), it's likely time-based
+    return workout.distance == null || workout.distance < 0.5
+}
+
+/**
+ * Format workout duration in human-readable format (e.g., "26 minutes", "1h 30m")
+ */
+fun formatWorkoutDuration(durationSeconds: Int?): String? {
+    if (durationSeconds == null || durationSeconds <= 0) return null
+    val minutes = durationSeconds / 60
+    val seconds = durationSeconds % 60
+    return when {
+        minutes < 60 -> "$minutes min${if (seconds > 0) " ${seconds}s" else ""}"
+        else -> {
+            val hours = minutes / 60
+            val mins = minutes % 60
+            "$hours h${if (mins > 0) " ${mins}m" else ""}"
+        }
+    }
 }
 
 /**

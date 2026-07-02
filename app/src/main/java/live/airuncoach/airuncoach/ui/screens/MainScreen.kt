@@ -1056,6 +1056,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             // Build a RunSetupConfig pre-loaded with coaching plan context
                             // so the in-run AI coach knows which plan workout is being executed.
                             val planCtx = WorkoutHolder.planContext
+                            // Capture watch-mode flag before clearing WorkoutHolder below.
+                            val isWatchMode = WorkoutHolder.isWatchMode
                             val targetDistanceKm = w.distance?.toFloat()
                             val config = RunSetupConfig(
                                 activityType = PhysicalActivityType.RUN,
@@ -1073,7 +1075,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                                 workoutDescription  = w.description,
                                 planGoalType        = planCtx?.goalType,
                                 planWeekNumber      = planCtx?.weekNumber,
-                                planTotalWeeks      = planCtx?.totalWeeks
+                                planTotalWeeks      = planCtx?.totalWeeks,
+                                // Watch mode: run screen waits for watch "start" command instead of auto-starting
+                                isWatchMode         = isWatchMode
                             )
                             RunConfigHolder.setConfig(config)
                             // Clear AFTER setting config so recomposition of this composable

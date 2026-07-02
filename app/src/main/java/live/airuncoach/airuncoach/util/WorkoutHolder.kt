@@ -21,9 +21,13 @@ data class WorkoutPlanContext(
 object WorkoutHolder {
     var currentWorkout: WorkoutDetails? = null
     var planContext: WorkoutPlanContext? = null
+    /** Set to true before navigating to run_session via "Prepare for Watch" so the
+     *  run screen waits in standby instead of auto-starting GPS tracking. */
+    var isWatchMode: Boolean = false
 
     fun clear() {
         currentWorkout = null
         planContext = null
+        isWatchMode = false
     }
 }

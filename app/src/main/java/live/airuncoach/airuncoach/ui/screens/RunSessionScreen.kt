@@ -143,6 +143,8 @@ fun RunSessionScreen(
     var routePolyline by remember { mutableStateOf<String?>(null) }
     var showPauseConfirm by remember { mutableStateOf(false) }
     var showStopConfirm by remember { mutableStateOf(false) }
+    // True when the session was opened from "Prepare for Watch" — run screen waits in standby
+    var isWatchMode by remember { mutableStateOf(false) }
 
     val isRunActive = runState.isRunning || runState.isPaused
 
@@ -223,6 +225,7 @@ fun RunSessionScreen(
 
         val config = RunConfigHolder.getConfig()
         val isCoachedWorkout = config?.trainingPlanId != null
+        isWatchMode = config?.isWatchMode == true
 
         config?.let {
             viewModel.setRunConfig(it)
@@ -240,7 +243,9 @@ fun RunSessionScreen(
 
             // For coached workouts, auto-start GPS tracking so the pre-run briefing
             // plays while the run is already in progress — no manual "Start Run" tap needed.
-            if (isCoachedWorkout) {
+            // EXCEPTION: watch mode — the phone must NOT auto-start. The run begins only
+            // when the user presses START on the watch, which sends a command to the service.
+            if (isCoachedWorkout && !isWatchMode) {
                 delay(800) // Allow prepareRun() to initiate the API call first
                 viewModel.startRun()
             }
@@ -329,6 +334,22 @@ fun RunSessionScreen(
                     SyncStatusIndicator(
                         pendingCount = pendingSyncCount,
                         isSyncing = runState.isStopping
+                    )
+                }
+            }
+
+            item {
+                // ── Watch standby banner ─────────────────────────────────────────────
+                // Shown while the phone is waiting for the user to press START on their watch.
+                AnimatedVisibility(
+                    visible = isWatchMode && !runState.isRunning && !runState.isPaused,
+                    enter = fadeIn(tween(400)) + expandVertically(tween(400)),
+                    exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
+                ) {
+                    WatchStandbyBanner(
+                        modifier = Modifier
+                            .padding(horizontal = Spacing.md)
+                            .padding(top = Spacing.sm)
                     )
                 }
             }
@@ -2051,6 +2072,48 @@ fun BreathingWave(active: Boolean, glow: Boolean, modifier: Modifier = Modifier)
 /* =====================================================================================
    TOP BAR + CONTROLS + MAP (kept compatible with your existing assets/theme)
 ===================================================================================== */
+
+@Composable
+fun WatchStandbyBanner(modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.primary.copy(alpha = 0.12f),
+            contentColor = Colors.primary
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_garmin_tag),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = Colors.primary
+            )
+            Column {
+                Text(
+                    text = "Ready — waiting for your watch",
+                    style = AppTextStyles.body.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = Colors.primary
+                    )
+                )
+                Text(
+                    text = "Press START on your Garmin to begin the session.",
+                    style = AppTextStyles.small.copy(
+                        color = Colors.primary.copy(alpha = 0.8f)
+                    )
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun SyncStatusIndicator(

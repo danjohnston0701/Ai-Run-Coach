@@ -28,18 +28,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * "Prepare Run on Watch" button — only rendered when the Garmin companion app
- * is confirmed installed on the paired watch ([companionInstalled] = true).
+ * "Prepare for Watch" button — only rendered when the Garmin companion app
+ * is confirmed installed on the paired watch.
  *
- * States:
- *  - idle      → cyan outlined button, watch icon, "Prepare Run on Watch"
- *  - sending   → pulsing "Sending to watch…" text
- *  - sent      → green "✓ Watch Ready — press START on watch"
- *
- * @param companionInstalled  from GarminWatchManager.isCompanionAppInstalled
- * @param onPrepare           called when user taps the button; caller sends the
- *                            payload and updates [sendState] accordingly
- * @param sendState           current send state driven by the caller
+ * IDLE state renders as a full-width row button: watch icon left, "Prepare for Watch" text.
+ * When isPrimary = true the background is filled teal (watch = primary action).
+ * When isPrimary = false it uses a dark background with a teal outline (secondary).
+ * SENDING state shows a pulsing "Sending to watch…" indicator.
+ * SENT state shows a green "✓ Watch Ready" confirmation.
  */
 
 enum class WatchSendState { IDLE, SENDING, SENT }
@@ -49,7 +45,8 @@ fun PrepareRunOnWatchButton(
     companionInstalled: Boolean,
     sendState: WatchSendState,
     onPrepare: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isPrimary: Boolean = false
 ) {
     AnimatedVisibility(
         visible = companionInstalled,
@@ -59,37 +56,50 @@ fun PrepareRunOnWatchButton(
     ) {
         when (sendState) {
             WatchSendState.IDLE -> {
-                Button(
-                    onClick = onPrepare,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF0A1628)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.5.dp, Color(0xFF00E5FF)
-                    )
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxSize()
+                val teal = Color(0xFF00E5FF)
+                if (isPrimary) {
+                    // Filled teal — watch is the primary action
+                    Button(
+                        onClick = onPrepare,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = teal),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Watch,
                             contentDescription = null,
-                            tint = Color(0xFF00E5FF),
-                            modifier = Modifier.size(20.dp)
+                            tint = Color(0xFF0A1628),
+                            modifier = Modifier.size(22.dp)
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.width(10.dp))
                         Text(
-                            "Prepare for\nWatch",
-                            fontSize = 10.sp,
+                            "Prepare for Watch",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0A1628)
+                        )
+                    }
+                } else {
+                    // Outlined / dark background — secondary
+                    Button(
+                        onClick = onPrepare,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0A1628)),
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, teal)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Watch,
+                            contentDescription = null,
+                            tint = teal,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "Prepare for Watch",
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF00E5FF),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            color = teal
                         )
                     }
                 }

@@ -4073,6 +4073,8 @@ class RunTrackingService : Service(), SensorEventListener {
         val phasePaceMax = currentPhase?.targetPaceMax ?: plan.targetMetrics.mainEffortPaceMax  // sec/km
         val phasePaceMin = currentPhase?.targetPaceMin ?: plan.targetMetrics.mainEffortPaceMin  // sec/km
         val currentPaceSecPerKm = parsePaceToSeconds(currentPace)
+        // Base phase name (without rep suffix) — used for "phase == recovery_walk" conditions
+        val currentPhaseBaseName = currentPhase?.name
 
         for (trigger in plan.triggers) {
             if (hasCoachingFiredThisTick) return
@@ -4097,7 +4099,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Evaluate optional condition (OpenAI may restrict to certain phases)
                 if (trigger.condition.isNotBlank() &&
                     trigger.condition != "always" &&
-                    !evaluateConditionExpression(trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm)) continue
+                    !evaluateConditionExpression(trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName)) continue
 
                 val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax)
                 triggerLastFiredMs[trigger.id] = now
@@ -4126,7 +4128,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Require 2 min elapsed for reactive triggers — prevents premature firing at run start
                     if (getActiveRunDuration() < 120_000L) false
                     else evaluateConditionExpression(
-                        trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm
+                        trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName
                     )
                 }
             }
@@ -4173,19 +4175,24 @@ class RunTrackingService : Service(), SensorEventListener {
         phasePaceMin: Int?,
         phasePaceMax: Int?,
         currentDistanceKm: Double,
+        currentPhaseBaseName: String? = null,
     ): Boolean {
         if (condition.isBlank() || condition == "always") return true
 
         // Split on AND — all clauses must be true
         val clauses = condition.split(Regex("\\bAND\\b", RegexOption.IGNORE_CASE))
         return clauses.all { clause -> evaluateSingleClause(
-            clause.trim(), phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm
+            clause.trim(), phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName
         ) }
     }
 
     /**
      * Evaluate a single comparison clause e.g. "hr > 145" or "cadence < 165".
      * Resolves metric names and target keywords to live or configured values.
+     *
+     * Special case: "phase == recovery_walk" or "phase != jog" — string equality comparison
+     * against the base phase name (without rep suffix). Used to scope reactive triggers to
+     * specific phases (e.g. guardrail triggers that should only fire during recovery).
      */
     private fun evaluateSingleClause(
         clause: String,
@@ -4194,12 +4201,26 @@ class RunTrackingService : Service(), SensorEventListener {
         phasePaceMin: Int?,
         phasePaceMax: Int?,
         currentDistanceKm: Double,
+        currentPhaseBaseName: String? = null,
     ): Boolean {
         // Tokenize: "metric  op  value"
         // Supports: "hr > 150", "hr > targetHRMax", "pace > targetPaceMax + 15", "cadence < 165"
         val tokenRegex = Regex("""^(\w+)\s*([><=!]+)\s*(.+)$""")
         val match = tokenRegex.find(clause) ?: return false
         val (metricToken, op, valueExpr) = match.destructured
+
+        // ── Special case: phase name string comparison ──────────────────────
+        // "phase == recovery_walk" fires only when the current base phase name matches.
+        // Supports startsWith matching so "phase == recovery" matches "recovery_walk", "recovery_jog", etc.
+        if (metricToken.lowercase() == "phase") {
+            val baseName = currentPhaseBaseName ?: return false
+            val target = valueExpr.trim()
+            return when (op) {
+                "==" -> baseName.startsWith(target, ignoreCase = true) || baseName.equals(target, ignoreCase = true)
+                "!=" -> !baseName.startsWith(target, ignoreCase = true) && !baseName.equals(target, ignoreCase = true)
+                else -> false
+            }
+        }
 
         // Resolve left-hand metric to live value (returns null if metric has no data yet)
         val lhsValue: Double = when (metricToken.lowercase()) {

@@ -5323,11 +5323,38 @@ This is a critical session type for beginners and returning runners. The coachin
 - Jog phase triggers (rep_start) should be encouraging, not commanding — acknowledge the effort, give a specific cue, motivate the rep
 - Walk phase triggers (recovery_start) should be warm and affirming — celebrate completing the rep, give HR guidance, preview the next jog
 - HR reactive triggers on the jog phase — if HR spikes above intervalHRMax, coach the athlete to ease back (don't stop, just ease off)
-- EXAMPLE of good walk-run coaching messages:
-  * Jog rep start: "Lovely — time to pick it up again. Easy jog, keep that heart rate under control."
-  * Walk recovery start: "Brilliant effort! Walk it out now — let that heart rate settle below 120 before the next one."
-  * Jog rep 3 of 4: "Halfway through — you're doing great. One more after this and you're done."
-  * HR too high during jog: "Heart rate's getting up there — ease back just a fraction, you don't need to push that hard yet."
+
+CRITICAL — RECOVERY PHASE GUARDRAILS FOR WALK-RUN (REQUIRED):
+You MUST include reactive guardrail triggers scoped to the recovery_walk phase. These exist because athletes often continue jogging during a walk phase (they don't realise they've transitioned). The message must EXPLICITLY tell them they are in the walk phase and to slow to a walk.
+
+1. "recovery_still_jogging" trigger — detects pace too fast (athlete is still running during walk phase):
+   - condition: "phase == recovery_walk AND pace < 540"  ← adjust 540 (9:00/km) based on runner profile
+   - For a slow/beginner runner: "phase == recovery_walk AND pace < 600" (10:00/km threshold)
+   - message: something like "This is your walk phase — slow right down and walk. Let that heart rate settle."
+   - frequency: "on_condition"
+   - Include 3-4 alternativeMessages, all of which explicitly say WALK and reference the recovery phase
+
+2. "recovery_hr_too_high" trigger — detects HR still elevated (walk phase not achieving recovery):
+   - condition: "phase == recovery_walk AND hr > targetHRMax"
+   - message: something like "HR still at {hr} during your walk — slow right down, deep breaths, let it drop below {targetHRMax}."
+   - frequency: "on_condition"
+
+Both guardrails MUST use "phase == recovery_walk" in the condition so they only fire during walk phases, not during jog intervals.
+
+CRITICAL — PRESCRIPTIVE TRANSITION MESSAGES FOR WALK-RUN:
+The athlete MUST know exactly what activity they are doing and for how long at every phase transition. A generic "off you go!" or "take a breather" is NOT acceptable — the athlete must hear the specific task so they know whether to jog or walk and for how long.
+
+- rep_start messages MUST state: (1) what to do (jog/run), (2) for how long (the exact durationMinutes of the jog phase), (3) any HR or effort guidance. The athlete is transitioning FROM a walk, so they need to know the jog is starting and exactly how long it lasts.
+- recovery_start messages MUST state: (1) what to do (walk — be explicit), (2) for how long (the exact durationMinutes of the recovery phase), (3) HR recovery guidance. The athlete is transitioning FROM a jog, so they need to know they should walk and for exactly how long.
+
+- EXAMPLE of good walk-run coaching messages (using exact durations from the session):
+  * Jog rep start (8 min jog): "Off you go — 8 minute easy jog now, keep that effort nice and controlled."
+  * Jog rep start variation: "Time to move — easy jog for 8 minutes, find your rhythm and settle in."
+  * Walk recovery start (2 min walk): "Jog done! Walk it out now — 2 minutes to let that heart rate settle. Nice easy walk."
+  * Walk recovery start variation: "Brilliant effort — take your 2 minute walk. Breathe steady and let your heart rate come down."
+  * Jog rep 3 of 4: "Rep {repNum} of {totalReps} — 8 minutes of easy jogging. You've got this."
+  * HR too high during jog: "Heart rate's at {hr} — ease back just a fraction, you don't need to push that hard yet."
+  * HR check during recovery walk: "Heart rate sitting at {hr} — keep walking, let it settle before the next jog."
 
 CUEING STRATEGY — choose the one that best fits this session:
 - "interval" — sessions with structured repeating effort phases (walk_run, intervals, hill reps, fartlek blocks) — REQUIRED for walk_run
@@ -5344,22 +5371,31 @@ Think like a real coach who has sensor data in front of them: heart rate, pace, 
 
 AVAILABLE LIVE METRICS (use these in conditions and in {template} variables in messages):
   hr              — current heart rate in bpm
-  pace            — current pace in sec/km (e.g. 360 = 6:00/km)
+  pace            — current pace in sec/km (e.g. 360 = 6:00/km). LOWER value = FASTER speed.
   cadence         — current running cadence in steps per minute
   distance        — total distance covered in km
   distance_pct    — percentage of total session distance complete (0–100)
   elapsed_min     — elapsed run time in minutes
   targetHRMax     — the target HR ceiling for the current phase
   targetHRMin     — the target HR floor for the current phase
-  targetPaceMax   — the target pace ceiling (sec/km) for the current phase
-  targetPaceMin   — the target pace floor (sec/km) for the current phase
+  targetPaceMax   — the target pace ceiling (sec/km) for the current phase (higher = slower)
+  targetPaceMin   — the target pace floor (sec/km) for the current phase (lower = faster)
+  phase           — the name of the current phase (string comparison only: == or !=)
+                    Use this to scope a reactive trigger to a specific phase.
+                    Supports prefix matching — "phase == recovery" matches "recovery_walk", "recovery_jog", etc.
 
 CONDITION SYNTAX — evaluated by the runtime engine each GPS tick:
-  Single:   "hr > 150",  "cadence < 165",  "elapsed_min > 20",  "distance_pct > 50"
-  With plan targets: "hr > targetHRMax",  "pace > targetPaceMax + 15"
-  Compound (AND): "hr > 145 AND cadence < 160",  "pace < 330 AND elapsed_min > 5"
-  Phase-based: "phase == jog",  "phase == recovery_walk"
-  Always (for periodic): "always"
+  Single:          "hr > 150",  "cadence < 165",  "elapsed_min > 20",  "distance_pct > 50"
+  With targets:    "hr > targetHRMax",  "pace < targetPaceMin - 15"
+  Compound (AND):  "hr > 145 AND cadence < 160",  "pace < 330 AND elapsed_min > 5"
+  Phase-scoped:    "phase == recovery_walk AND hr > targetHRMax"
+                   "phase == jog AND pace < targetPaceMin - 30"
+  Always (periodic): "always"
+
+IMPORTANT — pace direction: pace is sec/km, so LOWER = FASTER.
+  "pace < 360"  → athlete is going faster than 6:00/km (running)
+  "pace > 600"  → athlete is going slower than 10:00/km (walking)
+  "pace < targetPaceMin - 30" → athlete is running 30 sec/km faster than the floor target (too fast)
 
 MESSAGE TEMPLATES — embed live data directly in coaching messages:
   {hr}          — current heart rate in bpm        "Your heart rate is at {hr} right now"
@@ -5402,6 +5438,7 @@ DESIGN GUIDANCE — think like a coach, not a robot:
 - Design triggers for every coaching moment that actually matters: HR drift, cadence drop, pace slip, rep progress, half-way point, final push, recovery quality
 - Use periodic triggers for regular check-ins with live data (e.g. every 2 minutes: "Heart rate sitting at {hr} — that's right where we want it")
 - Use compound conditions (AND) for precise, contextual alerts (e.g. "hr > targetHRMax AND elapsed_min > 3" — don't alert in the warmup)
+- Use "phase == <phase_name>" to scope guardrail triggers to a specific phase — critical for interval/walk_run sessions where the same metric (HR, pace) means different things in work vs recovery phases
 - Embed {hr}, {cadence}, {pace} in messages so the athlete gets ACTUAL data, not abstract advice
 - 4–5 alternativeMessages per repeating trigger — rotate so each rep sounds different
 - Phase-end triggers should preview what comes next (for interval sessions, tell them the recovery is coming; for jog phases, tell them the walk is nearly there)

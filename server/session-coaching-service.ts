@@ -569,7 +569,10 @@ export async function getOrGenerateSessionCoaching(
   // Plans cached at an older version are silently regenerated on next access.
   // v2.3 — OpenAI designs all triggers using full metric vocabulary (hr, pace, cadence, elapsed_min, distance_pct);
   //         periodic trigger support; compound AND conditions; {template} variable substitution in messages
-  const CURRENT_PLAN_VERSION = "2.3";
+  // v2.4 — rep_start and recovery_start messages for walk_run sessions must include specific duration and
+  //         activity type (e.g. "easy jog for 8 minutes" / "2 minute walk") so the athlete knows exactly
+  //         what phase they are transitioning into.
+  const CURRENT_PLAN_VERSION = "2.4";
 
   // 1. Check cache — return existing plan if available, up-to-date, and not forced to regenerate
   if (!forceRegenerate) {

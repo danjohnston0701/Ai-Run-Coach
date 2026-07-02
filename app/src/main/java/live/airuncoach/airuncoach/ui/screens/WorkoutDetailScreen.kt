@@ -48,6 +48,7 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.util.WorkoutHolder
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -162,11 +163,18 @@ fun WorkoutDetailScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        workoutTypeLabel(workout.workoutType),
-                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.textPrimary
-                    )
+                    Column {
+                        Text(
+                            "Generate Session",
+                            style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.textPrimary
+                        )
+                        Text(
+                            workoutTypeLabel(workout.workoutType),
+                            style = AppTextStyles.small,
+                            color = Colors.textMuted
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -459,68 +467,83 @@ fun WorkoutDetailScreen(
                     onRegenerate = { runSessionViewModel.regenerateCoachingForWorkout(workout.id) }
                 )
 
-                // "Prepare Run on Watch" — only shown when companion app is installed on watch
-                // Disabled while coaching is still generating
+                // ── Watch vs Phone primary action ─────────────────────────────────
+                // When a watch is connected: "Prepare for Watch" = primary filled teal,
+                //   "Start This Workout" = secondary outlined button below.
+                // When no watch connected: "Start This Workout" = primary filled teal (original).
+                val watchReady = companionInstalled && isCoachingReady
+                val onPrepareWatch = {
+                    runSessionViewModel.prepareRunOnWatchWithCoaching(
+                        workoutId        = workout.id,
+                        distanceKm       = workout.distance?.toFloat() ?: 0f,
+                        workoutType      = workout.workoutType,
+                        workoutIntensity = workout.intensity,
+                        targetPace       = workout.targetPace,
+                        intervalCount    = workout.intervalCount,
+                        intervalDistKm   = workout.intervalDistanceMeters?.let { it / 1000f },
+                        intervalDurSecs  = workout.intervalDurationSeconds
+                    )
+                    // Signal to the run screen that it should NOT auto-start —
+                    // it must wait for the watch to send the "start" command.
+                    WorkoutHolder.isWatchMode = true
+                    onStartWorkout(workout)
+                }
+
+                // "Prepare for Watch" button — full-width with icon+text in a row
                 PrepareRunOnWatchButton(
-                    companionInstalled = companionInstalled && isCoachingReady,
+                    companionInstalled = watchReady,
                     sendState = watchSendState,
-                    onPrepare = {
-                        // 1. Send the coached session to the watch (coaching brief + interval data)
-                        runSessionViewModel.prepareRunOnWatchWithCoaching(
-                            workoutId        = workout.id,
-                            distanceKm       = workout.distance?.toFloat() ?: 0f,
-                            workoutType      = workout.workoutType,
-                            workoutIntensity = workout.intensity,
-                            targetPace       = workout.targetPace,
-                            intervalCount    = workout.intervalCount,
-                            intervalDistKm   = workout.intervalDistanceMeters?.let { it / 1000f },
-                            intervalDurSecs  = workout.intervalDurationSeconds
-                        )
-                        // 2. Set RunConfigHolder + navigate to run_session screen immediately,
-                        //    exactly as pressing "Start This Workout" does. The run_session screen
-                        //    will wait in standby until the watch fires its "start" command.
-                        onStartWorkout(workout)
-                    },
+                    isPrimary = watchReady,   // filled teal when watch connected
+                    onPrepare = onPrepareWatch,
                     modifier = Modifier.padding(bottom = Spacing.sm)
                 )
 
-                Button(
-                    onClick = { onStartWorkout(workout) },
-                    enabled = canStart,
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary,
-                        disabledContainerColor = Colors.primary.copy(alpha = 0.35f)
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    if (isCoachingGenerating) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = Colors.buttonText
-                        )
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text("Preparing AI Coaching…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
-                    } else if (isGettingLocation) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = Colors.buttonText
-                        )
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text("Acquiring GPS…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
-                    } else if (!hasLocationPermission) {
-                        Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text("Location Required", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
-                    } else {
+                // "Start This Workout" — primary when no watch, outlined when watch connected
+                if (watchReady) {
+                    OutlinedButton(
+                        onClick = { onStartWorkout(workout) },
+                        enabled = canStart,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
                         Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text("Start This Workout", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                        Text("Start This Workout", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                    }
+                } else {
+                    Button(
+                        onClick = { onStartWorkout(workout) },
+                        enabled = canStart,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.primary,
+                            disabledContainerColor = Colors.primary.copy(alpha = 0.35f)
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        if (isCoachingGenerating) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Colors.buttonText)
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text("Preparing AI Coaching…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                        } else if (isGettingLocation) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Colors.buttonText)
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text("Acquiring GPS…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                        } else if (!hasLocationPermission) {
+                            Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text("Location Required", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                        } else {
+                            Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(Spacing.sm))
+                            Text("Start This Workout", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(Spacing.sm))
+
+                // Big spacer separating start action from the "done without running" actions
+                Spacer(modifier = Modifier.height(28.dp))
+
                 OutlinedButton(
                     onClick = { onMarkComplete(workout) },
                     modifier = Modifier.fillMaxWidth(),

@@ -49,7 +49,14 @@ data class RunSetupConfig(
     // AI-determined coaching plan for this specific workout session
     val sessionInstructions: SessionInstructionsResponse? = null,  // Fetched pre-run
     val sessionCoachingTone: String? = null,   // Cached tone for quick access
-    val sessionCoachingIntensity: String? = null  // "relaxed", "moderate", "intense"
+    val sessionCoachingIntensity: String? = null,  // "relaxed", "moderate", "intense"
+
+    // ── Watch mode ────────────────────────────────────────────────────────────
+    // When true the run was initiated via "Prepare for Watch" and the phone should
+    // wait in standby on the RunSessionScreen without auto-starting GPS tracking.
+    // The watch fires a "start" command via the Garmin companion which triggers
+    // the RunTrackingService to begin — the phone UI then syncs to that.
+    val isWatchMode: Boolean = false
 ) {
     /**
      * Get formatted target time string
