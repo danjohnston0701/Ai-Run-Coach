@@ -290,6 +290,13 @@ export async function runAutoMigrations(): Promise<void> {
     `[AutoMigrate] Done — ${succeeded} succeeded, ${failed} skipped/warned`
   );
 
+  // ── Ensure admin accounts have is_admin = true ───────────────────────────────
+  try {
+    await pool.query(`UPDATE users SET is_admin = true WHERE email = 'danjohnston0701@gmail.com'`);
+  } catch (err: any) {
+    console.warn(`[AutoMigrate] Admin email setup (non-fatal): ${err.message}`);
+  }
+
   // ── One-time data repair: fix corrupted aiCoachingNotes timestamps ──────────
   // The POST /api/runs handler was passing note.time through parseDate(), which
   // treated the elapsed-ms value as SECONDS and multiplied by 1000.  This made

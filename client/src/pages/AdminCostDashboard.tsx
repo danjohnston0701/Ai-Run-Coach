@@ -88,8 +88,16 @@ function getUserProfile() {
   } catch { return null; }
 }
 
+function getAuthToken(): string | null {
+  try {
+    const stored = localStorage.getItem("userProfile");
+    const parsed = stored ? JSON.parse(stored) : null;
+    return parsed?.token ?? null;
+  } catch { return null; }
+}
+
 async function adminFetch(path: string, options: RequestInit = {}) {
-  const token = localStorage.getItem("authToken");
+  const token = getAuthToken();
   const res = await fetch(path, {
     ...options,
     headers: {
@@ -312,7 +320,10 @@ export default function AdminCostDashboard() {
 
   // Check admin via JWT
   useEffect(() => {
-    const token = localStorage.getItem("authToken");
+    const stored = localStorage.getItem("userProfile");
+    const parsed = stored ? JSON.parse(stored) : null;
+    // userProfile is stored as the full login response: { user: {...}, token: "..." }
+    const token = parsed?.token;
     if (!token) { setLocation("/login"); return; }
     fetch("/api/admin/verify", {
       headers: { "Authorization": `Bearer ${token}` },
