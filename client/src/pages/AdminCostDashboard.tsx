@@ -89,12 +89,12 @@ function getUserProfile() {
 }
 
 async function adminFetch(path: string, options: RequestInit = {}) {
-  const profile = getUserProfile();
+  const token = localStorage.getItem("authToken");
   const res = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "x-user-profile": JSON.stringify(profile),
+      ...(token ? { "Authorization": `Bearer ${token}` } : {}),
       ...(options.headers ?? {}),
     },
   });
@@ -310,18 +310,19 @@ export default function AdminCostDashboard() {
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("overview");
 
-  // Check admin
+  // Check admin via JWT
   useEffect(() => {
-    const profile = getUserProfile();
-    if (!profile) { setLocation("/login"); return; }
-    fetch(`/api/users/${profile.id}`, {
-      headers: { "Authorization": `Bearer ${localStorage.getItem("authToken")}` },
+    const token = localStorage.getItem("authToken");
+    if (!token) { setLocation("/login"); return; }
+    fetch("/api/admin/verify", {
+      headers: { "Authorization": `Bearer ${token}` },
     })
-      .then(r => r.json())
-      .then(u => {
-        if (!u.isAdmin) { setLocation("/"); return; }
-        setIsAdmin(true);
+      .then(r => {
+        if (r.status === 403) { setLocation("/"); return null; }
+        if (!r.ok) { setLocation("/login"); return null; }
+        return r.json();
       })
+      .then(data => { if (data?.isAdmin) setIsAdmin(true); })
       .catch(() => setLocation("/"));
   }, []);
 

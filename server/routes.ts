@@ -15535,16 +15535,27 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
+   * GET /api/admin/verify
+   * Quick admin status check using JWT.
+   */
+  app.get("/api/admin/verify", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
+      res.json({ isAdmin: true });
+    } catch {
+      res.status(500).json({ error: "Failed to verify admin" });
+    }
+  });
+
+  /**
    * GET /api/admin/costs/overview
    * Company-wide cost summary for the selected month (default: current).
    * Admin-only.
    */
-  app.get("/api/admin/costs/overview", async (req: Request, res: Response) => {
+  app.get("/api/admin/costs/overview", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userProfile = req.headers["x-user-profile"];
-      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
-      const profile = JSON.parse(userProfile as string);
-      const user = await storage.getUser(profile.id);
+      const user = await storage.getUser(req.user!.userId);
       if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
 
       const yearMonth = (req.query.yearMonth as string) || (() => {
@@ -15658,12 +15669,9 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
    * Per-user cost breakdown using monthly_usage counters + estimated cost multipliers.
    * Admin-only.
    */
-  app.get("/api/admin/costs/users", async (req: Request, res: Response) => {
+  app.get("/api/admin/costs/users", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userProfile = req.headers["x-user-profile"];
-      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
-      const profile = JSON.parse(userProfile as string);
-      const user = await storage.getUser(profile.id);
+      const user = await storage.getUser(req.user!.userId);
       if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
 
       const yearMonth = (req.query.yearMonth as string) || (() => {
@@ -15790,12 +15798,9 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
    * Daily cost breakdown for the last 30 days.
    * Admin-only.
    */
-  app.get("/api/admin/costs/timeline", async (req: Request, res: Response) => {
+  app.get("/api/admin/costs/timeline", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userProfile = req.headers["x-user-profile"];
-      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
-      const profile = JSON.parse(userProfile as string);
-      const user = await storage.getUser(profile.id);
+      const user = await storage.getUser(req.user!.userId);
       if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
 
       const days = Math.min(90, parseInt(req.query.days as string) || 30);
@@ -15838,12 +15843,9 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
    * GET /api/admin/costs/infra
    * Get infrastructure costs for a given month.
    */
-  app.get("/api/admin/costs/infra", async (req: Request, res: Response) => {
+  app.get("/api/admin/costs/infra", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userProfile = req.headers["x-user-profile"];
-      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
-      const profile = JSON.parse(userProfile as string);
-      const user = await storage.getUser(profile.id);
+      const user = await storage.getUser(req.user!.userId);
       if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
 
       const yearMonth = (req.query.yearMonth as string) || (() => {
@@ -15862,12 +15864,9 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
    * POST /api/admin/costs/infra
    * Save or update infrastructure costs for a month.
    */
-  app.post("/api/admin/costs/infra", async (req: Request, res: Response) => {
+  app.post("/api/admin/costs/infra", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const userProfile = req.headers["x-user-profile"];
-      if (!userProfile) return res.status(401).json({ error: "Unauthorized" });
-      const profile = JSON.parse(userProfile as string);
-      const user = await storage.getUser(profile.id);
+      const user = await storage.getUser(req.user!.userId);
       if (!user?.isAdmin) return res.status(403).json({ error: "Forbidden" });
 
       const { yearMonth, replitCostUsd = 0, neonCostUsd = 0, otherCostUsd = 0, notes = "" } = req.body;
