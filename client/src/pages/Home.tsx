@@ -634,7 +634,12 @@ export default function Home() {
     const loadProfileAndRuns = async () => {
       const userProfileStr = localStorage.getItem("userProfile");
       if (userProfileStr) {
-        const parsedProfile = JSON.parse(userProfileStr);
+        let parsedProfile = JSON.parse(userProfileStr);
+        // Migrate old nested format { user: {...}, token: "..." } → flat { ...user, token }
+        if (parsedProfile.user && typeof parsedProfile.user === "object") {
+          parsedProfile = { ...parsedProfile.user, token: parsedProfile.token };
+          localStorage.setItem("userProfile", JSON.stringify(parsedProfile));
+        }
         setProfile(parsedProfile);
 
         // Check admin status live from server (don't rely on stale localStorage)

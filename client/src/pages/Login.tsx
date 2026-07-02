@@ -34,7 +34,9 @@ export default function Auth() {
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
       if (res.ok) {
-        const user = await res.json();
+        const data = await res.json();
+        // Flatten: store { ...user fields, token } so profile.id, profile.name, profile.isAdmin all work directly
+        const user = data.user ? { ...data.user, token: data.token } : data;
         localStorage.setItem("userProfile", JSON.stringify(user));
         const migrationResult = await migrateLocalDataToDatabase(user.id);
         if (migrationResult.runs > 0) {
