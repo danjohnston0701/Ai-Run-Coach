@@ -93,8 +93,10 @@ function setupCacheHeaders(app: express.Application) {
         "/api/connected-devices", // Connection state changes immediately on connect/disconnect
       ];
       const isNoCache = noCachePaths.some((p) => path.startsWith(p));
+      // Never cache HTML pages — ensures new deployments are picked up immediately
+      const isHtml = path === "/" || path.endsWith(".html") || (!path.includes(".") && !path.startsWith("/api") && !path.startsWith("/assets"));
 
-      if (isNoCache) {
+      if (isNoCache || isHtml) {
         // Ensure these are always fresh
         res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       } else if (req.headers.authorization) {
