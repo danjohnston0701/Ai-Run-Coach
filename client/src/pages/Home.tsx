@@ -231,6 +231,7 @@ export default function Home() {
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const [enablingNotifications, setEnablingNotifications] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isAdminUser, setIsAdminUser] = useState(false);
   const [activeSession, setActiveSession] = useState<ActiveRunSession | null>(null);
   const [coachSettingsOpen, setCoachSettingsOpen] = useState(false);
   const [coachSettings, setCoachSettings] = useState<AiCoachSettings>(defaultSettings);
@@ -635,6 +636,14 @@ export default function Home() {
       if (userProfileStr) {
         const parsedProfile = JSON.parse(userProfileStr);
         setProfile(parsedProfile);
+
+        // Check admin status live from server (don't rely on stale localStorage)
+        const token = parsedProfile?.token;
+        if (token) {
+          fetch("/api/admin/verify", {
+            headers: { "Authorization": `Bearer ${token}` },
+          }).then(r => { if (r.ok) setIsAdminUser(true); }).catch(() => {});
+        }
         
         // Try to load last run and favorite routes from database if user has an ID
         if (parsedProfile.id) {
@@ -1554,7 +1563,7 @@ export default function Home() {
                   <Mic className="w-5 h-5 text-primary" />
                   <span className="font-medium">AI Coach Settings</span>
                 </button>
-                {(profile?.isAdmin || (profile as any)?.user?.isAdmin) && (
+                {isAdminUser && (
                   <>
                     <div className="px-4 pt-2 pb-1">
                       <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Admin</span>
