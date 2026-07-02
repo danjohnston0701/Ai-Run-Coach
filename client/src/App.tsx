@@ -101,6 +101,8 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/features" component={Features} />
+      <Route path="/admin/ai-config" component={AdminAIConfig} />
+      <Route path="/admin/costs" component={AdminCostDashboard} />
       {!hasProfile && (
         <>
           <Route path="/" component={LandingPage} />
@@ -120,8 +122,6 @@ function Router() {
           <Route path="/friend/:friendId" component={FriendProfile} />
           <Route path="/notifications" component={Notifications} />
           <Route path="/notifications/manage" component={ManageNotifications} />
-          <Route path="/admin/ai-config" component={AdminAIConfig} />
-          <Route path="/admin/costs" component={AdminCostDashboard} />
           <Route path="/routes" component={Routes} />
           <Route path="/events" component={Events} />
           <Route path="/event/:id" component={PreEvent} />
