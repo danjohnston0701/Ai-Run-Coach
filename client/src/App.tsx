@@ -21,6 +21,7 @@ import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
 import AdminAIConfig from "@/pages/AdminAIConfig";
 import AdminCostDashboard from "@/pages/AdminCostDashboard";
+import AdminHub from "@/pages/AdminHub";
 import Routes from "@/pages/Routes";
 import Events from "@/pages/Events";
 import PreEvent from "@/pages/PreEvent";
@@ -101,6 +102,7 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/features" component={Features} />
+      <Route path="/admin" component={AdminHub} />
       <Route path="/admin/ai-config" component={AdminAIConfig} />
       <Route path="/admin/costs" component={AdminCostDashboard} />
       {!hasProfile && (
