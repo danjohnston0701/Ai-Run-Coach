@@ -4,23 +4,23 @@ import com.google.gson.annotations.SerializedName
 
 data class GroupRun(
     @SerializedName("id") val id: String,
-    @SerializedName("name") val name: String,
-    @SerializedName("description") val description: String = "",
-    @SerializedName("creatorId") val creatorId: String = "",
-    @SerializedName("creatorName") val creatorName: String = "",
+    @SerializedName("name") val name: String?,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("creatorId") val creatorId: String? = null,
+    @SerializedName("creatorName") val creatorName: String? = null,
     @SerializedName("meetingPoint") val meetingPoint: String? = null,
     @SerializedName("meetingLat") val meetingLat: Double? = null,
     @SerializedName("meetingLng") val meetingLng: Double? = null,
-    @SerializedName("distance") val distance: Double = 5.0,
-    @SerializedName("dateTime") val dateTime: String = "",
+    @SerializedName("distance") val distance: Double? = null,
+    @SerializedName("dateTime") val dateTime: String? = null,
     @SerializedName("maxParticipants") val maxParticipants: Int? = null,
-    @SerializedName("currentParticipants") val currentParticipants: Int = 0,
+    @SerializedName("currentParticipants") val currentParticipants: Int? = null,
     @SerializedName("isPublic") val isPublic: Boolean = true,
-    @SerializedName("status") val status: String = "upcoming",
+    @SerializedName("status") val status: String? = null,
     @SerializedName("isJoined") val isJoined: Boolean = false,
     @SerializedName("isOrganiser") val isOrganiser: Boolean = false,
     @SerializedName("myInvitationStatus") val myInvitationStatus: String? = null, // "pending"|"accepted"|"declined"
-    @SerializedName("participants") val participants: List<GroupRunParticipant> = emptyList(),
+    @SerializedName("participants") val participants: List<GroupRunParticipant>? = null,
     @SerializedName("createdAt") val createdAt: String? = null,
     @SerializedName("inviteToken") val inviteToken: String? = null
 )

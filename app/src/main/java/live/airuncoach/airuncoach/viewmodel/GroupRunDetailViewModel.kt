@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.GroupRun
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.GroupRunRespondRequest
@@ -23,7 +25,8 @@ sealed class GroupRunDetailState {
 
 @HiltViewModel
 class GroupRunDetailViewModel @Inject constructor(
-    private val apiService: ApiService
+    private val apiService: ApiService,
+    private val sessionManager: SessionManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<GroupRunDetailState>(GroupRunDetailState.Loading)
@@ -38,6 +41,30 @@ class GroupRunDetailViewModel @Inject constructor(
     private val _startedGroupRunId = MutableStateFlow<String?>(null)
     /** Non-null when organiser has started the run — triggers navigation to run screen */
     val startedGroupRunId: StateFlow<String?> = _startedGroupRunId.asStateFlow()
+
+    private val _cancelledGroupRun = MutableStateFlow(false)
+    /** Becomes true when the organiser cancels/deletes the run — triggers navigation back */
+    val cancelledGroupRun: StateFlow<Boolean> = _cancelledGroupRun.asStateFlow()
+
+    private val _friends = MutableStateFlow<List<Friend>>(emptyList())
+    val friends: StateFlow<List<Friend>> = _friends.asStateFlow()
+
+    private val _loadingFriends = MutableStateFlow(false)
+    val loadingFriends: StateFlow<Boolean> = _loadingFriends.asStateFlow()
+
+    fun loadFriends() {
+        viewModelScope.launch {
+            _loadingFriends.value = true
+            try {
+                val userId = sessionManager.getUserId() ?: return@launch
+                _friends.value = apiService.getFriends(userId)
+            } catch (e: Exception) {
+                Log.e("GroupRunDetailVM", "Failed to load friends: ${e.message}", e)
+            } finally {
+                _loadingFriends.value = false
+            }
+        }
+    }
 
     fun loadGroupRun(groupRunId: String) {
         viewModelScope.launch {
@@ -120,5 +147,21 @@ class GroupRunDetailViewModel @Inject constructor(
 
     fun clearStartedRun() {
         _startedGroupRunId.value = null
+    }
+
+    fun cancelRun(groupRunId: String) {
+        viewModelScope.launch {
+            _actionLoading.value = true
+            _actionError.value = null
+            try {
+                apiService.cancelGroupRun(groupRunId)
+                _cancelledGroupRun.value = true
+            } catch (e: Exception) {
+                _actionError.value = "Failed to cancel run: ${e.message}"
+                Log.e("GroupRunDetailVM", "cancel error", e)
+            } finally {
+                _actionLoading.value = false
+            }
+        }
     }
 }

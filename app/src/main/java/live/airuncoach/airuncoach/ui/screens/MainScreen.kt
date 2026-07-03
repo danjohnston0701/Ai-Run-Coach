@@ -1128,7 +1128,7 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
             }
             composable("group_run_detail/{groupRunId}") { backStackEntry ->
                 val groupRunId = backStackEntry.arguments?.getString("groupRunId") ?: return@composable
-                GroupRunDetailScreen(
+                GroupRunDetailScreenEnhanced(
                     groupRunId = groupRunId,
                     onNavigateBack = { navController.popBackStack() },
                     onStartRun = { grId ->

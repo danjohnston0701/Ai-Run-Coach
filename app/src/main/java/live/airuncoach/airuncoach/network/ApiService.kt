@@ -200,6 +200,9 @@ interface ApiService {
     @DELETE("/api/group-runs/{id}/leave")
     suspend fun leaveGroupRun(@Path("id") groupRunId: String): Response<Unit>
 
+    @DELETE("/api/group-runs/{id}")
+    suspend fun cancelGroupRun(@Path("id") groupRunId: String): Response<Unit>
+
     /** Generate AI post-run debrief comparing current user vs group */
     @POST("/api/group-runs/{id}/debrief")
     suspend fun getGroupRunDebrief(@Path("id") groupRunId: String): GroupRunDebriefResponse

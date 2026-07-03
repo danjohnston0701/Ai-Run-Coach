@@ -185,7 +185,7 @@ fun GroupRunCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = groupRun.name,
+                    text = groupRun.name ?: "Group Run",
                     style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                     color = Colors.textPrimary,
                     modifier = Modifier.weight(1f)
@@ -193,14 +193,16 @@ fun GroupRunCard(
                 GroupRunStatusBadge(status = groupRun.status, myInvitationStatus = groupRun.myInvitationStatus)
             }
 
-            if (groupRun.description.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = groupRun.description,
-                    style = AppTextStyles.small,
-                    color = Colors.textSecondary,
-                    maxLines = 2
-                )
+            groupRun.description?.let {
+                if (it.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = it,
+                        style = AppTextStyles.small,
+                        color = Colors.textSecondary,
+                        maxLines = 2
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(Spacing.sm))
@@ -212,23 +214,27 @@ fun GroupRunCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.lg)
             ) {
-                GroupRunStat(
-                    icon = R.drawable.icon_target_vector,
-                    label = "${groupRun.distance} km"
-                )
-                if (groupRun.dateTime.isNotEmpty()) {
+                if (groupRun.distance != null) {
+                    GroupRunStat(
+                        icon = R.drawable.icon_target_vector,
+                        label = "${groupRun.distance} km"
+                    )
+                }
+                if (!groupRun.dateTime.isNullOrEmpty()) {
                     GroupRunStat(
                         icon = R.drawable.icon_calendar_vector,
                         label = formatGroupRunDate(groupRun.dateTime)
                     )
                 }
-                GroupRunStat(
-                    icon = R.drawable.icon_people_vector,
-                    label = buildString {
-                        append("${groupRun.currentParticipants}")
-                        if (groupRun.maxParticipants != null) append("/${groupRun.maxParticipants}")
-                    }
-                )
+                if (groupRun.currentParticipants != null) {
+                    GroupRunStat(
+                        icon = R.drawable.icon_people_vector,
+                        label = buildString {
+                            append("${groupRun.currentParticipants}")
+                            if (groupRun.maxParticipants != null) append("/${groupRun.maxParticipants}")
+                        }
+                    )
+                }
             }
 
             if (!groupRun.meetingPoint.isNullOrEmpty()) {
@@ -252,7 +258,7 @@ fun GroupRunCard(
             // Organiser name
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Organised by ${groupRun.creatorName}",
+                text = "Organised by ${groupRun.creatorName ?: "Unknown"}",
                 style = AppTextStyles.small,
                 color = Colors.textMuted
             )
@@ -312,7 +318,7 @@ fun GroupRunStat(icon: Int, label: String) {
 }
 
 @Composable
-fun GroupRunStatusBadge(status: String, myInvitationStatus: String?) {
+fun GroupRunStatusBadge(status: String?, myInvitationStatus: String?) {
     val (label, color) = when {
         myInvitationStatus == "pending" -> "Invited" to Colors.warning
         status == "active" -> "Live" to Colors.success
@@ -406,7 +412,8 @@ fun ErrorGroupRunsState(
     }
 }
 
-fun formatGroupRunDate(isoDateTime: String): String {
+fun formatGroupRunDate(isoDateTime: String?): String {
+    if (isoDateTime.isNullOrEmpty()) return ""
     return try {
         val zdt = ZonedDateTime.parse(isoDateTime)
         zdt.format(DateTimeFormatter.ofPattern("EEE d MMM, h:mm a", Locale.getDefault()))

@@ -3827,35 +3827,31 @@ function transformRunForAndroid(run: any) {
   app.get("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      
-      // Get all group runs, filter in memory
-      const allGroupRuns = await db
-        .select()
-        .from(groupRuns);
 
-      // Get participant IDs for the current user
+      // Get all group runs the user is involved with (hosted or participating)
       const participantRunIds = await db
         .select({ groupRunId: groupRunParticipants.groupRunId })
         .from(groupRunParticipants)
         .where(eq(groupRunParticipants.userId, userId));
-
       const participantRunIdSet = new Set(participantRunIds.map(r => r.groupRunId));
 
-      // Filter to runs the user hosts or participates in, and upcoming runs only
-      const upcomingGroupRuns = allGroupRuns
+      const allGroupRuns = await db.select().from(groupRuns);
+      const relevantRuns = allGroupRuns
         .filter(run => run.hostUserId === userId || participantRunIdSet.has(run.id))
-        .filter(run => !run.startedAt) // Only runs that haven't started
         .sort((a, b) => {
           const aTime = a.plannedStartAt ? new Date(a.plannedStartAt).getTime() : Infinity;
           const bTime = b.plannedStartAt ? new Date(b.plannedStartAt).getTime() : Infinity;
           return aTime - bTime;
         });
 
-      // Return wrapped response matching Android GroupRunsResponse model
+      // Build properly formatted response for each run
+      const formatted = await Promise.all(relevantRuns.map(run => buildGroupRunResponse(run, userId)));
+      const validRuns = formatted.filter(Boolean);
+
       res.json({
-        groupRuns: upcomingGroupRuns,
-        count: upcomingGroupRuns.length,
-        total: upcomingGroupRuns.length,
+        groupRuns: validRuns,
+        count: validRuns.length,
+        total: validRuns.length,
       });
     } catch (error: any) {
       console.error("Get group runs error:", error);
@@ -3863,28 +3859,57 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.get("/api/group-runs/:id", async (req: Request, res: Response) => {
+  app.get("/api/group-runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const groupRun = await storage.getGroupRun(req.params.id);
-      if (!groupRun) {
-        return res.status(404).json({ error: "Group run not found" });
-      }
-      res.json(groupRun);
+      const gr = await storage.getGroupRun(req.params.id);
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+      res.json(await buildGroupRunResponse(gr, req.user!.userId));
     } catch (error: any) {
       console.error("Get group run error:", error);
       res.status(500).json({ error: "Failed to get group run" });
     }
   });
 
+  // NOTE: This route is intentionally left as a pass-through. The full implementation is below (line ~11982).
+  // Due to Express routing, this one is reached first, so we duplicate the logic here.
   app.post("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      const {
+        name, description, meetingPoint, meetingLat, meetingLng,
+        distance, dateTime, maxParticipants = 10, isPublic = true
+      } = req.body;
+      const creatorId = req.user!.userId;
+      if (!name || !distance || !dateTime) {
+        return res.status(400).json({ error: 'Missing required fields: name, distance, dateTime' });
+      }
+      if (new Date(dateTime) <= new Date()) {
+        return res.status(400).json({ error: 'Date/time must be in the future' });
+      }
       const inviteToken = `GR${Date.now().toString(36).toUpperCase()}`;
       const groupRun = await storage.createGroupRun({
-        ...req.body,
-        hostUserId: req.user!.userId,
+        hostUserId: creatorId,
+        title: name,
+        description: description || null,
+        meetingPoint: meetingPoint || null,
+        meetingLat: meetingLat ? parseFloat(meetingLat) : null,
+        meetingLng: meetingLng ? parseFloat(meetingLng) : null,
+        targetDistance: parseFloat(distance),
+        plannedStartAt: new Date(dateTime),
+        maxParticipants: maxParticipants ? parseInt(maxParticipants) : 10,
+        isPublic: isPublic !== false,
         inviteToken,
+        status: 'pending',
+        mode: 'route'
       });
-      res.status(201).json(groupRun);
+      // Auto-join creator as organiser
+      await db.insert(groupRunParticipants).values({
+        groupRunId: groupRun.id,
+        userId: creatorId,
+        role: 'organiser',
+        invitationStatus: 'accepted',
+        joinedAt: new Date(),
+      });
+      res.status(201).json(await buildGroupRunResponse(groupRun, creatorId));
     } catch (error: any) {
       console.error("Create group run error:", error);
       res.status(500).json({ error: "Failed to create group run" });
@@ -3893,133 +3918,95 @@ function transformRunForAndroid(run: any) {
 
   app.post("/api/group-runs/:id/join", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const participant = await storage.joinGroupRun(req.params.id, req.user!.userId);
-      res.status(201).json(participant);
+      const groupRunId = req.params.id;
+      const userId = req.user!.userId;
+      const gr = await storage.getGroupRun(groupRunId);
+      if (!gr) return res.status(404).json({ error: 'Group run not found' });
+      const existing = await db.select().from(groupRunParticipants)
+        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
+      if (existing.length > 0) return res.status(409).json({ error: 'Already joined' });
+      await storage.joinGroupRun(groupRunId, userId);
+      res.json(await buildGroupRunResponse(gr, userId));
     } catch (error: any) {
       console.error("Join group run error:", error);
       res.status(500).json({ error: "Failed to join group run" });
     }
   });
 
-  // Invite a user to a group run (send notification)
-  // Host uses this to invite specific users to their group run
   app.post("/api/group-runs/:id/invite", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { groupRunId } = req.params;
-      const { invitedUserIds } = req.body; // Array of user IDs to invite
-      
-      if (!invitedUserIds || !Array.isArray(invitedUserIds) || invitedUserIds.length === 0) {
-        return res.status(400).json({ error: "invitedUserIds array is required" });
+      const groupRunId = req.params.id;
+      const { userIds } = req.body as { userIds: string[] };
+      const requesterId = req.user!.userId;
+
+      const gr = await storage.getGroupRun(groupRunId);
+      if (!gr) return res.status(404).json({ error: 'Group run not found' });
+      if (gr.hostUserId !== requesterId) return res.status(403).json({ error: 'Only the organiser can invite friends' });
+      if (!Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({ error: 'userIds must be a non-empty array' });
       }
 
-      // Verify the current user is the host of this group run
-      const groupRun = await storage.getGroupRun(groupRunId);
-      if (!groupRun) {
-        return res.status(404).json({ error: "Group run not found" });
-      }
-      if (groupRun.hostUserId !== req.user!.userId) {
-        return res.status(403).json({ error: "Only the host can invite users" });
-      }
+      const host = await storage.getUser(requesterId);
+      const hostName = host?.name || 'Someone';
+      const runName = gr.title || 'a group run';
+      const plannedDate = gr.plannedStartAt
+        ? new Date(gr.plannedStartAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : 'soon';
 
-      // Get host details for the invitation message
-      const hostUser = await storage.getUser(req.user!.userId);
-      const hostName = hostUser?.name || "Someone";
-      const runName = groupRun.name || "a group run";
-      const plannedDate = groupRun.plannedStartAt 
-        ? new Date(groupRun.plannedStartAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        : "soon";
+      const results: string[] = [];
+      for (const uid of userIds) {
+        const existing = await db.select().from(groupRunParticipants)
+          .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, uid)));
+        if (existing.length > 0) continue;
 
-      // Send invitation to each user with push notification
-      const notificationService = await import("./notification-service");
-      const results = { invited: 0, failed: 0 };
-
-      for (const invitedUserId of invitedUserIds) {
-        // Skip if user is already a participant
-        const existingParticipant = await db
-          .select()
-          .from(groupRunParticipants)
-          .where(and(
-            eq(groupRunParticipants.groupRunId, groupRunId),
-            eq(groupRunParticipants.userId, invitedUserId)
-          ))
-          .limit(1);
-
-        if (existingParticipant.length > 0) {
-          console.log(`[GroupRunInvite] User ${invitedUserId} already a participant in group run ${groupRunId}`);
-          continue;
-        }
+        await db.insert(groupRunParticipants).values({
+          groupRunId,
+          userId: uid,
+          role: 'participant',
+          invitationStatus: 'pending',
+          joinedAt: new Date(),
+        });
+        results.push(uid);
 
         try {
-          // Add user as participant with "invited" status (they can then accept/decline)
-          await db.insert(groupRunParticipants).values({
-            groupRunId,
-            userId: invitedUserId,
-            status: "invited", // pending acceptance
-            invitedByUserId: req.user!.userId,
-            invitedAt: new Date(),
-          });
-
-          // Send push notification
-          const pushSent = await notificationService.sendFirebasePush(
-            invitedUserId,
-            `You're invited to a group run!`,
-            `${hostName} invited you to run "${runName}" on ${plannedDate}`,
-            { 
-              type: "group_run_invite",
-              groupRunId,
-              hostUserId: groupRun.hostUserId,
-              runName
-            }
+          const notificationService = await import("./notification-service");
+          await notificationService.sendFirebasePush(
+            uid,
+            `You're invited to a group run! 🏃`,
+            `${hostName} invited you to "${runName}" on ${plannedDate}`,
+            { type: "group_run_invite", groupRunId, runName }
           );
-
-          console.log(`[GroupRunInvite] Invited user ${invitedUserId} to group run ${groupRunId} (push sent: ${pushSent})`);
-          results.invited++;
-        } catch (error: any) {
-          console.error(`[GroupRunInvite] Failed to invite user ${invitedUserId}:`, error);
-          results.failed++;
+        } catch (pushErr: any) {
+          console.warn(`[GroupRunInvite] Push to ${uid} failed:`, pushErr.message);
         }
       }
 
-      res.json({ 
-        success: true, 
-        message: `Invited ${results.invited} user(s)`,
-        invited: results.invited,
-        failed: results.failed
-      });
+      res.json({ invited: results, groupRunId });
     } catch (error: any) {
-      console.error("Group run invite error:", error);
+      console.error("Invite to group run error:", error);
       res.status(500).json({ error: "Failed to invite users" });
     }
   });
 
-  // Accept or decline a group run invitation
-  app.post("/api/group-runs/:id/respond-invite", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  // Accept or decline a group run invitation - also supports /respond-invite legacy path
+  app.post("/api/group-runs/:id/respond", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { groupRunId } = req.params;
-      const { accept } = req.body; // true to accept, false to decline
-
-      if (typeof accept !== "boolean") {
-        return res.status(400).json({ error: "accept (boolean) is required" });
+      const groupRunId = req.params.id;
+      const { response } = req.body as { response: 'accepted' | 'declined' };
+      const userId = req.user!.userId;
+      if (!['accepted', 'declined'].includes(response)) {
+        return res.status(400).json({ error: "response must be 'accepted' or 'declined'" });
       }
-
-      // Update participant status
-      const newStatus = accept ? "accepted" : "declined";
-      await db
-        .update(groupRunParticipants)
-        .set({ 
-          status: newStatus,
-          respondedAt: new Date()
-        })
-        .where(and(
-          eq(groupRunParticipants.groupRunId, groupRunId),
-          eq(groupRunParticipants.userId, req.user!.userId)
-        ));
-
-      console.log(`[GroupRunInvite] User ${req.user!.userId} ${newStatus} invitation to group run ${groupRunId}`);
-
-      res.json({ success: true, status: newStatus });
+      const existing = await db.select().from(groupRunParticipants)
+        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
+      if (existing.length === 0) return res.status(404).json({ error: 'No invitation found for this user' });
+      await db.update(groupRunParticipants)
+        .set({ invitationStatus: response, ...(response === 'accepted' ? { joinedAt: new Date() } : {}) })
+        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
+      const gr = await storage.getGroupRun(groupRunId);
+      res.json(await buildGroupRunResponse(gr!, userId));
     } catch (error: any) {
-      console.error("Respond to invite error:", error);
+      console.error("Respond to invitation error:", error);
       res.status(500).json({ error: "Failed to respond to invitation" });
     }
   });
@@ -12108,9 +12095,28 @@ function transformRunForAndroid(run: any) {
           userId: uid,
           role: 'participant',
           invitationStatus: 'pending',
-          inviteExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+          joinedAt: new Date(),
         });
         results.push(uid);
+
+        // Send push notification to invited user
+        try {
+          const notificationService = await import("./notification-service");
+          const host = await storage.getUser(requesterId);
+          const hostName = host?.name || "Someone";
+          const runName = gr.title || gr.name || "a group run";
+          const plannedDate = gr.plannedStartAt
+            ? new Date(gr.plannedStartAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            : "soon";
+          await notificationService.sendFirebasePush(
+            uid,
+            `You're invited to a group run! 🏃`,
+            `${hostName} invited you to "${runName}" on ${plannedDate}`,
+            { type: "group_run_invite", groupRunId, runName }
+          );
+        } catch (pushErr: any) {
+          console.warn(`[GroupRunInvite] Push to ${uid} failed:`, pushErr.message);
+        }
       }
 
       res.json({ invited: results, groupRunId });
@@ -12141,7 +12147,7 @@ function transformRunForAndroid(run: any) {
       await db.update(groupRunParticipants)
         .set({
           invitationStatus: response,
-          ...(response === 'accepted' ? { acceptedAt: new Date(), joinedAt: new Date() } : { declinedAt: new Date() }),
+          ...(response === 'accepted' ? { joinedAt: new Date() } : {}),
         })
         .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
 
@@ -12201,7 +12207,7 @@ function transformRunForAndroid(run: any) {
 
       // Link run to participant record
       await db.update(groupRunParticipants)
-        .set({ runId, completedAt: new Date() })
+        .set({ runId })
         .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
 
       // Check if all accepted participants have completed
@@ -12271,6 +12277,27 @@ function transformRunForAndroid(run: any) {
     } catch (error: any) {
       console.error("Group run results error:", error);
       res.status(500).json({ error: "Failed to get group run results" });
+    }
+  });
+
+  // Cancel/delete a group run (organiser only)
+  app.delete("/api/group-runs/:groupRunId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { groupRunId } = req.params;
+      const userId = req.user!.userId;
+
+      const gr = await storage.getGroupRun(groupRunId);
+      if (!gr) return res.status(404).json({ error: 'Group run not found' });
+      if (gr.hostUserId !== userId) return res.status(403).json({ error: 'Only the organiser can cancel this run' });
+
+      // Delete all participants first, then the run
+      await db.delete(groupRunParticipants).where(eq(groupRunParticipants.groupRunId, groupRunId));
+      await db.delete(groupRuns).where(eq(groupRuns.id, groupRunId));
+
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Cancel group run error:", error);
+      res.status(500).json({ error: "Failed to cancel group run" });
     }
   });
 

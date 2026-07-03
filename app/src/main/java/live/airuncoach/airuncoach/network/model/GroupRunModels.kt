@@ -5,7 +5,7 @@ import live.airuncoach.airuncoach.domain.model.GroupRun
 
 /** Wrapper returned by GET /api/group-runs */
 data class GroupRunsResponse(
-    @SerializedName("groupRuns") val groupRuns: List<GroupRun>,
+    @SerializedName("groupRuns") val groupRuns: List<GroupRun>?,
     @SerializedName("count") val count: Int = 0,
     @SerializedName("total") val total: Int = 0
 )

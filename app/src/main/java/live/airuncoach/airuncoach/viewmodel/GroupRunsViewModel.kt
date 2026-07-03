@@ -45,7 +45,7 @@ class GroupRunsViewModel @Inject constructor(
             try {
                 Log.d("GroupRunsViewModel", "📡 Fetching group runs...")
                 val response = apiService.getGroupRuns()
-                allGroupRuns = response.groupRuns
+                allGroupRuns = response.groupRuns ?: emptyList()
                 Log.d("GroupRunsViewModel", "✅ Fetched ${allGroupRuns.size} group runs")
                 applyTab(_selectedTab.value)
             } catch (e: HttpException) {
@@ -68,7 +68,12 @@ class GroupRunsViewModel @Inject constructor(
 
     private fun applyTab(tab: String) {
         val filtered = when (tab) {
-            "my" -> allGroupRuns.filter { it.isOrganiser || it.isJoined || it.myInvitationStatus == "pending" }
+            "my" -> allGroupRuns.filter { it.isOrganiser || it.isJoined || it.myInvitationStatus == "pending" }.also {
+                Log.d("GroupRunsViewModel", "🔍 My Runs tab filter: total=${allGroupRuns.size}, filtered=${it.size}")
+                allGroupRuns.forEach { run ->
+                    Log.d("GroupRunsViewModel", "  - ${run.name}: organiser=${run.isOrganiser}, joined=${run.isJoined}, invite=${run.myInvitationStatus}")
+                }
+            }
             "past" -> allGroupRuns.filter { it.status == "completed" || it.status == "cancelled" }
             else -> allGroupRuns.filter { it.status != "completed" && it.status != "cancelled" }
         }

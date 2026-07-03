@@ -58,7 +58,7 @@ fun GroupRunDetailScreen(
                 title = {
                     Text(
                         when (val s = state) {
-                            is GroupRunDetailState.Success -> s.groupRun.name
+                            is GroupRunDetailState.Success -> s.groupRun.name ?: "Group Run"
                             else -> "Group Run"
                         },
                         style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
@@ -162,7 +162,7 @@ fun GroupRunDetailContent(
             ) {
                 Column(modifier = Modifier.padding(Spacing.lg)) {
                     // Date
-                    if (groupRun.dateTime.isNotEmpty()) {
+                    if (!groupRun.dateTime.isNullOrEmpty()) {
                         GroupRunDetailRow(
                             icon = R.drawable.icon_calendar_vector,
                             label = formatGroupRunDate(groupRun.dateTime)
@@ -178,21 +178,25 @@ fun GroupRunDetailContent(
                         Spacer(modifier = Modifier.height(Spacing.sm))
                     }
                     // Distance
-                    GroupRunDetailRow(
-                        icon = R.drawable.icon_target_vector,
-                        label = "${groupRun.distance} km"
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    if (groupRun.distance != null) {
+                        GroupRunDetailRow(
+                            icon = R.drawable.icon_target_vector,
+                            label = "${groupRun.distance} km"
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                    }
                     // Participants
-                    GroupRunDetailRow(
-                        icon = R.drawable.icon_people_vector,
-                        label = buildString {
-                            append("${groupRun.currentParticipants} going")
-                            if (groupRun.maxParticipants != null) append(" (max ${groupRun.maxParticipants})")
-                        }
-                    )
+                    if (groupRun.currentParticipants != null) {
+                        GroupRunDetailRow(
+                            icon = R.drawable.icon_people_vector,
+                            label = buildString {
+                                append("${groupRun.currentParticipants} going")
+                                if (groupRun.maxParticipants != null) append(" (max ${groupRun.maxParticipants})")
+                            }
+                        )
+                    }
                     // Description
-                    if (groupRun.description.isNotEmpty()) {
+                    if (!groupRun.description.isNullOrEmpty()) {
                         Spacer(modifier = Modifier.height(Spacing.md))
                         HorizontalDivider(color = Colors.backgroundRoot, thickness = 1.dp)
                         Spacer(modifier = Modifier.height(Spacing.md))
@@ -241,7 +245,7 @@ fun GroupRunDetailContent(
         // ── Participants header ────────────────────────────────────────────────
         item {
             Text(
-                "Participants (${groupRun.participants.size})",
+                "Participants (${groupRun.participants?.size ?: 0})",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                 color = Colors.textPrimary
             )
@@ -249,18 +253,18 @@ fun GroupRunDetailContent(
         }
 
         // ── Participants list ──────────────────────────────────────────────────
-        if (groupRun.participants.isEmpty()) {
+        if (groupRun.participants?.isNotEmpty() == true) {
+            items(groupRun.participants) { participant ->
+                ParticipantRow(participant = participant)
+                Spacer(modifier = Modifier.height(Spacing.sm))
+            }
+        } else {
             item {
                 Text(
                     "No participants yet",
                     style = AppTextStyles.body,
                     color = Colors.textMuted
                 )
-            }
-        } else {
-            items(groupRun.participants) { participant ->
-                ParticipantRow(participant = participant)
-                Spacer(modifier = Modifier.height(Spacing.sm))
             }
         }
     }
@@ -319,8 +323,8 @@ fun GroupRunActionButtons(
 
         // Organiser — start run (when in pending/upcoming)
         groupRun.isOrganiser && groupRun.status != "active" -> {
-            val readyCount = groupRun.participants.count { it.readyToStart }
-            val acceptedCount = groupRun.participants.count { it.invitationStatus == "accepted" }
+            val readyCount = groupRun.participants?.count { it.readyToStart } ?: 0
+            val acceptedCount = groupRun.participants?.count { it.invitationStatus == "accepted" } ?: 0
             Column {
                 if (acceptedCount > 0) {
                     Text(
@@ -344,7 +348,7 @@ fun GroupRunActionButtons(
 
         // Active run — participant ready to start
         groupRun.status == "active" && groupRun.isJoined && !groupRun.isOrganiser -> {
-            val myParticipant = groupRun.participants.find { it.userId == "" }
+            val myParticipant = groupRun.participants?.find { it.userId == "" }
             if (myParticipant?.readyToStart != true) {
                 Button(
                     onClick = onMarkReady,
@@ -364,7 +368,7 @@ fun GroupRunActionButtons(
 
         // Accepted participant — mark ready
         groupRun.isJoined && groupRun.status != "active" && !groupRun.isOrganiser -> {
-            val myParticipant = groupRun.participants.find { it.role != "organiser" && it.invitationStatus == "accepted" }
+            val myParticipant = groupRun.participants?.find { it.role != "organiser" && it.invitationStatus == "accepted" }
             if (myParticipant?.readyToStart != true) {
                 OutlinedButton(
                     onClick = onMarkReady,
