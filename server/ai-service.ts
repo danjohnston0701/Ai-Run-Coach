@@ -906,7 +906,7 @@ ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}${runnerProfileB
   return completion.choices[0].message.content || (isSplit ? `Kilometer ${splitKm} done at ${spokenSplitPace}. Keep it up!` : "Looking good, keep this pace!");
 }
 
-export async function generateRunSummary(runData: any, runnerProfile?: string | null): Promise<any> {
+export async function generateRunSummary(runData: any, runnerProfile?: string | null, userId?: string | null): Promise<any> {
   const prompt = `Analyze this run and provide a brief summary with highlights, struggles, and tips:
 Run Data:
 - Distance: ${runData.distance}km
@@ -927,6 +927,12 @@ Provide response as JSON with fields: highlights (array), struggles (array), tip
     max_tokens: 500,
     temperature: 0.7,
   });
+
+  if (completion.usage) {
+    import("./cost-tracking-service").then(({ trackOpenAIChatCost }) => {
+      trackOpenAIChatCost(completion.usage!, userId ?? null, "run_analysis");
+    }).catch(() => {});
+  }
 
   try {
     const content = completion.choices[0].message.content || "{}";

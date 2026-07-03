@@ -19,6 +19,24 @@ import { toast } from "sonner";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/** Convert TTS character count → hh:mm:ss (≈750 chars per spoken minute at normal pace) */
+function formatTTSDuration(chars: number): string {
+  if (!chars) return "0s";
+  const totalSecs = Math.round(chars / 12.5); // 750 chars/min = 12.5 chars/sec
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function formatNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 function formatUsd(value: number, decimals = 4): string {
   if (value === 0) return "$0.00";
   if (value < 0.0001) return "<$0.0001";
@@ -519,74 +537,109 @@ export default function AdminCostDashboard() {
 
               {/* API spend detail */}
               <div className="space-y-3">
-                {[
-                  {
-                    icon: Zap,
-                    label: "OpenAI Chat (AI Coaching)",
-                    value: s.openaiChatUsd ?? 0,
-                    colour: SERVICE_COLOURS.openai_chat,
-                    detail: (() => {
-                      const r = overview?.serviceBreakdown?.find((x: any) => x.service === "openai_chat");
-                      if (!r) return "No calls recorded";
-                      return `${Number(r.totalInputTokens).toLocaleString()} input + ${Number(r.totalOutputTokens).toLocaleString()} output tokens · ${Number(r.callCount)} calls`;
-                    })(),
-                    pricing: "$0.15 / 1M input · $0.60 / 1M output",
-                  },
-                  {
-                    icon: Mic,
-                    label: "AWS Polly (Voice Synthesis)",
-                    value: s.pollyUsd ?? 0,
-                    colour: SERVICE_COLOURS.polly,
-                    detail: (() => {
-                      const r = overview?.serviceBreakdown?.find((x: any) => x.service === "polly");
-                      if (!r) return "No calls recorded";
-                      return `${Number(r.totalCharacters).toLocaleString()} characters synthesised · ${Number(r.callCount)} calls`;
-                    })(),
-                    pricing: "$16.00 / 1M characters (Neural)",
-                  },
-                  {
-                    icon: Mic,
-                    label: "OpenAI TTS (fallback)",
-                    value: s.openaiTtsUsd ?? 0,
-                    colour: SERVICE_COLOURS.openai_tts,
-                    detail: (() => {
-                      const r = overview?.serviceBreakdown?.find((x: any) => x.service === "openai_tts");
-                      if (!r) return "No calls recorded";
-                      return `${Number(r.totalCharacters).toLocaleString()} characters · ${Number(r.callCount)} calls`;
-                    })(),
-                    pricing: "$15.00 / 1M characters",
-                  },
-                  {
-                    icon: Map,
-                    label: "GraphHopper (Route Generation)",
-                    value: s.graphhopperUsd ?? 0,
-                    colour: SERVICE_COLOURS.graphhopper,
-                    detail: (() => {
-                      const r = overview?.serviceBreakdown?.find((x: any) => x.service === "graphhopper");
-                      if (!r) return "No calls recorded";
-                      return `${Number(r.totalRequests).toLocaleString()} routes generated`;
-                    })(),
-                    pricing: "$0.01 / route request",
-                  },
-                ].map(({ icon: Icon, label, value, colour, detail, pricing }) => (
-                  <Card key={label} className="bg-gray-900 border-gray-800">
-                    <CardContent className="pt-4 pb-3">
-                      <div className="flex items-start gap-3">
-                        <div className="p-1.5 rounded-lg mt-0.5" style={{ backgroundColor: `${colour}22` }}>
-                          <Icon className="w-4 h-4" style={{ color: colour }} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-gray-200">{label}</p>
-                            <p className="text-base font-bold text-white whitespace-nowrap">{formatUsd(value)}</p>
+                {(() => {
+                  const sb = overview?.serviceBreakdown ?? [];
+                  const ob = overview?.operationBreakdown ?? [];
+                  const find = (svc: string) => sb.find((x: any) => x.service === svc);
+                  const findOp = (svc: string, op: string) => ob.find((x: any) => x.service === svc && x.operation === op);
+
+                  const polly = find("polly");
+                  const oaiTts = find("openai_tts");
+                  const oaiChat = find("openai_chat");
+                  const gh = find("graphhopper");
+                  const analysis = findOp("openai_chat", "run_analysis");
+
+                  // Coaching = all openai_chat minus analysis
+                  const coachingCost = Math.max(0, (s.openaiChatUsd ?? 0) - Number(analysis?.totalCostUsd ?? 0));
+                  const coachingCalls = Math.max(0, Number(oaiChat?.callCount ?? 0) - Number(analysis?.callCount ?? 0));
+                  const coachingInputTokens = Math.max(0, Number(oaiChat?.totalInputTokens ?? 0) - Number(analysis?.totalInputTokens ?? 0));
+                  const coachingOutputTokens = Math.max(0, Number(oaiChat?.totalOutputTokens ?? 0) - Number(analysis?.totalOutputTokens ?? 0));
+
+                  const pollyChars = Number(polly?.totalCharacters ?? 0);
+                  const oaiTtsChars = Number(oaiTts?.totalCharacters ?? 0);
+                  const totalTtsChars = pollyChars + oaiTtsChars;
+
+                  const cards = [
+                    {
+                      icon: Mic,
+                      label: "AI Coaching (Voice)",
+                      value: (s.pollyUsd ?? 0) + (s.openaiTtsUsd ?? 0),
+                      colour: SERVICE_COLOURS.polly,
+                      rows: [
+                        { label: "Duration", value: formatTTSDuration(totalTtsChars), highlight: true },
+                        { label: "Characters synthesised", value: formatNum(totalTtsChars) },
+                        { label: "Polly calls", value: formatNum(Number(polly?.callCount ?? 0)) },
+                        { label: "OpenAI TTS calls (fallback)", value: formatNum(Number(oaiTts?.callCount ?? 0)) },
+                        { label: "Polly cost", value: formatUsd(s.pollyUsd ?? 0) },
+                        { label: "OpenAI TTS cost", value: formatUsd(s.openaiTtsUsd ?? 0) },
+                      ],
+                      pricing: "Polly $16 / 1M chars · OpenAI TTS $15 / 1M chars",
+                    },
+                    {
+                      icon: Zap,
+                      label: "AI Coaching (Chat)",
+                      value: coachingCost,
+                      colour: SERVICE_COLOURS.openai_chat,
+                      rows: [
+                        { label: "Coaching calls", value: formatNum(coachingCalls), highlight: true },
+                        { label: "Input tokens", value: formatNum(coachingInputTokens) },
+                        { label: "Output tokens", value: formatNum(coachingOutputTokens) },
+                        { label: "Total tokens", value: formatNum(coachingInputTokens + coachingOutputTokens) },
+                      ],
+                      pricing: "$0.15 / 1M input · $0.60 / 1M output",
+                    },
+                    {
+                      icon: Database,
+                      label: "AI Analysis (Post-Run)",
+                      value: Number(analysis?.totalCostUsd ?? 0),
+                      colour: "#A78BFA",
+                      rows: [
+                        { label: "Analyses generated", value: formatNum(Number(analysis?.callCount ?? 0)), highlight: true },
+                        { label: "Input tokens", value: formatNum(Number(analysis?.totalInputTokens ?? 0)) },
+                        { label: "Output tokens", value: formatNum(Number(analysis?.totalOutputTokens ?? 0)) },
+                      ],
+                      pricing: "$0.15 / 1M input · $0.60 / 1M output",
+                    },
+                    {
+                      icon: Map,
+                      label: "GraphHopper (Routes)",
+                      value: s.graphhopperUsd ?? 0,
+                      colour: SERVICE_COLOURS.graphhopper,
+                      rows: [
+                        { label: "Routes generated", value: formatNum(Number(gh?.totalRequests ?? 0)), highlight: true },
+                        { label: "API calls", value: formatNum(Number(gh?.callCount ?? 0)) },
+                      ],
+                      pricing: "~$0.01 / route · 500 req/day free tier",
+                    },
+                  ];
+
+                  return cards.map(({ icon: Icon, label, value, colour, rows, pricing }) => (
+                    <Card key={label} className="bg-gray-900 border-gray-800">
+                      <CardContent className="pt-4 pb-3">
+                        <div className="flex items-start gap-3">
+                          <div className="p-1.5 rounded-lg mt-0.5 flex-shrink-0" style={{ backgroundColor: `${colour}22` }}>
+                            <Icon className="w-4 h-4" style={{ color: colour }} />
                           </div>
-                          <p className="text-xs text-gray-500 mt-0.5">{detail}</p>
-                          <p className="text-xs text-gray-600 mt-0.5 font-mono">{pricing}</p>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <p className="text-sm font-semibold text-gray-200">{label}</p>
+                              <p className="text-base font-bold text-white whitespace-nowrap">{formatUsd(value)}</p>
+                            </div>
+                            <div className="space-y-1">
+                              {rows.map(r => (
+                                <div key={r.label} className="flex justify-between text-xs">
+                                  <span className="text-gray-500">{r.label}</span>
+                                  <span className={r.highlight ? "font-semibold text-white" : "text-gray-300"}>{r.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-xs text-gray-700 mt-2 font-mono">{pricing}</p>
+                          </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardContent>
+                    </Card>
+                  ));
+                })()}
               </div>
             </div>
 

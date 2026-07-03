@@ -4205,7 +4205,7 @@ function transformRunForAndroid(run: any) {
       const insights = await aiService.generateRunSummary({
         ...run,
         ...req.body
-      });
+      }, null, run.userId);
       await storage.updateRun(req.params.id, { aiInsights: JSON.stringify(insights) });
       res.json(insights);
     } catch (error: any) {
@@ -15585,6 +15585,25 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
         ))
         .groupBy(apiCostLogs.service);
 
+      // Operation-level breakdown (coaching vs analysis vs TTS etc.)
+      const operationRows = await db
+        .select({
+          service: apiCostLogs.service,
+          operation: apiCostLogs.operation,
+          totalCostUsd: sql<number>`COALESCE(SUM(${apiCostLogs.estimatedCostUsd}), 0)`,
+          totalInputTokens: sql<number>`COALESCE(SUM(${apiCostLogs.inputTokens}), 0)`,
+          totalOutputTokens: sql<number>`COALESCE(SUM(${apiCostLogs.outputTokens}), 0)`,
+          totalCharacters: sql<number>`COALESCE(SUM(${apiCostLogs.characters}), 0)`,
+          totalRequests: sql<number>`COALESCE(SUM(${apiCostLogs.requests}), 0)`,
+          callCount: sql<number>`COUNT(*)`,
+        })
+        .from(apiCostLogs)
+        .where(and(
+          gte(apiCostLogs.createdAt, startDate),
+          lt(apiCostLogs.createdAt, endDate)
+        ))
+        .groupBy(apiCostLogs.service, apiCostLogs.operation);
+
       // Infra costs (manually entered)
       const infraRow = await db
         .select()
@@ -15644,6 +15663,7 @@ Keep it conversational, not clinical. No bullet points — just natural sentence
           otherUsd: otherCost,
         },
         serviceBreakdown: costRows,
+        operationBreakdown: operationRows,
         infra: infra,
         users: {
           total: Number(totalUsers[0]?.count ?? 0),
