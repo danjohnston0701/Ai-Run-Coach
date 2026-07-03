@@ -1108,8 +1108,17 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 }
             }
 
-            composable("group_runs") {
+            composable("group_runs") { backStackEntry ->
+                val groupRunsViewModel: live.airuncoach.airuncoach.viewmodel.GroupRunsViewModel = hiltViewModel()
+                // Reload whenever this screen becomes the active destination (e.g. navigating back from detail)
+                val currentBackStack by navController.currentBackStackEntryAsState()
+                LaunchedEffect(currentBackStack) {
+                    if (currentBackStack?.destination?.route == "group_runs") {
+                        groupRunsViewModel.loadGroupRuns()
+                    }
+                }
                 GroupRunsScreen(
+                    viewModel = groupRunsViewModel,
                     onCreateGroupRun = { navController.navigate("create_group_run") },
                     onNavigateToDetail = { groupRunId -> navController.navigate("group_run_detail/$groupRunId") },
                     onNavigateBack = { navController.popBackStack() }

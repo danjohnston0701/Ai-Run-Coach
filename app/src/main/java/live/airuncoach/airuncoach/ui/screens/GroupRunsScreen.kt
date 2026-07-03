@@ -30,9 +30,9 @@ import java.util.Locale
 fun GroupRunsScreen(
     onCreateGroupRun: () -> Unit,
     onNavigateToDetail: (String) -> Unit,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    viewModel: GroupRunsViewModel = hiltViewModel()
 ) {
-    val viewModel: GroupRunsViewModel = hiltViewModel()
     val groupRunsState by viewModel.groupRunsState.collectAsState()
     val selectedTab by viewModel.selectedTab.collectAsState()
 
