@@ -1110,12 +1110,15 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
 
             composable("group_runs") { backStackEntry ->
                 val groupRunsViewModel: live.airuncoach.airuncoach.viewmodel.GroupRunsViewModel = hiltViewModel()
-                // Reload whenever this screen becomes the active destination (e.g. navigating back from detail)
-                val currentBackStack by navController.currentBackStackEntryAsState()
-                LaunchedEffect(currentBackStack) {
-                    if (currentBackStack?.destination?.route == "group_runs") {
-                        groupRunsViewModel.loadGroupRuns()
+                // Reload every time this screen RESUMES (covers initial load, back from detail, back from create)
+                androidx.compose.runtime.DisposableEffect(backStackEntry) {
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                        if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                            groupRunsViewModel.loadGroupRuns()
+                        }
                     }
+                    backStackEntry.lifecycle.addObserver(observer)
+                    onDispose { backStackEntry.lifecycle.removeObserver(observer) }
                 }
                 GroupRunsScreen(
                     viewModel = groupRunsViewModel,
