@@ -688,21 +688,59 @@ fun GroupRunActionButtonsEnhanced(
             }
         }
 
-        groupRun.isJoined && groupRun.status != "active" && !groupRun.isOrganiser -> {
-            val myParticipant = groupRun.participants?.find { it.role != "organiser" && it.invitationStatus == "accepted" }
-            if (myParticipant?.readyToStart != true) {
-                OutlinedButton(
-                    onClick = onMarkReady,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
-                ) {
-                    Text("Mark as Ready")
+        groupRun.myInvitationStatus == "accepted" && groupRun.status != "active" && !groupRun.isOrganiser -> {
+            val myParticipant = groupRun.participants?.find { it.invitationStatus == "accepted" && it.role != "organiser" }
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                if (myParticipant?.readyToStart != true) {
+                    OutlinedButton(
+                        onClick = onMarkReady,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+                    ) {
+                        Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
+                        Text("Mark as Ready")
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Check, null, tint = Colors.success, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(Spacing.sm))
+                        Text("You're ready!", style = AppTextStyles.small, color = Colors.success)
+                    }
                 }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Check, null, tint = Colors.success, modifier = Modifier.size(20.dp))
+                OutlinedButton(
+                    onClick = onDecline,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.warning)
+                ) {
+                    Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(Spacing.xs))
+                    Text("Can't Make It")
+                }
+            }
+        }
+
+        groupRun.myInvitationStatus == "declined" && groupRun.status != "active" && !groupRun.isOrganiser -> {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Close, null, tint = Colors.warning, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("You're ready!", style = AppTextStyles.small, color = Colors.success)
+                    Text("You declined this run", style = AppTextStyles.small, color = Colors.textMuted)
+                }
+                Button(
+                    onClick = onAccept,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.success)
+                ) {
+                    Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(Spacing.xs))
+                    Text("I Can Make It", color = Colors.buttonText)
                 }
             }
         }
