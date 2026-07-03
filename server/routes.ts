@@ -1120,26 +1120,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/friend-requests/:id/accept", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const request = await storage.acceptFriendRequest(req.params.id);
-      
-      // Send push notification to the user who sent the friend request
+
+      // Send push notification to the requester (non-fatal — never fail the accept)
       if (request) {
-        const requesterUser = await storage.getUser(request.requesterId);
-        const addresseeUser = await storage.getUser(request.addresseeId);
-        
-        if (requesterUser && addresseeUser) {
-          await sendFirebasePush(request.requesterId, {
-            type: "friend_request_accepted",
-            title: `${addresseeUser.name} accepted your friend request!`,
-            body: `You and ${addresseeUser.name} are now friends.`,
-            data: {
-              type: "friend_request_accepted",
-              friendId: request.addresseeId,
-              friendName: addresseeUser.name
-            }
-          });
+        try {
+          const requesterUser = await storage.getUser(request.requesterId);
+          const addresseeUser = await storage.getUser(request.addresseeId);
+          if (requesterUser && addresseeUser) {
+            const notificationService = await import("./notification-service");
+            await notificationService.sendFirebasePush(
+              request.requesterId,
+              `${addresseeUser.name} accepted your friend request! 🎉`,
+              `You and ${addresseeUser.name} are now friends.`,
+              { type: "friend_request_accepted", friendId: request.addresseeId, friendName: addresseeUser.name }
+            );
+          }
+        } catch (pushErr: any) {
+          console.warn("[AcceptFriend] Push notification failed (non-fatal):", pushErr.message);
         }
       }
-      
+
       res.json({ success: true });
     } catch (error: any) {
       console.error("Accept friend request error:", error);

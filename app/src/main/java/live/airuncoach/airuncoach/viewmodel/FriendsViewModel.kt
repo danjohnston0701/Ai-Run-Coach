@@ -187,17 +187,28 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     fun acceptFriendRequest(requestId: String) {
         viewModelScope.launch {
             _isActionInProgress.value = true
+
+            // Optimistically remove from the pending list immediately so the UI
+            // updates before the network round-trip completes
+            val current = _pendingRequestsState.value
+            if (current is PendingRequestsUiState.Success) {
+                _pendingRequestsState.value = PendingRequestsUiState.Success(
+                    sent = current.sent,
+                    received = current.received.filter { it.id != requestId }
+                )
+            }
+
             try {
                 apiService.acceptFriendRequest(requestId)
-                // Refresh both friends and pending requests sequentially
-                // Wait for pending requests to complete first
-                loadPendingRequests()
-                // Then load friends to ensure the new friend appears
-                loadFriends()
-                Log.d("FriendsViewModel", "Friend request accepted and data refreshed")
+                Log.d("FriendsViewModel", "Friend request accepted")
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to accept friend request", e)
+                // Restore the request in the list if the API call failed
+                loadPendingRequests()
             } finally {
+                // Always refresh both lists to get accurate server state
+                loadPendingRequests()
+                loadFriends()
                 _isActionInProgress.value = false
             }
         }
@@ -206,13 +217,22 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     fun declineFriendRequest(requestId: String) {
         viewModelScope.launch {
             _isActionInProgress.value = true
+
+            // Optimistically remove from the pending list immediately
+            val current = _pendingRequestsState.value
+            if (current is PendingRequestsUiState.Success) {
+                _pendingRequestsState.value = PendingRequestsUiState.Success(
+                    sent = current.sent,
+                    received = current.received.filter { it.id != requestId }
+                )
+            }
+
             try {
                 apiService.declineFriendRequest(requestId)
-                // Refresh pending requests
-                loadPendingRequests()
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to decline friend request", e)
             } finally {
+                loadPendingRequests()
                 _isActionInProgress.value = false
             }
         }
