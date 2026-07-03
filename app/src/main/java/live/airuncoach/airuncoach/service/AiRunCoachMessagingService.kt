@@ -162,6 +162,19 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             }
+            type == "friend_request_accepted" -> {
+                // Friend request accepted — tap navigates to the Friends screen
+                val mainIntent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra("deeplink_friends", true)
+                }
+                PendingIntent.getActivity(
+                    this,
+                    REQUEST_CODE_GENERAL,
+                    mainIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            }
             type == "group_run_invite" -> {
                 // Group run invitation — tap navigates directly to that group run
                 val mainIntent = Intent(this, MainActivity::class.java).apply {

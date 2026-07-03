@@ -46,6 +46,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
     val searchState by viewModel.searchState.collectAsState()
     val pendingRequestsState by viewModel.pendingRequestsState.collectAsState()
     @Suppress("UNUSED_VARIABLE") val addedFriendIds by viewModel.addedFriendIds.collectAsState()
+    val isActionInProgress by viewModel.isActionInProgress.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
 
     Scaffold(
@@ -402,7 +403,8 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                             isIncoming = true,
                             onAccept = { viewModel.acceptFriendRequest(request.id) },
                             onDecline = { viewModel.declineFriendRequest(request.id) },
-                            onCancel = {}
+                            onCancel = {},
+                            isLoading = isActionInProgress
                         )
                     }
 
@@ -413,7 +415,8 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                             isIncoming = false,
                             onAccept = {},
                             onDecline = {},
-                            onCancel = { viewModel.cancelSentRequest(request.id) }
+                            onCancel = { viewModel.cancelSentRequest(request.id) },
+                            isLoading = isActionInProgress
                         )
                     }
                 }
@@ -617,7 +620,8 @@ fun PendingRequestCard(
     isIncoming: Boolean,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    isLoading: Boolean = false
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -675,18 +679,28 @@ fun PendingRequestCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     IconButton(
                         onClick = onAccept,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(36.dp),
+                        enabled = !isLoading
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Check,
-                            contentDescription = "Accept",
-                            tint = Colors.success,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Colors.primary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = "Accept",
+                                tint = Colors.success,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                     IconButton(
                         onClick = onDecline,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(36.dp),
+                        enabled = !isLoading
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Close,
@@ -704,13 +718,21 @@ fun PendingRequestCard(
                         contentColor = Colors.error
                     ),
                     modifier = Modifier.height(36.dp),
-                    enabled = true
+                    enabled = !isLoading
                 ) {
-                    Text(
-                        "Withdraw",
-                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
-                        fontSize = 12.sp
-                    )
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(12.dp),
+                            strokeWidth = 2.dp,
+                            color = Colors.error
+                        )
+                    } else {
+                        Text(
+                            "Withdraw",
+                            style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
         }

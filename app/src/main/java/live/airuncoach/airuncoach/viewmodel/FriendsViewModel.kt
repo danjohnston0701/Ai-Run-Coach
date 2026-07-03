@@ -61,6 +61,10 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     // Track last search query so we can refresh search results after sending/withdrawing a request
     val lastSearchQuery = MutableStateFlow("")
 
+    // Track if an action is in progress (accepting/declining/sending request)
+    private val _isActionInProgress = MutableStateFlow(false)
+    val isActionInProgress: StateFlow<Boolean> = _isActionInProgress.asStateFlow()
+
     init {
         loadUser()
     }
@@ -146,6 +150,7 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     fun sendFriendRequest(friendId: String) {
         viewModelScope.launch {
             val userId = _user.value?.id ?: return@launch
+            _isActionInProgress.value = true
             try {
                 apiService.sendFriendRequest(mapOf("addresseeId" to friendId))
                 _addedFriendIds.update { it + friendId }
@@ -173,31 +178,42 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
                 loadPendingRequests()
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to send friend request", e)
+            } finally {
+                _isActionInProgress.value = false
             }
         }
     }
 
     fun acceptFriendRequest(requestId: String) {
         viewModelScope.launch {
+            _isActionInProgress.value = true
             try {
                 apiService.acceptFriendRequest(requestId)
-                // Refresh both friends and pending requests
-                loadFriends()
+                // Refresh both friends and pending requests sequentially
+                // Wait for pending requests to complete first
                 loadPendingRequests()
+                // Then load friends to ensure the new friend appears
+                loadFriends()
+                Log.d("FriendsViewModel", "Friend request accepted and data refreshed")
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to accept friend request", e)
+            } finally {
+                _isActionInProgress.value = false
             }
         }
     }
 
     fun declineFriendRequest(requestId: String) {
         viewModelScope.launch {
+            _isActionInProgress.value = true
             try {
                 apiService.declineFriendRequest(requestId)
                 // Refresh pending requests
                 loadPendingRequests()
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to decline friend request", e)
+            } finally {
+                _isActionInProgress.value = false
             }
         }
     }

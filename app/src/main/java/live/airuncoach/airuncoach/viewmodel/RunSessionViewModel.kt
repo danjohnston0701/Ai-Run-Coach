@@ -967,7 +967,7 @@ class RunSessionViewModel @Inject constructor(
                             gender = user?.coachGender,
                             onComplete = {
                                 isBriefingAudioPlaying = false
-                                _runState.update { it.copy(coachText = "") }
+                                _runState.update { it.copy(coachText = "", latestCoachMessage = null) }
                             }
                         )
                     } else if (_runState.value.isMuted) {

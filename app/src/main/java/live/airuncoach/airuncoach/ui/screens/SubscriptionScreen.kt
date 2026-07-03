@@ -1,6 +1,7 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import android.app.Activity
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -28,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.core.net.toUri
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -53,6 +56,7 @@ fun SubscriptionScreen(
     val isTrialExpired = viewModel.isTrialExpired()
     val trialDaysRemaining = viewModel.trialDaysRemaining()
     val trialExpiresAt = viewModel.getTrialExpiresAt()
+    val currentTier = viewModel.getSubscriptionTier()
 
     // Open directly to Plans tab if trial has expired so user sees the upgrade path immediately
     var selectedTab by remember { mutableIntStateOf(if (isTrialExpired) 0 else 0) } // 0 = Plans, 1 = Usage
@@ -101,7 +105,8 @@ fun SubscriptionScreen(
                     viewModel = viewModel,
                     isTrialExpired = isTrialExpired,
                     trialDaysRemaining = trialDaysRemaining,
-                    trialExpiresAt = trialExpiresAt
+                    trialExpiresAt = trialExpiresAt,
+                    currentTier = currentTier
                 )
                 1 -> UsageTabContent(
                     viewModel = viewModel,
@@ -185,8 +190,10 @@ private fun PlansTabContent(
     viewModel: SubscriptionViewModel,
     isTrialExpired: Boolean = false,
     trialDaysRemaining: Int = 0,
-    trialExpiresAt: LocalDate? = null
+    trialExpiresAt: LocalDate? = null,
+    currentTier: String = "free"
 ) {
+    val context = LocalContext.current
     // Hoisted OUTSIDE LazyColumn so scrolling can never reset it
     var isAnnual by remember { mutableStateOf(false) }
 
@@ -196,6 +203,13 @@ private fun PlansTabContent(
             .background(Colors.backgroundDefault),
         contentPadding = PaddingValues(vertical = Spacing.lg)
     ) {
+        // Current plan badge for paid users
+        if (isPremium) {
+            item {
+                CurrentPlanBadge(currentTier = currentTier)
+            }
+        }
+
         // Trial expired urgent banner
         if (isTrialExpired && !isPremium) {
             item {
@@ -213,11 +227,14 @@ private fun PlansTabContent(
         // Subtitle
         item {
             Text(
-                text = if (isTrialExpired && !isPremium) "Upgrade to continue running with AI coaching"
-                       else "Choose a plan that fits your running",
+                text = when {
+                    isPremium -> "Your current plan"
+                    isTrialExpired && !isPremium -> "Upgrade to continue running with AI coaching"
+                    else -> "Choose a plan that fits your running"
+                },
                 fontSize = 16.sp,
                 color = if (isTrialExpired && !isPremium) Colors.textPrimary else Colors.textSecondary,
-                fontWeight = if (isTrialExpired && !isPremium) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (isTrialExpired && !isPremium || isPremium) FontWeight.SemiBold else FontWeight.Normal,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -225,9 +242,11 @@ private fun PlansTabContent(
             )
         }
 
-        // Billing Period Toggle — state lives in the parent composable, never resets on scroll
-        item {
-            BillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
+        // Billing Period Toggle — only show if user is comparing plans
+        if (!isPremium) {
+            item {
+                BillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
+            }
         }
 
         // Plan Cards
@@ -252,14 +271,16 @@ private fun PlansTabContent(
         item {
             PlanCard(
                 plan = liteTier,
-                isCurrent = false,
+                isCurrent = isPremium && currentTier == "lite",
                 isAnnual = isAnnual,
                 onUpgradeClick = {
-                    activity?.let {
-                        val productId = if (isAnnual) "lite_annual" else "lite_monthly"
-                        val liteProduct = subscriptions.find { sub -> sub.productId == productId }
-                        if (liteProduct != null) {
-                            viewModel.purchaseSubscription(it, liteProduct)
+                    if (!isPremium) {
+                        activity?.let {
+                            val productId = if (isAnnual) "lite_annual" else "lite_monthly"
+                            val liteProduct = subscriptions.find { sub -> sub.productId == productId }
+                            if (liteProduct != null) {
+                                viewModel.purchaseSubscription(it, liteProduct)
+                            }
                         }
                     }
                 }
@@ -270,15 +291,17 @@ private fun PlansTabContent(
         item {
             PlanCard(
                 plan = standardTier,
-                isCurrent = false,
+                isCurrent = isPremium && currentTier == "standard",
                 isPopular = true,
                 isAnnual = isAnnual,
                 onUpgradeClick = {
-                    activity?.let {
-                        val productId = if (isAnnual) "standard_annual" else "standard_monthly"
-                        val standardProduct = subscriptions.find { sub -> sub.productId == productId }
-                        if (standardProduct != null) {
-                            viewModel.purchaseSubscription(it, standardProduct)
+                    if (!isPremium) {
+                        activity?.let {
+                            val productId = if (isAnnual) "standard_annual" else "standard_monthly"
+                            val standardProduct = subscriptions.find { sub -> sub.productId == productId }
+                            if (standardProduct != null) {
+                                viewModel.purchaseSubscription(it, standardProduct)
+                            }
                         }
                     }
                 }
@@ -289,16 +312,7 @@ private fun PlansTabContent(
         // Manage Subscription Link (Paid users)
         if (isPremium) {
             item {
-                Text(
-                    text = "Manage Subscription",
-                    fontSize = 14.sp,
-                    color = Colors.primary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = Spacing.lg)
-                        .clickable { /* Open Google Play subscription management */ }
-                )
+                ManageSubscriptionCard(context = context)
             }
         }
 
@@ -1199,6 +1213,110 @@ data class PlanFeature(
     val text: String,
     val included: Boolean
 )
+
+/**
+ * Badge showing which plan the user is currently on
+ */
+@Composable
+private fun CurrentPlanBadge(currentTier: String) {
+    val (planName, planColor) = when (currentTier.lowercase()) {
+        "lite" -> "Lite Plan" to Colors.primary
+        "standard" -> "Standard Plan" to Color(0xFFA78BFA)
+        else -> "Free Trial" to Color(0xFF8E9BAE)
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(bottom = Spacing.lg),
+        colors = CardDefaults.cardColors(containerColor = planColor.copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = "Current Plan",
+                tint = planColor,
+                modifier = Modifier.size(24.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "✓ Your Current Plan",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = planColor
+                )
+                Text(
+                    text = planName,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Colors.textPrimary
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Card with link to manage subscription in Google Play Store
+ */
+@Composable
+private fun ManageSubscriptionCard(context: android.content.Context) {
+    val packageName = context.packageName
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(bottom = Spacing.lg)
+            .clickable {
+                // Open Google Play subscription management
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    data = "https://play.google.com/store/account/subscriptions?package=$packageName&sku=lite_monthly".toUri()
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            },
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Manage Subscription",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Colors.textPrimary
+                )
+                Text(
+                    text = "Change billing, cancel, or upgrade in Google Play Store",
+                    fontSize = 12.sp,
+                    color = Colors.textSecondary,
+                    modifier = Modifier.padding(top = Spacing.xs)
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = "Open Google Play",
+                tint = Colors.primary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
 
 data class PlanData(
     val name: String,

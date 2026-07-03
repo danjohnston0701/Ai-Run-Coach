@@ -20,6 +20,7 @@ import live.airuncoach.airuncoach.ui.screens.LocationPermissionScreen
 import live.airuncoach.airuncoach.ui.screens.MainScreen
 import live.airuncoach.airuncoach.ui.screens.PersonalDetailsScreen
 import live.airuncoach.airuncoach.ui.screens.CoachSettingsScreen
+import live.airuncoach.airuncoach.ui.screens.OnboardingSubscriptionScreen
 
 @Composable
 fun RootNavigationGraph(navController: NavHostController) {
@@ -166,8 +167,19 @@ fun RootNavigationGraph(navController: NavHostController) {
             CoachSettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToDashboard = {
-                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                    // Navigate to onboarding subscription instead of location permission
+                    navController.navigate("onboarding_subscription") {
                         popUpTo("coach_settings") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("onboarding_subscription") {
+            OnboardingSubscriptionScreen(
+                onNavigateToMain = {
+                    navController.navigate(AppRoutes.MAIN) {
+                        popUpTo("onboarding_subscription") { inclusive = true }
                     }
                 }
             )

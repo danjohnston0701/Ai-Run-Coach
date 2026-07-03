@@ -53,7 +53,7 @@ export interface IStorage {
   getRequestBetweenUsers(requesterId: string, addresseeId: string): Promise<FriendRequest | null>;  // Any request from A→B
   createFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest>;
   upsertFriendRequest(requesterId: string, addresseeId: string, message?: string): Promise<FriendRequest>;  // Create or re-activate declined request
-  acceptFriendRequest(id: string): Promise<void>;
+  acceptFriendRequest(id: string): Promise<{ requesterId: string; addresseeId: string } | null>;
   declineFriendRequest(id: string): Promise<void>;
   withdrawFriendRequest(id: string, requesterId: string): Promise<void>;  // Sender withdraws their own request
   
@@ -523,9 +523,9 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(friendRequests.id, id), eq(friendRequests.requesterId, requesterId)));
   }
 
-  async acceptFriendRequest(id: string): Promise<void> {
+  async acceptFriendRequest(id: string): Promise<{ requesterId: string; addresseeId: string } | null> {
     const [request] = await db.select().from(friendRequests).where(eq(friendRequests.id, id));
-    if (!request) return;
+    if (!request) return null;
     
     await db.update(friendRequests).set({ 
       status: "accepted",
@@ -533,6 +533,7 @@ export class DatabaseStorage implements IStorage {
     }).where(eq(friendRequests.id, id));
     
     await this.addFriend(request.requesterId, request.addresseeId);
+    return { requesterId: request.requesterId, addresseeId: request.addresseeId };
   }
 
   async declineFriendRequest(id: string): Promise<void> {
