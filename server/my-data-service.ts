@@ -310,24 +310,40 @@ export async function getDetailedTrends(userId: string, days: number) {
       return { paceTrend: [], hrTrend: [], elevationTrend: [], cadenceTrend: [] };
     }
 
+    // Sane pace bounds (min/km) — anything outside this range is almost certainly a
+    // corrupted/paused-GPS artifact (e.g. a run stopped mid-track that kept recording
+    // duration while barely moving), not a real running pace. Even a slow hike rarely
+    // exceeds ~20 min/km, so 30 gives generous headroom while still excluding the
+    // wild outliers (e.g. "750 min/km") that were blowing out the chart's Y-axis.
+    const MIN_SANE_PACE = 1.5;  // faster than 1:30/km is not realistically achievable
+    const MAX_SANE_PACE = 30;   // slower than 30:00/km is treated as bad data
+
     const paceTrend = userRuns
       .map(r => ({
         date: r.completedAt?.toISOString().split('T')[0] || '',
         value: r.avgPace ? parsePaceToMinutes(r.avgPace) : null,
       }))
-      .filter((d): d is { date: string; value: number } => d.value !== null && d.value > 0);
+      .filter((d): d is { date: string; value: number } =>
+        d.value !== null && d.value >= MIN_SANE_PACE && d.value <= MAX_SANE_PACE
+      );
 
+    // Same idea for heart rate and cadence — guard against sensor glitches / corrupted
+    // rows producing a single wild outlier that distorts the whole chart's scale.
     const hrTrend = userRuns
       .map(r => ({ date: r.completedAt?.toISOString().split('T')[0] || '', value: r.avgHeartRate ?? null }))
-      .filter((d): d is { date: string; value: number } => d.value !== null);
+      .filter((d): d is { date: string; value: number } =>
+        d.value !== null && d.value >= 30 && d.value <= 230
+      );
 
     const elevationTrend = userRuns
       .map(r => ({ date: r.completedAt?.toISOString().split('T')[0] || '', value: r.elevationGain ?? null }))
-      .filter((d): d is { date: string; value: number } => d.value !== null);
+      .filter((d): d is { date: string; value: number } => d.value !== null && d.value >= 0);
 
     const cadenceTrend = userRuns
       .map(r => ({ date: r.completedAt?.toISOString().split('T')[0] || '', value: r.cadence ?? null }))
-      .filter((d): d is { date: string; value: number } => d.value !== null);
+      .filter((d): d is { date: string; value: number } =>
+        d.value !== null && d.value >= 100 && d.value <= 260
+      );
 
     return { paceTrend, hrTrend, elevationTrend, cadenceTrend };
   } catch (error) {
