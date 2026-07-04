@@ -801,26 +801,70 @@ private fun SummaryStatItem(
  * encode whether a trend point represents better or worse performance.
  * 0f = worst (red), 0.5f = mid (orange), 1f = best (green).
  */
+/**
+ * Maps a 0f (worst) .. 1f (best) "goodness" fraction to the SAME green → yellow →
+ * orange → red spectrum used by the pace-colored route map on the Run Summary screen,
+ * so charts and the map speak the same visual language. Routing through yellow (rather
+ * than blending green and orange directly) avoids the muddy olive/brown midtones a
+ * straight RGB lerp between green and orange would produce.
+ */
 private fun performanceGradientColor(goodness: Float): Color {
     val g = goodness.coerceIn(0f, 1f)
-    val red = Color(0xFFFF5252)
-    val orange = Color(0xFFFF9800)
-    val green = Color(0xFF4CAF50)
-    return if (g <= 0.5f) {
-        lerpColor(red, orange, g / 0.5f)
-    } else {
-        lerpColor(orange, green, (g - 0.5f) / 0.5f)
+    // ratio: 0 = best (green) ... 1 = worst (red) — matches the map's paceToColor scale.
+    val ratio = 1f - g
+    return when {
+        ratio < 0.33f -> {
+            val t = ratio / 0.33f
+            Color(
+                red = lerp(0.30f, 1.0f, t),
+                green = lerp(0.69f, 0.84f, t),
+                blue = lerp(0.31f, 0.0f, t),
+                alpha = 1f
+            )
+        }
+        ratio < 0.66f -> {
+            val t = (ratio - 0.33f) / 0.33f
+            Color(
+                red = 1.0f,
+                green = lerp(0.84f, 0.55f, t),
+                blue = 0.0f,
+                alpha = 1f
+            )
+        }
+        else -> {
+            val t = (ratio - 0.66f) / 0.34f
+            Color(
+                red = lerp(1.0f, 0.90f, t),
+                green = lerp(0.55f, 0.22f, t),
+                blue = lerp(0.0f, 0.15f, t),
+                alpha = 1f
+            )
+        }
     }
 }
 
-private fun lerpColor(start: Color, end: Color, fraction: Float): Color {
-    val t = fraction.coerceIn(0f, 1f)
-    return Color(
-        red = start.red + (end.red - start.red) * t,
-        green = start.green + (end.green - start.green) * t,
-        blue = start.blue + (end.blue - start.blue) * t,
-        alpha = 1f
-    )
+private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+
+/**
+ * Builds intermediate color stops between two goodness values, walking the actual
+ * green→yellow→orange→red spectrum path at each step rather than a single straight
+ * RGB blend between the two endpoint colors. This keeps segments that swing across a
+ * wide part of the range (e.g. a fast point next to a slow point, with few data points
+ * total) looking like a clean spectrum transition instead of a muddy in-between color.
+ */
+private fun spectrumGradientStops(
+    goodness1: Float,
+    goodness2: Float,
+    startAlpha: Float,
+    endAlpha: Float,
+    steps: Int = 8
+): List<Pair<Float, Color>> {
+    return (0..steps).map { i ->
+        val t = i / steps.toFloat()
+        val g = lerp(goodness1, goodness2, t)
+        val alpha = lerp(startAlpha, endAlpha, t)
+        t to performanceGradientColor(g).copy(alpha = alpha)
+    }
 }
 
 @Composable
@@ -897,11 +941,20 @@ private fun SophisticatedLineChart(
             // Per-point performance color (red = worst, orange = mid, green = best).
             // Which end is "best" depends on whether lower values are better
             // (e.g. pace) or higher values are better (e.g. cadence).
+            //
+            // IMPORTANT: this is scaled against the actual min/max of the *data being
+            // shown*, not the padded yAxisMin/yAxisMax used for the chart's vertical
+            // scale (which is padded ±15% and would otherwise squash every real point
+            // into the muddy middle of the color spectrum, never reaching true red or
+            // true green).
+            val dataMin = data.minOf { it.value }
+            val dataMax = data.maxOf { it.value }
+            val dataRange = (dataMax - dataMin).let { if (it > 0.0001) it else 1.0 }
             val pointGoodness: List<Float> = data.map { point ->
                 val fraction = if (invertColors) {
-                    (yAxisMax - point.value) / yAxisRange
+                    (dataMax - point.value) / dataRange
                 } else {
-                    (point.value - yAxisMin) / yAxisRange
+                    (point.value - dataMin) / dataRange
                 }
                 fraction.toFloat().coerceIn(0f, 1f)
             }
@@ -915,14 +968,13 @@ private fun SophisticatedLineChart(
             if (points.size >= 2) {
                 if (usePerformanceGradient) {
                     // Draw both the fill and the line as a series of small segments,
-                    // each blended between the two performance colors of its endpoints.
-                    // This produces a continuous red → orange → green (or reverse)
-                    // gradient along the line AND matching fill as performance improves
-                    // or declines across the period. Each segment's fill uses a diagonal
-                    // brush (top-left endpoint color → bottom-right endpoint color) so it
-                    // picks up the same left-to-right hue shift as the line while still
-                    // fading vertically down toward the baseline, just like a normal area
-                    // chart fill.
+                    // each stepping through the real green → yellow → orange → red
+                    // spectrum between its endpoints' goodness values (same spectrum as
+                    // the pace-colored route map on Run Summary), rather than a single
+                    // straight RGB blend which can muddy through olive/brown tones when
+                    // the two endpoints are far apart. The fill uses the same spectrum
+                    // colors, fading in alpha from denser near the line to lighter near
+                    // the baseline.
                     for (i in 1 until points.size) {
                         val p1 = points[i - 1]
                         val p2 = points[i]
@@ -933,6 +985,9 @@ private fun SophisticatedLineChart(
                         val cp1y = p1.y + (p2.y - p0.y) / 6
                         val cp2x = p2.x - (p3.x - p1.x) / 6
                         val cp2y = p2.y - (p3.y - p1.y) / 6
+
+                        val g1 = pointGoodness[i - 1]
+                        val g2 = pointGoodness[i]
 
                         // Fill quad under this curve segment, down to the baseline.
                         val segmentFillPath = androidx.compose.ui.graphics.Path()
@@ -945,10 +1000,11 @@ private fun SophisticatedLineChart(
                         drawPath(
                             path = segmentFillPath,
                             brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                colors = listOf(
-                                    pointColors[i - 1].copy(alpha = 0.25f),
-                                    pointColors[i].copy(alpha = 0.05f)
-                                ),
+                                colorStops = *spectrumGradientStops(
+                                    g1, g2,
+                                    startAlpha = 0.30f,
+                                    endAlpha = 0.05f
+                                ).toTypedArray(),
                                 start = androidx.compose.ui.geometry.Offset(p1.x, 0f),
                                 end = androidx.compose.ui.geometry.Offset(p2.x, canvasHeight)
                             )
@@ -961,7 +1017,11 @@ private fun SophisticatedLineChart(
                         drawPath(
                             path = segmentPath,
                             brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                colors = listOf(pointColors[i - 1], pointColors[i]),
+                                colorStops = *spectrumGradientStops(
+                                    g1, g2,
+                                    startAlpha = 1f,
+                                    endAlpha = 1f
+                                ).toTypedArray(),
                                 start = p1,
                                 end = p2
                             ),
