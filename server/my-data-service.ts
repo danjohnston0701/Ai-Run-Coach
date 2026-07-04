@@ -147,9 +147,16 @@ function findFastest1kSplit(userRuns: any[]): any | null {
 /**
  * Parse pace string (mm:ss/km or mm:ss) to minutes as decimal
  */
-function parsePaceToMinutes(paceStr: string | null): number | null {
-  if (!paceStr) return null;
-  const match = paceStr.match(/(\d+):(\d+)/);
+function parsePaceToMinutes(paceStr: string | null | number): number | null {
+  if (paceStr === null || paceStr === undefined) return null;
+  
+  // If it's already a number (seconds per km from database), convert to minutes
+  if (typeof paceStr === 'number') {
+    return paceStr / 60;
+  }
+  
+  // If it's a string in "M:SS" format, parse it
+  const match = (paceStr as string).match(/(\d+):(\d+)/);
   if (!match) return null;
   const minutes = parseInt(match[1]);
   const seconds = parseInt(match[2]);
