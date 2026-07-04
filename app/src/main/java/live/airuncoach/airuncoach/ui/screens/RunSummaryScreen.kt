@@ -156,6 +156,7 @@ fun RunSummaryScreenFlagship(
     val currentUser by viewModel.currentUser.collectAsState()
     val userAge = currentUser?.age
     val userHeightCm = currentUser?.height  // stored in cm on server
+    val userWeightKg = currentUser?.weight  // stored in kg on server
     val isGarminConnected by viewModel.isGarminConnected.collectAsState()
     val runPersonalBests by viewModel.runPersonalBests.collectAsState()
     // Group run leaderboard
@@ -349,6 +350,7 @@ fun RunSummaryScreenFlagship(
                             hasDynamicsTab = hasDynamicsTab,
                             userAge = userAge,
                             userHeightCm = userHeightCm,
+                            userWeightKg = userWeightKg,
                         )
 
                         // Dynamics tab — only shown when run has Garmin watch data
@@ -1456,6 +1458,7 @@ private fun GraphsTabContent(
     hasDynamicsTab: Boolean = false,
     userAge: Int? = null,
     userHeightCm: Double? = null,
+    userWeightKg: Double? = null,
 ) {
     // State for collapsible sections — only used when Garmin data IS available
     var dynamicsExpanded by remember { mutableStateOf(true) }
@@ -1476,7 +1479,7 @@ private fun GraphsTabContent(
         // RUN SCORE RINGS — Effort, Cadence & Consistency at a glance
         // ═══════════════════════════════════════════════════════════════════════
 
-        item { RunMetricRingsRow(run = run, userAge = userAge, userHeightCm = userHeightCm) }
+        item { RunMetricRingsRow(run = run, userAge = userAge, userHeightCm = userHeightCm, userWeightKg = userWeightKg) }
 
         // ═══════════════════════════════════════════════════════════════════════
         // CORE CHARTS — Pace, Elevation, Cadence, HR (always shown when GPS data exists)
@@ -5910,11 +5913,24 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
  *
  * Falls back to height=170 cm and no age adjustment if user profile is absent.
  */
-private fun computeOptimalCadenceRange(
+/**
+ * Compute the optimal cadence (single target value) for a given run based on:
+ * - Running speed (from averageSpeed or distance/duration)
+ * - User height (affects stride length)
+ * - User age (affects lower-limb reactivity if >50)
+ * - User weight (heavier runners benefit from a slightly quicker, shorter stride
+ *   to reduce per-step impact loading)
+ * - Average incline of the run (uphill/downhill sections naturally shorten stride
+ *   and increase cadence to maintain balance and power)
+ * 
+ * Returns the TARGET cadence in steps per minute.
+ */
+private fun computeOptimalCadence(
     run: RunSession,
     userHeightCm: Double?,
-    userAge: Int?
-): IntRange {
+    userAge: Int?,
+    userWeightKg: Double? = null
+): Int {
     val speedMs = when {
         run.averageSpeed > 0f -> run.averageSpeed.toDouble()
         run.distance > 0 && run.duration > 0 -> run.distance / (run.duration / 1000.0)
@@ -5922,7 +5938,7 @@ private fun computeOptimalCadenceRange(
     }
 
     // Walking — biomechanical cadence formula doesn't apply
-    if (speedMs < 2.0) return 100..120
+    if (speedMs < 2.0) return 110 // Default walking cadence
 
     // Clamp pace (same as server)
     val paceSecPerKm = (1000.0 / speedMs).coerceIn(180.0, 900.0)
@@ -5944,7 +5960,32 @@ private fun computeOptimalCadenceRange(
         optimal = maxOf(150, optimal - adj)
     }
 
-    return (optimal - 8)..(optimal + 6)
+    // Weight adjustment: heavier runners are encouraged toward a slightly higher
+    // cadence (shorter, quicker steps) to reduce impact force per stride.
+    // Baseline ~70 kg; scales gently up to +4 spm by ~135 kg.
+    val weight = userWeightKg ?: 70.0
+    if (weight > 70.0) {
+        val weightAdj = (((weight - 70.0) / 15.0)).roundToInt().coerceIn(0, 4)
+        optimal += weightAdj
+    }
+
+    // Incline adjustment: net uphill runs shorten stride length (more cadence
+    // needed to maintain speed/power); net downhill runs also tend toward a
+    // quicker turnover to control impact and braking forces, though the effect
+    // is smaller. Average gradient is derived from total climb/descent over
+    // distance since the server does not populate averageGradient directly.
+    val avgGradientPct = if (run.distance > 0) {
+        ((run.totalElevationGain - run.totalElevationLoss) / run.distance) * 100.0
+    } else 0.0
+
+    val inclineAdj = when {
+        avgGradientPct > 0 -> (avgGradientPct * 0.8).coerceIn(0.0, 10.0)
+        avgGradientPct < 0 -> (-avgGradientPct * 0.4).coerceIn(0.0, 6.0)
+        else -> 0.0
+    }
+    optimal += inclineAdj.roundToInt()
+
+    return optimal
 }
 
 /**
@@ -5955,20 +5996,27 @@ private fun tanakaMaxHr(userAge: Int?): Int =
     userAge?.let { (208 - (0.7 * it)).toInt().coerceIn(155, 210) } ?: 185
 
 /**
- * Returns a 0f–1f quality score for how close [actual] cadence is to [range].
- * Full score (1f) if in range; degrades linearly within a 30 spm tolerance window.
+ * Calculate cadence quality as a percentage of the target cadence.
+ * Score is 100% when actual cadence matches target exactly.
+ * For runners below target: score = (actual / target) × 100%
+ * For runners above target: score = min(100%, 120% allows +20% overage before penalty)
+ * 
+ * This shows cadence as a percentage of their personalized target,
+ * creating a 0-100% scale on the ring visualization.
  */
-private fun cadenceQualityScore(actual: Int, range: IntRange): Float {
-    if (actual <= 0) return 0f
-    return when {
-        actual in range      -> 1f
-        actual < range.first -> (1f - (range.first - actual).toFloat() / 30f).coerceIn(0f, 1f)
-        else                 -> (1f - (actual - range.last).toFloat() / 30f).coerceIn(0f, 1f)
-    }
+private fun cadenceQualityScore(actual: Int, targetCadence: Int): Float {
+    if (actual <= 0 || targetCadence <= 0) return 0f
+    
+    // Score is percentage of target cadence
+    val percentage = (actual.toFloat() / targetCadence.toFloat()).coerceIn(0f, 1.2f)
+    
+    // Cap at 100% for the ring display (120% == 100% visually)
+    // This allows runners to go up to 20% above target without visual overflow
+    return (percentage / 1.2f).coerceIn(0f, 1f)
 }
 
 @Composable
-private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightCm: Double? = null) {
+private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightCm: Double? = null, userWeightKg: Double? = null) {
     // ── Quality color palette (Excellent → Bad) ───────────────────────────────────────────
     val colorExcellent = Color(0xFF00E676)       // Bright green
     val colorGood      = Color(0xFF69F0AE)       // Light green
@@ -6019,30 +6067,38 @@ private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightC
     val hrZoneBadge: String = if (hrZoneNumber != null) "Zone $hrZoneNumber" else "No HR"
 
     // ── Ring 2 fallback: CADENCE quality (when no HR data) — user height + age personalised ─
-    val optimalCadenceRange = remember(run.averageSpeed, run.distance, run.duration, userHeightCm, userAge) {
-        computeOptimalCadenceRange(run, userHeightCm, userAge)
+    val targetCadence = remember(
+        run.averageSpeed, run.distance, run.duration,
+        run.totalElevationGain, run.totalElevationLoss,
+        userHeightCm, userAge, userWeightKg
+    ) {
+        computeOptimalCadence(run, userHeightCm, userAge, userWeightKg)
     }
-    val cadenceScore = remember(run.cadence, optimalCadenceRange) {
-        cadenceQualityScore(run.cadence, optimalCadenceRange)
+    val cadenceScore = remember(run.cadence, targetCadence) {
+        cadenceQualityScore(run.cadence, targetCadence)
     }
     val isWalking = (run.averageSpeed > 0f && run.averageSpeed < 2.0f) ||
                     (run.averageSpeed <= 0f && run.distance > 0 && run.duration > 0 &&
                      run.distance / (run.duration / 1000.0) < 2.0)
     val cadenceFraction: Float? = if (!hasHr && run.cadence > 0) cadenceScore else null
+    
+    // Color based on cadence percentage of target
     val cadenceColor: Color = when {
         run.cadence <= 0           -> Colors.textMuted
-        cadenceScore >= 0.90f      -> colorExcellent
-        cadenceScore >= 0.75f      -> colorGood
-        cadenceScore >= 0.55f      -> colorAverage
-        cadenceScore >= 0.35f      -> colorCaution
-        else                       -> colorBad
+        cadenceScore >= 0.95f      -> colorExcellent  // 95%+ of target
+        cadenceScore >= 0.85f      -> colorGood       // 85-94% of target
+        cadenceScore >= 0.75f      -> colorAverage    // 75-84% of target
+        cadenceScore >= 0.60f      -> colorCaution    // 60-74% of target
+        else                       -> colorBad        // <60% of target
     }
     val cadenceBadge = when {
-        run.cadence <= 0                        -> ""
-        isWalking                               -> "Walking pace"
-        run.cadence in optimalCadenceRange      -> "Optimal"
-        run.cadence < optimalCadenceRange.first -> "Low for pace"
-        else                                    -> "High for pace"
+        run.cadence <= 0           -> ""
+        isWalking                  -> "Walking pace"
+        cadenceScore >= 0.95f      -> "Excellent"
+        cadenceScore >= 0.85f      -> "Good"
+        cadenceScore >= 0.75f      -> "Solid"
+        cadenceScore >= 0.60f      -> "Low"
+        else                       -> "Very low"
     }
 
     // ── Ring 3: CONSISTENCY — quality-based color (78% = Solid = Light Green, not orange) ──
@@ -6123,7 +6179,7 @@ private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightC
                         value = cadenceFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
                         subLabel = if (run.cadence > 0) "${run.cadence} spm" else "No data",
                         targetLabel = if (run.cadence > 0)
-                            "target ${optimalCadenceRange.first}-${optimalCadenceRange.last}"
+                            "target $targetCadence spm"
                         else null,
                         progress = cadenceFraction ?: 0f,
                         ringColor = cadenceColor,

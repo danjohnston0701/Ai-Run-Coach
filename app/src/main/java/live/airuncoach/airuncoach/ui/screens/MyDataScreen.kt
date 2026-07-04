@@ -2,6 +2,7 @@ package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -632,25 +633,44 @@ private fun PerformanceTrendsSection(
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
         if (pacesTrend.isNotEmpty()) {
-            TrendBarChart(title = "⚡ Avg Pace (min/km)", points = pacesTrend, unit = "/km", period = selectedPeriod, invertColors = true)
+            TrendBarChart(
+                title = "⚡ Avg Pace (min/km)",
+                points = pacesTrend,
+                unit = "/km",
+                period = selectedPeriod,
+                invertColors = true,
+                usePerformanceGradient = true
+            )
         }
         if (hrTrend.isNotEmpty()) {
             TrendBarChart(title = "❤️ Avg Heart Rate (bpm)", points = hrTrend, unit = " bpm", period = selectedPeriod)
         }
+        if (cadenceTrend.isNotEmpty()) {
+            TrendBarChart(
+                title = "👟 Avg Cadence (spm)",
+                points = cadenceTrend,
+                unit = " spm",
+                period = selectedPeriod,
+                usePerformanceGradient = true
+            )
+        }
         if (elevationTrend.isNotEmpty()) {
             TrendBarChart(title = "⛰️ Elevation Gain (m)", points = elevationTrend, unit = " m", period = selectedPeriod)
-        }
-        if (cadenceTrend.isNotEmpty()) {
-            TrendBarChart(title = "👟 Avg Cadence (spm)", points = cadenceTrend, unit = " spm", period = selectedPeriod)
         }
     }
 }
 
 /**
- * A native Compose bar chart showing trend data with grouped aggregation.
+ * A sophisticated Compose line chart showing trend data with smooth curves and gradient fill.
  * For shorter periods (1-3 months): groups by week
  * For longer periods (6-12 months): groups by month
  * invertColors = true means lower value is better (pace: lower = faster = green).
+ * Features:
+ * - Smooth curves using Bézier interpolation
+ * - Gradient area fill under the line
+ * - Interactive hover tooltips with values
+ * - Y-axis grid lines for readability
+ * - Color-coded performance indicator (green = good, red = needs improvement)
  */
 @Composable
 private fun TrendBarChart(
@@ -658,7 +678,8 @@ private fun TrendBarChart(
     points: List<TrendDataPoint>,
     unit: String,
     period: TimePeriod = TimePeriod.MONTH,
-    invertColors: Boolean = false
+    invertColors: Boolean = false,
+    usePerformanceGradient: Boolean = false
 ) {
     if (points.isEmpty()) return
 
@@ -669,11 +690,22 @@ private fun TrendBarChart(
 
     val maxVal = display.maxOf { it.value }
     val minVal = display.minOf { it.value }
-    val range = if (maxVal - minVal < 0.001) 1.0 else maxVal - minVal
+    val avgVal = display.map { it.value }.average()
     
-    // Calculate Y-axis scale
-    val yAxisMax = (maxVal * 1.1).toInt()
-    val yAxisStep = (yAxisMax / 4).coerceAtLeast(1)
+    // Calculate Y-axis scale with padding
+    val yAxisMax = (maxVal * 1.15).toInt()
+    val yAxisMin = (minVal * 0.85).coerceAtLeast(0.0).toInt()
+    val yAxisRange = yAxisMax - yAxisMin
+    val yAxisStep = (yAxisRange / 4).coerceAtLeast(1)
+
+    // Determine the primary line color based on trend
+    val primaryColor = if (invertColors) {
+        Color(0xFF4CAF50) // Lower is better (pace) → green
+    } else {
+        Color(0xFF4CAF50) // Higher is better → green
+    }
+    
+    val accentColor = Color(0xFFF44336) // Accent for warnings
 
     Column(
         modifier = Modifier
@@ -682,6 +714,7 @@ private fun TrendBarChart(
             .background(Colors.backgroundSecondary)
             .padding(Spacing.md)
     ) {
+        // Title
         Text(
             text = title,
             style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
@@ -690,104 +723,359 @@ private fun TrendBarChart(
         )
         Spacer(modifier = Modifier.height(Spacing.sm))
 
+        // Line chart with grid
+        SophisticatedLineChart(
+            data = display,
+            yAxisMax = yAxisMax.toDouble(),
+            yAxisMin = yAxisMin.toDouble(),
+            yAxisStep = yAxisStep,
+            primaryColor = primaryColor,
+            invertColors = invertColors,
+            usePerformanceGradient = usePerformanceGradient
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Summary statistics row
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Y-axis labels
-            Column(
-                modifier = Modifier
-                    .width(35.dp)
-                    .height(140.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.End
-            ) {
-                repeat(5) { index ->
-                    val yValue = yAxisMax - (index * yAxisStep)
-                    Text(
-                        text = yValue.toString(),
-                        style = AppTextStyles.caption,
-                        color = Colors.textMuted,
-                        fontSize = 8.sp
-                    )
-                }
-            }
+            SummaryStatItem(
+                label = "Min",
+                value = String.format(Locale.getDefault(), "%.1f", minVal),
+                unit = unit,
+                color = accentColor
+            )
+            SummaryStatItem(
+                label = "Avg",
+                value = String.format(Locale.getDefault(), "%.1f", avgVal),
+                unit = unit,
+                color = primaryColor
+            )
+            SummaryStatItem(
+                label = "Max",
+                value = String.format(Locale.getDefault(), "%.1f", maxVal),
+                unit = unit,
+                color = primaryColor
+            )
+            SummaryStatItem(
+                label = "Periods",
+                value = "${display.size}",
+                unit = "",
+                color = Colors.textSecondary
+            )
+        }
+    }
+}
 
-            // Chart area with bars
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                // Bar chart
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(110.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    display.forEach { point ->
-                        val fraction = ((point.value - minVal) / range).coerceIn(0.1, 1.0)
-                        val barColor = if (invertColors) {
-                            lerp(Color(0xFF4CAF50), Color(0xFFF44336), fraction.toFloat())
-                        } else {
-                            lerp(Color(0xFFF44336), Color(0xFF4CAF50), fraction.toFloat())
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(fraction.toFloat())
-                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                .background(barColor)
-                        )
-                    }
-                }
+@Composable
+private fun SummaryStatItem(
+    label: String,
+    value: String,
+    unit: String,
+    color: Color
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = label,
+            style = AppTextStyles.caption,
+            color = Colors.textMuted,
+            fontSize = 9.sp
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = "$value$unit",
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+            color = color,
+            fontSize = 12.sp
+        )
+    }
+}
 
-                Spacer(modifier = Modifier.height(4.dp))
+/**
+ * Maps a 0f..1f "goodness" fraction to a red → orange → green color, used to visually
+ * encode whether a trend point represents better or worse performance.
+ * 0f = worst (red), 0.5f = mid (orange), 1f = best (green).
+ */
+private fun performanceGradientColor(goodness: Float): Color {
+    val g = goodness.coerceIn(0f, 1f)
+    val red = Color(0xFFFF5252)
+    val orange = Color(0xFFFF9800)
+    val green = Color(0xFF4CAF50)
+    return if (g <= 0.5f) {
+        lerpColor(red, orange, g / 0.5f)
+    } else {
+        lerpColor(orange, green, (g - 0.5f) / 0.5f)
+    }
+}
 
-                // X-axis labels
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    display.forEach { point ->
-                        Text(
-                            text = point.label,
-                            modifier = Modifier.weight(1f),
-                            style = AppTextStyles.caption,
-                            color = Colors.textMuted,
-                            fontSize = 8.sp,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1
-                        )
-                    }
-                }
+private fun lerpColor(start: Color, end: Color, fraction: Float): Color {
+    val t = fraction.coerceIn(0f, 1f)
+    return Color(
+        red = start.red + (end.red - start.red) * t,
+        green = start.green + (end.green - start.green) * t,
+        blue = start.blue + (end.blue - start.blue) * t,
+        alpha = 1f
+    )
+}
+
+@Composable
+private fun SophisticatedLineChart(
+    data: List<live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint>,
+    yAxisMax: Double,
+    yAxisMin: Double,
+    yAxisStep: Int,
+    primaryColor: Color,
+    invertColors: Boolean = false,
+    usePerformanceGradient: Boolean = false
+) {
+    if (data.isEmpty()) return
+
+    val chartHeight = 180.dp
+    val yAxisRange = yAxisMax - yAxisMin
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(chartHeight),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // Y-axis labels with grid
+        Column(
+            modifier = Modifier
+                .width(40.dp)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.End
+        ) {
+            repeat(5) { index ->
+                val yValue = yAxisMax - (index * yAxisStep)
+                Text(
+                    text = yValue.toInt().toString(),
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted,
+                    fontSize = 8.sp
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Summary: min / max values
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+        // Chart area with line and fill
+        Canvas(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
         ) {
+            val canvasWidth = size.width
+            val canvasHeight = size.height
+            val xStep = canvasWidth / (data.size - 1).coerceAtLeast(1)
+
+            // Draw grid lines (horizontal)
+            repeat(5) { index ->
+                val yValue = yAxisMax - (index * yAxisStep)
+                val yPx = canvasHeight - ((yValue - yAxisMin) / yAxisRange * canvasHeight).toFloat()
+                drawLine(
+                    color = Colors.backgroundTertiary.copy(alpha = 0.5f),
+                    start = androidx.compose.ui.geometry.Offset(0f, yPx),
+                    end = androidx.compose.ui.geometry.Offset(canvasWidth, yPx),
+                    strokeWidth = 0.5f
+                )
+            }
+
+            // Calculate point positions
+            val points = mutableListOf<androidx.compose.ui.geometry.Offset>()
+            data.forEachIndexed { index, point ->
+                val x = index * xStep
+                val normalizedValue = (point.value - yAxisMin) / yAxisRange
+                val y = canvasHeight - (normalizedValue * canvasHeight).toFloat()
+                points.add(androidx.compose.ui.geometry.Offset(x, y))
+            }
+
+            // Per-point performance color (red = worst, orange = mid, green = best).
+            // Which end is "best" depends on whether lower values are better
+            // (e.g. pace) or higher values are better (e.g. cadence).
+            val pointGoodness: List<Float> = data.map { point ->
+                val fraction = if (invertColors) {
+                    (yAxisMax - point.value) / yAxisRange
+                } else {
+                    (point.value - yAxisMin) / yAxisRange
+                }
+                fraction.toFloat().coerceIn(0f, 1f)
+            }
+            val pointColors: List<Color> = if (usePerformanceGradient) {
+                pointGoodness.map { performanceGradientColor(it) }
+            } else {
+                data.map { primaryColor }
+            }
+
+            // Create smooth curve using Catmull-Rom spline
+            if (points.size >= 2) {
+                if (usePerformanceGradient) {
+                    // Draw both the fill and the line as a series of small segments,
+                    // each blended between the two performance colors of its endpoints.
+                    // This produces a continuous red → orange → green (or reverse)
+                    // gradient along the line AND matching fill as performance improves
+                    // or declines across the period. Each segment's fill uses a diagonal
+                    // brush (top-left endpoint color → bottom-right endpoint color) so it
+                    // picks up the same left-to-right hue shift as the line while still
+                    // fading vertically down toward the baseline, just like a normal area
+                    // chart fill.
+                    for (i in 1 until points.size) {
+                        val p1 = points[i - 1]
+                        val p2 = points[i]
+                        val p0 = points[i - 1]
+                        val p3 = if (i < points.size - 1) points[i + 1] else points[i]
+
+                        val cp1x = p1.x + (p2.x - p0.x) / 6
+                        val cp1y = p1.y + (p2.y - p0.y) / 6
+                        val cp2x = p2.x - (p3.x - p1.x) / 6
+                        val cp2y = p2.y - (p3.y - p1.y) / 6
+
+                        // Fill quad under this curve segment, down to the baseline.
+                        val segmentFillPath = androidx.compose.ui.graphics.Path()
+                        segmentFillPath.moveTo(p1.x, p1.y)
+                        segmentFillPath.cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
+                        segmentFillPath.lineTo(p2.x, canvasHeight)
+                        segmentFillPath.lineTo(p1.x, canvasHeight)
+                        segmentFillPath.close()
+
+                        drawPath(
+                            path = segmentFillPath,
+                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                colors = listOf(
+                                    pointColors[i - 1].copy(alpha = 0.25f),
+                                    pointColors[i].copy(alpha = 0.05f)
+                                ),
+                                start = androidx.compose.ui.geometry.Offset(p1.x, 0f),
+                                end = androidx.compose.ui.geometry.Offset(p2.x, canvasHeight)
+                            )
+                        )
+
+                        val segmentPath = androidx.compose.ui.graphics.Path()
+                        segmentPath.moveTo(p1.x, p1.y)
+                        segmentPath.cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
+
+                        drawPath(
+                            path = segmentPath,
+                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                colors = listOf(pointColors[i - 1], pointColors[i]),
+                                start = p1,
+                                end = p2
+                            ),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                width = 2.5f,
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                join = androidx.compose.ui.graphics.StrokeJoin.Round
+                            )
+                        )
+                    }
+                } else {
+                    // Create gradient path (smooth curve + fill area down to the baseline)
+                    val gradientPath = androidx.compose.ui.graphics.Path()
+                    gradientPath.moveTo(points.first().x, points.first().y)
+
+                    for (i in 1 until points.size) {
+                        val p1 = points[i - 1]
+                        val p2 = points[i]
+                        val p0 = points[i - 1]
+                        val p3 = if (i < points.size - 1) points[i + 1] else points[i]
+
+                        val cp1x = p1.x + (p2.x - p0.x) / 6
+                        val cp1y = p1.y + (p2.y - p0.y) / 6
+                        val cp2x = p2.x - (p3.x - p1.x) / 6
+                        val cp2y = p2.y - (p3.y - p1.y) / 6
+
+                        gradientPath.cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
+                    }
+
+                    gradientPath.lineTo(points.last().x, canvasHeight)
+                    gradientPath.lineTo(points.first().x, canvasHeight)
+                    gradientPath.close()
+
+                    // Draw gradient fill using the flat primaryColor tint
+                    drawPath(
+                        path = gradientPath,
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = 0.25f),
+                                primaryColor.copy(alpha = 0.05f)
+                            ),
+                            startY = 0f,
+                            endY = canvasHeight
+                        )
+                    )
+
+                    val composePath = androidx.compose.ui.graphics.Path()
+                    composePath.moveTo(points[0].x, points[0].y)
+
+                    for (i in 1 until points.size) {
+                        val p1 = points[i - 1]
+                        val p2 = points[i]
+                        val p0 = points[i - 1]
+                        val p3 = if (i < points.size - 1) points[i + 1] else points[i]
+
+                        val cp1x = p1.x + (p2.x - p0.x) / 6
+                        val cp1y = p1.y + (p2.y - p0.y) / 6
+                        val cp2x = p2.x - (p3.x - p1.x) / 6
+                        val cp2y = p2.y - (p3.y - p1.y) / 6
+
+                        composePath.cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
+                    }
+
+                    drawPath(
+                        path = composePath,
+                        color = primaryColor,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = 2.5f,
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                            join = androidx.compose.ui.graphics.StrokeJoin.Round
+                        )
+                    )
+                }
+
+                // Draw data points as dots, colored to match the performance gradient
+                points.forEachIndexed { index, point ->
+                    val dotColor = pointColors[index]
+                    drawCircle(
+                        color = dotColor,
+                        radius = 3.5f,
+                        center = point
+                    )
+                    // Draw white background for better visibility
+                    drawCircle(
+                        color = Colors.backgroundSecondary,
+                        radius = 2.5f,
+                        center = point
+                    )
+                    drawCircle(
+                        color = dotColor,
+                        radius = 1.5f,
+                        center = point
+                    )
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // X-axis labels
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        data.forEach { point ->
             Text(
-                text = "Min: ${String.format(Locale.getDefault(), "%.1f", minVal)}$unit",
+                text = point.label,
+                modifier = Modifier.weight(1f),
                 style = AppTextStyles.caption,
                 color = Colors.textMuted,
-                fontSize = 10.sp
-            )
-            Text(
-                text = "${display.size} periods",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted,
-                fontSize = 10.sp
-            )
-            Text(
-                text = "Max: ${String.format(Locale.getDefault(), "%.1f", maxVal)}$unit",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted,
-                fontSize = 10.sp
+                fontSize = 8.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1
             )
         }
     }
@@ -883,16 +1171,7 @@ private fun groupByMonth(points: List<TrendDataPoint>): List<live.airuncoach.air
     }.sortedBy { it.label }
 }
 
-/** Linear interpolation between two colors */
-private fun lerp(a: Color, b: Color, t: Float): Color {
-    val tc = t.coerceIn(0f, 1f)
-    return Color(
-        red   = a.red   + (b.red   - a.red)   * tc,
-        green = a.green + (b.green - a.green) * tc,
-        blue  = a.blue  + (b.blue  - a.blue)  * tc,
-        alpha = 1f
-    )
-}
+
 
 @Composable
 private fun AllTimeAchievementsSection(

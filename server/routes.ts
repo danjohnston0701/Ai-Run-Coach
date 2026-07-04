@@ -1303,7 +1303,14 @@ function transformRunForAndroid(run: any) {
       endTime: endTime,
       duration: durationMs,
       distance: normalizeDistanceMeters(run),
-      averageSpeed: normalizeDistanceMeters(run) && run.duration ? (normalizeDistanceMeters(run) / (run.duration / 1000)) : 0,
+      // NOTE: must divide by durationMs (normalized above), NOT the raw run.duration —
+      // Garmin imports store duration in seconds while legacy Android uploads used
+      // milliseconds. Dividing by the raw (unnormalized) value here previously produced
+      // wildly incorrect averageSpeed (often 1000x too high) for any run whose raw
+      // duration was in seconds, which in turn broke the personalized cadence target
+      // calculation on the Run Summary screen (it would clamp to the fastest possible
+      // pace and show a constant, too-high target for every run).
+      averageSpeed: normalizeDistanceMeters(run) && durationMs ? (normalizeDistanceMeters(run) / (durationMs / 1000)) : 0,
       maxSpeed: run.maxSpeed ?? null,
       averagePace: run.avgPace || "0'00\"/km",
       calories: run.calories || 0,

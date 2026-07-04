@@ -204,12 +204,20 @@ data class ApiError(
 /* ------------------------------------------------------------ */
 
 fun RunResponse.toRunSession(): RunSession {
+    // Calculate average speed in m/s: distance (meters) / duration (seconds)
+    val avgSpeed = if (distance > 0 && duration > 0) {
+        (distance / (duration / 1000.0)).toFloat()
+    } else {
+        0f
+    }
+    
     return RunSession(
         id = id,
         startTime = completedAt - duration,
         endTime = completedAt,
         duration = duration,
         distance = distance,
+        averageSpeed = avgSpeed,  // Now properly calculated in m/s
         averagePace = avgPace,
         calories = calories ?: 0,
         cadence = cadence ?: 0,
