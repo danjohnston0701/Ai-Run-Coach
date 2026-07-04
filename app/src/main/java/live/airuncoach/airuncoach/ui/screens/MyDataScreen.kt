@@ -704,8 +704,25 @@ private fun TrendBarChart(
     } else {
         Color(0xFF4CAF50) // Higher is better → green
     }
-    
-    val accentColor = Color(0xFFF44336) // Accent for warnings
+
+    // Color-code the Min/Avg/Max summary stats using the SAME goodness spectrum as the
+    // chart itself (red = worst, green = best), scaled by where each stat sits between
+    // this period's actual min and max — NOT a fixed "min=red, max=green" assumption,
+    // which was backwards for anything using invertColors (e.g. pace, where a LOW value
+    // is the good one). Avg is graded by variance from best/worst too, not hardcoded.
+    val statRange = (maxVal - minVal).let { if (it > 0.0001) it else 1.0 }
+    fun statColor(value: Double): Color {
+        if (!usePerformanceGradient) return primaryColor
+        val fraction = if (invertColors) {
+            (maxVal - value) / statRange
+        } else {
+            (value - minVal) / statRange
+        }
+        return performanceGradientColor(fraction.toFloat().coerceIn(0f, 1f))
+    }
+    val minColor = statColor(minVal)
+    val avgColor = statColor(avgVal)
+    val maxColor = statColor(maxVal)
 
     Column(
         modifier = Modifier
@@ -746,19 +763,19 @@ private fun TrendBarChart(
                 label = "Min",
                 value = String.format(Locale.getDefault(), "%.1f", minVal),
                 unit = unit,
-                color = accentColor
+                color = minColor
             )
             SummaryStatItem(
                 label = "Avg",
                 value = String.format(Locale.getDefault(), "%.1f", avgVal),
                 unit = unit,
-                color = primaryColor
+                color = avgColor
             )
             SummaryStatItem(
                 label = "Max",
                 value = String.format(Locale.getDefault(), "%.1f", maxVal),
                 unit = unit,
-                color = primaryColor
+                color = maxColor
             )
             SummaryStatItem(
                 label = "Periods",
