@@ -125,7 +125,7 @@ class MyDataViewModel @Inject constructor(
     private val tag = "MyDataViewModel"
     
     // UI State
-    private val _selectedTimePeriod = MutableStateFlow(TimePeriod.MONTH)
+    private val _selectedTimePeriod = MutableStateFlow(TimePeriod.HALF_YEAR)
     val selectedTimePeriod: StateFlow<TimePeriod> = _selectedTimePeriod.asStateFlow()
     
     private val _isLoading = MutableStateFlow(false)
