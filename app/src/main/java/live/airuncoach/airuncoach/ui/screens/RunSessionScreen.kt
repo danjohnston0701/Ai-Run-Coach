@@ -54,6 +54,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.rotate
@@ -94,6 +95,7 @@ import com.google.maps.android.SphericalUtil
 
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.domain.model.GroupRunParticipant
 import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -334,6 +336,21 @@ fun RunSessionScreen(
                     SyncStatusIndicator(
                         pendingCount = pendingSyncCount,
                         isSyncing = runState.isStopping
+                    )
+                }
+            }
+
+            // ── Group Run Participants Panel ─────────────────────────────���────────
+            // Shows participants joining the group run in real-time
+            if (groupRunId != null) {
+                item {
+                    val participants by viewModel.groupRunParticipants.collectAsState()
+                    val isLoadingParticipants by viewModel.isLoadingParticipants.collectAsState()
+                    
+                    GroupRunParticipantsPanel(
+                        participants = participants,
+                        isLoading = isLoadingParticipants,
+                        modifier = Modifier.padding(horizontal = Spacing.md)
                     )
                 }
             }
@@ -3130,6 +3147,156 @@ fun IntervalPhaseDisplay(
                     fontSize = 11.sp
                 )
             }
+        }
+    }
+}
+
+/**
+ * Displays participants in a group run, updated in real-time as they join/start their sessions
+ */
+@Composable
+fun GroupRunParticipantsPanel(
+    participants: List<GroupRunParticipant>,
+    isLoading: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (participants.isEmpty() && !isLoading) return
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = Spacing.sm),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            // Header with refresh indicator
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.icon_people_vector),
+                        contentDescription = null,
+                        tint = Colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Group Run (${participants.size})",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                }
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Colors.primary,
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.sm))
+
+            // Participants list
+            participants.forEach { participant ->
+                ParticipantRowDuringRun(participant = participant)
+            }
+
+            if (participants.isEmpty() && isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(Spacing.md),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = Colors.primary,
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Single row for a participant in the group run
+ */
+@Composable
+fun ParticipantRowDuringRun(
+    participant: GroupRunParticipant,
+    modifier: Modifier = Modifier
+) {
+    val statusColor = when {
+        participant.readyToStart -> Colors.success
+        participant.invitationStatus == "accepted" -> Colors.primary
+        participant.invitationStatus == "declined" -> Colors.warning
+        else -> Colors.textMuted
+    }
+
+    val statusText = when {
+        participant.readyToStart -> "🏃 Running"
+        participant.invitationStatus == "accepted" -> "✓ Joined"
+        participant.invitationStatus == "declined" -> "✗ Declined"
+        else -> "⏳ Invited"
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundRoot, RoundedCornerShape(8.dp))
+            .padding(Spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
+        // Avatar
+        Surface(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape),
+            color = statusColor.copy(alpha = 0.15f),
+            shape = CircleShape
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = participant.userName.take(1).uppercase(),
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                    color = statusColor
+                )
+            }
+        }
+
+        // Name and status
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                participant.userName,
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
+                color = Colors.textPrimary
+            )
+        }
+
+        // Status badge
+        Surface(
+            color = statusColor.copy(alpha = 0.15f),
+            shape = RoundedCornerShape(6.dp)
+        ) {
+            Text(
+                statusText,
+                style = AppTextStyles.small.copy(fontWeight = FontWeight.Medium),
+                color = statusColor,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
         }
     }
 }

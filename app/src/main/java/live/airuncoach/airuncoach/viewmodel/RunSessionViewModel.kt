@@ -136,6 +136,15 @@ class RunSessionViewModel @Inject constructor(
         groupRunId = id
     }
 
+    // ── Group Run Participants ─────────────────────────────────────────────────
+    /** Participants in the active group run, updated periodically during the run */
+    private val _groupRunParticipants = MutableStateFlow<List<GroupRunParticipant>>(emptyList())
+    val groupRunParticipants: StateFlow<List<GroupRunParticipant>> = _groupRunParticipants.asStateFlow()
+
+    /** Whether participants are currently being fetched */
+    private val _isLoadingParticipants = MutableStateFlow(false)
+    val isLoadingParticipants: StateFlow<Boolean> = _isLoadingParticipants.asStateFlow()
+
     init {
         // Observe the first GPS fix from RunTrackingService and trigger route recognition
         viewModelScope.launch {
@@ -144,6 +153,58 @@ class RunSessionViewModel @Inject constructor(
                     checkForKnownRoute(gpsPoint.first, gpsPoint.second)
                 }
             }
+        }
+
+        // Start polling for group run participants when run is active
+        viewModelScope.launch {
+            _runState.collect { runState ->
+                if (runState.isRunning && groupRunId != null) {
+                    startParticipantPolling()
+                } else if (!runState.isRunning) {
+                    // Stop polling when run stops
+                    stopParticipantPolling()
+                }
+            }
+        }
+    }
+
+    /** Polling job for group run participants */
+    private var participantPollingJob: kotlinx.coroutines.Job? = null
+
+    /** Start polling for group run participants every 2 seconds */
+    private fun startParticipantPolling() {
+        if (participantPollingJob != null) return // Already polling
+        
+        participantPollingJob = viewModelScope.launch {
+            while (groupRunId != null && _runState.value.isRunning) {
+                try {
+                    fetchGroupRunParticipants()
+                    delay(2000) // Poll every 2 seconds
+                } catch (e: Exception) {
+                    Log.w("RunSessionViewModel", "Error polling participants: ${e.message}")
+                    delay(5000) // Back off on error
+                }
+            }
+        }
+    }
+
+    /** Stop polling for group run participants */
+    private fun stopParticipantPolling() {
+        participantPollingJob?.cancel()
+        participantPollingJob = null
+    }
+
+    /** Fetch latest participants from backend */
+    private suspend fun fetchGroupRunParticipants() {
+        val grId = groupRunId ?: return
+        try {
+            _isLoadingParticipants.value = true
+            val groupRun = apiService.getGroupRun(grId)
+            _groupRunParticipants.value = groupRun.participants ?: emptyList()
+        } catch (e: Exception) {
+            Log.w("RunSessionViewModel", "Failed to fetch group run participants: ${e.message}")
+        } finally {
+            _isLoadingParticipants.value = false
         }
     }
 

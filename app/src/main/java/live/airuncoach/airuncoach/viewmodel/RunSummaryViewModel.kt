@@ -601,10 +601,20 @@ class RunSummaryViewModel @Inject constructor(
                                 _isEnrichingWithGarmin.value = false
                                 return@launch
                             }
-                            _runSession.value = enrichedRun
+                            // Merge Garmin-enriched data with existing session.
+                            // The backend may have overwritten phone-captured fields (routePoints with
+                            // speed data, kmSplits, paceData, strugglePoints) with null values from
+                            // the Garmin API. We preserve non-null original data in a smart merge so
+                            // the pace graph, km splits, and pace analysis are never lost.
+                            val mergedRun = mergeWithGarminEnrichment(_runSession.value, enrichedRun)
+                            _runSession.value = mergedRun
+                            // Keep struggle points consistent with merged run
+                            if (mergedRun.strugglePoints.isNotEmpty()) {
+                                _strugglePoints.value = mergedRun.strugglePoints
+                            }
                             _isEnrichingWithGarmin.value = false
                             _isWaitingForGarminSync.value = false
-                            Log.d("RunSummaryViewModel", "Run enriched with Garmin data ✅")
+                            Log.d("RunSummaryViewModel", "Run enriched with Garmin data ✅ (routePoints=${mergedRun.routePoints.size}, kmSplits=${mergedRun.kmSplits.size})")
                             return@launch
                         }
                         response.code() == 202 -> {
@@ -660,6 +670,58 @@ class RunSummaryViewModel @Inject constructor(
 
     fun dismissGarminReconnect() {
         _garminNeedsReconnect.value = false
+    }
+
+    /**
+     * Merges a Garmin-enriched [RunSession] into the existing session, preserving critical
+     * phone-captured data that the Garmin API may not return.
+     *
+     * ## Why this is needed
+     * When the user finishes a run on the phone and then saves it on the watch a few minutes
+     * later, Garmin's webhook fires and the backend enriches the existing DB record.  The
+     * Garmin API does not always return fields like [RunSession.routePoints] (GPS track with
+     * per-point speed), [RunSession.kmSplits], or [RunSession.paceData] — so a naïve full
+     * replacement would silently wipe the pace graph, km splits, and pace analysis.
+     *
+     * This function keeps everything from [enriched] (the authoritative Garmin result) but
+     * falls back to [original] for any field that the Garmin response left null or empty.
+     *
+     * @param original The pre-enrichment session (may be null if enrichment is called before
+     *                 any local session is loaded).
+     * @param enriched The server response from POST /api/runs/{id}/enrich-with-garmin-data.
+     */
+    private fun mergeWithGarminEnrichment(original: RunSession?, enriched: RunSession): RunSession {
+        if (original == null) return enriched
+        return enriched.copy(
+            // ── GPS track with per-point speed — used to draw the pace graph ─────────────
+            // Garmin's enriched run may omit routePoints or return them without a speed value,
+            // which would blank the pace/elevation chart.  Preserve the phone-captured track.
+            routePoints = enriched.routePoints.ifEmpty { original.routePoints },
+
+            // ── Km splits — used by the split analysis chart ───────────────────────────────
+            kmSplits = enriched.kmSplits.ifEmpty { original.kmSplits },
+
+            // ── Pace time-series — used for the consistency ring ──────────────────────────
+            paceData = enriched.paceData ?: original.paceData,
+
+            // ── Average pace string ────────────────────────────────────────────────────────
+            averagePace = enriched.averagePace ?: original.averagePace,
+
+            // ── Struggle points detected on-device during the run ─────────────────────────
+            // These are set by the phone's real-time coaching engine and are never present
+            // in Garmin's data — always preserve the original.
+            strugglePoints = enriched.strugglePoints.ifEmpty { original.strugglePoints },
+
+            // ── AI coaching notes captured during the run ─────────────────────────────────
+            aiCoachingNotes = enriched.aiCoachingNotes.ifEmpty { original.aiCoachingNotes },
+
+            // ── User post-run comments ─────────────────────────────────────────────────────
+            userComments = enriched.userComments ?: original.userComments,
+
+            // ── Weather data captured at run start / end by the phone ─────────────────────
+            weatherAtStart = enriched.weatherAtStart ?: original.weatherAtStart,
+            weatherAtEnd   = enriched.weatherAtEnd   ?: original.weatherAtEnd,
+        )
     }
 
     /**

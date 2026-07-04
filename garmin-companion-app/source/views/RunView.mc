@@ -84,7 +84,8 @@ class RunView extends Ui.View {
     private var _lastGpsLng    = null;
     private var _lastGpsAlt    = null;
     private var _baroAlt        = null;   // Barometric altitude from Sensor.SensorInfo (continuous)
-    private var _lastGpsSpeed  = 0.0;
+    private var _lastGpsSpeed   = 0.0;
+    private var _lastGpsBearing = null;   // Degrees 0-360 (converted from Pos.Info.heading radians)
     private var _gpsStreamTick = 0;
 
     // GPS distance accumulation
@@ -528,7 +529,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.1.0");
+                _phoneLink.sendHello("3.1.2");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -894,7 +895,7 @@ class RunView extends Ui.View {
                     "alt"   => _lastGpsAlt,
                     "baroAlt" => _baroAlt,
                     "speed" => _lastGpsSpeed,
-                    "bear"  => _lastGpsSpeed > 0 ? _lastGpsSpeed : null,
+                    "bear"  => _lastGpsBearing,
                     "acc"   => _gpsQuality,
                     // Core biometrics
                     "hr"    => _heartRate,
@@ -972,6 +973,12 @@ class RunView extends Ui.View {
             _lastGpsLng = deg[1];
             _lastGpsAlt = info.altitude;
             if (info.speed != null) { _lastGpsSpeed = info.speed; }
+            // Heading: Pos.Info.heading is radians (0 = North, clockwise). Convert to degrees 0-360.
+            if (info has :heading && info.heading != null) {
+                var hdgDeg = info.heading * 180.0 / Math.PI;
+                if (hdgDeg < 0) { hdgDeg = hdgDeg + 360.0; }
+                _lastGpsBearing = hdgDeg;
+            }
             if (!_phoneControlled && info.altitude != null && _dataStreamer != null) {
                 _dataStreamer.updateGPS(_lastGpsLat, _lastGpsLng, info.altitude);
             }

@@ -182,7 +182,7 @@ interface ApiService {
     suspend fun markReadyToStart(@Path("id") groupRunId: String): GroupRun
 
     @POST("/api/group-runs/{id}/start")
-    suspend fun startGroupRun(@Path("id") groupRunId: String): GroupRun
+    suspend fun startGroupRun(@Path("id") groupRunId: String): GroupRun?
 
     @POST("/api/group-runs/{id}/complete")
     suspend fun completeGroupRun(

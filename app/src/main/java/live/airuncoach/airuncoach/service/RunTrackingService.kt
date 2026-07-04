@@ -200,6 +200,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private val watchHrSeries       = mutableListOf<Int>()      // bpm
     private val watchCadenceSeries  = mutableListOf<Int>()      // steps/min
     private val watchAltSeries      = mutableListOf<Float>()    // metres (barometric)
+    private val watchPaceSeries     = mutableListOf<Double>()   // sec/km (derived from speedMs)
     private val watchGctSeries      = mutableListOf<Float>()    // ms
     private val watchGcbSeries      = mutableListOf<Float>()    // %
     private val watchVoSeries       = mutableListOf<Float>()    // cm
@@ -1096,7 +1097,7 @@ class RunTrackingService : Service(), SensorEventListener {
         watchRespSum = 0f;   watchRespCount = 0
         // Reset time-series lists
         watchHrSeries.clear();      watchCadenceSeries.clear()
-        watchAltSeries.clear();     watchGctSeries.clear()
+        watchPaceSeries.clear();    watchAltSeries.clear();     watchGctSeries.clear()
         watchGcbSeries.clear();     watchVoSeries.clear()
         watchVrSeries.clear();      watchSlSeries.clear()
         watchPwrSeries.clear();     watchRespSeries.clear()
@@ -1909,7 +1910,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 val response = apiService.getPhaseCoaching(update)
                 Log.d("PaceCoaching", "LLM response: ${response.message.take(80)}...")
                 
-                // Play via the standard coaching audio pipeline
+                // Play via the standard coaching audio pipeline (handles all text normalizations)
                 playCoachingAudio(response.audio, response.format, response.message)
             } catch (e: Exception) {
                 Log.e("PaceCoaching", "Failed to get pace coaching from LLM", e)
@@ -2303,6 +2304,13 @@ class RunTrackingService : Service(), SensorEventListener {
             else                                 -> null
         }
         if (altSample != null)             watchAltSeries.add(altSample)
+        // Derive pace (sec/km) from watch speed (m/s). Clamped 3:00–15:00/km to exclude
+        // GPS noise spikes (e.g. standing still returning 0.01 m/s = 27h/km pace).
+        val speedSample = frame.speedMs
+        if (speedSample != null && speedSample > 0f) {
+            val paceSecPerKm = (1000.0 / speedSample.toDouble()).coerceIn(180.0, 900.0)
+            watchPaceSeries.add(paceSecPerKm)
+        }
         if (frame.groundContactTime > 0f)  watchGctSeries.add(frame.groundContactTime)
         if (frame.groundContactBalance in 30f..70f) watchGcbSeries.add(frame.groundContactBalance)
         if (frame.verticalOscillation > 0f) watchVoSeries.add(frame.verticalOscillation)
@@ -2912,6 +2920,7 @@ class RunTrackingService : Service(), SensorEventListener {
             heartRateData              = watchHrSeries.takeIf { it.isNotEmpty() },
             cadenceData                = watchCadenceSeries.takeIf { it.isNotEmpty() },
             altitudeData               = watchAltSeries.takeIf { it.isNotEmpty() },
+            paceData                   = watchPaceSeries.takeIf { it.isNotEmpty() },
             groundContactTimeData      = watchGctSeries.toList().takeIf { it.isNotEmpty() },
             groundContactBalanceData   = watchGcbSeries.toList().takeIf { it.isNotEmpty() },
             verticalOscillationData    = watchVoSeries.toList().takeIf { it.isNotEmpty() },
@@ -3359,6 +3368,7 @@ class RunTrackingService : Service(), SensorEventListener {
             heartRateData            = watchHrSeries.takeIf { it.isNotEmpty() },
             cadenceData              = watchCadenceSeries.takeIf { it.isNotEmpty() },
             altitudeData             = watchAltSeries.takeIf { it.isNotEmpty() },
+            paceData                 = watchPaceSeries.takeIf { it.isNotEmpty() },
             groundContactTimeData    = watchGctSeries.takeIf { it.isNotEmpty() },
             groundContactBalanceData = watchGcbSeries.takeIf { it.isNotEmpty() },
             verticalOscillationData  = watchVoSeries.takeIf { it.isNotEmpty() },
@@ -3664,16 +3674,33 @@ class RunTrackingService : Service(), SensorEventListener {
     /**
      * Play coaching audio using OpenAI TTS if available, otherwise fall back to Android TTS
      */
+    /**
+     * Clean coaching message by applying all text normalizations:
+     * - Remove redundant "per kilometer" from pace differences
+     * - Normalize time values (e.g. 131 seconds → 2 minutes and 11 seconds)
+     */
+    private fun cleanCoachingMessage(message: String): String {
+        var result = message
+        // Apply pace-difference cleanup first (e.g. "by 42 seconds per kilometer" → "by 42 seconds")
+        result = live.airuncoach.airuncoach.util.AbbreviationExpander.cleanPaceDifference(result)
+        // Then normalize time values (e.g. "131 seconds" → "2 minutes and 11 seconds")
+        result = live.airuncoach.airuncoach.util.AbbreviationExpander.normalizeTimeValues(result)
+        return result
+    }
+
     private fun playCoachingAudio(base64Audio: String?, format: String?, fallbackText: String) {
+        // Clean the message (normalize pace differences, format time values)
+        val cleanedText = cleanCoachingMessage(fallbackText)
+        
         // Broadcast text to UI
-        _latestCoachingText.value = fallbackText
+        _latestCoachingText.value = cleanedText
 
         // Enqueue via shared audio queue (prevents overlap with other coaching)
         CoachingAudioQueue.enqueue(
             context = this,
             base64Audio = base64Audio,
             format = format,
-            fallbackText = fallbackText,
+            fallbackText = cleanedText,
             accent = currentUser?.coachAccent,
             gender = currentUser?.coachGender,
             onComplete = {
@@ -3829,6 +3856,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     Log.d("RunTrackingService", "500m coaching response: ${response.message}")
 
                     // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
+                    // (playCoachingAudio handles all text normalizations internally)
                     if (!isMuted) {
                         playCoachingAudio(response.audio, response.format, response.message)
                     }
@@ -4946,6 +4974,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 Log.d("RunTrackingService", "Km ${split.km} split coaching: ${response.message}")
 
                 // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
+                // (playCoachingAudio handles all text normalizations internally)
                 if (!isMuted) {
                     playCoachingAudio(response.audio, response.format, response.message)
                 }

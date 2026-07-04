@@ -117,10 +117,17 @@ class GroupRunDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _actionLoading.value = true
             try {
-                apiService.startGroupRun(groupRunId)
+                val response = apiService.startGroupRun(groupRunId)
+                // Backend may return null on 204 No Content, which is fine
+                // Just mark the group run as started
                 _startedGroupRunId.value = groupRunId
+                // If we got a response, update the state
+                response?.let { updatedGr ->
+                    _state.value = GroupRunDetailState.Success(updatedGr)
+                }
             } catch (e: Exception) {
                 _actionError.value = "Failed to start run: ${e.message}"
+                Log.e("GroupRunDetailVM", "startRun error", e)
             } finally {
                 _actionLoading.value = false
             }
