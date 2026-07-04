@@ -322,10 +322,20 @@ export async function getDetailedTrends(userId: string, days: number) {
       .map(r => ({
         date: r.completedAt?.toISOString().split('T')[0] || '',
         value: r.avgPace ? parsePaceToMinutes(r.avgPace) : null,
+        rawAvgPace: r.avgPace,
       }))
-      .filter((d): d is { date: string; value: number } =>
-        d.value !== null && d.value >= MIN_SANE_PACE && d.value <= MAX_SANE_PACE
-      );
+      .filter((d) => {
+        const inRange = d.value !== null && d.value >= MIN_SANE_PACE && d.value <= MAX_SANE_PACE;
+        if (!inRange && d.value !== null) {
+          // Log so we can trace exactly which run/date is producing the outlier.
+          console.warn(
+            `[MyData] Excluding outlier pace for user ${userId} on ${d.date}: ` +
+            `raw="${d.rawAvgPace}" parsed=${d.value.toFixed(1)} min/km`
+          );
+        }
+        return inRange;
+      })
+      .map(({ date, value }) => ({ date, value: value as number }));
 
     // Same idea for heart rate and cadence — guard against sensor glitches / corrupted
     // rows producing a single wild outlier that distorts the whole chart's scale.
