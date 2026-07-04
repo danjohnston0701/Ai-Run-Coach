@@ -306,7 +306,7 @@ export async function getDetailedTrends(userId: string, days: number) {
     const paceTrend = userRuns
       .map(r => ({
         date: r.completedAt?.toISOString().split('T')[0] || '',
-        value: r.avgPace ? parseFloat(r.avgPace) : null,
+        value: r.avgPace ? parsePaceToMinutes(r.avgPace) : null,
       }))
       .filter((d): d is { date: string; value: number } => d.value !== null && d.value > 0);
 
