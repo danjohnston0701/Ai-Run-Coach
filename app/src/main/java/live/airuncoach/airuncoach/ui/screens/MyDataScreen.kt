@@ -1174,10 +1174,11 @@ private fun groupTrendDataByPeriod(
 }
 
 /**
- * Group trend data by week, showing Monday date of that week
+ * Group trend data by week, showing only dd/mm for the Monday of that week.
+ * Sorted in chronological order by actual date, not alphabetically.
  */
 private fun groupByWeek(points: List<TrendDataPoint>): List<live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint> {
-    val grouped = mutableMapOf<String, MutableList<Double>>()
+    val grouped = mutableMapOf<Long, Pair<String, MutableList<Double>>>() // sortKey -> (label, values)
     val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     
     points.forEach { point ->
@@ -1192,32 +1193,43 @@ private fun groupByWeek(points: List<TrendDataPoint>): List<live.airuncoach.airu
                 val daysToSubtract = if (dayOfWeek == java.util.Calendar.SUNDAY) 6 else dayOfWeek - 2
                 calendar.add(java.util.Calendar.DAY_OF_MONTH, -daysToSubtract)
                 
-                val weekKey = String.format(Locale.getDefault(), "%02d/%02d/%02d",
-                    calendar.get(java.util.Calendar.DAY_OF_MONTH),
-                    calendar.get(java.util.Calendar.MONTH) + 1,
-                    calendar.get(java.util.Calendar.YEAR) % 100
+                val year = calendar.get(java.util.Calendar.YEAR)
+                val month = calendar.get(java.util.Calendar.MONTH) + 1
+                val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+                
+                // Label: dd/mm (no year for 3-month view)
+                val label = String.format(Locale.getDefault(), "%02d/%02d",
+                    day, month
                 )
                 
-                grouped.getOrPut(weekKey) { mutableListOf() }.add(point.value)
+                // Sort key: YYYYMMDD for chronological ordering
+                val sortKey = (year.toLong() * 10000) + (month * 100) + day
+                
+                grouped.getOrPut(sortKey) { Pair(label, mutableListOf()) }
+                    .second.add(point.value)
             }
         } catch (_: Exception) {
             // Skip invalid dates
         }
     }
     
-    return grouped.map { (label, values) ->
-        live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint(
-            label = label,
-            value = values.average()
-        )
-    }.sortedBy { it.label }
+    return grouped
+        .map { (sortKey, pair) ->
+            live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint(
+                label = pair.first,
+                value = pair.second.average(),
+                sortKey = sortKey
+            )
+        }
+        .sortedBy { it.sortKey }
 }
 
 /**
- * Group trend data by month - showing month names (Jan, Feb, Mar, etc.)
+ * Group trend data by month - showing month names (Jan, Feb, Mar, etc.) with year.
+ * Sorted in calendar order (Jan -> Dec), not alphabetically.
  */
 private fun groupByMonth(points: List<TrendDataPoint>): List<live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint> {
-    val grouped = mutableMapOf<String, Pair<Int, MutableList<Double>>>() // label -> (sortOrder, values)
+    val grouped = mutableMapOf<Long, Pair<String, MutableList<Double>>>() // sortKey -> (label, values)
     val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     val monthNames = arrayOf("", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
     
@@ -1229,10 +1241,11 @@ private fun groupByMonth(points: List<TrendDataPoint>): List<live.airuncoach.air
                 calendar.time = date
                 val month = calendar.get(java.util.Calendar.MONTH) + 1
                 val year = calendar.get(java.util.Calendar.YEAR)
-                val key = "${monthNames[month]} ${(year % 100).toString().padStart(2, '0')}"
-                val sortOrder = year * 100 + month // For sorting
+                val label = "${monthNames[month]} ${(year % 100).toString().padStart(2, '0')}"
+                // Sort key: YYYYMM for chronological ordering (Jan 2025 before Feb 2025, etc.)
+                val sortKey = (year.toLong() * 100) + month
                 
-                grouped.getOrPut(key) { Pair(sortOrder, mutableListOf()) }
+                grouped.getOrPut(sortKey) { Pair(label, mutableListOf()) }
                     .second.add(point.value)
             }
         } catch (_: Exception) {
@@ -1240,12 +1253,15 @@ private fun groupByMonth(points: List<TrendDataPoint>): List<live.airuncoach.air
         }
     }
     
-    return grouped.map { (label, pair) ->
-        live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint(
-            label = label,
-            value = pair.second.average()
-        )
-    }.sortedBy { it.label }
+    return grouped
+        .map { (sortKey, pair) ->
+            live.airuncoach.airuncoach.viewmodel.GroupedTrendDataPoint(
+                label = pair.first,
+                value = pair.second.average(),
+                sortKey = sortKey
+            )
+        }
+        .sortedBy { it.sortKey }
 }
 
 

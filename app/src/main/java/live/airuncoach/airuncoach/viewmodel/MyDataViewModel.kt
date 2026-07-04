@@ -75,8 +75,9 @@ data class TrendDataPoint(
  * Grouped trend data point for weekly/monthly aggregation
  */
 data class GroupedTrendDataPoint(
-    val label: String,  // e.g. "Week 1", "Mar 2024"
-    val value: Double   // aggregated average value for that period
+    val label: String,  // e.g. "08/06", "Mar 26"
+    val value: Double,   // aggregated average value for that period
+    val sortKey: Long = 0L  // Unix timestamp or numeric sort key (year*10000 + month*100 + day)
 )
 
 /**
@@ -125,7 +126,7 @@ class MyDataViewModel @Inject constructor(
     private val tag = "MyDataViewModel"
     
     // UI State
-    private val _selectedTimePeriod = MutableStateFlow(TimePeriod.HALF_YEAR)
+    private val _selectedTimePeriod = MutableStateFlow(TimePeriod.QUARTER)
     val selectedTimePeriod: StateFlow<TimePeriod> = _selectedTimePeriod.asStateFlow()
     
     private val _isLoading = MutableStateFlow(false)
