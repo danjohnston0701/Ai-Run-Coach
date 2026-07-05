@@ -500,12 +500,12 @@ fun TrainingPlanDashboardScreen(
         containerColor = Colors.backgroundRoot,
         contentWindowInsets = WindowInsets(0)
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
             when (val s = state) {
-                is PlanDetailState.Loading -> Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                is PlanDetailState.Loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Colors.primary)
                 }
-                is PlanDetailState.Error -> Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                is PlanDetailState.Error -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(s.message, style = AppTextStyles.body, color = Colors.textSecondary)
                         Spacer(modifier = Modifier.height(Spacing.md))
