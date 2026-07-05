@@ -2630,11 +2630,16 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Tier 1 — Interval/hill repeat sessions: suppress struggle detection entirely.
-        // The dynamic coaching plan manages all cues including rep pacing and recovery.
-        // Recovery jogs between reps cause large intentional pace drops — the struggle engine
-        // would incorrectly fire "you're struggling" when the runner is executing the plan.
-        if (isIntervalTypeSession) {
+        // All coaching plan sessions: suppress struggle detection entirely.
+        //
+        // Tier 1 (intervals, hill repeats): recovery jogs cause intentional pace drops that
+        // the struggle engine would misread as "you're struggling".
+        //
+        // Tier 2 (easy, recovery, long_run): the session coaching plan now fires HR zone alerts,
+        // pace alerts, and periodic check-ins that provide all the effort guidance the runner
+        // needs. A generic struggle prompt ("you seem to be slowing down") conflicts with and
+        // duplicates the plan's reactive triggers and gives the runner a confusing second voice.
+        if (isCoachingPlanActive) {
             isStruggling = false
             return
         }
@@ -2691,11 +2696,14 @@ class RunTrackingService : Service(), SensorEventListener {
             splitPausedMs = 0  // Reset pause accumulator for next split
             Log.d("RunTrackingService", "Reached ${currentKm}km split")
 
-            // Tier 1 — Interval/hill repeat sessions: the dynamic coaching plan manages all cues.
-            // Km splits are irrelevant — the runner is alternating between hard reps and recovery,
-            // so a per-km average pace has no coaching value and would conflict with rep instructions.
-            if (isIntervalTypeSession) {
-                Log.d("RunTrackingService", "Skipping km split coaching for interval session at ${currentKm}km")
+            // All coaching plan sessions: suppress km splits entirely.
+            // The session coaching plan owns all pacing feedback — its periodic check-ins,
+            // phase transitions, and milestone triggers (distance_pct > 50/75/90) already give
+            // per-distance context with full knowledge of the session goal and what was just said.
+            // A generic km split firing mid-plan is context-ignorant and potentially contradictory
+            // (e.g. "brilliant pace!" immediately after a plan trigger said "ease off, HR is high").
+            if (isCoachingPlanActive) {
+                Log.d("RunTrackingService", "Skipping km split coaching for coached session at ${currentKm}km")
                 return
             }
 
@@ -2825,7 +2833,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
             }
 
-            // Cadence/stride coaching fires in ALL sessions — technique matters everywhere
+            // Cadence/stride coaching — fires in free-run sessions only.
+            // Suppressed for coaching plan sessions (handled inside maybeTriggerCadenceCoaching).
             if (!hasCoachingFiredThisTick && canFireCoaching()) {
                 maybeTriggerCadenceCoaching()
             }
@@ -4016,16 +4025,10 @@ class RunTrackingService : Service(), SensorEventListener {
         serviceScope.launch {
             try {
                 if (!isMuted) {
-                    // Same Polly routing as fireDynamicTrigger: pre-cached → real-time → Android TTS
-                    val base64Audio: String?
-                    val audioFormat: String?
-                    if (!message.contains('{')) {
-                        base64Audio = getPreCachedPollyAudio(message)
-                        audioFormat = if (base64Audio != null) "mp3" else null
-                    } else {
-                        base64Audio = getRealtimePollyAudio(message)
-                        audioFormat = if (base64Audio != null) "mp3" else null
-                    }
+                    // Polly routing: pre-cached → real-time → Android TTS
+                    val base64Audio: String? = getPreCachedPollyAudio(message)
+                        ?: getRealtimePollyAudio(message)
+                    val audioFormat: String? = if (base64Audio != null) "mp3" else null
                     CoachingAudioQueue.enqueue(
                         context = this@RunTrackingService,
                         base64Audio = base64Audio,
@@ -4129,7 +4132,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     trigger.condition != "always" &&
                     !evaluateConditionExpression(trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName)) continue
 
-                val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax)
+                val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax, phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax)
                 triggerLastFiredMs[trigger.id] = now
                 Log.d("RunTrackingService", "⏱️ Periodic trigger [${trigger.type}] ${trigger.id}: $message")
                 fireDynamicTrigger(message, trigger.type, dynamicCurrentPhaseName ?: "unknown")
@@ -4163,7 +4166,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
             if (!conditionMet) continue
 
-            val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax)
+            val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax, phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax)
             triggerLastFiredMs[trigger.id] = now
             if (trigger.frequency == "once") triggerFiredOnce.add(trigger.id)
 
@@ -4261,6 +4264,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (td > 0) (currentDistanceKm / td * 100.0) else return false
             }
             "elapsed_min"    -> getActiveRunDuration() / 60_000.0
+            // Terrain — grade in % (positive = uphill, negative = downhill)
+            "grade"          -> currentSmoothedGrade
+            // Cumulative elevation gain in metres this session
+            "elevation_gain" -> totalElevationGain
             else             -> return false   // Unknown metric — skip trigger safely
         }
 
@@ -4481,6 +4488,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     phaseStartTrigger, repNumber, totalReps,
                     phaseHRMin = resolvedPhase.targetHRMin,
                     phaseHRMax = resolvedPhase.targetHRMax,
+                    phasePaceMin = resolvedPhase.targetPaceMin,
+                    phasePaceMax = resolvedPhase.targetPaceMax,
                 )
                 // Mark "once" triggers as fired; leave repeating triggers unfired so they rotate
                 if (phaseStartTrigger.frequency == "once") triggerFiredOnce.add(phaseStartTrigger.id)
@@ -4519,6 +4528,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         phaseEndTrigger, repNumber, totalReps,
                         phaseHRMin = resolvedPhase.targetHRMin,
                         phaseHRMax = resolvedPhase.targetHRMax,
+                        phasePaceMin = resolvedPhase.targetPaceMin,
+                        phasePaceMax = resolvedPhase.targetPaceMax,
                     )
                     if (phaseEndTrigger.frequency == "once") triggerFiredOnce.add(phaseEndTrigger.id)
                     fireDynamicTrigger(msg, "phase_end", resolvedPhaseName)
@@ -4551,6 +4562,8 @@ class RunTrackingService : Service(), SensorEventListener {
         totalReps: Int = 1,
         phaseHRMin: Int? = null,
         phaseHRMax: Int? = null,
+        phasePaceMin: Int? = null,
+        phasePaceMax: Int? = null,
     ): String {
         val alts = trigger.alternativeMessages
         val allMessages = if (alts.isNullOrEmpty()) listOf(trigger.message)
@@ -4558,24 +4571,30 @@ class RunTrackingService : Service(), SensorEventListener {
         val idx = triggerAltMessageIndex.getOrDefault(trigger.id, 0)
         val raw = allMessages[idx % allMessages.size]
         triggerAltMessageIndex[trigger.id] = (idx + 1) % allMessages.size
-        return resolveTemplateVariables(raw, repNum, totalReps, phaseHRMin, phaseHRMax)
+        return resolveTemplateVariables(raw, repNum, totalReps, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax)
     }
 
     /**
      * Resolve live-data template variables in a coaching message string.
      *
      * Supported tokens:
-     *  {hr}          — current heart rate (bpm)
-     *  {hrZone}      — current HR zone (1–5)
-     *  {pace}        — current pace formatted as "m:ss"
-     *  {cadence}     — current cadence (spm)
-     *  {repNum}      — current interval rep number (1-indexed)
-     *  {totalReps}   — total reps in this interval group
-     *  {repsLeft}    — reps remaining (totalReps - repNum)
-     *  {elapsedMin}  — elapsed run time in whole minutes
-     *  {distKm}      — total distance covered in km (1 d.p.)
-     *  {targetHRMax} — target HR max for the current phase
-     *  {targetHRMin} — target HR min for the current phase
+     *  {hr}            — current heart rate (bpm)
+     *  {hrZone}        — current HR zone (1–5)
+     *  {pace}          — current pace formatted as "m:ss"
+     *  {cadence}       — current cadence (spm)
+     *  {repNum}        — current interval rep number (1-indexed)
+     *  {totalReps}     — total reps in this interval group
+     *  {repsLeft}      — reps remaining (totalReps - repNum)
+     *  {elapsedMin}    — elapsed run time in whole minutes
+     *  {distKm}        — total distance covered in km (1 d.p.)
+     *  {targetHRMax}   — target HR max for the current phase
+     *  {targetHRMin}   — target HR min for the current phase
+     *  {targetPaceMin} — target pace floor for the current phase as "m:ss"
+     *  {targetPaceMax} — target pace ceiling for the current phase as "m:ss"
+     *  {grade}         — current slope as e.g. "+5%" (uphill) or "-3%" (downhill) or "flat"
+     *  {elevationGain} — total elevation gain this session in metres (e.g. "45m")
+     *  {remainingKm}   — distance remaining to target (e.g. "1.8")
+     *  {remainingMin}  — time remaining to target duration in whole minutes
      */
     private fun resolveTemplateVariables(
         template: String,
@@ -4583,33 +4602,70 @@ class RunTrackingService : Service(), SensorEventListener {
         totalReps: Int = 1,
         phaseHRMin: Int? = null,
         phaseHRMax: Int? = null,
+        phasePaceMin: Int? = null,
+        phasePaceMax: Int? = null,
     ): String {
         if (!template.contains('{')) return template  // fast path — no templates
 
+        // Age-adjusted HR zones using Tanaka formula: maxHR = 208 - (0.7 × age)
+        // This is more accurate than the generic 220-age formula and the previous hardcoded
+        // absolute thresholds (which were calibrated to a ~35 year old and wrong for everyone else).
+        // Zone boundaries as % of age-adjusted max HR:
+        //   Zone 1: <60%   Zone 2: 60–70%   Zone 3: 70–80%   Zone 4: 80–90%   Zone 5: ≥90%
+        val userMaxHR = currentUser?.age
+            ?.let { age -> (208 - 0.7 * age).toInt().coerceIn(150, 220) }
+            ?: 190  // Fallback for unknown age (equivalent to ~25-year-old estimate)
         val hrZone = when {
-            currentHeartRate <= 0    -> "unknown"
-            currentHeartRate < 115   -> "1"
-            currentHeartRate < 135   -> "2"
-            currentHeartRate < 152   -> "3"
-            currentHeartRate < 168   -> "4"
-            else                     -> "5"
+            currentHeartRate <= 0                          -> "unknown"
+            currentHeartRate < (userMaxHR * 0.60).toInt() -> "1"
+            currentHeartRate < (userMaxHR * 0.70).toInt() -> "2"
+            currentHeartRate < (userMaxHR * 0.80).toInt() -> "3"
+            currentHeartRate < (userMaxHR * 0.90).toInt() -> "4"
+            else                                           -> "5"
         }
-        val elapsedMin = (getActiveRunDuration() / 60_000L).toInt()
-        val distKmStr  = String.format("%.1f", totalDistance / 1_000.0)
-        val paceStr    = currentPace.ifBlank { "—" }
+        val elapsedMin  = (getActiveRunDuration() / 60_000L).toInt()
+        val currentKm   = totalDistance / 1_000.0
+        val distKmStr   = String.format("%.1f", currentKm)
+        val paceStr     = currentPace.ifBlank { "—" }
+
+        // Grade — show as "+N%" for uphill, "-N%" for downhill, "flat" for <0.5%
+        val gradeStr = when {
+            currentSmoothedGrade > 0.5  -> "+${currentSmoothedGrade.toInt()}%"
+            currentSmoothedGrade < -0.5 -> "${currentSmoothedGrade.toInt()}%"
+            else                        -> "flat"
+        }
+        val elevGainStr = "${totalElevationGain.toInt()}m"
+
+        // Remaining distance — only meaningful when a target distance is set
+        val remainingKmStr = (targetDistance?.let { it / 1000.0 - currentKm })
+            ?.coerceAtLeast(0.0)
+            ?.let { String.format("%.1f", it) }
+            ?: "—"
+
+        // Remaining time — only meaningful when a target time is set
+        val remainingMinStr = targetTime
+            ?.let { targetMs -> ((targetMs - getActiveRunDuration()) / 60_000L).coerceAtLeast(0L) }
+            ?.toString()
+            ?: "—"
 
         return template
-            .replace("{hr}",          if (currentHeartRate > 0) "$currentHeartRate" else "—")
-            .replace("{hrZone}",      hrZone)
-            .replace("{pace}",        paceStr)
-            .replace("{cadence}",     if (currentCadence > 0) "$currentCadence" else "—")
-            .replace("{repNum}",      "$repNum")
-            .replace("{totalReps}",   "$totalReps")
-            .replace("{repsLeft}",    "${(totalReps - repNum).coerceAtLeast(0)}")
-            .replace("{elapsedMin}",  "$elapsedMin")
-            .replace("{distKm}",      distKmStr)
-            .replace("{targetHRMax}", phaseHRMax?.toString() ?: "—")
-            .replace("{targetHRMin}", phaseHRMin?.toString() ?: "—")
+            .replace("{hr}",            if (currentHeartRate > 0) "$currentHeartRate" else "—")
+            .replace("{hrZone}",        hrZone)
+            .replace("{pace}",          paceStr)
+            .replace("{cadence}",       if (currentCadence > 0) "$currentCadence" else "—")
+            .replace("{repNum}",        "$repNum")
+            .replace("{totalReps}",     "$totalReps")
+            .replace("{repsLeft}",      "${(totalReps - repNum).coerceAtLeast(0)}")
+            .replace("{elapsedMin}",    "$elapsedMin")
+            .replace("{distKm}",        distKmStr)
+            .replace("{targetHRMax}",   phaseHRMax?.toString() ?: "—")
+            .replace("{targetHRMin}",   phaseHRMin?.toString() ?: "—")
+            .replace("{targetPaceMin}", phasePaceMin?.let { formatPace(it.toDouble()) } ?: "—")
+            .replace("{targetPaceMax}", phasePaceMax?.let { formatPace(it.toDouble()) } ?: "—")
+            .replace("{grade}",         gradeStr)
+            .replace("{elevationGain}", elevGainStr)
+            .replace("{remainingKm}",   remainingKmStr)
+            .replace("{remainingMin}",  remainingMinStr)
     }
 
     // ── Polly audio cache helpers ────────────────────────���─────────────────────
@@ -4701,27 +4757,24 @@ class RunTrackingService : Service(), SensorEventListener {
             try {
                 if (!isMuted) {
                     // ── Polly audio routing ─────────────────────────────────────────────
-                    // STATIC messages (no {template} vars at generate time) → pre-cached file
-                    // TEMPLATE messages (live data substituted) → real-time Polly call
-                    // FALLBACK (Polly unavailable / network failure) → Android TTS
-                    val base64Audio: String?
-                    val audioFormat: String?
-                    if (!message.contains('{')) {
-                        // Static message — look up the file that was written at prepare time
-                        base64Audio = getPreCachedPollyAudio(message)
-                        audioFormat = if (base64Audio != null) "mp3" else null
-                        if (base64Audio != null) {
-                            Log.d("RunTrackingService", "🎵 Using pre-cached Polly audio for: ${message.take(40)}")
-                        }
-                    } else {
-                        // Template message — real-time Polly call with live data already substituted
-                        // (message here is already resolved — e.g. "Heart rate at 148 right now")
-                        base64Audio = getRealtimePollyAudio(message)
-                        audioFormat = if (base64Audio != null) "mp3" else null
-                        if (base64Audio != null) {
-                            Log.d("RunTrackingService", "🎵 Real-time Polly audio for: ${message.take(40)}")
-                        }
-                    }
+                    // Priority 1: pre-cached Polly file (written at "Prepare Run" time for
+                    //             static messages without live-data template variables).
+                    // Priority 2: real-time Polly call — covers two cases:
+                    //             a) Messages that originally had {hr}/{pace}/etc. — by the
+                    //                time they reach here the variables are already substituted
+                    //                (e.g. "Heart rate at 142"), so pre-cache misses correctly.
+                    //             b) Static messages that weren't pre-cached for any reason.
+                    // Priority 3: Android TTS fallback (Polly unavailable / network failure).
+                    //
+                    // NOTE: We do NOT branch on message.contains('{') here because template
+                    // variables are resolved before this call — the message is always a plain
+                    // string at this point. Always try pre-cache first; real-time Polly if not
+                    // found; Android TTS as last resort.
+                    val base64Audio: String? = getPreCachedPollyAudio(message)
+                        ?.also { Log.d("RunTrackingService", "🎵 Pre-cached Polly: ${message.take(40)}") }
+                        ?: getRealtimePollyAudio(message)
+                            ?.also { Log.d("RunTrackingService", "🎵 Real-time Polly: ${message.take(40)}") }
+                    val audioFormat: String? = if (base64Audio != null) "mp3" else null
                     CoachingAudioQueue.enqueue(
                         context = this@RunTrackingService,
                         base64Audio = base64Audio,
@@ -5056,6 +5109,11 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun maybeTriggerCadenceCoaching() {
         if (!coachingFeaturePrefs.cadenceStrideEnabled) return
+        // Coaching plan sessions: the plan owns all cadence guidance. It has access to {cadence}
+        // in triggers and periodic messages — so if cadence coaching is relevant to THIS session
+        // the AI will have designed triggers for it. A separate generic voice firing independently
+        // would be context-ignorant and could contradict what the plan just said.
+        if (isCoachingPlanActive) return
         if (currentCadence <= 0) return
         if (totalDistance < 1000) return // Need at least 1km of data
 

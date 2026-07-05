@@ -6418,6 +6418,16 @@ function transformRunForAndroid(run: any) {
                       await db.update(plannedWorkouts)
                         .set({ isCompleted: true, completedRunId: runId })
                         .where(eq(plannedWorkouts.id, matchedSession.plannedWorkoutId));
+                      // Mirror the link on the run
+                      await db.update(runs)
+                        .set({
+                          linkedWorkoutId: matchedSession.plannedWorkoutId,
+                          linkedPlanId: workout.trainingPlanId ?? null,
+                          workoutType: workout.workoutType ?? null,
+                          workoutIntensity: workout.intensity ?? null,
+                          workoutDescription: workout.description ?? null,
+                        })
+                        .where(eq(runs.id, runId));
                       console.log(`✅ [Garmin Webhook] Tier-1: auto-completed planned workout ${matchedSession.plannedWorkoutId} via companion session for run ${runId}`);
                       return; // Done — no need for Tier-2 lookup
                     } else if (workout?.isCompleted) {
@@ -6473,6 +6483,16 @@ function transformRunForAndroid(run: any) {
                     await db.update(plannedWorkouts)
                       .set({ isCompleted: true, completedRunId: runId })
                       .where(eq(plannedWorkouts.id, workout.id));
+                    // Mirror the link on the run
+                    await db.update(runs)
+                      .set({
+                        linkedWorkoutId: workout.id,
+                        linkedPlanId: workout.trainingPlanId ?? null,
+                        workoutType: workout.workoutType ?? null,
+                        workoutIntensity: workout.intensity ?? null,
+                        workoutDescription: workout.description ?? null,
+                      })
+                      .where(eq(runs.id, runId));
                     console.log(`✅ [Garmin Webhook] Tier-2: auto-completed planned workout ${workout.id} (scheduled ${runDateStr}) for run ${runId}`);
                   } else if (candidates.length > 1) {
                     console.log(`[Garmin Webhook] Tier-2: ${candidates.length} planned workouts on ${runDateStr} — ambiguous, skipping auto-complete`);
@@ -14298,12 +14318,29 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       console.log(`✅ Completing workout ${workoutId}...`);
 
+      // Fetch the workout first so we can copy plan context onto the run
+      const [workoutBefore] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));
+
       // Update the workout
-      const updateResult = await db.update(plannedWorkouts)
+      await db.update(plannedWorkouts)
         .set({ isCompleted: true, completedRunId: runId || null })
         .where(eq(plannedWorkouts.id, workoutId));
 
       console.log(`✅ Workout updated: ${workoutId}`);
+
+      // Mirror the link on the run so plan-adherence queries work correctly
+      if (runId && workoutBefore) {
+        await db.update(runs)
+          .set({
+            linkedWorkoutId: workoutId,
+            linkedPlanId: workoutBefore.trainingPlanId ?? null,
+            workoutType: workoutBefore.workoutType ?? null,
+            workoutIntensity: workoutBefore.intensity ?? null,
+            workoutDescription: workoutBefore.description ?? null,
+          })
+          .where(eq(runs.id, runId));
+        console.log(`✅ Run ${runId} linked to workout ${workoutId}`);
+      }
 
       // Fetch the UPDATED workout to confirm
       const [workout] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));

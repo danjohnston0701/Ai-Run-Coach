@@ -44,11 +44,14 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.network.model.WorkoutDetails
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
+import live.airuncoach.airuncoach.ui.components.WorkoutTypeBadge
+import live.airuncoach.airuncoach.ui.components.workoutTypeColor
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.util.WorkoutHolder
+import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +67,12 @@ fun WorkoutDetailScreen(
     val color = workoutTypeColor(workout.workoutType)
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
+    // User age for age-adjusted HR zone calculations (Tanaka formula: 208 - 0.7×age)
+    val dashboardViewModel: DashboardViewModel = hiltViewModel()
+    val currentUser by dashboardViewModel.user.collectAsState()
+    val userMaxHR: Int = currentUser?.age
+        ?.let { age -> (208 - 0.7 * age).toInt().coerceIn(150, 220) }
+        ?: 190  // Tanaka fallback for unknown age
     // Drive watch send state from ViewModel (supports async prepare-coaching flow)
     val watchSendState by runSessionViewModel.watchSendState.collectAsState()
 
@@ -255,10 +264,9 @@ fun WorkoutDetailScreen(
                     workout.distance?.let {
                         WorkoutStatCard(label = "Distance", value = "${it}km", icon = R.drawable.icon_target_vector, modifier = Modifier.weight(1f))
                     }
-                    workout.intensity?.let {
-                        val zoneNumber = it.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 2
+                    run {
+                        val zoneNumber = resolveZoneNumber(workout)
                         val zoneInfo = HeartRateZones.getZoneInfo(zoneNumber)
-                        // Show "Zone X" with effort level below (e.g., "Easy")
                         val zoneLabel = "Zone $zoneNumber"
                         val effortLabel = zoneInfo.effort
                         WorkoutStatCard(label = "Intensity", value = zoneLabel, subtitleValue = effortLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
@@ -282,8 +290,8 @@ fun WorkoutDetailScreen(
                 Spacer(modifier = Modifier.height(Spacing.lg))
 
                 // ── Zone description and pace guidance ─────────────────────────────
-                workout.intensity?.let { intensity ->
-                    val zoneNumber = intensity.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 2
+                workout.intensity?.let {
+                    val zoneNumber = resolveZoneNumber(workout)
                     val zoneInfo = HeartRateZones.getZoneInfo(zoneNumber)
                     
                     Text(
@@ -333,12 +341,19 @@ fun WorkoutDetailScreen(
                             Text("Pace guidance:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                             Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
                             
-                            // Heart rate range (estimated for ~35 year old, max HR ~185)
+                            // Heart rate range — use AI-calculated BPMs from the workout if available,
+                            // otherwise fall back to zone-% formula with a conservative max HR estimate.
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
-                            val estimatedMaxHR = 185 // Standard estimate for ~35 year old
-                            val hrRange = HeartRateZones.getTargetHRRange(zoneNumber, estimatedMaxHR)
-                            Text("Keep your HR between ${hrRange.first} and ${hrRange.last} beats per minute", style = AppTextStyles.small, color = Colors.textSecondary)
+                            val hrMin = workout.hrZoneMinBpm
+                            val hrMax = workout.hrZoneMaxBpm
+                            if (hrMin != null && hrMax != null) {
+                                Text("Keep your HR between $hrMin and $hrMax bpm", style = AppTextStyles.small, color = Colors.textSecondary)
+                            } else {
+                                // Fallback: zone % applied to age-adjusted max HR (Tanaka formula)
+                                val hrRange = HeartRateZones.getTargetHRRange(zoneNumber, userMaxHR)
+                                Text("Keep your HR between ${hrRange.first} and ${hrRange.last} bpm (estimated)", style = AppTextStyles.small, color = Colors.textSecondary)
+                            }
                             
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("Benefits:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
@@ -350,8 +365,8 @@ fun WorkoutDetailScreen(
             }
 
             // ── Zone comparison chart (for Zone 2 focus) ──────────────────────
-            workout.intensity?.let { intensity ->
-                val zoneNumber = intensity.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 2
+            workout.intensity?.let {
+                val zoneNumber = resolveZoneNumber(workout)
                 if (zoneNumber == 2) {
                     Text("How Zone 2 Compares", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                     Spacer(modifier = Modifier.height(Spacing.sm))
@@ -867,6 +882,39 @@ fun WorkoutStructureSection(workout: WorkoutDetails) {
             }
         }
         Spacer(modifier = Modifier.height(Spacing.sm))
+    }
+}
+
+/**
+ * Resolve the HR zone number (1-5) for display and HR range calculations.
+ *
+ * Priority:
+ *  1. hrZoneNumber from the planned workout — most accurate (set by the AI plan generator)
+ *  2. Parse intensity string for "z1"–"z5" format (e.g. "z2", "Z3")
+ *  3. Map workoutType to its natural zone (easy/long_run �� 2, tempo → 3, intervals → 4, etc.)
+ *  4. Default to Zone 2 as a safe fallback
+ *
+ * This avoids the "Zone 2310" bug that occurred when the bare-digit regex stripped ALL digits
+ * from free-text intensity strings like "RPE 2–3/10".
+ */
+fun resolveZoneNumber(workout: WorkoutDetails): Int {
+    // 1. Explicit zone number from AI plan
+    workout.hrZoneNumber?.let { if (it in 1..5) return it }
+
+    // 2. "z1"–"z5" intensity format
+    workout.intensity?.let { intensity ->
+        Regex("z([1-5])", RegexOption.IGNORE_CASE).find(intensity)
+            ?.groupValues?.get(1)?.toIntOrNull()
+            ?.let { return it }
+    }
+
+    // 3. Workout type default
+    return when (workout.workoutType.lowercase()) {
+        "recovery", "rest"             -> 1
+        "easy", "long_run"             -> 2
+        "tempo"                        -> 3
+        "intervals", "hill_repeats"    -> 4
+        else                           -> 2
     }
 }
 

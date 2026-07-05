@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { db } from "./db";
-import { sessionInstructions, plannedWorkouts, users, runs } from "../shared/schema";
+import { sessionInstructions, plannedWorkouts, weeklyPlans, trainingPlans, users, runs } from "../shared/schema";
 import { eq, and, desc, isNotNull } from "drizzle-orm";
 import {
   generateSessionCoaching,
@@ -572,7 +572,18 @@ export async function getOrGenerateSessionCoaching(
   // v2.4 — rep_start and recovery_start messages for walk_run sessions must include specific duration and
   //         activity type (e.g. "easy jog for 8 minutes" / "2 minute walk") so the athlete knows exactly
   //         what phase they are transitioning into.
-  const CURRENT_PLAN_VERSION = "2.4";
+  // v2.5 — Session intent, training week/total weeks, and last-session recovery context added to prompt.
+  //         Terrain triggers (grade, elevation_gain) and remaining distance/time template vars added.
+  //         Freerun/easy sessions now require HR zone triggers with actual BPM values.
+  //         Age-adjusted HR zones use Tanaka formula throughout.
+  const CURRENT_PLAN_VERSION = "2.5";
+
+  // Semver-aware comparison: parse "major.minor" strings to numeric values for correct ordering.
+  // String comparison fails for versions like "2.10" vs "2.4" ("2.10" < "2.4" lexicographically).
+  function parseSemver(v: string): number {
+    const parts = v.split(".").map(Number);
+    return (parts[0] ?? 0) * 1000 + (parts[1] ?? 0);
+  }
 
   // 1. Check cache — return existing plan if available, up-to-date, and not forced to regenerate
   if (!forceRegenerate) {
@@ -588,7 +599,7 @@ export async function getOrGenerateSessionCoaching(
       // Check if this is the new-format SessionCoachingPlan (has phases + triggers)
       if (structure?.phases && structure?.triggers && structure?.cueingStrategy) {
         const cachedVersion = (existing.generatedVersion as string | null) ?? "1.0";
-        if (cachedVersion >= CURRENT_PLAN_VERSION) {
+        if (parseSemver(cachedVersion) >= parseSemver(CURRENT_PLAN_VERSION)) {
           console.log(`[getOrGenerateSessionCoaching] Cache hit v${cachedVersion} for workout ${plannedWorkoutId}`);
           return structure as SessionCoachingPlan;
         }
@@ -610,8 +621,28 @@ export async function getOrGenerateSessionCoaching(
 
   const aiRunnerProfile = aiRunnerProfileResult?.profile ?? null;
 
+  // 2a. Load training plan progression context — week number and total weeks.
+  //     Used to tell the AI whether this is Week 1 (conservative) or Week 14/16 (peak).
+  let trainingWeekNumber: number | undefined;
+  let trainingTotalWeeks: number | undefined;
+  try {
+    if (workout.weeklyPlanId) {
+      const weeklyPlan = await db.select().from(weeklyPlans).where(eq(weeklyPlans.id, workout.weeklyPlanId)).then(r => r[0]);
+      trainingWeekNumber = weeklyPlan?.weekNumber ?? undefined;
+    }
+    if (workout.trainingPlanId) {
+      const trainingPlan = await db.select().from(trainingPlans).where(eq(trainingPlans.id, workout.trainingPlanId)).then(r => r[0]);
+      trainingTotalWeeks = trainingPlan?.totalWeeks ?? undefined;
+    }
+  } catch (e) {
+    console.warn("[getOrGenerateSessionCoaching] Could not fetch training plan week context:", e);
+  }
+
+  // Hard session types — these leave meaningful residual fatigue that affects the next session
+  const HARD_SESSION_TYPES = new Set(["intervals", "tempo", "threshold", "hills", "hill_repeats", "speed", "race"]);
+
   // Fetch last 5 runs for recent context (non-blocking — if it fails we proceed without)
-  let recentRuns: Array<{ distanceKm: number; durationMinutes: number; avgPaceSecPerKm: number; avgHR?: number; workoutType?: string }> = [];
+  let recentRuns: Array<{ distanceKm: number; durationMinutes: number; avgPaceSecPerKm: number; avgHR?: number; workoutType?: string; isHardSession?: boolean }> = [];
   try {
     const rawRuns = await db.select().from(runs).where(eq(runs.userId, userId)).orderBy(desc(runs.completedAt)).limit(5);
     recentRuns = rawRuns.map(r => {
@@ -619,12 +650,14 @@ export async function getOrGenerateSessionCoaching(
       const durMin  = Math.round((r.duration ?? 0) / 60);
       const durSec  = r.duration ?? 0;
       const paceSecPerKm = distKm > 0 ? Math.round(durSec / distKm) : 0;
+      const wType = (r as any).workoutType as string | undefined;
       return {
         distanceKm:        distKm,
         durationMinutes:   durMin,
         avgPaceSecPerKm:   paceSecPerKm,
         avgHR:             r.avgHeartRate ?? undefined,
-        workoutType:       (r as any).workoutType ?? undefined,
+        workoutType:       wType,
+        isHardSession:     wType ? HARD_SESSION_TYPES.has(wType.toLowerCase()) : false,
       };
     }).filter(r => r.distanceKm > 0);
   } catch (e) {
@@ -639,6 +672,53 @@ export async function getOrGenerateSessionCoaching(
     return parseInt(parts[0]) * 60 + parseInt(parts[1]);
   }
 
+  // 5a. Infer HR zone targets from workout type + user age when the workout has no explicit BPM values.
+  //     This ensures the AI always has concrete targets to put in trigger conditions and messages.
+  function inferHRZone(workoutType: string | null | undefined, age: number): { zoneNum: number; min: number; max: number } {
+    // Tanaka formula: maxHR = 208 - (0.7 × age) — more accurate than 220-age, especially for
+    // runners over 40 where 220-age overcorrects. Validated against large-scale studies.
+    const estimatedMaxHR = Math.round(208 - 0.7 * age);
+    // HR zone boundaries as % of max HR (standard 5-zone model)
+    const zones: Record<number, [number, number]> = {
+      1: [0.50, 0.60],
+      2: [0.60, 0.70],
+      3: [0.70, 0.80],
+      4: [0.80, 0.90],
+      5: [0.90, 1.00],
+    };
+    const typeToZone: Record<string, number> = {
+      easy:       2,
+      recovery:   1,
+      long_run:   2,
+      aerobic:    2,
+      walk_run:   2,
+      tempo:      3,
+      threshold:  4,
+      interval:   4,
+      speed:      5,
+      hills:      4,
+      race:       4,
+    };
+    const zoneNum = typeToZone[workoutType?.toLowerCase() ?? ""] ?? 2;
+    const [minPct, maxPct] = zones[zoneNum];
+    return {
+      zoneNum,
+      min: Math.round(estimatedMaxHR * minPct),
+      max: Math.round(estimatedMaxHR * maxPct),
+    };
+  }
+
+  const userAge = (user as any).age ?? 35;
+  const hrZoneInferred = inferHRZone(workout.workoutType, userAge);
+  const resolvedTargetHRMin = workout.hrZoneMinBpm ?? hrZoneInferred.min;
+  const resolvedTargetHRMax = workout.hrZoneMaxBpm ?? hrZoneInferred.max;
+
+  console.log(
+    `[getOrGenerateSessionCoaching] HR targets: explicit=${workout.hrZoneMinBpm}–${workout.hrZoneMaxBpm}`,
+    `inferred zone ${hrZoneInferred.zoneNum} (age ${userAge}, maxHR ${220 - userAge}) = ${hrZoneInferred.min}–${hrZoneInferred.max}`,
+    `→ using ${resolvedTargetHRMin}–${resolvedTargetHRMax}`,
+  );
+
   // 5. Build GenerateSessionCoachingParams from DB workout data
   const params: GenerateSessionCoachingParams = {
     sessionType:           workout.workoutType,
@@ -649,8 +729,8 @@ export async function getOrGenerateSessionCoaching(
     targetPaceMax:         workout.targetPace
                              ? paceStringToSecPerKm(workout.targetPace)! + 30  // +30s/km tolerance
                              : undefined,
-    targetHRMin:           workout.hrZoneMinBpm ?? undefined,
-    targetHRMax:           workout.hrZoneMaxBpm ?? undefined,
+    targetHRMin:           resolvedTargetHRMin,
+    targetHRMax:           resolvedTargetHRMax,
     sessionInstructions:   workout.instructions ?? workout.description ?? undefined,
     // Interval/walk-run rep structure
     intervalCount:             workout.intervalCount ?? undefined,
@@ -677,8 +757,11 @@ export async function getOrGenerateSessionCoaching(
     coachName:        (user as any).coachName  ?? "Coach",
     coachTone:        (user as any).coachTone  ?? "motivational",
     coachAccent:      (user as any).coachAccent ?? undefined,
-    aiRunnerProfile,  // "What I know about you" personalisation block
-    recentRuns,       // Last 5 runs for pacing/HR context
+    aiRunnerProfile,       // "What I know about you" personalisation block
+    sessionIntent:    workout.sessionIntent ?? undefined,  // What this session is designed to achieve
+    trainingWeekNumber,    // Current week in plan (e.g. 3) — sets tone and progression expectations
+    trainingTotalWeeks,    // Total weeks in plan (e.g. 16)
+    recentRuns,            // Last 5 runs with type, pace, HR, and hard/easy classification
   };
 
   // 6. Generate the bespoke coaching plan

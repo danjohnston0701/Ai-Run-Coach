@@ -33,6 +33,8 @@ import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.WeatherData
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.WeatherRetrofitClient
+import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
+import live.airuncoach.airuncoach.network.model.TodayWorkoutResponse
 import live.airuncoach.airuncoach.service.RunTrackingService
 import dagger.hilt.android.EntryPointAccessors
 import retrofit2.HttpException
@@ -90,6 +92,10 @@ class DashboardViewModel @Inject constructor(
     // Training Load / Recovery Engine
     private val _trainingLoad = MutableStateFlow<live.airuncoach.airuncoach.network.model.TrainingLoadResponse?>(null)
     val trainingLoad: StateFlow<live.airuncoach.airuncoach.network.model.TrainingLoadResponse?> = _trainingLoad.asStateFlow()  // Displayed in DashboardScreen
+    
+    // Today's AI Plan Sessions (for dashboard tile)
+    private val _todayActivePlans = MutableStateFlow<List<Pair<TrainingPlanSummary, TodayWorkoutResponse?>>>(emptyList())
+    val todayActivePlans: StateFlow<List<Pair<TrainingPlanSummary, TodayWorkoutResponse?>>> = _todayActivePlans.asStateFlow()
     
     // Track active run session
     val activeRunSession: StateFlow<RunSession?> = 
@@ -179,6 +185,14 @@ class DashboardViewModel @Inject constructor(
             }
         }
 
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                loadTodayActivePlans()
+            } catch (e: Exception) {
+                Log.e("DashboardViewModel", "Error loading today's active plans: ${e.message}", e)
+            }
+        }
+
         // Re-fetch the recent run whenever a watch offline run syncs to the backend,
         // so it appears on the dashboard without waiting for the run cache to expire.
         runSyncedEvent?.let { events ->
@@ -205,6 +219,38 @@ class DashboardViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.w("DashboardViewModel", "Training load fetch failed (no data yet): ${e.message}")
                 _trainingLoad.value = null
+            }
+        }
+    }
+
+    private fun loadTodayActivePlans() {
+        val userId = sessionManager.getUserId() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Fetch all active plans for the user
+                val activePlans = apiService.getUserTrainingPlans(userId, "active")
+                
+                // For each active plan, fetch today's workout
+                val userTimezone = TimeZone.getDefault().id
+                val plansWithTodayWorkouts = activePlans.mapNotNull { plan ->
+                    try {
+                        val todayWorkout = apiService.getTodayWorkout(plan.id, userTimezone)
+                        // Only include plans that have a scheduled workout for today
+                        if (todayWorkout != null && todayWorkout.workout != null && !todayWorkout.workout.isCompleted) {
+                            plan to todayWorkout
+                        } else {
+                            null
+                        }
+                    } catch (e: Exception) {
+                        Log.w("DashboardViewModel", "Failed to fetch today's workout for plan ${plan.id}: ${e.message}")
+                        null
+                    }
+                }
+                
+                _todayActivePlans.value = plansWithTodayWorkouts
+            } catch (e: Exception) {
+                Log.w("DashboardViewModel", "Failed to fetch today's active plans: ${e.message}")
+                _todayActivePlans.value = emptyList()
             }
         }
     }
@@ -420,6 +466,11 @@ class DashboardViewModel @Inject constructor(
     // Public method to refresh goals (e.g., when returning from goals screen)
     fun refreshGoals() {
         loadGoals()
+    }
+
+    // Public method to refresh today's active plans (e.g., after completing a workout)
+    fun refreshTodayActivePlans() {
+        loadTodayActivePlans()
     }
     
     fun toggleAiCoach(enabled: Boolean) {

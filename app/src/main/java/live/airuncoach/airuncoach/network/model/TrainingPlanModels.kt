@@ -136,7 +136,12 @@ data class WorkoutDetails(
     @SerializedName("intervalHeartRateMax") val intervalHeartRateMax: Int? = null,     // Max HR for work
     @SerializedName("restHeartRateMax") val restHeartRateMax: Int? = null,             // Max HR for recovery
     @SerializedName("isCompleted") val isCompleted: Boolean = false,
-    @SerializedName("completedRunId") val completedRunId: String? = null
+    @SerializedName("completedRunId") val completedRunId: String? = null,
+    // HR zone metadata — used for live coaching guidance and UI display
+    @SerializedName("hrZoneNumber") val hrZoneNumber: Int? = null,     // 1-5 if AI assigned a specific zone
+    @SerializedName("hrZoneMinBpm") val hrZoneMinBpm: Int? = null,     // Actual BPM floor for target zone
+    @SerializedName("hrZoneMaxBpm") val hrZoneMaxBpm: Int? = null,     // Actual BPM ceiling for target zone
+    @SerializedName("hrZoneScenario") val hrZoneScenario: String? = null // 'device' | 'history' | 'effort'
 )
 
 /** GET /api/training-plans/:planId/today */

@@ -59,6 +59,8 @@ import live.airuncoach.airuncoach.domain.model.WeatherData
 import live.airuncoach.airuncoach.ui.components.GarminAttributionBadge
 import live.airuncoach.airuncoach.ui.components.GarminBadgeStyle
 import live.airuncoach.airuncoach.ui.components.TargetTimeCard
+import live.airuncoach.airuncoach.ui.components.TodayWorkoutCard
+import live.airuncoach.airuncoach.ui.components.WorkoutCardStatus
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.network.model.TrainingLoadResponse
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
@@ -101,6 +103,7 @@ fun DashboardScreen(
     val activeRunSession by viewModel.activeRunSession.collectAsState()
     val trainingLoad by viewModel.trainingLoad.collectAsState()
     val hasPendingWatchSync by viewModel.hasPendingWatchSync.collectAsState()
+    val todayActivePlans by viewModel.todayActivePlans.collectAsState()
 
     // Optimize: Only load data once when screen is first shown
     LaunchedEffect(Unit) {
@@ -169,6 +172,35 @@ fun DashboardScreen(
             }
         }
         item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        
+        // Today's AI Plan Sessions (if any are scheduled and not completed)
+        if (todayActivePlans.isNotEmpty()) {
+            item {
+                val (plan, todayWorkout) = todayActivePlans.first()
+                todayWorkout?.workout?.let { workout ->
+                    // Determine the status (today vs overdue)
+                    val isActuallyToday = todayWorkout.isToday
+                    val isOverdue = todayWorkout.isOverdue
+                    val status = when {
+                        isOverdue && !workout.isCompleted -> WorkoutCardStatus.OVERDUE
+                        else -> WorkoutCardStatus.TODAY
+                    }
+
+                    TodayWorkoutCard(
+                        workout = workout,
+                        isLoading = false,
+                        status = status,
+                        onPrepare = { /* TODO: Navigate to run session */ },
+                        onComplete = { 
+                            // TODO: Mark workout as complete and refresh
+                            viewModel.refreshTodayActivePlans()
+                        },
+                        onViewDetail = { /* TODO: Navigate to plan details */ }
+                    )
+                }
+            }
+            item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+        }
         
         // Location permission warning
         if (!hasLocationPermission) {

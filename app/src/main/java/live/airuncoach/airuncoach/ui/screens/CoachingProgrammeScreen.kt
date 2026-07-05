@@ -33,6 +33,10 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.domain.model.Injury
 import live.airuncoach.airuncoach.domain.model.InjuryStatus
+import live.airuncoach.airuncoach.ui.components.TodayWorkoutCard
+import live.airuncoach.airuncoach.ui.components.WorkoutCardStatus
+import live.airuncoach.airuncoach.ui.components.WorkoutTypeBadge
+import live.airuncoach.airuncoach.ui.components.PlanStatChip
 import live.airuncoach.airuncoach.network.model.TrainingPlanDetails
 import live.airuncoach.airuncoach.network.model.TrainingPlanProgress
 import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
@@ -408,15 +412,6 @@ fun PlanSummaryCard(
                 PlanStatChip(R.drawable.icon_trending_vector, plan.experienceLevel.replaceFirstChar { it.uppercase() })
             }
         }
-    }
-}
-
-@Composable
-fun PlanStatChip(icon: Int, label: String, modifier: Modifier = Modifier) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
-        Icon(painterResource(icon), null, tint = Colors.textMuted, modifier = Modifier.size(14.dp))
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(label, style = AppTextStyles.small, color = Colors.textMuted)
     }
 }
 
@@ -859,7 +854,8 @@ fun PlanDashboardContent(
                     TodayWorkoutCard(
                         workout = workout,
                         isLoading = actionLoading,
-                        onStart = { startWithContext(workout) },
+                        status = WorkoutCardStatus.TODAY,
+                        onPrepare = { startWithContext(workout) },
                         onComplete = { onCompleteWorkout(workout) },
                         onSkip = { viewModel?.skipWorkout(workout.id, details.plan.id) },
                         onViewDetail = { viewWithContext(workout) }
@@ -883,84 +879,14 @@ fun PlanDashboardContent(
             // ── Overdue: missed session from a previous day ────────────────────
             workout != null && isOverdue && !workout.isCompleted -> {
                 item {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(Spacing.lg)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                Icon(painterResource(R.drawable.icon_timer_vector), null, tint = Colors.warning, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(Spacing.sm))
-                                Text("Missed Session", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.warning)
-                                Spacer(modifier = Modifier.weight(1f))
-                                Surface(
-                                    color = Colors.warning.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        "OVERDUE",
-                                        style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
-                                        color = Colors.warning,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(Spacing.sm))
-                            WorkoutTypeBadge(workout.workoutType)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(workout.description ?: workoutTypeLabel(workout.workoutType), style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary, maxLines = 2)
-                            Spacer(modifier = Modifier.height(Spacing.sm))
-                            Text("You have a session you haven't completed yet. Complete it now or it will be skipped.", style = AppTextStyles.small, color = Colors.textSecondary, maxLines = 3)
-                            Spacer(modifier = Modifier.height(Spacing.md))
-                            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                                // Row 1: Distance or Duration
-                                if (isTimeBasedWorkout(workout)) {
-                                    workout.duration?.let { duration ->
-                                        formatWorkoutDuration(duration)?.let { formatted ->
-                                            PlanStatChip(R.drawable.icon_clock_vector, formatted)
-                                        }
-                                    }
-                                } else {
-                                    workout.distance?.let {
-                                        PlanStatChip(R.drawable.icon_target_vector, "${it}km")
-                                    }
-                                }
-                                // Row 2: Intensity
-                                workout.intensity?.let {
-                                    val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
-                                    PlanStatChip(R.drawable.icon_heart_vector, zoneLabel)
-                                }
-                                // Row 3: Pace (if available)
-                                workout.targetPace?.let { raw ->
-                                    val paceValue = raw.replace("/km", "").trim()
-                                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(Spacing.md))
-                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), modifier = Modifier.fillMaxWidth()) {
-                                OutlinedButton(
-                                    onClick = { onCompleteWorkout(workout) },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(painterResource(R.drawable.icon_check_vector), null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Mark Done", style = AppTextStyles.small)
-                                }
-                                Button(
-                                    onClick = { startWithContext(workout) },
-                                    modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Colors.warning),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(16.dp), tint = Colors.buttonText)
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Begin Session", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
-                                }
-                            }
-                        }
-                    }
+                    TodayWorkoutCard(
+                        workout = workout,
+                        isLoading = actionLoading,
+                        status = WorkoutCardStatus.OVERDUE,
+                        onPrepare = { startWithContext(workout) },
+                        onComplete = { onCompleteWorkout(workout) },
+                        onViewDetail = { viewWithContext(workout) }
+                    )
                     Spacer(modifier = Modifier.height(Spacing.lg))
                 }
             }
@@ -1114,112 +1040,6 @@ fun OverallProgressCard(progress: TrainingPlanProgress, currentWeek: Int? = null
                 color = Colors.primary,
                 trackColor = Colors.backgroundTertiary
             )
-        }
-    }
-}
-
-@Composable
-fun TodayWorkoutCard(
-    workout: WorkoutDetails,
-    isLoading: Boolean,
-    onStart: () -> Unit,
-    onComplete: () -> Unit,
-    onSkip: () -> Unit = {},
-    onViewDetail: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(modifier = Modifier.padding(Spacing.lg)) {
-            // Tapping the header area navigates to detail — buttons below are independent
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { onViewDetail() },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    WorkoutTypeBadge(workout.workoutType)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(workout.description ?: workoutTypeLabel(workout.workoutType), style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                }
-                Icon(painterResource(R.drawable.icon_chevron_right_vector), null, tint = Colors.textMuted, modifier = Modifier.size(20.dp))
-            }
-
-            if (!workout.instructions.isNullOrEmpty()) {
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                Text(workout.instructions, style = AppTextStyles.small, color = Colors.textSecondary, maxLines = 3)
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.md))
-
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                // Row 1: Distance or Duration
-                if (isTimeBasedWorkout(workout)) {
-                    workout.duration?.let { duration ->
-                        formatWorkoutDuration(duration)?.let { formatted ->
-                            PlanStatChip(R.drawable.icon_clock_vector, formatted)
-                        }
-                    }
-                } else {
-                    workout.distance?.let { PlanStatChip(R.drawable.icon_target_vector, "${it}km") }
-                }
-                // Row 2: Intensity
-                workout.intensity?.let {
-                    val zoneLabel = it.replace(Regex("^z([1-5])$")) { match -> "Zone ${match.groupValues[1].uppercase()}" }
-                    PlanStatChip(R.drawable.icon_heart_vector, zoneLabel)
-                }
-                // Row 3: Pace (if available)
-                workout.targetPace?.let { raw ->
-                    val paceValue = raw.replace("/km", "").trim()
-                    PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.lg))
-
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                // Primary actions: Start or Complete
-                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    if (workout.workoutType != "rest") {
-                        Button(
-                            onClick = onStart,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
-                            enabled = !isLoading
-                        ) {
-                            Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Start", color = Colors.buttonText, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold))
-                        }
-                    }
-                    OutlinedButton(
-                        onClick = onComplete,
-                        modifier = if (workout.workoutType == "rest") Modifier.fillMaxWidth() else Modifier.weight(1f),
-                        enabled = !isLoading
-                    ) {
-                        if (isLoading) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Colors.primary, strokeWidth = 2.dp)
-                        else {
-                            Icon(painterResource(R.drawable.icon_check_vector), null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (workout.workoutType == "rest") "Mark Done" else "Mark Done", style = AppTextStyles.small)
-                        }
-                    }
-                }
-                
-                // Secondary action: Skip
-                OutlinedButton(
-                    onClick = onSkip,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textMuted),
-                    enabled = !isLoading
-                ) {
-                    Icon(painter = painterResource(R.drawable.icon_x_vector), null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Skip Session", style = AppTextStyles.small)
-                }
-            }
         }
     }
 }
@@ -1621,18 +1441,6 @@ fun ExpandedWeekWorkoutRow(
                 }
             }
         }
-    }
-}
-
-@Composable
-fun WorkoutTypeBadge(workoutType: String) {
-    Surface(shape = RoundedCornerShape(6.dp), color = workoutTypeColor(workoutType).copy(alpha = 0.15f)) {
-        Text(
-            workoutTypeLabel(workoutType),
-            style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
-            color = workoutTypeColor(workoutType),
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-        )
     }
 }
 

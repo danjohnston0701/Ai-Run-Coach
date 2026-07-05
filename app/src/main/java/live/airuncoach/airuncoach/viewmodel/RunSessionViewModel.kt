@@ -1009,30 +1009,74 @@ class RunSessionViewModel @Inject constructor(
                     val displayText = briefing.getFullBriefingText()
                     val speechText = briefing.getSpeechText()
 
-                    _runState.update { it.copy(
-                        coachText = displayText,
-                        latestCoachMessage = displayText,
-                        briefingResponse = briefing,
-                        isLoadingBriefing = false
-                    )}
-                    
-                    // Enqueue pre-run briefing audio via shared queue (prevents overlap)
-                    if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
-                        isBriefingAudioPlaying = true
-                        CoachingAudioQueue.enqueue(
-                            context = context,
-                            base64Audio = briefing.audio,
-                            format = briefing.format,
-                            fallbackText = speechText,
-                            accent = user?.coachAccent,
-                            gender = user?.coachGender,
-                            onComplete = {
-                                isBriefingAudioPlaying = false
-                                _runState.update { it.copy(coachText = "", latestCoachMessage = null) }
-                            }
-                        )
-                    } else if (_runState.value.isMuted) {
-                        Log.d("RunSessionViewModel", "Audio muted - skipping playback")
+                    // ── Coaching plan pre-run brief (primary audio for coached sessions) ──
+                    // When an AI coaching plan is active, its preRunBrief is the most valuable
+                    // briefing to speak — it contains exact HR targets, phase structure, training
+                    // week context, and session-specific coaching. Play it from the pre-cached
+                    // Polly audio file (generated when the coaching plan was loaded).
+                    // The old briefing text is still shown in the UI for weather/route context.
+                    val coachingPlanBrief = activeSessionCoachingPlan?.preRunBrief?.trim()?.takeIf { it.isNotBlank() }
+                    val workoutIdForBrief = coachingGeneratedForWorkoutId
+
+                    if (coachingPlanBrief != null && workoutIdForBrief != null) {
+                        // Use coaching plan preRunBrief as the spoken audio — it's more specific
+                        val cachedAudioFile = File(context.cacheDir, "coaching_audio/$workoutIdForBrief/${textMd5(coachingPlanBrief)}.mp3")
+                        val briefAudio: String? = if (cachedAudioFile.exists()) {
+                            Base64.encodeToString(cachedAudioFile.readBytes(), Base64.NO_WRAP)
+                        } else null
+
+                        // Display coaching plan brief in UI (richer/more specific than old briefing)
+                        _runState.update { it.copy(
+                            coachText = coachingPlanBrief,
+                            latestCoachMessage = coachingPlanBrief,
+                            briefingResponse = briefing,   // keep for data access (weather etc.)
+                            isLoadingBriefing = false
+                        )}
+
+                        if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
+                            isBriefingAudioPlaying = true
+                            CoachingAudioQueue.enqueue(
+                                context = context,
+                                base64Audio = briefAudio,
+                                format = if (briefAudio != null) "mp3" else null,
+                                fallbackText = coachingPlanBrief,  // real-time Polly or Android TTS
+                                accent = user?.coachAccent,
+                                gender = user?.coachGender,
+                                onComplete = {
+                                    isBriefingAudioPlaying = false
+                                    _runState.update { it.copy(coachText = "", latestCoachMessage = null) }
+                                }
+                            )
+                            Log.d("RunSessionViewModel",
+                                "Playing coaching plan preRunBrief (${if (briefAudio != null) "pre-cached Polly" else "real-time/TTS"}): " +
+                                coachingPlanBrief.take(80))
+                        }
+                    } else {
+                        // No coaching plan brief — fall back to the old generic briefing
+                        _runState.update { it.copy(
+                            coachText = displayText,
+                            latestCoachMessage = displayText,
+                            briefingResponse = briefing,
+                            isLoadingBriefing = false
+                        )}
+
+                        if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
+                            isBriefingAudioPlaying = true
+                            CoachingAudioQueue.enqueue(
+                                context = context,
+                                base64Audio = briefing.audio,
+                                format = briefing.format,
+                                fallbackText = speechText,
+                                accent = user?.coachAccent,
+                                gender = user?.coachGender,
+                                onComplete = {
+                                    isBriefingAudioPlaying = false
+                                    _runState.update { it.copy(coachText = "", latestCoachMessage = null) }
+                                }
+                            )
+                        } else if (_runState.value.isMuted) {
+                            Log.d("RunSessionViewModel", "Audio muted - skipping playback")
+                        }
                     }
                     
                     // Reset the flag to allow re-triggering if needed

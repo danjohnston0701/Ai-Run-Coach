@@ -2153,12 +2153,21 @@ Respond with ONLY valid JSON in this exact format:
 }
 
 /**
- * Mark workout as completed and link to run
+ * Mark workout as completed and link to run.
+ * Updates both sides of the relationship:
+ *   - planned_workouts.is_completed / completed_run_id
+ *   - runs.linked_workout_id (so plan-adherence filters work correctly)
  */
 export async function completeWorkout(
   workoutId: string,
   runId: string
 ): Promise<void> {
+  // First, fetch the workout so we can copy plan context onto the run
+  const [workout] = await db
+    .select()
+    .from(plannedWorkouts)
+    .where(eq(plannedWorkouts.id, workoutId));
+
   await db
     .update(plannedWorkouts)
     .set({
@@ -2166,6 +2175,18 @@ export async function completeWorkout(
       completedRunId: runId,
     })
     .where(eq(plannedWorkouts.id, workoutId));
+
+  // Mirror the link on the run so plan-adherence queries work
+  await db
+    .update(runs)
+    .set({
+      linkedWorkoutId: workoutId,
+      linkedPlanId: workout?.trainingPlanId ?? null,
+      workoutType: workout?.workoutType ?? null,
+      workoutIntensity: workout?.intensity ?? null,
+      workoutDescription: workout?.description ?? null,
+    })
+    .where(eq(runs.id, runId));
 }
 
 /**

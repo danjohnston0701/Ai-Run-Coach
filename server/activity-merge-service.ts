@@ -218,41 +218,85 @@ export async function mergeGarminActivityWithAiRunCoachRun(
     // Extract detailed metrics from Garmin activity
     const detailedMetrics = buildDetailedMetricsFromGarminActivity(garminActivity);
 
+    // ── avgPace: always compute from distance/duration in "mm:ss" format ──────
+    // NEVER use garminActivity.averagePaceInMinutesPerKilometer directly — it is
+    // a raw float (e.g. 6.45) that does NOT match the "6:27" string format stored
+    // in runs.avg_pace.  Overwriting with it corrupts or nulls the pace everywhere.
+    const garminDistanceKm = (garminActivity.distanceInMeters || 0) / 1000;
+    const garminDurationSec = garminActivity.durationInSeconds || 0;
+    let computedAvgPace: string | undefined;
+    if (garminDistanceKm > 0 && garminDurationSec > 0) {
+      const paceSecPerKm = garminDurationSec / garminDistanceKm;
+      const mins = Math.floor(paceSecPerKm / 60);
+      const secs = Math.floor(paceSecPerKm % 60);
+      computedAvgPace = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // ── Fetch the existing run so we can apply a PRESERVE-THEN-ENRICH strategy ─
+    // Rule: Garmin data enriches the record, but NEVER overwrites phone-recorded
+    // fields with null/empty values.  Data loss after a watch sync is unacceptable.
+    const [existingRun] = await db.select().from(runs).where(eq(runs.id, aiRunCoachRunId)).limit(1);
+
     // Prepare enriched data from Garmin
-    // Use Garmin metrics as primary (wearables are more accurate)
-    const enrichedData = {
+    const enrichedData: Record<string, any> = {
       garminActivityId: garminActivity.id,
       garminSummaryId: garminActivity.summaryId,
       hasGarminData: true,
 
-      // Override with Garmin metrics (more accurate)
-      distance: (garminActivity.distanceInMeters || 0) / 1000,
-      duration: garminActivity.durationInSeconds,
-      avgHeartRate: garminActivity.averageHeartRateInBeatsPerMinute,
-      maxHeartRate: garminActivity.maxHeartRateInBeatsPerMinute,
-      calories: garminActivity.activeKilocalories,
+      // Garmin wearable metrics are more accurate — always overwrite these scalars
+      distance: garminDistanceKm,
+      duration: garminDurationSec,
+      avgHeartRate: garminActivity.averageHeartRateInBeatsPerMinute ?? (existingRun as any)?.avgHeartRate,
+      maxHeartRate: garminActivity.maxHeartRateInBeatsPerMinute ?? (existingRun as any)?.maxHeartRate,
+      calories: garminActivity.activeKilocalories ?? (existingRun as any)?.calories,
+      elevationGain: garminActivity.totalElevationGainInMeters ?? (existingRun as any)?.elevationGain,
+      avgSpeed: garminActivity.averageSpeedInMetersPerSecond ?? (existingRun as any)?.avgSpeed,
+      activityType: garminActivity.activityType ?? (existingRun as any)?.activityType,
+      deviceName: garminActivity.deviceName ?? (existingRun as any)?.deviceName,
 
-      // Add enriched data
-      elevationGain: garminActivity.totalElevationGainInMeters,
-      avgPace: garminActivity.averagePaceInMinutesPerKilometer,
-      avgSpeed: garminActivity.averageSpeedInMetersPerSecond,
-      activityType: garminActivity.activityType,
-      deviceName: garminActivity.deviceName,
-
-      // Detailed metrics from Garmin (pace, heart rate, GPS track, splits, elevation)
-      paceData: detailedMetrics.paceData,
-      heartRateData: detailedMetrics.heartRateData,
-      kmSplits: detailedMetrics.kmSplits,
-      // Only overwrite GPS if Garmin actually provided GPS samples.
-      // If undefined (Garmin had no GPS data for this activity), preserve the
-      // phone-recorded GPS so the route doesn't disappear after a merge.
-      ...(detailedMetrics.gpsTrack != null ? { gpsTrack: detailedMetrics.gpsTrack } : {}),
-      elevationProfile: detailedMetrics.elevationProfile,
+      // avgPace — use the computed "mm:ss" string; fall back to whatever the run already has
+      avgPace: computedAvgPace ?? (existingRun as any)?.avgPace,
 
       // Merge tracking
       mergeScore: mergeCandidate.matchScore,
       mergeConfidence: mergeCandidate.matchScore / 100,
     };
+
+    // ── Time-series / detail fields — ONLY overwrite if Garmin has real data ──
+    // Empty Garmin objects ({ avg:0, samples:[] }) must NOT replace phone's rich arrays.
+
+    // paceData: prefer Garmin if it has actual samples
+    const garminPaceSamples = detailedMetrics.paceData?.samples;
+    if (Array.isArray(garminPaceSamples) && garminPaceSamples.length > 0) {
+      enrichedData.paceData = detailedMetrics.paceData;
+    } else if (!(existingRun as any)?.paceData) {
+      // Existing run has nothing — store Garmin's even if sparse (better than nothing)
+      enrichedData.paceData = detailedMetrics.paceData ?? null;
+    }
+
+    // heartRateData: prefer Garmin per-sample array over existing if richer
+    const garminHRSamples = detailedMetrics.heartRateData?.samples;
+    const existingHRSamples = (existingRun as any)?.heartRateData;
+    const existingHRIsArray = Array.isArray(existingHRSamples) && existingHRSamples.length > 0;
+    if (Array.isArray(garminHRSamples) && garminHRSamples.length > 0 && !existingHRIsArray) {
+      enrichedData.heartRateData = detailedMetrics.heartRateData;
+    }
+    // If existing has a flat number[] (phone watchHrSeries) — keep it; Garmin object format is inferior
+
+    // kmSplits: only replace if Garmin has actual split data and existing run has none
+    if (detailedMetrics.kmSplits != null && !(existingRun as any)?.kmSplits) {
+      enrichedData.kmSplits = detailedMetrics.kmSplits;
+    }
+
+    // GPS track: only replace if Garmin actually provided GPS samples (already established logic)
+    if (detailedMetrics.gpsTrack != null) {
+      enrichedData.gpsTrack = detailedMetrics.gpsTrack;
+    }
+
+    // Elevation profile: only add if missing
+    if (detailedMetrics.elevationProfile != null && !(existingRun as any)?.elevationProfile) {
+      enrichedData.elevationProfile = detailedMetrics.elevationProfile;
+    }
 
     // Update the run record with merged data
     await db.update(runs)
