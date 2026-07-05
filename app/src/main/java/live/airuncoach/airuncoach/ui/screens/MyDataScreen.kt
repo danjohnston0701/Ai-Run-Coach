@@ -394,21 +394,18 @@ private fun AiCoachReviewSection(review: String, updatedAt: String? = null) {
     }
 }
 
-// All 7 standard PB categories — always shown, blank if no PB yet
-private val PB_CATEGORIES = listOf(
-    Triple("1K",           "1K",            1.0),
-    Triple("Mile",         "Mile",          1.609),
-    Triple("5K",           "5K",            5.0),
-    Triple("10K",          "10K",           10.0),
-    Triple("20K",          "20K",           20.0),
-    Triple("Half Marathon","Half Marathon",  21.1),
-    Triple("Marathon",     "Marathon",       42.2)
-)
-
 @Composable
 private fun PersonalRecordsSection(
     personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>
 ) {
+    // Only show PBs that actually exist
+    val existingPbs = personalBests.filter { it.duration > 0 && it.distance > 0 }
+    
+    if (existingPbs.isEmpty()) {
+        EmptyStateCard(message = "No personal records yet.\nComplete some runs to see your personal bests!")
+        return
+    }
+    
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -417,10 +414,9 @@ private fun PersonalRecordsSection(
             .padding(vertical = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        PB_CATEGORIES.forEachIndexed { index, (_, label, _) ->
-            val pb = personalBests.find { it.category == label }
-            PersonalBestRow(label = label, pb = pb)
-            if (index < PB_CATEGORIES.size - 1) {
+        existingPbs.forEachIndexed { index, pb ->
+            PersonalBestRow(label = pb.category, pb = pb)
+            if (index < existingPbs.size - 1) {
                 HorizontalDivider(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -495,7 +491,7 @@ private fun PeriodStatisticsSection(
             .padding(Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
-        // Top row: Key metrics
+        // Top row: Key metrics (Runs, Total Distance, Longest Run)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -511,8 +507,8 @@ private fun PeriodStatisticsSection(
                 modifier = Modifier.weight(1f)
             )
             StatCard(
-                label = "Elevation",
-                value = String.format(Locale.getDefault(), "%.0f m", stats.totalElevationGain),
+                label = "Longest",
+                value = String.format(Locale.getDefault(), "%.1f km", stats.longestRun),
                 modifier = Modifier.weight(1f)
             )
         }
@@ -523,7 +519,7 @@ private fun PeriodStatisticsSection(
             thickness = 1.dp
         )
 
-        // Second row: Averages
+        // Second row: Pace & Cadence
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -534,13 +530,13 @@ private fun PeriodStatisticsSection(
                 modifier = Modifier.weight(1f)
             )
             StatCard(
-                label = "Avg HR",
-                value = "${stats.averageHeartRate} bpm",
+                label = "Avg Cadence",
+                value = "${stats.averageCadence} spm",
                 modifier = Modifier.weight(1f)
             )
             StatCard(
-                label = "Avg Cadence",
-                value = "${stats.averageCadence} spm",
+                label = "Avg HR",
+                value = "${stats.averageHeartRate} bpm",
                 modifier = Modifier.weight(1f)
             )
         }
@@ -551,14 +547,14 @@ private fun PeriodStatisticsSection(
             thickness = 1.dp
         )
 
-        // Third row: Extremes
+        // Third row: Elevation & Consistency
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             StatCard(
-                label = "Longest",
-                value = String.format(Locale.getDefault(), "%.1f km", stats.longestRun),
+                label = "Elevation",
+                value = String.format(Locale.getDefault(), "%.0f m", stats.totalElevationGain),
                 modifier = Modifier.weight(1f)
             )
             StatCard(
@@ -1380,14 +1376,14 @@ private fun CoachingPlanSummarySection(summary: CoachingPlanSummary) {
         }
 
         // ── Pace + Distance row ──────────────────────────────────────────────
-        if (summary.avgPaceDisplay.isNotBlank() && summary.avgPaceDisplay != "--") {
+        if (summary.sessionsThisPeriod > 0) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
                 StatCard(
                     label = "Avg Pace",
-                    value = summary.avgPaceDisplay,
+                    value = if (summary.avgPaceDisplay.isNotBlank() && summary.avgPaceDisplay != "--") summary.avgPaceDisplay else "--",
                     modifier = Modifier.weight(1f)
                 )
                 StatCard(
@@ -1486,11 +1482,26 @@ private fun CoachingPlanSummarySection(summary: CoachingPlanSummary) {
             }
         }
 
-        // ── Workout type breakdown (if populated) ────────────────────────────
-        val hasTypes = summary.workoutTypeBreakdown.isNotEmpty() &&
-                summary.workoutTypeBreakdown.keys.any { it != "other" && it.isNotBlank() }
-
-        if (hasTypes) {
+        // ── Workout type breakdown ──────────────────────────────────────────────
+        if (summary.sessionsThisPeriod > 0) {
+            val typeOrder = listOf("easy_run", "long_run", "tempo", "intervals",
+                "hill_repeats", "recovery", "other")
+            val typeLabels = mapOf(
+                "easy_run"     to "Easy Run",
+                "long_run"     to "Long Run",
+                "tempo"        to "Tempo",
+                "intervals"    to "Intervals",
+                "hill_repeats" to "Hill Repeats",
+                "recovery"     to "Recovery",
+                "other"        to "Other"
+            )
+            
+            // Get all types with counts, filtering to only those with data
+            val typesWithCounts = typeOrder.mapNotNull { key ->
+                val cnt = summary.workoutTypeBreakdown[key] ?: 0
+                if (cnt > 0) key to cnt else null
+            }
+            
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1505,20 +1516,16 @@ private fun CoachingPlanSummarySection(summary: CoachingPlanSummary) {
                     color = Colors.textMuted,
                     fontSize = 11.sp
                 )
-                val typeOrder = listOf("easy_run", "long_run", "tempo", "intervals",
-                    "hill_repeats", "recovery", "other")
-                val typeLabels = mapOf(
-                    "easy_run"     to "Easy Run",
-                    "long_run"     to "Long Run",
-                    "tempo"        to "Tempo",
-                    "intervals"    to "Intervals",
-                    "hill_repeats" to "Hill Repeats",
-                    "recovery"     to "Recovery",
-                    "other"        to "Other"
-                )
-                typeOrder.forEach { key ->
-                    val cnt = summary.workoutTypeBreakdown[key] ?: 0
-                    if (cnt > 0) {
+                
+                if (typesWithCounts.isEmpty()) {
+                    Text(
+                        text = "No session type data available",
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        fontSize = 12.sp
+                    )
+                } else {
+                    typesWithCounts.forEach { (key, cnt) ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
