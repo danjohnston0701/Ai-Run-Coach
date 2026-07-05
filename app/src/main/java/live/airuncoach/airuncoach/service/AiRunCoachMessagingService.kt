@@ -191,6 +191,22 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             }
+            type == "group_run_started" -> {
+                // Group run has been started by organiser — tap navigates to the group run detail screen
+                val mainIntent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    val groupRunId = data["groupRunId"] ?: ""
+                    if (groupRunId.isNotEmpty()) {
+                        putExtra("deeplink_group_run_id", groupRunId)
+                    }
+                }
+                PendingIntent.getActivity(
+                    this,
+                    REQUEST_CODE_GENERAL,
+                    mainIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            }
             else -> {
                 // Regular notifications (run_enriched, new_activity, etc.)
                 val intent = Intent(this, MainActivity::class.java).apply {

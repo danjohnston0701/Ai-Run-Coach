@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { eq, and, or, gte, lt, desc, lte, count, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, or, gte, lt, desc, lte, count, isNull, isNotNull, inArray } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
@@ -15283,11 +15283,59 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { id } = req.params;
       const userId = req.user!.userId;
 
-      const [gr] = await db.select({ id: groupRuns.id, hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id));
+      const [gr] = await db.select({
+        id: groupRuns.id,
+        hostUserId: groupRuns.hostUserId,
+        runName: groupRuns.runName,
+      }).from(groupRuns).where(eq(groupRuns.id, id));
       if (!gr) return res.status(404).json({ error: "Group run not found" });
       if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can start the run" });
 
       await db.update(groupRuns).set({ status: "active" }).where(eq(groupRuns.id, id));
+
+      // Fetch organiser name for notification
+      const [organiser] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+      const organiserName = organiser?.name || "The organiser";
+
+      // Send push notifications to all participants who are "accepted" or "pending" (NOT "declined")
+      try {
+        const participants = await db
+          .select({
+            userId: groupRunParticipants.userId,
+            invitationStatus: groupRunParticipants.invitationStatus,
+          })
+          .from(groupRunParticipants)
+          .where(
+            and(
+              eq(groupRunParticipants.groupRunId, id),
+              inArray(groupRunParticipants.invitationStatus, ["accepted", "pending"])
+            )
+          );
+
+        const notificationService = await import("./notification-service");
+
+        for (const participant of participants) {
+          // Don't send notification to the organiser themselves
+          if (participant.userId === userId) continue;
+
+          await notificationService.sendFirebasePush(
+            participant.userId,
+            `${organiserName} is ready to run! 🏃`,
+            `The group run "${gr.runName}" is ready to start. Tap to join!`,
+            {
+              type: "group_run_started",
+              groupRunId: id,
+              runName: gr.runName,
+              organiserName,
+            }
+          );
+        }
+
+        console.log(`[Group Run Start] Sent notifications to ${participants.length} participants for group run ${id}`);
+      } catch (notifError: any) {
+        console.warn(`[Group Run Start] Failed to send notifications for group run ${id}:`, notifError.message);
+        // Don't fail the entire request if notifications fail — the run start is still valid
+      }
 
       const updated = await buildGroupRunResponse(id, userId);
       res.json(updated);
