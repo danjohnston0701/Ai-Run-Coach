@@ -14958,9 +14958,21 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     // Fall back to kmSplits if no valid km-split paceData
     if (!paceData && rawKmSplits.length > 0) {
       paceData = rawKmSplits.map((s: any) => {
-        const parts = (s.pace || '0:00').split(':');
-        const paceSec = parts.length === 2 ? (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) : 0;
-        return { km: s.km, pace: s.pace, paceSeconds: paceSec };
+        // s.pace may be a string "6:27" or a number (seconds per km)
+        let paceSec: number;
+        if (typeof s.pace === 'number') {
+          paceSec = s.pace;
+        } else if (typeof s.pace === 'string' && s.pace.includes(':')) {
+          const parts = s.pace.split(':');
+          paceSec = (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0);
+        } else if (s.paceSeconds != null) {
+          paceSec = s.paceSeconds;
+        } else {
+          paceSec = 0;
+        }
+        const paceStr = typeof s.pace === 'string' ? s.pace :
+          `${Math.floor(paceSec / 60)}:${String(paceSec % 60).padStart(2, '0')}`;
+        return { km: s.km, pace: paceStr, paceSeconds: paceSec };
       });
     }
 
