@@ -14938,10 +14938,25 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       ...(p.altitude != null ? { altitude: p.altitude } : {}),
     })).filter((p: any) => p.lat !== 0 && p.lng !== 0) : undefined;
     
-    // Build paceData from kmSplits if paceData not available
+    // Build paceData in km-split format ({km, pace, paceSeconds}) for the share image.
+    // Raw pace samples ({time, value}) must be discarded — they are not km splits and
+    // cause hundreds of km-marker circles to be drawn on the route map.
     const rawKmSplits = Array.isArray(run.kmSplits) ? run.kmSplits as any[] : [];
-    let paceData = run.paceData as any;
-    if ((!paceData || !Array.isArray(paceData) || paceData.length === 0) && rawKmSplits.length > 0) {
+    let paceDataRaw = run.paceData as any;
+
+    // Detect raw sample format vs km-split format
+    let paceData: any = null;
+    if (Array.isArray(paceDataRaw) && paceDataRaw.length > 0) {
+      const first = paceDataRaw[0];
+      if (typeof first.paceSeconds === 'number' || typeof first.pace === 'string') {
+        // Already km-split format — use as-is
+        paceData = paceDataRaw;
+      }
+      // else: raw {time, value} samples — discard, fall through to kmSplits
+    }
+
+    // Fall back to kmSplits if no valid km-split paceData
+    if (!paceData && rawKmSplits.length > 0) {
       paceData = rawKmSplits.map((s: any) => {
         const parts = (s.pace || '0:00').split(':');
         const paceSec = parts.length === 2 ? (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) : 0;

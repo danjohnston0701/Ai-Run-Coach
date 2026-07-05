@@ -694,9 +694,10 @@ function buildMercatorRouteSvg(
     routeSvg = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
 
-  // km markers
+  // km markers — only draw if paceData looks like km splits (≤ 50 entries)
+  // Raw pace samples can have hundreds of entries and must NOT be used as km markers.
   let kmMarkers = "";
-  if (paceData && paceData.length > 1) {
+  if (paceData && paceData.length > 1 && paceData.length <= 50) {
     paceData.forEach((_pd, idx) => {
       if (idx === 0) return;
       const mIdx = Math.min(Math.round((idx / paceData.length) * mapped.length), mapped.length - 1);
