@@ -379,8 +379,8 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                         // Navigate to check_route_availability - it will handle the API check itself
                         navController.navigate("check_route_availability")
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds ->
-                        // Create RunSetupConfig and start run without route
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants ->
+                        // Create RunSetupConfig and start run without route — preserve social settings
                         val config = RunSetupConfig(
                             activityType = PhysicalActivityType.RUN,
                             targetDistance = distance,
@@ -388,10 +388,10 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                             targetHours = hours,
                             targetMinutes = minutes,
                             targetSeconds = seconds,
-                            liveTrackingEnabled = false,
-                            liveTrackingObservers = emptyList(),
-                            isGroupRun = false,
-                            groupRunParticipants = emptyList()
+                            liveTrackingEnabled = liveTrackingEnabled,
+                            liveTrackingObservers = liveTrackingObservers,
+                            isGroupRun = isGroupRun,
+                            groupRunParticipants = groupRunParticipants
                         )
                         RunConfigHolder.setConfig(config)
                         navController.navigate("run_session") {

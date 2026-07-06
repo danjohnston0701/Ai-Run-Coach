@@ -74,8 +74,12 @@ fun MapMyRunSetupScreen(
         targetTimeEnabled: Boolean,
         hours: Int,
         minutes: Int,
-        seconds: Int
-    ) -> Unit = { _, _, _, _, _ -> }
+        seconds: Int,
+        liveTrackingEnabled: Boolean,
+        liveTrackingObservers: List<String>,
+        isGroupRun: Boolean,
+        groupRunParticipants: List<String>
+    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
@@ -400,7 +404,11 @@ fun MapMyRunSetupScreen(
                                             isTargetTimeEnabled,
                                             hoursInt,
                                             minutesInt,
-                                            secondsInt
+                                            secondsInt,
+                                            isLiveTrackingEnabled,
+                                            liveTrackingObservers,
+                                            isGroupRunEnabled,
+                                            groupRunParticipants
                                         )
                                     }
                                 )
@@ -447,7 +455,11 @@ fun MapMyRunSetupScreen(
                                             isTargetTimeEnabled,
                                             hoursInt,
                                             minutesInt,
-                                            secondsInt
+                                            secondsInt,
+                                            isLiveTrackingEnabled,
+                                            liveTrackingObservers,
+                                            isGroupRunEnabled,
+                                            groupRunParticipants
                                         )
                                     }
                                 )
@@ -494,7 +506,11 @@ fun MapMyRunSetupScreen(
                                     isTargetTimeEnabled,
                                     hoursInt,
                                     minutesInt,
-                                    secondsInt
+                                    secondsInt,
+                                    isLiveTrackingEnabled,
+                                    liveTrackingObservers,
+                                    isGroupRunEnabled,
+                                    groupRunParticipants
                                 )
                             }
                         )

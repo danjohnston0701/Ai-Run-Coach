@@ -33,6 +33,7 @@ import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.WeatherData
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.WeatherRetrofitClient
+import live.airuncoach.airuncoach.network.model.CompleteWorkoutRequest
 import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
 import live.airuncoach.airuncoach.network.model.TodayWorkoutResponse
 import live.airuncoach.airuncoach.service.RunTrackingService
@@ -471,6 +472,30 @@ class DashboardViewModel @Inject constructor(
     // Public method to refresh today's active plans (e.g., after completing a workout)
     fun refreshTodayActivePlans() {
         loadTodayActivePlans()
+    }
+
+    /**
+     * Mark a workout as manually completed (no associated run).
+     * Calls PUT /api/training-plans/workouts/{workoutId}/complete then refreshes the dashboard card.
+     */
+    fun markWorkoutComplete(workoutId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                Log.d("DashboardViewModel", "Marking workout $workoutId as complete...")
+                val response = apiService.completeWorkout(
+                    workoutId = workoutId,
+                    request = CompleteWorkoutRequest(runId = null) // Manual mark — no run linked
+                )
+                if (response.isSuccessful && response.body()?.success == true) {
+                    Log.d("DashboardViewModel", "✅ Workout $workoutId marked complete")
+                    loadTodayActivePlans() // Refresh — completed workout will no longer appear
+                } else {
+                    Log.w("DashboardViewModel", "⚠️ Failed to mark workout complete: HTTP ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.e("DashboardViewModel", "Error marking workout complete: ${e.message}", e)
+            }
+        }
     }
     
     fun toggleAiCoach(enabled: Boolean) {

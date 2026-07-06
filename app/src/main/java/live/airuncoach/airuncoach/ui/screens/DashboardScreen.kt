@@ -203,9 +203,8 @@ fun DashboardScreen(
                             )
                             onNavigateToWorkoutDetail()
                         },
-                        onComplete = { 
-                            // TODO: Mark workout as complete and refresh
-                            viewModel.refreshTodayActivePlans()
+                        onComplete = {
+                            viewModel.markWorkoutComplete(workout.id)
                         },
                         onViewDetail = {
                             WorkoutHolder.currentWorkout = workout
