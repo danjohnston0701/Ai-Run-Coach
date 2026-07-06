@@ -2841,14 +2841,19 @@ class RunTrackingService : Service(), SensorEventListener {
         }
 
         // Elite coaching final-stretch triggers — preserved for coached sessions (final 500m/250m/100m)
-        // Generic milestone/pace-trend/technique elite triggers are suppressed during coached sessions
+        // Generic milestone/pace-trend/technique elite triggers are suppressed during coached sessions.
+        // EXCEPTION: interval plan sessions suppress ALL generic prompts including final-stretch — the
+        // dynamic plan owns all cueing; a "final 250m!" shout mid-interval is disruptive and confusing.
+        val isIntervalSession = dynamicCoachingPlan?.cueingStrategy == "interval" ||
+                                sessionInstructions?.sessionStructure?.cueingStrategy == "interval"
         if (!hasCoachingFiredThisTick && canFireCoaching()) {
-            if (isCoachingPlanActive) {
-                // Coached session: only fire final 500m / 250m / 100m motivation, skip all other elite cues
+            if (isCoachingPlanActive && !isIntervalSession) {
+                // Coached non-interval session: only fire final 500m / 250m / 100m motivation
                 maybeFinalStretchCoaching(displayDistance, duration, avgSpeed)
-            } else {
+            } else if (!isCoachingPlanActive) {
                 maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
             }
+            // isCoachingPlanActive && isIntervalSession → all generic prompts suppressed
         }
         
         _currentRunSession.value = RunSession(
@@ -4478,8 +4483,11 @@ class RunTrackingService : Service(), SensorEventListener {
             val phaseStartTrigger = plan.triggers.firstOrNull { t ->
                 t.type in triggerTypeToMatch &&
                 (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName)) &&
-                // "once" triggers only fire on the very first occurrence; others fire every rep
-                if (t.frequency == "once") !triggerFiredOnce.contains(t.id) else true
+                // rep_start / recovery_start must fire on EVERY rep — never block via triggerFiredOnce.
+                // phase_start triggers that are "once" (e.g. a warm-up intro) fire only the first time.
+                if (t.frequency == "once" && t.type !in listOf("rep_start", "recovery_start")) {
+                    !triggerFiredOnce.contains(t.id)
+                } else true
             }
 
             if (phaseStartTrigger != null && !hasCoachingFiredThisTick &&
@@ -4491,8 +4499,14 @@ class RunTrackingService : Service(), SensorEventListener {
                     phasePaceMin = resolvedPhase.targetPaceMin,
                     phasePaceMax = resolvedPhase.targetPaceMax,
                 )
-                // Mark "once" triggers as fired; leave repeating triggers unfired so they rotate
-                if (phaseStartTrigger.frequency == "once") triggerFiredOnce.add(phaseStartTrigger.id)
+                // IMPORTANT: Do NOT add rep_start / recovery_start triggers to triggerFiredOnce.
+                // These must fire on every rep transition — the isNewPhase guard above already
+                // prevents them from double-firing within the same phase.
+                // Only non-repeating phase_start triggers (e.g. warm-up intro) should be once-only.
+                val isRepTransitionTrigger = phaseStartTrigger.type in listOf("rep_start", "recovery_start")
+                if (phaseStartTrigger.frequency == "once" && !isRepTransitionTrigger) {
+                    triggerFiredOnce.add(phaseStartTrigger.id)
+                }
                 triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
                 fireDynamicTrigger(msg, phaseStartTrigger.type, resolvedPhaseName)
             }

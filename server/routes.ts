@@ -1807,6 +1807,39 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // ── Helper: server-side auto-complete of a linked planned workout ────────
+  // Called whenever a run is saved (new, Case-0 merge, or Case-2 merge).
+  // Idempotent — skips silently if already completed or no link exists.
+  async function autoCompleteLinkedWorkout(runId: string): Promise<void> {
+    const [savedRun] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    const wid = (savedRun as any)?.linkedWorkoutId;
+    if (!wid) return;
+
+    const [pw] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, wid)).limit(1);
+    if (!pw || (pw as any).isCompleted) return;
+
+    await db.update(plannedWorkouts)
+      .set({ isCompleted: true, completedRunId: runId })
+      .where(eq(plannedWorkouts.id, wid));
+    console.log(`✅ [autoComplete] Planned workout ${wid} marked complete via run ${runId}`);
+
+    // Advance the week if all workouts in this week are now done
+    if ((pw as any).weeklyPlanId && (pw as any).trainingPlanId) {
+      const weekWorkouts = await db.select().from(plannedWorkouts)
+        .where(eq(plannedWorkouts.weeklyPlanId, (pw as any).weeklyPlanId));
+      if (weekWorkouts.every((w: any) => w.isCompleted)) {
+        const [week] = await db.select().from(weeklyPlans)
+          .where(eq(weeklyPlans.id, (pw as any).weeklyPlanId)).limit(1);
+        if (week) {
+          await db.update(trainingPlans)
+            .set({ currentWeek: (week as any).weekNumber + 1 })
+            .where(eq(trainingPlans.id, (pw as any).trainingPlanId));
+          console.log(`📅 [autoComplete] Week ${(week as any).weekNumber} complete — advanced to ${(week as any).weekNumber + 1}`);
+        }
+      }
+    }
+  }
+
   app.post("/api/runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
@@ -2107,6 +2140,9 @@ function transformRunForAndroid(run: any) {
               refreshRunnerProfile(userId).catch(err =>
                 console.error('[POST /api/runs] Case 0 merge: runner profile refresh failed:', err)
               );
+              autoCompleteLinkedWorkout(existingByExternalId.id).catch(err =>
+                console.error('[POST /api/runs] Case 0: workout auto-complete failed (non-fatal):', err)
+              );
               return res.status(200).json(transformRunForAndroid(merged));
             }
 
@@ -2114,6 +2150,9 @@ function transformRunForAndroid(run: any) {
             // always advances after any run-related upload, matching user expectations.
             refreshRunnerProfile(userId).catch(err =>
               console.error('[POST /api/runs] Case 0 no-merge: runner profile refresh failed:', err)
+            );
+            autoCompleteLinkedWorkout(existingByExternalId.id).catch(err =>
+              console.error('[POST /api/runs] Case 0 no-merge: workout auto-complete failed (non-fatal):', err)
             );
             return res.status(200).json(transformRunForAndroid(existingByExternalId));
           }
@@ -2213,6 +2252,18 @@ function transformRunForAndroid(run: any) {
           if (targetTime    != null && (garminDup as any).targetTime    == null) c2Merge.targetTime    = targetTime;
           if (wasTargetAchieved != null && (garminDup as any).wasTargetAchieved == null) c2Merge.wasTargetAchieved = wasTargetAchieved;
 
+          // Training plan linking — the garmin_companion run has no knowledge of the
+          // coaching plan; only the phone knows which workout was being executed.
+          // Transfer all plan context so the run is properly linked and the workout
+          // can be marked complete (both server-side and in RunSummaryViewModel).
+          if (runData.linkedWorkoutId   && !(garminDup as any).linkedWorkoutId)   c2Merge.linkedWorkoutId   = runData.linkedWorkoutId;
+          if (runData.linkedPlanId      && !(garminDup as any).linkedPlanId)      c2Merge.linkedPlanId      = runData.linkedPlanId;
+          if (runData.workoutType       && !(garminDup as any).workoutType)       c2Merge.workoutType       = runData.workoutType;
+          if (runData.workoutIntensity  && !(garminDup as any).workoutIntensity)  c2Merge.workoutIntensity  = runData.workoutIntensity;
+          if (runData.workoutDescription && !(garminDup as any).workoutDescription) c2Merge.workoutDescription = runData.workoutDescription;
+          if (runData.planProgressWeek  && !(garminDup as any).planProgressWeek)  c2Merge.planProgressWeek  = runData.planProgressWeek;
+          if (runData.planProgressWeeks && !(garminDup as any).planProgressWeeks) c2Merge.planProgressWeeks = runData.planProgressWeeks;
+
           if (Object.keys(c2Merge).length > 0) {
             await db.update(runs).set(c2Merge).where(eq(runs.id, garminDup.id));
             console.log(`[POST /api/runs] Case 2 merge applied to run ${garminDup.id}:`, Object.keys(c2Merge).join(', '));
@@ -2221,6 +2272,11 @@ function transformRunForAndroid(run: any) {
           // Kick off profile refresh with the enriched data
           refreshRunnerProfile(userId).catch((err: any) =>
             console.error('[POST /api/runs] Case 2 merge: runner profile refresh failed:', err)
+          );
+
+          // Auto-complete the linked workout now that the plan context has been merged in
+          autoCompleteLinkedWorkout(garminDup.id).catch((err: any) =>
+            console.error('[POST /api/runs] Case 2: workout auto-complete failed (non-fatal):', err)
           );
 
           const [updated2] = await db.select().from(runs).where(eq(runs.id, garminDup.id)).limit(1);
@@ -2346,6 +2402,14 @@ function transformRunForAndroid(run: any) {
       checkAchievementsAfterRun(run.id, userId).catch(err => {
         console.error("Failed to check achievements:", err);
       });
+
+      // ── Server-side planned workout auto-complete ─────────────────────────
+      // Mark the linked planned workout as done the moment a run is saved.
+      // This is the definitive completion path — it works even if the phone
+      // crashes, goes offline, or RunSummaryViewModel never fires.
+      autoCompleteLinkedWorkout(run.id).catch(err =>
+        console.error("[Run] Server-side workout auto-complete failed (non-fatal):", err)
+      );
 
       // Reassess training plans asynchronously (don't block response)
       setImmediate(() => {
@@ -11189,14 +11253,16 @@ function transformRunForAndroid(run: any) {
             Math.abs((r.distance ?? 0) - distKmCheck) / Math.max(distKmCheck, 0.1) < 0.1
           );
           if (phoneMatch) {
-            console.log(`[Offline Batch] Phone run ${phoneMatch.id} matches batch (${distKmCheck.toFixed(2)} km) — linking GPS track to phone run, no duplicate created`);
+            console.log(`[Offline Batch] Phone run ${phoneMatch.id} matches batch (${distKmCheck.toFixed(2)} km) — linking to phone run, will NOT overwrite existing rich data`);
             // Tag the phone run with the watch session ID + source so future lookups match
             await db.update(runs).set({
               externalId:     sessionId,
               externalSource: 'garmin_companion',
               hasGarminData:  true,
             }).where(eq(runs.id, phoneMatch.id));
-            existingRun = phoneMatch as any;
+            // Fetch the FULL run so we know which data fields are already populated
+            const [fullPhoneRun] = await db.select().from(runs).where(eq(runs.id, phoneMatch.id));
+            existingRun = fullPhoneRun as any;
           }
         }
       }
@@ -11255,28 +11321,52 @@ function transformRunForAndroid(run: any) {
       }
 
       // ── Decode compact points into chart series ──────────────────────────
-      const gpsTrack:       { lat: number; lng: number; altitude?: number; timestamp: number }[] = [];
+      // Point format: [elapsed_s, lat_e5, lng_e5, alt_dm, hr, cadence, pace_ds]
+      // We embed hr, cadence and speed INTO each GPS track point so the app can
+      // render the coloured-pace map exactly as it does for phone-tracked runs.
+      const gpsTrack:       any[] = [];
       const heartRateData:  { time: number; value: number }[] = [];
       const paceData:       { time: number; value: number }[] = [];
       const altitudeData:   { time: number; value: number }[] = [];
       const cadenceData:    { time: number; value: number }[] = [];
 
-      for (const pt of points) {
+      // First pass: collect alt values so we can compute inclineDegrees
+      // (requires consecutive-point altitude difference + distance estimate)
+      const rawAltDm: number[] = points.map((p: number[]) => p[3]);
+
+      for (let i = 0; i < points.length; i++) {
+        const pt = points[i] as number[];
         const [elapsed_s, lat_e5, lng_e5, alt_dm, hr, cadence, pace_ds] = pt;
         const lat  = lat_e5  / 100000.0;
         const lng  = lng_e5  / 100000.0;
         const altM = alt_dm  / 10.0;
-        const pace = pace_ds / 10.0;
+        const pace = pace_ds / 10.0;   // sec/km
 
         if (lat_e5 !== 0 && lng_e5 !== 0) {
           const gpsPt: any = { lat, lng, timestamp: elapsed_s };
-          if (alt_dm !== 0) gpsPt.altitude = altM;
+          if (alt_dm !== 0)                    gpsPt.altitude  = altM;
+          if (hr > 0)                          gpsPt.heartRate = hr;
+          if (cadence > 0)                     gpsPt.cadence   = cadence;
+          // Convert pace (sec/km) → speed (m/s) so the map can colour segments
+          if (pace > 0 && pace < 1200)         gpsPt.speed     = 1000 / pace;
+
+          // Estimate inclineDegrees from consecutive altitude difference
+          // Using a 15-sec interval ≈ ~40m horizontal at easy pace → atan(Δalt/40)
+          if (i > 0 && alt_dm !== 0 && rawAltDm[i - 1] !== 0) {
+            const deltaAltM    = altM - (rawAltDm[i - 1] / 10.0);
+            const prevPace     = (points[i - 1] as number[])[6] / 10.0; // sec/km
+            const estSpeedMps  = (prevPace > 0 && prevPace < 1200) ? 1000 / prevPace : 2.5;
+            const intervalSec  = elapsed_s - (points[i - 1] as number[])[0];
+            const horizDistM   = Math.max(estSpeedMps * intervalSec, 1);
+            gpsPt.inclineDegrees = Math.atan2(deltaAltM, horizDistM) * (180 / Math.PI);
+          }
+
           gpsTrack.push(gpsPt);
         }
-        if (hr > 0)              heartRateData.push({ time: elapsed_s, value: hr });
+        if (hr > 0)                  heartRateData.push({ time: elapsed_s, value: hr });
         if (pace > 0 && pace < 1200) paceData.push({ time: elapsed_s, value: pace });
-        if (alt_dm !== 0)        altitudeData.push({ time: elapsed_s, value: altM });
-        if (cadence > 0)         cadenceData.push({ time: elapsed_s, value: cadence });
+        if (alt_dm !== 0)            altitudeData.push({ time: elapsed_s, value: altM });
+        if (cadence > 0)             cadenceData.push({ time: elapsed_s, value: cadence });
       }
 
       // ── Build km splits via time-proportional interpolation ─────────────
@@ -11335,15 +11425,36 @@ function transformRunForAndroid(run: any) {
       // at full 250ms resolution and is therefore more accurate.
       const finalAscent = totalAscent && totalAscent > 0 ? totalAscent : computedAscent;
 
-      // ── Patch the run record ─────────────────��───────────────────────────
+      // ── Patch the run record ─────────────────────────────────────────────
+      // CRITICAL: Never overwrite data fields that already exist on the run.
+      // If this run was tracked by the phone the existing data is RICHER than
+      // what the watch offline batch can provide (phone has per-point speed,
+      // HR, cadence, inclineDegrees; watch batch only has lat/lng/alt).
+      // Only fill in fields that are genuinely missing (null / empty array).
+      const hasExistingGps      = Array.isArray((existingRun as any).gpsTrack)      && (existingRun as any).gpsTrack.length      > 0;
+      const hasExistingHr       = Array.isArray((existingRun as any).heartRateData) && (existingRun as any).heartRateData.length > 0;
+      const hasExistingPace     = Array.isArray((existingRun as any).paceData)      && (existingRun as any).paceData.length      > 0;
+      const hasExistingAlt      = Array.isArray((existingRun as any).altitudeData)  && (existingRun as any).altitudeData.length  > 0;
+      const hasExistingCadence  = Array.isArray((existingRun as any).cadenceData)   && (existingRun as any).cadenceData.length   > 0;
+      const hasExistingKmSplits = Array.isArray((existingRun as any).kmSplits)      && (existingRun as any).kmSplits.length      > 0;
+
       const updatePayload: any = {
-        gpsTrack:      gpsTrack.length      > 0 ? gpsTrack      : undefined,
-        heartRateData: heartRateData.length > 0 ? heartRateData : undefined,
-        paceData:      paceData.length      > 0 ? paceData      : undefined,
-        altitudeData:  altitudeData.length  > 0 ? altitudeData  : undefined,
-        cadenceData:   cadenceData.length   > 0 ? cadenceData   : undefined,
-        kmSplits:      kmSplits.length      > 0 ? kmSplits      : undefined,
+        gpsTrack:      (!hasExistingGps      && gpsTrack.length      > 0) ? gpsTrack      : undefined,
+        heartRateData: (!hasExistingHr       && heartRateData.length > 0) ? heartRateData : undefined,
+        paceData:      (!hasExistingPace     && paceData.length      > 0) ? paceData      : undefined,
+        altitudeData:  (!hasExistingAlt      && altitudeData.length  > 0) ? altitudeData  : undefined,
+        cadenceData:   (!hasExistingCadence  && cadenceData.length   > 0) ? cadenceData   : undefined,
+        kmSplits:      (!hasExistingKmSplits && kmSplits.length      > 0) ? kmSplits      : undefined,
       };
+
+      // Log what was skipped so it's easy to diagnose in future
+      if (hasExistingGps)      console.log(`[Offline Batch] Preserved existing GPS track (${(existingRun as any).gpsTrack.length} pts) — watch batch skipped`);
+      if (hasExistingHr)       console.log(`[Offline Batch] Preserved existing HR data — watch batch skipped`);
+      if (hasExistingPace)     console.log(`[Offline Batch] Preserved existing pace data — watch batch skipped`);
+      if (hasExistingAlt)      console.log(`[Offline Batch] Preserved existing altitude data — watch batch skipped`);
+      if (hasExistingCadence)  console.log(`[Offline Batch] Preserved existing cadence data — watch batch skipped`);
+      if (hasExistingKmSplits) console.log(`[Offline Batch] Preserved existing km splits — watch batch skipped`);
+
       if (finalAscent != null) {
         updatePayload.elevationGain = finalAscent;
         updatePayload.elevation     = finalAscent;
