@@ -136,6 +136,7 @@ fun RunSummaryScreenFlagship(
     onNavigateBack: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {},
     onNavigateToShareImage: (String) -> Unit = {},
+    onNavigateToShareVideo: (String) -> Unit = {},
     onNavigateToSubscription: () -> Unit = {},
     viewModel: RunSummaryViewModel = hiltViewModel(),
     lastRunForDelta: RunSession? = null, // optional: wire later from your VM/store
@@ -303,6 +304,7 @@ fun RunSummaryScreenFlagship(
                             onStruggleRestore = viewModel::restoreStrugglePoint,
                             difficultyLabel = session?.let { formatTerrainLabel(it.getDifficultyLevel()) },
                             onCreateShareImage = { onNavigateToShareImage(runId) },
+                            onCreateShareVideo = { onNavigateToShareVideo(runId) },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
                             personalBests = runPersonalBests,
@@ -1086,6 +1088,7 @@ private fun AiInsightsTabContent(
     onStruggleRestore: (String) -> Unit = {},
     difficultyLabel: String? = null,
     onCreateShareImage: () -> Unit = {},
+    onCreateShareVideo: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     personalBests: List<String> = emptyList(),
@@ -1164,6 +1167,11 @@ private fun AiInsightsTabContent(
         // Create Share Image button
         item {
             CreateShareImageButton(onClick = onCreateShareImage)
+        }
+
+        // Share Run Video button
+        item {
+            CreateShareVideoButton(onClick = onCreateShareVideo)
         }
 
         // Struggle Point Analysis — moved above map for visibility
@@ -1734,6 +1742,32 @@ private fun CreateShareImageButton(onClick: () -> Unit) {
         Text(
             text = "Create Share Image",
             style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+        )
+    }
+}
+
+@Composable
+private fun CreateShareVideoButton(onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.5.dp, Colors.primary.copy(alpha = 0.6f)),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = Colors.primary
+        )
+    ) {
+        Icon(
+            imageVector = Icons.Default.PlayCircle,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(Spacing.sm))
+        Text(
+            text = "Share Run Video",
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold)
         )
     }
 }

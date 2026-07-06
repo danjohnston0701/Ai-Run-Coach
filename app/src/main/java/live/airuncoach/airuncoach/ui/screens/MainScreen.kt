@@ -698,9 +698,19 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onNavigateToShareImage = { id ->
                         navController.navigate("share_image/$id")
                     },
+                    onNavigateToShareVideo = { id ->
+                        navController.navigate("run_video/$id")
+                    },
                     onNavigateToSubscription = {
                         navController.navigate("subscription")
                     },
+                )
+            }
+            composable("run_video/{runId}") { backStackEntry ->
+                val runId = backStackEntry.arguments?.getString("runId") ?: ""
+                RunVideoScreen(
+                    runId          = runId,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable("share_image/{runId}") { backStackEntry ->
