@@ -711,6 +711,14 @@ interface ApiService {
     ): InviteObserverResponse
 
     /**
+     * Mark the current user as actively viewing a live session.
+     * Called when an observer opens the ObserverRunSessionScreen.
+     * The server increments the session's active viewer count.
+     */
+    @POST("/api/live-sessions/{sessionId}/join")
+    suspend fun joinLiveSession(@Path("sessionId") sessionId: String): JoinLiveSessionResponse
+
+    /**
      * Invite a friend to participate in a group run session.
      * Sends push notification to the participant.
      *
@@ -774,6 +782,13 @@ data class CreateLiveSessionRequest(
 data class CreateLiveSessionResponse(
     val id: String,            // The live session ID — use for all subsequent invite calls
     val success: Boolean,
+    val error: String? = null
+)
+
+// Response from joining a live session as an observer
+data class JoinLiveSessionResponse(
+    val success: Boolean,
+    val viewerCount: Int? = null,
     val error: String? = null
 )
 

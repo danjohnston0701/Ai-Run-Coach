@@ -36,6 +36,16 @@ class ObserverRunSessionViewModel @Inject constructor(
                 _isLoading.value = true
                 _error.value = null
 
+                // Register this user as an active viewer so the runner's panel
+                // shows real viewer count (not just invited observers)
+                try {
+                    apiService.joinLiveSession(sessionId)
+                    Log.d("ObserverVM", "Joined live session: $sessionId")
+                } catch (e: Exception) {
+                    Log.w("ObserverVM", "joinLiveSession failed (non-fatal): ${e.message}")
+                    // Non-fatal — continue loading the session
+                }
+
                 Log.d("ObserverVM", "Fetching live session: $sessionId")
                 val session = apiService.getLiveSession(sessionId)
                 
@@ -211,6 +221,7 @@ data class LiveSessionApiResponse(
     val routeId: String? = null,
     val sharedWithFriends: Boolean? = null,
     val isActive: Boolean? = null,
-    val observers: Any? = null,
+    val observers: Any? = null,       // list of invited observers
+    val viewerCount: Int? = null,     // number of observers who have actually joined
     val lastSyncedAt: String? = null
 )

@@ -247,16 +247,18 @@ class RunSessionViewModel @Inject constructor(
         observerCountPollingJob = null
     }
 
-    /** Fetch observer count from the live session endpoint */
+    /** Fetch observer count from the live session endpoint.
+     *  Prefers viewerCount (active viewers who joined) over observers.size (invited). */
     private suspend fun fetchObserverCount() {
         val sessionId = _liveSessionId.value ?: return
         try {
             val session = apiService.getLiveSession(sessionId)
-            // observers field can be a List or null
-            val count = when (val obs = session.observers) {
-                is List<*> -> obs.size
-                else -> 0
-            }
+            // Prefer viewerCount (users who called /join) over the invited observers list
+            val count = session.viewerCount
+                ?: when (val obs = session.observers) {
+                    is List<*> -> obs.size
+                    else -> 0
+                }
             _liveObserverCount.value = count
             Log.d("RunSessionViewModel", "Live observers: $count")
         } catch (e: Exception) {
