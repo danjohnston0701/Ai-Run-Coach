@@ -3623,7 +3623,30 @@ function transformRunForAndroid(run: any) {
   });
 
   // ==================== LIVE SESSIONS ====================
-  
+
+  // POST /api/live-sessions — creates a new live tracking session
+  app.post("/api/live-sessions", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { runnerName } = req.body;
+      const { randomBytes } = await import("node:crypto");
+      const observeToken = randomBytes(32).toString("hex");
+
+      const session = await storage.createLiveSession({
+        userId,
+        runnerName: runnerName || "Runner",
+        isActive: true,
+        startedAt: new Date(),
+        observeToken,
+      });
+
+      return res.json({ id: session.id, success: true });
+    } catch (err: any) {
+      console.error("[live-sessions] create failed:", err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.get("/api/live-sessions/:sessionId", async (req: Request, res: Response) => {
     try {
       const session = await storage.getLiveSession(req.params.sessionId);
