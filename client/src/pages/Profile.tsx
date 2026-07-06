@@ -604,7 +604,8 @@ export default function Profile() {
         });
         if (res.ok) {
           const updatedUser = await res.json();
-          localStorage.setItem("userProfile", JSON.stringify(updatedUser));
+          const existingToken = JSON.parse(localStorage.getItem("userProfile") || "{}").token;
+          localStorage.setItem("userProfile", JSON.stringify({ ...updatedUser, token: existingToken }));
           toast.success("Profile saved!");
         } else {
           toast.error("Failed to save profile");
@@ -645,7 +646,8 @@ export default function Profile() {
       if (res.ok) {
         const updatedUser = await res.json();
         setProfile(prev => prev ? { ...prev, email: newEmail } : null);
-        localStorage.setItem("userProfile", JSON.stringify(updatedUser));
+        const existingToken = JSON.parse(localStorage.getItem("userProfile") || "{}").token;
+        localStorage.setItem("userProfile", JSON.stringify({ ...updatedUser, token: existingToken }));
         setIsEditingEmail(false);
         setNewEmail("");
         toast.success("Email updated successfully");
