@@ -177,16 +177,8 @@ class RunSessionViewModel @Inject constructor(
             }
         }
 
-        // Poll observer count every 10s while live session is active
-        viewModelScope.launch {
-            _runState.collect { runState ->
-                if (runState.isRunning && _liveSessionId.value != null) {
-                    startObserverCountPolling()
-                } else if (!runState.isRunning) {
-                    stopObserverCountPolling()
-                }
-            }
-        }
+        // Observer count polling is started directly by sendObserverInvites() once
+        // a live session is created; it runs for the lifetime of the session.
     }
 
     /** Polling job for group run participants */
@@ -232,11 +224,12 @@ class RunSessionViewModel @Inject constructor(
     // ── Live Observer Count Polling ─────────────────────────────────────────────
     private var observerCountPollingJob: kotlinx.coroutines.Job? = null
 
-    /** Start polling for observer count every 10 seconds while live tracking is active */
+    /** Start polling for observer count every 10 seconds while a live session exists.
+     *  Runs from the moment invites are sent (during prepare), through the entire run. */
     private fun startObserverCountPolling() {
         if (observerCountPollingJob != null) return // Already polling
         observerCountPollingJob = viewModelScope.launch {
-            while (_liveSessionId.value != null && _runState.value.isRunning) {
+            while (_liveSessionId.value != null) {
                 try {
                     fetchObserverCount()
                     delay(10_000L) // Poll every 10 seconds
@@ -919,6 +912,18 @@ class RunSessionViewModel @Inject constructor(
         )
         
         isPrepareRunInProgress = true
+
+        // ── Live Tracking: send observer invites immediately ──────────────────
+        // Invites go out as soon as the user taps "Prepare Run", before the
+        // briefing plays. This gives observers time to open the app and join
+        // before the run actually starts.
+        runConfig?.let { config ->
+            if (config.liveTrackingEnabled && config.liveTrackingObservers.isNotEmpty()) {
+                Log.d("RunSessionViewModel", "Live tracking enabled — sending invites to ${config.liveTrackingObservers.size} observer(s)")
+                sendObserverInvites(config.liveTrackingObservers)
+            }
+        }
+
         viewModelScope.launch {
             // Check if setup was cancelled before proceeding
             if (isSetupCancelled) {
@@ -1538,17 +1543,14 @@ class RunSessionViewModel @Inject constructor(
             _runState.update { it.copy(isRunning = true, isPaused = false) }
             Log.d("RunSessionViewModel", "Run tracking service started")
             
-            // Send observer invites if Live Tracking is enabled
+            // Send group run invites when the run actually starts (needs to be live)
             runConfig?.let { config ->
-                if (config.liveTrackingEnabled && config.liveTrackingObservers.isNotEmpty()) {
-                    sendObserverInvites(config.liveTrackingObservers)
-                }
-                
-                // Send group run invites if Group Run is enabled
                 if (config.isGroupRun && config.groupRunParticipants.isNotEmpty()) {
                     sendGroupRunInvites(config.groupRunParticipants)
                 }
             }
+            // Note: live tracking observer invites are sent in prepareRun() so observers
+            // get notified before the run starts and can join the observer view early.
         } catch (e: Exception) {
             Log.e("RunSessionViewModel", "Failed to start run tracking service", e)
             _runState.update { it.copy(
@@ -1694,6 +1696,8 @@ class RunSessionViewModel @Inject constructor(
         }
         context.startService(intent)
         _runState.update { it.copy(isRunning = false, isPaused = false, isStopping = true) }
+        stopObserverCountPolling()
+        _liveSessionId.value = null // Clear so panel hides on summary screen
     }
 
     // ── Wake word ─────────────────────────────────────────────────────────────
@@ -1982,6 +1986,9 @@ class RunSessionViewModel @Inject constructor(
         isPrepareRunInProgress = false
         // Clear any pending run configuration
         runConfig = null
+        // Stop live observer polling if cancelled before run started
+        stopObserverCountPolling()
+        _liveSessionId.value = null
         // If the service was pre-started in standby (ACTION_PREPARE_FOR_WATCH) and the run has
         // not yet begun, tell it to stop.  The service will ignore this if tracking is already
         // active (i.e. the user pressed START on the watch before tapping Cancel here).
