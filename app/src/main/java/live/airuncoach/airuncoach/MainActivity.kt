@@ -106,8 +106,17 @@ class MainActivity : ComponentActivity() {
         // Active-run notification (tap on the ongoing run notification)
         val launchToActiveRun = intent?.getBooleanExtra(RunTrackingService.EXTRA_ACTIVE_RUN, false) == true
 
-        // Observer session invitation (live_run_invite notification from registered users)
+        // Observer session invitation (live_run_invite notification from registered users).
+        // Two paths:
+        //   1. App was in FOREGROUND when push arrived → onMessageReceived built our own
+        //      notification with "deeplink_observer_session_id" extra (set below).
+        //   2. App was in BACKGROUND when push arrived → FCM system showed the notification.
+        //      On tap, the raw FCM data keys land on the intent ("type", "sessionId").
+        //      We must handle BOTH cases so tapping always navigates to the observer screen.
         val observerSessionId = intent?.getStringExtra("deeplink_observer_session_id")
+            ?: if (intent?.getStringExtra("type") == "live_run_invite")
+                intent.getStringExtra("sessionId")?.takeIf { it.isNotBlank() }
+               else null
 
         // Observer invite token (email link for non-registered observers)
         val observerInviteToken = intent?.getStringExtra("observer_invite_token")
@@ -267,9 +276,13 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "Warm launch: Garmin watch update v$version")
                 _pendingGarminUpdate.value = Pair(version, releaseNote)
             }
-            // Observer session invitation → inner nav observer_session
-            intent?.hasExtra("deeplink_observer_session_id") == true -> {
-                val sessionId = intent.getStringExtra("deeplink_observer_session_id")
+            // Observer session invitation → inner nav observer_session.
+            // Handle both foreground-tap path (deeplink_observer_session_id) and
+            // background-tap path (raw FCM data: type=live_run_invite + sessionId).
+            intent?.hasExtra("deeplink_observer_session_id") == true ||
+            intent?.getStringExtra("type") == "live_run_invite" -> {
+                val sessionId = intent?.getStringExtra("deeplink_observer_session_id")
+                    ?: intent?.getStringExtra("sessionId")
                 if (!sessionId.isNullOrBlank()) {
                     Log.d("MainActivity", "Warm launch: observer_session/$sessionId")
                     pendingDeepLink.value = "observer_session/$sessionId"
