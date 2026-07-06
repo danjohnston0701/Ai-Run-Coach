@@ -2097,14 +2097,14 @@ function transformRunForAndroid(run: any) {
               mergeFields.kmSplits = runData.kmSplits;
             }
 
-            // Altitude time-series — prefer phone's flat float[] over any object-format stored
-            // by garmin_companion session/end (kmSplits-derived [{km, value}] which Gson
-            // can't deserialize as List<Float> in the Android app).
+            // Altitude time-series — only replace the old {km,value} kmSplits stub (which
+            // Android can't deserialize as List<Float>).  Preserve {time,value} GPS altitude
+            // that upload-batch built — it is more accurate than the phone's barometric watchAltSeries.
             if (Array.isArray(runData.altitudeData) && (runData.altitudeData as any[]).length > 0) {
               const existingAlt = (existingByExternalId as any).altitudeData;
-              const existingAltIsObjectArray = Array.isArray(existingAlt) &&
-                existingAlt.length > 0 && typeof existingAlt[0] === 'object';
-              if (!existingAlt || existingAltIsObjectArray) {
+              const existingAltIsKmFormat = Array.isArray(existingAlt) &&
+                existingAlt.length > 0 && typeof existingAlt[0] === 'object' && 'km' in existingAlt[0];
+              if (!existingAlt || existingAltIsKmFormat) {
                 mergeFields.altitudeData = runData.altitudeData;
               }
             }
@@ -2198,14 +2198,19 @@ function transformRunForAndroid(run: any) {
 
           const c2Merge: Record<string, any> = {};
 
-          // heartRateData: phone's watchHrSeries (flat number[]) is far richer than the
-          // garmin_companion record which only has avgHeartRate with no per-sample array.
+          // heartRateData: phone's watchHrSeries is a flat number[] at 1-sample/sec — far
+          // richer than either the garmin_companion session/end stub ({time,value} kmSplit
+          // objects) OR the upload-batch's per-GPS-point {time,value} series.
+          // Upgrade whenever the existing data is absent OR is still an object array.
+          // Only preserve if the existing is already a flat number[] (from a previous phone sync).
           const c2ExistingHR = (garminDup as any).heartRateData;
-          const c2IncomingHRIsArray = Array.isArray(runData.heartRateData) && (runData.heartRateData as any[]).length > 0;
-          const c2ExistingHRIsArray = Array.isArray(c2ExistingHR) && (c2ExistingHR as any[]).length > 0;
-          if (c2IncomingHRIsArray && !c2ExistingHRIsArray) {
+          const c2IncomingHRIsFlat = Array.isArray(runData.heartRateData) && (runData.heartRateData as any[]).length > 0 &&
+            typeof (runData.heartRateData as any[])[0] !== 'object';
+          const c2ExistingHRIsFlatArray = Array.isArray(c2ExistingHR) && (c2ExistingHR as any[]).length > 0 &&
+            typeof c2ExistingHR[0] !== 'object';
+          if (c2IncomingHRIsFlat && !c2ExistingHRIsFlatArray) {
             c2Merge.heartRateData = runData.heartRateData;
-            console.log(`[POST /api/runs] Case 2: upgrading heartRateData to phone watchHrSeries (${(runData.heartRateData as any[]).length} samples)`);
+            console.log(`[POST /api/runs] Case 2: upgrading heartRateData to phone flat watchHrSeries (${(runData.heartRateData as any[]).length} samples)`);
           }
 
           // GPS track: phone has full array with embedded HR/cadence per point
@@ -2228,23 +2233,40 @@ function transformRunForAndroid(run: any) {
           }
 
           // Cadence / altitude time-series
-          // Always prefer phone's flat number[] over garminDup's possible object/kmSplit format.
-          // garmin_companion altitudeData is stored as [{km, value}] (kmSplits-derived) which Gson
-          // can't deserialize as List<Float> on Android — it silently becomes null, killing the chart.
-          const c2CadArr = Array.isArray(runData.cadenceData) && (runData.cadenceData as any[]).length > 0;
-          const c2ExistingCadIsArray = Array.isArray((garminDup as any).cadenceData);
-          if (c2CadArr && !c2ExistingCadIsArray) c2Merge.cadenceData = runData.cadenceData;
+          // paceData: phone's watchPaceSeries is a flat number[] at 1-sample/sec.
+          // Upgrade whenever existing is absent or is an object array (inferior kmSplit/batch format).
+          const c2ExistingPace = (garminDup as any).paceData;
+          const c2IncomingPaceIsFlat = Array.isArray(runData.paceData) && (runData.paceData as any[]).length > 0 &&
+            typeof (runData.paceData as any[])[0] !== 'object';
+          const c2ExistingPaceIsFlatArray = Array.isArray(c2ExistingPace) && c2ExistingPace.length > 0 &&
+            typeof c2ExistingPace[0] !== 'object';
+          if (c2IncomingPaceIsFlat && !c2ExistingPaceIsFlatArray) {
+            c2Merge.paceData = runData.paceData;
+            console.log(`[POST /api/runs] Case 2: upgrading paceData to phone flat watchPaceSeries (${(runData.paceData as any[]).length} samples)`);
+          }
+
+          // cadenceData: same logic — upgrade from object array to flat number[]
+          const c2ExistingCad = (garminDup as any).cadenceData;
+          const c2IncomingCadIsFlat = Array.isArray(runData.cadenceData) && (runData.cadenceData as any[]).length > 0 &&
+            typeof (runData.cadenceData as any[])[0] !== 'object';
+          const c2ExistingCadIsFlatArray = Array.isArray(c2ExistingCad) && c2ExistingCad.length > 0 &&
+            typeof c2ExistingCad[0] !== 'object';
+          if (c2IncomingCadIsFlat && !c2ExistingCadIsFlatArray) c2Merge.cadenceData = runData.cadenceData;
 
           const c2AltArr = Array.isArray(runData.altitudeData) && (runData.altitudeData as any[]).length > 0;
           const c2ExistingAlt = (garminDup as any).altitudeData;
-          // Force-overwrite if incoming is a flat number[] AND existing is either:
-          //   (a) absent/null, or
-          //   (b) an array of objects (kmSplits format) which Android can't deserialize as Float[]
-          const c2ExistingAltIsObjectArray = Array.isArray(c2ExistingAlt) &&
-            c2ExistingAlt.length > 0 && typeof c2ExistingAlt[0] === 'object';
-          if (c2AltArr && (!c2ExistingAlt || c2ExistingAltIsObjectArray)) {
+          // For altitude we PRESERVE the upload-batch's GPS-based {time,value} series —
+          // it is more accurate than the phone's barometric watchAltSeries (which is a
+          // raw flat float[]).  Only overwrite if existing is the OLD {km,value} kmSplits
+          // stub (which has only 1 value per km and can't be deserialized by Android).
+          // We identify the old format by the presence of a 'km' key on the first element.
+          const c2ExistingAltIsKmFormat = Array.isArray(c2ExistingAlt) &&
+            c2ExistingAlt.length > 0 && typeof c2ExistingAlt[0] === 'object' && 'km' in c2ExistingAlt[0];
+          if (c2AltArr && (!c2ExistingAlt || c2ExistingAltIsKmFormat)) {
             c2Merge.altitudeData = runData.altitudeData;
-            console.log(`[POST /api/runs] Case 2: upgrading altitudeData from ${c2ExistingAltIsObjectArray ? 'kmSplits object format' : 'null'} to phone flat float array`);
+            console.log(`[POST /api/runs] Case 2: upgrading altitudeData from ${c2ExistingAltIsKmFormat ? '{km,value} kmSplits stub' : 'null'} to phone series`);
+          } else if (c2ExistingAlt && !c2ExistingAltIsKmFormat) {
+            console.log(`[POST /api/runs] Case 2: preserved existing GPS altitude data (${c2ExistingAlt.length} pts) — phone barometric series skipped`);
           }
 
           // Target / achievement
@@ -11432,10 +11454,21 @@ function transformRunForAndroid(run: any) {
       // HR, cadence, inclineDegrees; watch batch only has lat/lng/alt).
       // Only fill in fields that are genuinely missing (null / empty array).
       const hasExistingGps      = Array.isArray((existingRun as any).gpsTrack)      && (existingRun as any).gpsTrack.length      > 0;
-      const hasExistingHr       = Array.isArray((existingRun as any).heartRateData) && (existingRun as any).heartRateData.length > 0;
-      const hasExistingPace     = Array.isArray((existingRun as any).paceData)      && (existingRun as any).paceData.length      > 0;
-      const hasExistingAlt      = Array.isArray((existingRun as any).altitudeData)  && (existingRun as any).altitudeData.length  > 0;
-      const hasExistingCadence  = Array.isArray((existingRun as any).cadenceData)   && (existingRun as any).cadenceData.length   > 0;
+      // For HR, pace, cadence: ONLY skip overwrite if the existing data is ALREADY
+      // a flat number[] (meaning it came from a phone upload or a previous watch batch
+      // that already did the conversion).  Object-array formats like [{time,value}] or
+      // [{km,value}] are the inferior kmSplits-derived stubs created by session/end —
+      // the offline batch's per-point arrays are far richer and should replace them.
+      const _existingHrRaw      = (existingRun as any).heartRateData;
+      const _existingPaceRaw    = (existingRun as any).paceData;
+      const _existingCadRaw     = (existingRun as any).cadenceData;
+      const _existingAltRaw     = (existingRun as any).altitudeData;
+      const hasExistingHr       = Array.isArray(_existingHrRaw)   && _existingHrRaw.length   > 0 && typeof _existingHrRaw[0]   !== 'object';
+      const hasExistingPace     = Array.isArray(_existingPaceRaw) && _existingPaceRaw.length > 0 && typeof _existingPaceRaw[0] !== 'object';
+      const hasExistingCadence  = Array.isArray(_existingCadRaw)  && _existingCadRaw.length  > 0 && typeof _existingCadRaw[0]  !== 'object';
+      // Altitude: treat ANY object array ({time,value} or {km,value}) as absent so
+      // the batch's GPS-based {time,value} series always replaces the kmSplits stub.
+      const hasExistingAlt      = Array.isArray(_existingAltRaw)  && _existingAltRaw.length  > 0 && typeof _existingAltRaw[0]  !== 'object';
       const hasExistingKmSplits = Array.isArray((existingRun as any).kmSplits)      && (existingRun as any).kmSplits.length      > 0;
 
       const updatePayload: any = {
