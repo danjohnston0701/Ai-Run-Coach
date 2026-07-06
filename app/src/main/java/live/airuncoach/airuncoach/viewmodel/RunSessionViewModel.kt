@@ -27,6 +27,7 @@ import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.CreateLiveSessionRequest
 import live.airuncoach.airuncoach.network.InviteObserverRequest
 import live.airuncoach.airuncoach.network.InviteParticipantRequest
+import live.airuncoach.airuncoach.network.SyncLiveSessionRequest
 import live.airuncoach.airuncoach.network.model.BatchTTSRequest
 import live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan
 import live.airuncoach.airuncoach.network.model.PreRunBriefingRequest
@@ -1551,6 +1552,28 @@ class RunSessionViewModel @Inject constructor(
                     sendGroupRunInvites(config.groupRunParticipants)
                 }
             }
+
+            // Mark the live session as started so observer screens transition from the
+            // waiting state to the live run map.  Also hand the session ID to
+            // RunTrackingService so it can push GPS/metrics updates during the run.
+            val liveId = _liveSessionId.value
+            if (!liveId.isNullOrBlank()) {
+                RunTrackingService.activeLiveSessionId = liveId
+                viewModelScope.launch {
+                    try {
+                        apiService.syncLiveSession(
+                            SyncLiveSessionRequest(
+                                sessionId = liveId,
+                                hasStarted = true
+                            )
+                        )
+                        Log.d("RunSessionViewModel", "✅ Live session marked as started: $liveId")
+                    } catch (e: Exception) {
+                        Log.w("RunSessionViewModel", "Failed to mark live session as started: ${e.message}")
+                    }
+                }
+            }
+
             // Note: live tracking observer invites are sent in prepareRun() so observers
             // get notified before the run starts and can join the observer view early.
         } catch (e: Exception) {
@@ -1991,6 +2014,7 @@ class RunSessionViewModel @Inject constructor(
         // Stop live observer polling if cancelled before run started
         stopObserverCountPolling()
         _liveSessionId.value = null
+        RunTrackingService.activeLiveSessionId = null
         // If the service was pre-started in standby (ACTION_PREPARE_FOR_WATCH) and the run has
         // not yet begun, tell it to stop.  The service will ignore this if tracking is already
         // active (i.e. the user pressed START on the watch before tapping Cancel here).

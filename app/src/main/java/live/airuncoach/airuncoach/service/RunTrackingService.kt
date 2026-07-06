@@ -87,6 +87,8 @@ class RunTrackingService : Service(), SensorEventListener {
     // Timestamp of the last watch GPS injection (ms).  While watch GPS is flowing
     // (within 15 s) phone GPS updates are skipped to prevent double-counting distance.
     private var lastWatchGpsMs: Long = 0L
+    // Throttle for live-session metric sync (don't hammer the server every GPS tick)
+    private var lastLiveSessionSyncMs: Long = 0L
 
     // True when this run was initiated by a watch "start" command.
     // Used to: (a) pre-block phone GPS at run start and (b) skip sending redundant
@@ -547,6 +549,10 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val ROLLING_TERRAIN_COACH_INTERVAL_KM = 2  // Fire rolling cue at most every 2km
         private const val ALTITUDE_SMOOTHING_WINDOW = 5      // Number of altitude readings to average for smoothing
         
+        // How often (ms) the service pushes GPS/metrics to the live session on the server.
+        // 5 seconds keeps observers up-to-date without hammering the API.
+        private const val LIVE_SESSION_SYNC_INTERVAL_MS = 5_000L
+
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
         const val ACTION_PAUSE_TRACKING = "ACTION_PAUSE_TRACKING"
@@ -623,6 +629,14 @@ class RunTrackingService : Service(), SensorEventListener {
         // RunSummaryViewModel uses this to resolve a 404 caused by upload failure / retry.
         private val _localToServerRunIds = MutableStateFlow<Map<String, String>>(emptyMap())
         val localToServerRunIds: StateFlow<Map<String, String>> = _localToServerRunIds
+
+        /**
+         * Set by [RunSessionViewModel] once a live tracking session has been created and the
+         * runner has tapped Start.  The service uses this ID to push GPS/metrics updates to the
+         * server so that observers see real-time data.  Cleared when the run ends.
+         */
+        @Volatile
+        var activeLiveSessionId: String? = null
 
         /** Call after any successful upload so the registry is always current. */
         fun recordRunIdMapping(localId: String, serverId: String) {
@@ -2985,6 +2999,38 @@ class RunTrackingService : Service(), SensorEventListener {
             // Non-fatal — watch broadcast should never break the run session
             Log.w("RunTrackingService", "Watch broadcast failed: ${e.message}")
         }
+
+        // ── Live Session Sync (for observers) ────────────────────────────────
+        // Push GPS position and metrics to the server so observers see real-time data.
+        // Throttled to once every 5 seconds to avoid API overload.
+        val liveSessionId = activeLiveSessionId
+        if (!liveSessionId.isNullOrBlank() && isTracking) {
+            val now = System.currentTimeMillis()
+            if (now - lastLiveSessionSyncMs >= LIVE_SESSION_SYNC_INTERVAL_MS) {
+                lastLiveSessionSyncMs = now
+                val lastPoint = routePoints.lastOrNull()
+                val distKm = totalDistance / 1000.0
+                val elapsedSecs = (getActiveRunDuration() / 1000L).toInt()
+                serviceScope.launch {
+                    try {
+                        apiService.syncLiveSession(
+                            live.airuncoach.airuncoach.network.SyncLiveSessionRequest(
+                                sessionId = liveSessionId,
+                                currentLat = lastPoint?.latitude,
+                                currentLng = lastPoint?.longitude,
+                                distanceCovered = distKm,
+                                elapsedTime = elapsedSecs,
+                                currentPace = currentPace,
+                                currentHeartRate = currentHeartRate.takeIf { it > 0 }
+                            )
+                        )
+                        Log.d("RunTrackingService", "Live session synced: ${String.format("%.2f", distKm)}km, pace=$currentPace")
+                    } catch (e: Exception) {
+                        Log.w("RunTrackingService", "Live session sync failed (non-fatal): ${e.message}")
+                    }
+                }
+            }
+        }
     }
 
     /** Converts "M:SS" pace string → seconds/km (e.g. "4:32" → 272.0) */
@@ -3204,6 +3250,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun stopTracking() {
         isTracking = false
         isSimulating = false
+        // Clear live session ID so no more syncs fire after the run ends
+        activeLiveSessionId = null
+        lastLiveSessionSyncMs = 0L
         // Snapshot BEFORE resetting — used below to decide whether to skip the phone upload.
         // The watch calls session/end (creating a run record) only when it was disconnected at
         // run end.  If the watch was connected, the phone's upload is the sole record.

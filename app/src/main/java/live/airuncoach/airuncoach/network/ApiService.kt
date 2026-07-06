@@ -731,6 +731,16 @@ interface ApiService {
         @Path("sessionId") sessionId: String,
         @Body body: InviteParticipantRequest
     ): InviteParticipantResponse
+
+    /**
+     * Sync live session state to the server.
+     * Called when the run starts (to set hasStarted=true) and periodically during the run
+     * to push GPS position and metrics to observers.
+     *
+     * @param body Contains sessionId plus any fields to update (hasStarted, location, metrics, etc.)
+     */
+    @PUT("/api/live-sessions/sync")
+    suspend fun syncLiveSession(@Body body: SyncLiveSessionRequest): live.airuncoach.airuncoach.viewmodel.LiveSessionApiResponse
 }
 
 data class RefreshWatchTokenRequest(
@@ -790,6 +800,19 @@ data class JoinLiveSessionResponse(
     val success: Boolean,
     val viewerCount: Int? = null,
     val error: String? = null
+)
+
+// Request body for syncing live session state (runner → server → observers)
+data class SyncLiveSessionRequest(
+    val sessionId: String,
+    val hasStarted: Boolean? = null,
+    val isActive: Boolean? = null,
+    val currentLat: Double? = null,
+    val currentLng: Double? = null,
+    val distanceCovered: Double? = null,
+    val elapsedTime: Int? = null,
+    val currentPace: String? = null,
+    val currentHeartRate: Int? = null
 )
 
 // Request body for inviting observers to a live session
