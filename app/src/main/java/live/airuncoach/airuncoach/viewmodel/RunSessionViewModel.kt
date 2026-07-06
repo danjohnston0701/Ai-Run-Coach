@@ -146,6 +146,15 @@ class RunSessionViewModel @Inject constructor(
     private val _isLoadingParticipants = MutableStateFlow(false)
     val isLoadingParticipants: StateFlow<Boolean> = _isLoadingParticipants.asStateFlow()
 
+    // ── Live Tracking Observers ────────────────────────────────────────────────
+    /** Session ID for the active live tracking session, set once after createLiveSession() succeeds */
+    private val _liveSessionId = MutableStateFlow<String?>(null)
+    val liveSessionId: StateFlow<String?> = _liveSessionId.asStateFlow()
+
+    /** Number of people currently watching the live run */
+    private val _liveObserverCount = MutableStateFlow(0)
+    val liveObserverCount: StateFlow<Int> = _liveObserverCount.asStateFlow()
+
     init {
         // Observe the first GPS fix from RunTrackingService and trigger route recognition
         viewModelScope.launch {
@@ -164,6 +173,17 @@ class RunSessionViewModel @Inject constructor(
                 } else if (!runState.isRunning) {
                     // Stop polling when run stops
                     stopParticipantPolling()
+                }
+            }
+        }
+
+        // Poll observer count every 10s while live session is active
+        viewModelScope.launch {
+            _runState.collect { runState ->
+                if (runState.isRunning && _liveSessionId.value != null) {
+                    startObserverCountPolling()
+                } else if (!runState.isRunning) {
+                    stopObserverCountPolling()
                 }
             }
         }
@@ -206,6 +226,48 @@ class RunSessionViewModel @Inject constructor(
             Log.w("RunSessionViewModel", "Failed to fetch group run participants: ${e.message}")
         } finally {
             _isLoadingParticipants.value = false
+        }
+    }
+
+    // ── Live Observer Count Polling ─────────────────────────────────────────────
+    private var observerCountPollingJob: kotlinx.coroutines.Job? = null
+
+    /** Start polling for observer count every 10 seconds while live tracking is active */
+    private fun startObserverCountPolling() {
+        if (observerCountPollingJob != null) return // Already polling
+        observerCountPollingJob = viewModelScope.launch {
+            while (_liveSessionId.value != null && _runState.value.isRunning) {
+                try {
+                    fetchObserverCount()
+                    delay(10_000L) // Poll every 10 seconds
+                } catch (e: Exception) {
+                    Log.w("RunSessionViewModel", "Error polling observer count: ${e.message}")
+                    delay(15_000L) // Back off on error
+                }
+            }
+        }
+    }
+
+    /** Stop polling observer count */
+    private fun stopObserverCountPolling() {
+        observerCountPollingJob?.cancel()
+        observerCountPollingJob = null
+    }
+
+    /** Fetch observer count from the live session endpoint */
+    private suspend fun fetchObserverCount() {
+        val sessionId = _liveSessionId.value ?: return
+        try {
+            val session = apiService.getLiveSession(sessionId)
+            // observers field can be a List or null
+            val count = when (val obs = session.observers) {
+                is List<*> -> obs.size
+                else -> 0
+            }
+            _liveObserverCount.value = count
+            Log.d("RunSessionViewModel", "Live observers: $count")
+        } catch (e: Exception) {
+            Log.w("RunSessionViewModel", "Failed to fetch observer count: ${e.message}")
         }
     }
 
@@ -1511,7 +1573,11 @@ class RunSessionViewModel @Inject constructor(
                     return@launch
                 }
                 val sessionId = createResponse.id
+                _liveSessionId.value = sessionId // Store so the run screen can show observer count
                 Log.d("RunSessionViewModel", "✅ Live session created: $sessionId")
+
+                // Start polling observer count now that the session exists
+                startObserverCountPolling()
 
                 // Step 2: Send invites to each observer using the new session ID.
                 observers.forEach { observer ->

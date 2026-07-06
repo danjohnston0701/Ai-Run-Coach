@@ -140,6 +140,8 @@ fun RunSessionScreen(
     val pendingSyncCount by viewModel.pendingSyncCount.collectAsState()
     val knownRouteMatch by viewModel.knownRouteMatch.collectAsState()
     val wakeWordState by viewModel.wakeWordState.collectAsState()
+    val liveSessionId by viewModel.liveSessionId.collectAsState()
+    val liveObserverCount by viewModel.liveObserverCount.collectAsState()
 
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
@@ -340,7 +342,7 @@ fun RunSessionScreen(
                 }
             }
 
-            // ── Group Run Participants Panel ─────────────────────────────���────────
+            // ── Group Run Participants Panel ─────────────────────────────────────
             // Shows participants joining the group run in real-time
             if (groupRunId != null) {
                 item {
@@ -350,6 +352,17 @@ fun RunSessionScreen(
                     GroupRunParticipantsPanel(
                         participants = participants,
                         isLoading = isLoadingParticipants,
+                        modifier = Modifier.padding(horizontal = Spacing.md)
+                    )
+                }
+            }
+
+            // ── Live Tracking Observer Panel ───────────────────────────────────────
+            // Shown when live tracking is active — indicates how many people are watching
+            if (liveSessionId != null) {
+                item {
+                    LiveObserversPanel(
+                        observerCount = liveObserverCount,
                         modifier = Modifier.padding(horizontal = Spacing.md)
                     )
                 }
@@ -3297,6 +3310,91 @@ fun ParticipantRowDuringRun(
                 color = statusColor,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
             )
+        }
+    }
+}
+
+// ── Live Observers Panel ───────────────────────────────────────────────────────
+
+/**
+ * Shows a "LIVE" badge and how many people are currently watching the run.
+ * Appears on the run screen when live tracking is active.
+ */
+@Composable
+fun LiveObserversPanel(
+    observerCount: Int,
+    modifier: Modifier = Modifier
+) {
+    // Pulsing animation for the red live dot
+    val infiniteTransition = rememberInfiniteTransition(label = "live_pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_alpha"
+    )
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = Spacing.sm),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left: pulsing red dot + "LIVE" label
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            color = Color(0xFFFF3B30).copy(alpha = pulseAlpha),
+                            shape = CircleShape
+                        )
+                )
+                Text(
+                    text = "LIVE",
+                    style = AppTextStyles.small.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp
+                    ),
+                    color = Color(0xFFFF3B30)
+                )
+                Text(
+                    text = "Tracking active",
+                    style = AppTextStyles.small,
+                    color = Colors.textMuted
+                )
+            }
+
+            // Right: observer count
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.icon_people_vector),
+                    contentDescription = "Observers",
+                    tint = Colors.textMuted,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = if (observerCount == 1) "1 watching" else "$observerCount watching",
+                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Medium),
+                    color = if (observerCount > 0) Colors.textPrimary else Colors.textMuted
+                )
+            }
         }
     }
 }
