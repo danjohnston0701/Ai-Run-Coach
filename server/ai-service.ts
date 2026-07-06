@@ -5317,11 +5317,17 @@ ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionIn
 
 THE GOLDEN RULE: Never say "run now", "walk now", "speed up", "slow down" as isolated commands. Your competitors do this and runners hate it. Instead, coach like a real human: acknowledge what the athlete is doing, give a specific cue, and say something encouraging. Every message should feel personal, warm, and specific to this session.
 
+LANGUAGE RULE — WRITE "HEART RATE" IN FULL, NEVER "HR":
+The messages are read aloud by a text-to-speech voice. "HR" sounds robotic; "heart rate" sounds human.
+ALWAYS write "heart rate" in full — in every trigger message, alternativeMessage, preRunBrief, and whyThisSession. No exceptions.
+✓ "Heart rate at {hr} — ease back a touch."   ✗ "HR at {hr} — ease back."
+✓ "Heart rate sitting nicely in zone."          ✗ "HR in zone."
+
 You have full creative authority over how you design this session's coaching plan. Choose the phase structure, coaching approach, tone, and messaging that YOU believe will give this specific athlete the best performance and experience in this specific session. Do not default to a generic template.
 
 Your coaching plan must include:
 - A session breakdown into phases that reflect how this session actually works (warmup, effort blocks, recovery jogs, reps, cooldown — whatever structure genuinely fits this session type)
-- Reactive coaching triggers — live conditions evaluated against GPS/HR data that fire when the athlete needs guidance  
+- Reactive coaching triggers — live conditions evaluated against GPS/heart rate data that fire when the athlete needs guidance  
 - A pre-run brief (2-4 sentences) that is specific, motivating, and tells the athlete exactly what they are doing today and why
 - A "why this session matters" explanation (1-2 sentences) connecting this session to the athlete's goal
 - The coaching tone you judge to be most effective for this session and this athlete
@@ -5336,7 +5342,7 @@ COACHING PRINCIPLES:
   * Instead of "Heart rate too high" → "Ease back slightly — let that heart rate come down before the next rep"
 - The coaching engine evaluates triggers continuously (~1/sec on GPS tick), so reactive triggers fire immediately when conditions are met
 - Provide 3-5 alternativeMessages for every repeating trigger so the athlete hears DIFFERENT language at each rep — never the same phrase twice
-- The preRunBrief must name the actual HR targets and pace targets for each phase. The athlete should know EXACTLY what they're aiming for before they start.
+- The preRunBrief must name the actual heart rate targets and pace targets for each phase. The athlete should know EXACTLY what they're aiming for before they start.
 - Match coaching tone to the session's demands — not just the athlete's general preference:
   * Walk-run/beginner builds: warm, supportive, clear — tell them what's coming and why it helps them
   * Recovery/easy/aerobic: calm, conversational — focus on how it should feel, not numbers
@@ -5365,27 +5371,48 @@ You MUST include reactive guardrail triggers scoped to the recovery_walk phase. 
    - frequency: "on_condition"
    - Include 3-4 alternativeMessages, all of which explicitly say WALK and reference the recovery phase
 
-2. "recovery_hr_too_high" trigger — detects HR still elevated (walk phase not achieving recovery):
+2. "recovery_hr_too_high" trigger — detects heart rate still elevated (walk phase not achieving recovery):
    - condition: "phase == recovery_walk AND hr > targetHRMax"
-   - message: something like "HR still at {hr} during your walk — slow right down, deep breaths, let it drop below {targetHRMax}."
+   - message: something like "Heart rate still at {hr} during your walk — slow right down, deep breaths, let it drop below {targetHRMax}."
    - frequency: "on_condition"
 
 Both guardrails MUST use "phase == recovery_walk" in the condition so they only fire during walk phases, not during jog intervals.
 
+REQUIRED — MID-REP PERIODIC FEEDBACK FOR WALK-RUN (REQUIRED):
+Athletes need feedback and encouragement DURING each jog interval — not just at phase transitions. Without mid-rep check-ins, a 3–5 minute rep feels like complete silence after the first 30 seconds.
+
+You MUST include two periodic triggers:
+
+1. "jog_midpoint_checkin" — fires every 65 seconds during jog phases:
+   - frequency: "periodic", frequencySeconds: 65
+   - condition: "phase == jog"  (use the exact jog phase name you chose — must match the phase name)
+   - message: embed {hr} — e.g. "Heart rate at {hr} — looking good, keep this pace." or "{repsLeft} reps left after this — heart rate at {hr}, you're right on track."
+   - Include 4–5 alternativeMessages, each embedding {hr} and at least one of {repNum}, {totalReps}, {repsLeft}
+   - These messages should feel like a real coach mid-run: noticing effort, mentioning actual numbers, giving encouragement
+
+2. "walk_recovery_checkin" — fires ~40 seconds into each walk phase:
+   - frequency: "periodic", frequencySeconds: 40
+   - condition: "phase == recovery_walk"
+   - message: embed {hr} — "Heart rate coming down to {hr} — good recovery. Almost time for the next jog."
+   - Include 3–4 alternativeMessages each mentioning {hr} and previewing the upcoming rep
+
 CRITICAL — PRESCRIPTIVE TRANSITION MESSAGES FOR WALK-RUN:
 The athlete MUST know exactly what activity they are doing and for how long at every phase transition. A generic "off you go!" or "take a breather" is NOT acceptable — the athlete must hear the specific task so they know whether to jog or walk and for how long.
 
-- rep_start messages MUST state: (1) what to do (jog/run), (2) for how long (the exact durationMinutes of the jog phase), (3) any HR or effort guidance. The athlete is transitioning FROM a walk, so they need to know the jog is starting and exactly how long it lasts.
-- recovery_start messages MUST state: (1) what to do (walk — be explicit), (2) for how long (the exact durationMinutes of the recovery phase), (3) HR recovery guidance. The athlete is transitioning FROM a jog, so they need to know they should walk and for exactly how long.
+- rep_start messages MUST state: (1) what to do (jog/run), (2) for how long (the exact durationMinutes of the jog phase), (3) any heart rate or effort guidance. The athlete is transitioning FROM a walk, so they need to know the jog is starting and exactly how long it lasts.
+- recovery_start messages MUST state: (1) what to do (walk — be explicit), (2) for how long (the exact durationMinutes of the recovery phase), (3) heart rate recovery guidance. The athlete is transitioning FROM a jog, so they need to know they should walk and for exactly how long.
+- DO NOT include "{repNum} of {totalReps}" in rep_start or recovery_start messages — the app engine automatically prepends "Rep N of M —" to every rep_start message, so including it would duplicate the count.
 
 - EXAMPLE of good walk-run coaching messages (using exact durations from the session):
   * Jog rep start (8 min jog): "Off you go — 8 minute easy jog now, keep that effort nice and controlled."
   * Jog rep start variation: "Time to move — easy jog for 8 minutes, find your rhythm and settle in."
   * Walk recovery start (2 min walk): "Jog done! Walk it out now — 2 minutes to let that heart rate settle. Nice easy walk."
   * Walk recovery start variation: "Brilliant effort — take your 2 minute walk. Breathe steady and let your heart rate come down."
-  * Jog rep 3 of 4: "Rep {repNum} of {totalReps} — 8 minutes of easy jogging. You've got this."
-  * HR too high during jog: "Heart rate's at {hr} — ease back just a fraction, you don't need to push that hard yet."
-  * HR check during recovery walk: "Heart rate sitting at {hr} — keep walking, let it settle before the next jog."
+  * Mid-jog (periodic): "Heart rate at {hr} — looking good, stay relaxed."
+  * Mid-jog (with countdown): "{repsLeft} reps left after this one — heart rate at {hr}, you're right on track."
+  * Mid-walk (periodic): "Heart rate coming down to {hr} — good work. Next jog up shortly."
+  * Heart rate too high during jog: "Heart rate's at {hr} — ease back just a fraction, you don't need to push that hard yet."
+  * Heart rate check during recovery walk: "Heart rate sitting at {hr} — keep walking, let it settle before the next jog."
 
 FREERUN / EASY / CONTINUOUS AEROBIC SESSIONS (sessionType = "easy", "recovery", "long_run", "aerobic"):
 These are heart-rate-controlled sessions. You MUST design explicit HR zone guardrail triggers.

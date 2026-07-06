@@ -576,7 +576,11 @@ export async function getOrGenerateSessionCoaching(
   //         Terrain triggers (grade, elevation_gain) and remaining distance/time template vars added.
   //         Freerun/easy sessions now require HR zone triggers with actual BPM values.
   //         Age-adjusted HR zones use Tanaka formula throughout.
-  const CURRENT_PLAN_VERSION = "2.5";
+  // v2.6 — Language rule: "heart rate" always written in full (never "HR") for natural TTS speech.
+  //         Walk-run sessions now REQUIRE mid-rep periodic triggers (jog_midpoint_checkin + walk_recovery_checkin)
+  //         so the athlete hears real feedback during intervals, not just at phase transitions.
+  //         rep_start messages must NOT include {repNum}/{totalReps} — the engine prepends "Rep N of M" automatically.
+  const CURRENT_PLAN_VERSION = "2.6";
 
   // Semver-aware comparison: parse "major.minor" strings to numeric values for correct ordering.
   // String comparison fails for versions like "2.10" vs "2.4" ("2.10" < "2.4" lexicographically).

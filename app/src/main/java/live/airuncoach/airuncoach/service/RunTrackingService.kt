@@ -4492,13 +4492,25 @@ class RunTrackingService : Service(), SensorEventListener {
 
             if (phaseStartTrigger != null && !hasCoachingFiredThisTick &&
                 canFireCoaching(bypassDistanceGate = true)) {
-                val msg = pickTriggerMessage(
+                val rawMsg = pickTriggerMessage(
                     phaseStartTrigger, repNumber, totalReps,
                     phaseHRMin = resolvedPhase.targetHRMin,
                     phaseHRMax = resolvedPhase.targetHRMax,
                     phasePaceMin = resolvedPhase.targetPaceMin,
                     phasePaceMax = resolvedPhase.targetPaceMax,
                 )
+                // ── Rep progress prefix ───────────────────────────────────────────
+                // For rep_start (work interval) transitions in multi-rep sessions,
+                // prefix the message with "Rep N of M — " so the athlete always
+                // knows exactly where they are in the set.
+                // Skip if the AI message already includes the rep count (e.g. "4 of 6").
+                val msg = if (phaseStartTrigger.type == "rep_start" && totalReps > 1) {
+                    val alreadyHasCount =
+                        rawMsg.contains(Regex("\\b$repNumber\\s+of\\s+$totalReps\\b", RegexOption.IGNORE_CASE)) ||
+                        rawMsg.contains(Regex("\\brep\\s*$repNumber\\b", RegexOption.IGNORE_CASE))
+                    if (alreadyHasCount) rawMsg else "Rep $repNumber of $totalReps — $rawMsg"
+                } else rawMsg
+
                 // IMPORTANT: Do NOT add rep_start / recovery_start triggers to triggerFiredOnce.
                 // These must fire on every rep transition — the isNewPhase guard above already
                 // prevents them from double-firing within the same phase.
@@ -4756,15 +4768,22 @@ class RunTrackingService : Service(), SensorEventListener {
         hasCoachingFiredThisTick = true
         recordCoachingFired()
 
-        Log.d("RunTrackingService", "🎯 Dynamic trigger [$triggerType] phase=$phaseName: $message")
-        _latestCoachingText.value = message
+        // Sanitise AI messages: replace abbreviation "HR" with full "heart rate" so TTS reads
+        // naturally. The AI sometimes writes "HR at 143" or "HR still elevated" — we always
+        // want "heart rate at 143" in spoken output.
+        val sanitisedMessage = message
+            .replace(Regex("\\bHR\\b"), "heart rate")
+            .replace(Regex("\\bHR's\\b"), "heart rate's")
+
+        Log.d("RunTrackingService", "🎯 Dynamic trigger [$triggerType] phase=$phaseName: $sanitisedMessage")
+        _latestCoachingText.value = sanitisedMessage
 
         // Record in coaching history so messages appear in the post-run summary and saved JSON.
         // Without this, dynamic trigger cues (phase transitions, HR/pace alerts) are invisible
         // in ai_coaching_notes even though the runner heard them during the session.
         coachingHistory.add(AiCoachingNote(
             time = getActiveRunDuration(),
-            message = "[$triggerType] $message"
+            message = "[$triggerType] $sanitisedMessage"
         ))
 
         serviceScope.launch {
@@ -4784,16 +4803,16 @@ class RunTrackingService : Service(), SensorEventListener {
                     // variables are resolved before this call — the message is always a plain
                     // string at this point. Always try pre-cache first; real-time Polly if not
                     // found; Android TTS as last resort.
-                    val base64Audio: String? = getPreCachedPollyAudio(message)
-                        ?.also { Log.d("RunTrackingService", "🎵 Pre-cached Polly: ${message.take(40)}") }
-                        ?: getRealtimePollyAudio(message)
-                            ?.also { Log.d("RunTrackingService", "🎵 Real-time Polly: ${message.take(40)}") }
+                    val base64Audio: String? = getPreCachedPollyAudio(sanitisedMessage)
+                        ?.also { Log.d("RunTrackingService", "🎵 Pre-cached Polly: ${sanitisedMessage.take(40)}") }
+                        ?: getRealtimePollyAudio(sanitisedMessage)
+                            ?.also { Log.d("RunTrackingService", "🎵 Real-time Polly: ${sanitisedMessage.take(40)}") }
                     val audioFormat: String? = if (base64Audio != null) "mp3" else null
                     CoachingAudioQueue.enqueue(
                         context = this@RunTrackingService,
                         base64Audio = base64Audio,
                         format = audioFormat,
-                        fallbackText = message,
+                        fallbackText = sanitisedMessage,
                         accent = currentUser?.coachAccent,
                         gender = currentUser?.coachGender,
                         onComplete = { _latestCoachingText.value = null }
@@ -4806,7 +4825,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         plannedWorkoutId = planWorkoutId,
                         eventType = triggerType,
                         eventPhase = phaseName,
-                        coachingMessage = message,
+                        coachingMessage = sanitisedMessage,
                         coachingAudioUrl = null,
                         userMetrics = mapOf(
                             "distance_km" to totalDistance / 1000.0,
