@@ -3746,11 +3746,11 @@ function transformRunForAndroid(run: any) {
           return res.status(500).json({ error: "Friend not found" });
         }
 
-        // Send push notification to friend
+        // Send push notification to friend — data-only so onMessageReceived fires in all states
         const pushSent = await notificationService.sendFirebasePush(
           friendId,
           `${runner.name} invited you to watch their run`,
-          "Watch their live location and route in real-time",
+          "Tap to watch live",
           {
             type: "live_run_invite",
             sessionId,
@@ -3758,7 +3758,8 @@ function transformRunForAndroid(run: any) {
             runnerName: runner.name || "A runner",
             routeId: session.routeId || "",
             hasStarted: session.hasStarted ? "true" : "false",
-          }
+          },
+          true
         );
 
         console.log(`[Live Sessions] Invited ${friendId} to watch ${runnerId}'s run (session ${sessionId}). Push sent: ${pushSent}`);
@@ -3789,10 +3790,11 @@ function transformRunForAndroid(run: any) {
             return res.status(500).json({ error: "Failed to invite observer" });
           }
 
+          // Data-only so onMessageReceived fires in all states
           const pushSent = await notificationService.sendFirebasePush(
             existingUser.id,
             `${runner.name} invited you to watch their run`,
-            "Watch their live location and route in real-time",
+            "Tap to watch live",
             {
               type: "live_run_invite",
               sessionId,
@@ -3800,7 +3802,8 @@ function transformRunForAndroid(run: any) {
               runnerName: runner.name || "A runner",
               routeId: session.routeId || "",
               hasStarted: session.hasStarted ? "true" : "false",
-            }
+            },
+            true
           );
 
           console.log(`[Live Sessions] Invited registered user ${existingUser.id} (${trimmedEmail}) via email. Push sent: ${pushSent}`);

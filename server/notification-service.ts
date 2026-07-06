@@ -140,7 +140,8 @@ export async function sendFirebasePush(
   userId: string,
   title: string,
   body: string,
-  data?: Record<string, string>
+  data?: Record<string, string>,
+  dataOnly?: boolean
 ): Promise<boolean> {
   const app = await getFirebaseApp();
   if (!app) {
@@ -168,19 +169,26 @@ export async function sendFirebasePush(
 
     console.log(`[Firebase Push] Sending to user ${userId} with token: ${user.fcmToken.substring(0, 20)}...`);
 
-    const message: any = {
-      token: user.fcmToken,
-      notification: { title, body },
-      data: data ?? {},
-      android: {
-        priority: "high",
-        notification: {
-          channelId: "garmin_sync",
-          sound: "default",
-          clickAction: "OPEN_RUN_SUMMARY",
-        },
-      },
-    };
+    const message: any = dataOnly
+      ? {
+          // Data-only — no `notification` field so onMessageReceived fires in all states
+          token: user.fcmToken,
+          data: { title, body, ...data },
+          android: { priority: "high" },
+        }
+      : {
+          token: user.fcmToken,
+          notification: { title, body },
+          data: data ?? {},
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "garmin_sync",
+              sound: "default",
+              clickAction: "OPEN_RUN_SUMMARY",
+            },
+          },
+        };
 
     const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
     const messageId = await messaging.send(message);
