@@ -6034,6 +6034,16 @@ private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightC
 
     // ── Ring 2: HR ZONE quality (when HR available) — uses user-personalised max HR ───────
     val hasHr = run.heartRate > 0
+    
+    // Compute actual average HR from heartRateData if available (more accurate than summary)
+    val displayedAvgHr = remember(run.heartRateData, run.heartRate) {
+        if (!run.heartRateData.isNullOrEmpty()) {
+            run.heartRateData.filter { it > 0 }.average().toInt()
+        } else {
+            run.heartRate
+        }
+    }
+    
     // Compute zone boundaries from user's Tanaka max HR
     val hrZoneThresholds = remember(maxHr) {
         listOf(
@@ -6046,15 +6056,15 @@ private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightC
     }
     val hrZoneNumber: Int? = if (hasHr) {
         when {
-            run.heartRate < hrZoneThresholds[0] -> 1
-            run.heartRate < hrZoneThresholds[1] -> 2
-            run.heartRate < hrZoneThresholds[2] -> 3
-            run.heartRate < hrZoneThresholds[3] -> 4
+            displayedAvgHr < hrZoneThresholds[0] -> 1
+            displayedAvgHr < hrZoneThresholds[1] -> 2
+            displayedAvgHr < hrZoneThresholds[2] -> 3
+            displayedAvgHr < hrZoneThresholds[3] -> 4
             else                                -> 5
         }
     } else null
     // Ring fraction = % of max HR (0..1) — now relative to THIS user's max
-    val hrFraction = if (hasHr) (run.heartRate.toFloat() / maxHr.toFloat()).coerceIn(0f, 1f) else null
+    val hrFraction = if (hasHr) (displayedAvgHr.toFloat() / maxHr.toFloat()).coerceIn(0f, 1f) else null
 
     val hrZoneColor: Color = when (hrZoneNumber) {
         null -> Colors.textMuted
@@ -6166,7 +6176,7 @@ private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightC
                         modifier = Modifier.weight(1f),
                         label = "HR ZONE",
                         value = "${(hrFraction * 100).roundToInt()}%",
-                        subLabel = "${run.heartRate} bpm",
+                        subLabel = "${displayedAvgHr} bpm",
                         targetLabel = "max ${maxHr} bpm",
                         progress = hrFraction,
                         ringColor = hrZoneColor,
