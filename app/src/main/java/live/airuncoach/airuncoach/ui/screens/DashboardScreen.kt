@@ -66,6 +66,8 @@ import live.airuncoach.airuncoach.network.model.TrainingLoadResponse
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.util.WorkoutHolder
+import live.airuncoach.airuncoach.util.WorkoutPlanContext
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -83,6 +85,7 @@ fun DashboardScreen(
     onNavigateToHistory: () -> Unit = {},
     onNavigateToLocationPermission: () -> Unit = {},
     onCreateGoal: () -> Unit = {},
+    onNavigateToWorkoutDetail: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel(),
     // Key to trigger refresh when returning from other screens
     refreshKey: Int = 0
@@ -190,12 +193,30 @@ fun DashboardScreen(
                         workout = workout,
                         isLoading = false,
                         status = status,
-                        onPrepare = { /* TODO: Navigate to run session */ },
+                        onPrepare = {
+                            WorkoutHolder.currentWorkout = workout
+                            WorkoutHolder.planContext = WorkoutPlanContext(
+                                planId     = plan.id,
+                                goalType   = plan.goalType,
+                                weekNumber = plan.currentWeek,
+                                totalWeeks = plan.totalWeeks
+                            )
+                            onNavigateToWorkoutDetail()
+                        },
                         onComplete = { 
                             // TODO: Mark workout as complete and refresh
                             viewModel.refreshTodayActivePlans()
                         },
-                        onViewDetail = { /* TODO: Navigate to plan details */ }
+                        onViewDetail = {
+                            WorkoutHolder.currentWorkout = workout
+                            WorkoutHolder.planContext = WorkoutPlanContext(
+                                planId     = plan.id,
+                                goalType   = plan.goalType,
+                                weekNumber = plan.currentWeek,
+                                totalWeeks = plan.totalWeeks
+                            )
+                            onNavigateToWorkoutDetail()
+                        }
                     )
                 }
             }

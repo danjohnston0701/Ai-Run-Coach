@@ -260,6 +260,9 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                     onCreateGoal = {
                         navController.navigate("create_goal")
                     },
+                    onNavigateToWorkoutDetail = {
+                        navController.navigate("workout_detail")
+                    },
                     refreshKey = refreshKey
                 )
             }
