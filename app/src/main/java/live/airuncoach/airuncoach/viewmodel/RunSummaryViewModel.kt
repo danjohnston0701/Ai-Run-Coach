@@ -164,13 +164,21 @@ class RunSummaryViewModel @Inject constructor(
      * (e.g. 404 after a failed upload, or NumberFormatException from date parsing).
      */
     fun loadRunById(runId: String) {
-        currentRunId = runId // Store for API calls
+        // ── Check local→server ID registry first ────────────────────────────────
+        // If the upload failed inline (e.g. 401) and the run was queued, the SyncWorker
+        // may have already successfully uploaded it and recorded the real server UUID.
+        // Use the server UUID instead of the local UUID so we never hit a 404.
+        val resolvedId = RunTrackingService.localToServerRunIds.value[runId] ?: runId
+        if (resolvedId != runId) {
+            Log.d("RunSummaryViewModel", "Resolved local run ID $runId → server ID $resolvedId")
+        }
+        currentRunId = resolvedId // All subsequent API calls (share image, AI, etc.) use server ID
         viewModelScope.launch {
             _isLoadingRun.value = true
             _loadError.value = null
             
             try {
-                val session = runRepository.getRunById(runId)  // ⚡ Use repository (cached)
+                val session = runRepository.getRunById(resolvedId)  // ⚡ Use repository (cached)
                 _runSession.value = session
                 _currentUser.value = getUserFromPrefs()  // Refresh user profile for personalised metric targets
 
@@ -180,25 +188,25 @@ class RunSummaryViewModel @Inject constructor(
                 _analysisState.value = AiAnalysisState.Idle
 
                 // Load any saved AI analysis for this run (if present)
-                loadSavedAnalysis(runId)
+                loadSavedAnalysis(resolvedId)
 
                 // Check if this run sets any new personal bests
-                checkPersonalBests(runId)
+                checkPersonalBests(resolvedId)
                 
                 // Auto-complete workout if this run was linked to a planned workout
                 if (session.linkedWorkoutId != null && session.linkedPlanId != null) {
-                    completeLinkedWorkout(session.linkedWorkoutId!!, runId, session.linkedPlanId!!)
+                    completeLinkedWorkout(session.linkedWorkoutId!!, resolvedId, session.linkedPlanId!!)
                 }
 
                 // Check if this run is part of a group run — load leaderboard if so
-                loadLinkedGroupRun(runId)
+                loadLinkedGroupRun(resolvedId)
 
                 // Load race predictions (Riegel formula) for this run
-                loadRacePredictions(runId)
+                loadRacePredictions(resolvedId)
                 
                 _isLoadingRun.value = false
             } catch (e: Exception) {
-                Log.w("RunSummaryViewModel", "Backend fetch failed for run $runId, trying local data", e)
+                Log.w("RunSummaryViewModel", "Backend fetch failed for run $resolvedId, trying local data", e)
                 
                 // Fallback: try to use the local run data from RunTrackingService
                 val localSession = RunTrackingService.currentRunSession?.value
@@ -211,14 +219,23 @@ class RunSummaryViewModel @Inject constructor(
                     
                     // Auto-complete workout for local session too
                     if (localSession.linkedWorkoutId != null && localSession.linkedPlanId != null) {
-                        completeLinkedWorkout(localSession.linkedWorkoutId!!, runId, localSession.linkedPlanId!!)
+                        completeLinkedWorkout(localSession.linkedWorkoutId!!, resolvedId, localSession.linkedPlanId!!)
                     }
                     
-                    // If this run is part of a group run, link it automatically
-                    // (server will set group run status to "completed" if this is organiser's run)
-                    // This happens silently in background — no UI interaction needed
-                    
                     _isLoadingRun.value = false
+
+                    // ── Watch for SyncWorker to upload the run ───────────────────
+                    // Once the background sync succeeds, the registry will have the real
+                    // server ID and we can reload with full server data (share image, AI etc.)
+                    viewModelScope.launch {
+                        RunTrackingService.localToServerRunIds.collect { mapping ->
+                            val serverId = mapping[runId]
+                            if (serverId != null && serverId != currentRunId) {
+                                Log.d("RunSummaryViewModel", "SyncWorker finished: reloading run with server ID $serverId")
+                                loadRunById(runId) // will resolve via registry
+                            }
+                        }
+                    }
                 } else {
                     // No local data available either - show error
                     val errorMsg = when {

@@ -616,6 +616,21 @@ class RunTrackingService : Service(), SensorEventListener {
         private val _uploadComplete = MutableStateFlow<String?>(null) // Backend run ID when upload completes
         val uploadComplete: StateFlow<String?> = _uploadComplete
 
+        // ── Local → Server run ID registry ──────────────────────────────────────
+        // Populated whenever a run is successfully uploaded (either inline or via SyncWorker).
+        // Key  = phone-side local UUID (what was stored as currentRunId before upload)
+        // Value = server-assigned UUID (what actually exists in the database)
+        // RunSummaryViewModel uses this to resolve a 404 caused by upload failure / retry.
+        private val _localToServerRunIds = MutableStateFlow<Map<String, String>>(emptyMap())
+        val localToServerRunIds: StateFlow<Map<String, String>> = _localToServerRunIds
+
+        /** Call after any successful upload so the registry is always current. */
+        fun recordRunIdMapping(localId: String, serverId: String) {
+            if (localId == serverId) return // same UUID — no mapping needed
+            _localToServerRunIds.value = _localToServerRunIds.value + (localId to serverId)
+            android.util.Log.d("RunTrackingService", "🗺 Run ID mapped: $localId → $serverId")
+        }
+
         // Coaching text broadcast to UI (set when coaching plays, cleared when audio finishes)
         private val _latestCoachingText = MutableStateFlow<String?>(null)
         val latestCoachingText: StateFlow<String?> = _latestCoachingText
@@ -3404,6 +3419,9 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Update the run session with the backend ID
                 _currentRunSession.value = _currentRunSession.value?.copy(id = response.id)
                 _uploadComplete.value = response.id
+                // Register local → server ID mapping so RunSummaryViewModel can resolve
+                // any 404 that occurred if navigation happened before the upload completed.
+                recordRunIdMapping(runSession.id, response.id)
                 
                 // Update running metrics baselines with this run's data (for personalization)
                 // This ensures future coaching uses this runner's actual performance baselines, not generic defaults

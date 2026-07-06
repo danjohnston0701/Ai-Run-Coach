@@ -15,6 +15,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.UploadRunRequest
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.service.RunTrackingService
 
 /**
  * WorkManager Worker for syncing pending runs in the background.
@@ -66,13 +67,18 @@ class SyncWorker(
                     // Convert RunSession to UploadRunRequest
                     val uploadRequest = convertRunToUploadRequest(run)
 
-                    // Attempt upload
-                    apiService.uploadRun(uploadRequest)
+                    // Attempt upload — capture the server response to get the server-assigned UUID
+                    val serverRun = apiService.uploadRun(uploadRequest)
+
+                    // Register local → server ID mapping so any screen still holding the
+                    // local UUID (e.g. RunSummaryScreen after a 401-induced fallback) can
+                    // resolve it to the real DB ID and reload without a 404.
+                    RunTrackingService.recordRunIdMapping(run.id, serverRun.id)
 
                     // Success - remove from queue
                     syncQueue.markSynced(run.id)
                     successCount++
-                    Log.d("SyncWorker", "✅ Successfully synced run ${run.id}")
+                    Log.d("SyncWorker", "✅ Successfully synced run ${run.id} → server ID ${serverRun.id}")
 
                 } catch (e: Exception) {
                     failureCount++
