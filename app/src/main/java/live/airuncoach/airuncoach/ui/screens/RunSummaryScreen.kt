@@ -1516,7 +1516,7 @@ private fun GraphsTabContent(
                 item { GarminDataDisclosure(disclosureType = "chart") }
             }
 
-            item { HeartRateZonesVisualCard(heartRateData = run.heartRateData, run = run) }
+            item { HeartRateZonesVisualCard(heartRateData = run.heartRateData, run = run, userAge = userAge) }
 
             // Intensity Distribution Donut
             item { IntensityDistributionCard(run = run) }
@@ -5816,7 +5816,7 @@ private fun RunningDynamicsStatsRow(run: RunSession) {
 }
 
 @Composable
-private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession? = null) {
+private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession? = null, userAge: Int? = null) {
     data class ZoneInfo(
         val name: String, val label: String, val color: Color,
         val range: IntRange, val percent: Int, val timeSeconds: Long
@@ -5838,9 +5838,10 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
         val t4 = (run.timeInZone4 ?: 0).toLong()
         val t5 = (run.timeInZone5 ?: 0).toLong()
         val total = (t1 + t2 + t3 + t4 + t5).coerceAtLeast(1)
-        // Use observed peak as a lower bound, but clamp to ≥185 bpm so that
-        // a Zone-2 run (peak ~145 bpm) doesn't compress all zone thresholds downward.
-        maxHr = run.heartRateData?.filter { it > 0 }?.maxOrNull()?.coerceAtLeast(185) ?: 185
+        // Use observed peak as a lower bound, but clamp to user's age-specific max HR (Tanaka formula)
+        // so that a Zone-2 run (peak ~145 bpm) doesn't compress all zone thresholds downward.
+        val userMaxHr = tanakaMaxHr(userAge)
+        maxHr = run.heartRateData?.filter { it > 0 }?.maxOrNull()?.coerceAtLeast(userMaxHr) ?: userMaxHr
         val z2 = (0.60 * maxHr).toInt(); val z3 = (0.70 * maxHr).toInt()
         val z4 = (0.80 * maxHr).toInt(); val z5 = (0.90 * maxHr).toInt()
         zones = listOf(
@@ -5855,7 +5856,8 @@ private fun HeartRateZonesVisualCard(heartRateData: List<Int>?, run: RunSession?
         // Fallback: derive from HR time-series
         val hr = heartRateData?.filter { it > 0 }.orEmpty()
         if (hr.isEmpty()) return
-        maxHr = (hr.maxOrNull() ?: 185).coerceAtLeast(185)
+        val userMaxHr = tanakaMaxHr(userAge)
+        maxHr = (hr.maxOrNull() ?: userMaxHr).coerceAtLeast(userMaxHr)
         val z2 = (0.60 * maxHr).toInt(); val z3 = (0.70 * maxHr).toInt()
         val z4 = (0.80 * maxHr).toInt(); val z5 = (0.90 * maxHr).toInt()
         val total = hr.size
