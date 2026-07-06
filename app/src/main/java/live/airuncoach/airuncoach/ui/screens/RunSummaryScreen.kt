@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -1760,7 +1761,7 @@ private fun CreateShareVideoButton(onClick: () -> Unit) {
         )
     ) {
         Icon(
-            imageVector = Icons.Default.PlayCircle,
+            imageVector = Icons.Default.PlayArrow,
             contentDescription = null,
             modifier = Modifier.size(20.dp)
         )
