@@ -31,6 +31,7 @@ import Features from "@/pages/Features";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
 import Support from "@/pages/Support";
+import RunVideoShare from "@/pages/RunVideoShare";
 import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
@@ -127,8 +128,10 @@ function Router() {
           <Route path="/routes" component={Routes} />
           <Route path="/events" component={Events} />
           <Route path="/event/:id" component={PreEvent} />
+          <Route path="/run-video/:id" component={RunVideoShare} />
         </>
       )}
+      <Route path="/run-video/:id" component={RunVideoShare} />
       <Route component={NotFound} />
     </Switch>
   );

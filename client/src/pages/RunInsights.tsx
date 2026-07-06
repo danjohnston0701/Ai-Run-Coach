@@ -1257,6 +1257,16 @@ export default function RunInsights() {
               <Button
                 variant="outline"
                 size="icon"
+                onClick={() => setLocation(`/run-video/${params?.id}`)}
+                className="rounded-full border-primary/50 hover:bg-primary/20 text-primary"
+                data-testid="button-share-video"
+                title="Share as Video"
+              >
+                <Play className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
                 onClick={() => setShowShareModal(true)}
                 className="rounded-full border-white/20 hover:bg-white/10 text-muted-foreground"
                 data-testid="button-share-run"
