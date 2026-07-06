@@ -2845,7 +2845,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // EXCEPTION: interval plan sessions suppress ALL generic prompts including final-stretch — the
         // dynamic plan owns all cueing; a "final 250m!" shout mid-interval is disruptive and confusing.
         val isIntervalSession = dynamicCoachingPlan?.cueingStrategy == "interval" ||
-                                sessionInstructions?.sessionStructure?.cueingStrategy == "interval"
+                                sessionInstructions?.sessionStructure?.type?.contains("interval") == true
         if (!hasCoachingFiredThisTick && canFireCoaching()) {
             if (isCoachingPlanActive && !isIntervalSession) {
                 // Coached non-interval session: only fire final 500m / 250m / 100m motivation
