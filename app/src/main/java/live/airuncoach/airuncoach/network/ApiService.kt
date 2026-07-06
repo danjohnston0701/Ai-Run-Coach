@@ -689,6 +689,14 @@ interface ApiService {
     suspend fun getObserveSession(@Path("token") token: String): ObserveSessionResponse
 
     /**
+     * Create a new live tracking session for the runner.
+     * Must be called when a live tracking run starts, before inviting observers.
+     * Returns the session ID used for all subsequent live tracking calls.
+     */
+    @POST("/api/live-sessions")
+    suspend fun createLiveSession(@Body body: CreateLiveSessionRequest): CreateLiveSessionResponse
+
+    /**
      * Invite an observer to watch a live run session.
      * Can invite by friendId (registered user) or email (any email address).
      *
@@ -755,6 +763,18 @@ data class GpsPoint(
     val lng: Double,
     val timestamp: Long,
     val altitude: Double? = null
+)
+
+// Request body for creating a new live tracking session
+data class CreateLiveSessionRequest(
+    val runnerName: String     // Display name shown to observers
+)
+
+// Response from creating a live tracking session
+data class CreateLiveSessionResponse(
+    val id: String,            // The live session ID — use for all subsequent invite calls
+    val success: Boolean,
+    val error: String? = null
 )
 
 // Request body for inviting observers to a live session

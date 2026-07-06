@@ -24,6 +24,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.WeatherRepository
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.CreateLiveSessionRequest
 import live.airuncoach.airuncoach.network.InviteObserverRequest
 import live.airuncoach.airuncoach.network.InviteParticipantRequest
 import live.airuncoach.airuncoach.network.model.BatchTTSRequest
@@ -1496,23 +1497,27 @@ class RunSessionViewModel @Inject constructor(
 
     private fun sendObserverInvites(observers: List<String>) {
         viewModelScope.launch {
-            // Wait a brief moment for the live session to be created and synced
-            delay(500)
-            
             try {
-                // Get the current live session ID from the active session
-                val sessionId = getCurrentRunningSessionId()
-                if (sessionId.isNullOrBlank()) {
-                    Log.w("RunSessionViewModel", "No active session ID available for observer invites")
+                // Step 1: Create the live tracking session on the server first.
+                // This generates the session ID that all invite calls require.
+                val runnerName = sessionManager.getUserName() ?: "Runner"
+
+                Log.d("RunSessionViewModel", "Creating live session for observer invites (runner: $runnerName)")
+                val createResponse = apiService.createLiveSession(
+                    body = CreateLiveSessionRequest(runnerName = runnerName)
+                )
+                if (!createResponse.success || createResponse.id.isBlank()) {
+                    Log.e("RunSessionViewModel", "Failed to create live session: ${createResponse.error}")
                     return@launch
                 }
-                
-                Log.d("RunSessionViewModel", "Sending observer invites for session: $sessionId")
-                
+                val sessionId = createResponse.id
+                Log.d("RunSessionViewModel", "✅ Live session created: $sessionId")
+
+                // Step 2: Send invites to each observer using the new session ID.
                 observers.forEach { observer ->
                     try {
                         if (observer.contains("@")) {
-                            // Email address
+                            // Email address (registered or unregistered)
                             val response = apiService.inviteObserver(
                                 sessionId = sessionId,
                                 body = InviteObserverRequest(email = observer)
@@ -1523,7 +1528,7 @@ class RunSessionViewModel @Inject constructor(
                                 Log.w("RunSessionViewModel", "Observer email invite failed: ${response.error}")
                             }
                         } else {
-                            // User ID (friend)
+                            // User ID (registered friend)
                             val response = apiService.inviteObserver(
                                 sessionId = sessionId,
                                 body = InviteObserverRequest(friendId = observer)
@@ -1539,8 +1544,8 @@ class RunSessionViewModel @Inject constructor(
                         // Continue with other invites even if one fails
                     }
                 }
-                
-                Log.d("RunSessionViewModel", "✅ All observer invites processed")
+
+                Log.d("RunSessionViewModel", "✅ All observer invites processed for session $sessionId")
             } catch (e: Exception) {
                 Log.e("RunSessionViewModel", "Error sending observer invites: ${e.message}", e)
             }
