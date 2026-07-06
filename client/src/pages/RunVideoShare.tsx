@@ -124,7 +124,7 @@ export default function RunVideoShare() {
   // ── Fetch run ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!runId) return;
-    const token = localStorage.getItem("authToken");
+    const token = (() => { try { return JSON.parse(localStorage.getItem("userProfile") || "{}").token; } catch { return null; } })();
     fetch(`/api/runs/${runId}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })

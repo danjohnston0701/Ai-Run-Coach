@@ -96,13 +96,14 @@ fun RunVideoScreen(
 
                     webViewClient = object : WebViewClient() {
 
-                        // Inject auth token as early as possible — before React reads localStorage
+                        // Inject auth token as early as possible — before React reads localStorage.
+                        // The web app reads the token from userProfile.token in localStorage.
                         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                             val safe = authToken
                                 .replace("\\", "\\\\")
                                 .replace("\"", "\\\"")
                             view.evaluateJavascript(
-                                """localStorage.setItem('authToken',"$safe");""", null
+                                """(function(){try{var p=JSON.parse(localStorage.getItem('userProfile')||'{}');p.token="$safe";localStorage.setItem('userProfile',JSON.stringify(p));}catch(e){}})();""", null
                             )
                         }
 
@@ -113,7 +114,7 @@ fun RunVideoScreen(
                                 .replace("\"", "\\\"")
                             view.evaluateJavascript("""
                                 (function(){
-                                  localStorage.setItem('authToken',"$safe");
+                                  try{var p=JSON.parse(localStorage.getItem('userProfile')||'{}');p.token="$safe";localStorage.setItem('userProfile',JSON.stringify(p));}catch(e){};
                                   if(window.__arcVideoBridgeInjected)return;
                                   window.__arcVideoBridgeInjected=true;
                                   var orig=HTMLAnchorElement.prototype.click;
