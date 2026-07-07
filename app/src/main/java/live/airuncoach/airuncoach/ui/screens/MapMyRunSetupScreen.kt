@@ -1370,95 +1370,168 @@ private fun LiveTrackingObserverSection(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Email input field — pressing Done on the keyboard auto-adds the email
-        TextField(
-            value = emailInput,
-            onValueChange = { onPendingEmailChange(it) },
+        // Email input with prominent "Add Email" button
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
-            placeholder = {
-                Text(
-                    "Add email address",
-                    style = AppTextStyles.small,
-                    color = Colors.textMuted
-                )
-            },
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.5f),
-                unfocusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.3f),
-                focusedIndicatorColor = Colors.primary,
-                unfocusedIndicatorColor = Colors.backgroundTertiary.copy(alpha = 0.5f)
-            ),
-            textStyle = AppTextStyles.small,
-            singleLine = true,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                keyboardType = androidx.compose.ui.text.input.KeyboardType.Email,
-                imeAction = androidx.compose.ui.text.input.ImeAction.Done
-            ),
-            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                onDone = { addEmailIfValid() }
-            ),
-            trailingIcon = {
-                if (emailInput.isNotEmpty()) {
-                    IconButton(
-                        onClick = { addEmailIfValid() },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.icon_check_vector),
-                            contentDescription = "Add",
-                            tint = Colors.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-        )
-
-        if (observers.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Display added observers
-            Column(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextField(
+                value = emailInput,
+                onValueChange = { onPendingEmailChange(it) },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Colors.backgroundTertiary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .weight(1f)
+                    .fillMaxHeight(),
+                placeholder = {
+                    Text(
+                        "email@example.com",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.3f),
+                    focusedIndicatorColor = Colors.primary,
+                    unfocusedIndicatorColor = Colors.backgroundTertiary.copy(alpha = 0.5f)
+                ),
+                textStyle = AppTextStyles.small,
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Email,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onDone = { addEmailIfValid() }
+                )
+            )
+
+            // Prominent "Add Email" button
+            Button(
+                onClick = { addEmailIfValid() },
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(56.dp),
+                enabled = emailInput.trim().isNotEmpty(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    disabledContainerColor = Colors.backgroundTertiary.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(BorderRadius.md)
             ) {
-                observers.forEach { observer ->
-                    // For emails show as-is; for friend IDs resolve to name
-                    val displayName = if (observer.contains("@")) {
-                        observer
-                    } else {
-                        friends.find { it.id == observer }?.name ?: observer
-                    }
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_check_vector),
+                    contentDescription = "Add email",
+                    tint = if (emailInput.trim().isNotEmpty()) Colors.textPrimary else Colors.textMuted,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Invited Observers section — shows count and list when observers are added
+        if (observers.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(BorderRadius.md),
+                colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.6f))
+            ) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
+                    // Header with count
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = displayName,
-                            style = AppTextStyles.small,
-                            color = Colors.textPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = {
-                                onObserversChanged(observers.filter { it != observer })
-                            },
-                            modifier = Modifier.size(24.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                painter = painterResource(id = R.drawable.icon_close_vector),
-                                contentDescription = "Remove",
-                                tint = Colors.textMuted,
-                                modifier = Modifier.size(16.dp)
+                                painter = painterResource(id = R.drawable.icon_people_vector),
+                                contentDescription = null,
+                                tint = Colors.primary,
+                                modifier = Modifier.size(18.dp)
                             )
+                            Text(
+                                text = "Invited Observers",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textPrimary
+                            )
+                        }
+                        // Count badge
+                        Box(
+                            modifier = Modifier
+                                .background(Colors.primary, CircleShape)
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = observers.size.toString(),
+                                style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.textPrimary
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = Colors.backgroundTertiary.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+
+                    // List of observers
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        observers.forEach { observer ->
+                            val displayName = if (observer.contains("@")) {
+                                observer
+                            } else {
+                                friends.find { it.id == observer }?.name ?: observer
+                            }
+                            val isEmail = observer.contains("@")
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(
+                                            id = if (isEmail) R.drawable.icon_email else R.drawable.icon_people_vector
+                                        ),
+                                        contentDescription = null,
+                                        tint = Colors.textMuted,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = displayName,
+                                        style = AppTextStyles.small,
+                                        color = Colors.textPrimary
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        onObserversChanged(observers.filter { it != observer })
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.icon_close_vector),
+                                        contentDescription = "Remove",
+                                        tint = Colors.textMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
