@@ -31,6 +31,16 @@ MP4 muxer writes broken/missing duration metadata → players (and Instagram) sh
 (`fastStart:'in-memory'`, codec `avc1.42E029` H.264 Baseline L4.1). Stamp each frame with an
 explicit `timestamp` (µs) in the rAF loop, throttle to ~30fps, keyframe periodically, then
 `await encoder.flush()` → `muxer.finalize()` → Blob(`video/mp4`). This yields correct duration.
-Gate it behind `VideoEncoder.isConfigSupported(...)` at mount; keep `MediaRecorder` only as a
-last-resort fallback for WebViews without WebCodecs.
+Keep `MediaRecorder` only as a last-resort fallback for WebViews without WebCodecs.
 **Why:** explicit per-frame timestamps + a real (non-fragmented) moov are what fix the duration.
+
+**Do NOT gate WebCodecs on `isConfigSupported()` alone — it LIES on some Android WebViews**
+(returns `supported:true`, then real encoding yields zero frames / async encoder error → the
+share dead-ends with "Recording failed"). Gate on a **real runtime self-test**: at mount,
+actually `encode()` + `await flush()` one `VideoFrame` at the true output resolution
+(1080×1920), walking a codec ladder (`avc1.42E029`→`42E028`→`42001F`→`4D0029`→`640029`), and
+only enable WebCodecs if a chunk truly comes out; store the proven codec and use it for the real
+recording. Disable the Record button until the probe finishes (else a fast tap skips WebCodecs).
+Because on-device client `console.error` is invisible, surface the actual failure reason in the
+UI (encoder/frame/finalize message + frame count) so device-only bugs are diagnosable.
+**Why:** WebView WebCodecs capability reporting is unreliable; a real encode is the only proof.

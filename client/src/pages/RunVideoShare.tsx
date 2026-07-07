@@ -157,7 +157,9 @@ export default function RunVideoShare() {
   const useWebCodecsRef = useRef<boolean>(false);
   const lastEncMsRef    = useRef<number>(-1);
   const encFrameCountRef = useRef<number>(0);
-  const webCodecsSupportedRef = useRef<boolean>(false); // set at mount via isConfigSupported
+  const webCodecsSupportedRef = useRef<boolean>(false); // set at mount via a real encode self-test
+  const workingCodecRef = useRef<string>("avc1.42E029");// H.264 codec proven to encode on THIS device
+  const encErrRef       = useRef<string>("");           // first runtime encoder/frame error (surfaced to UI)
 
   // Route geometry
   const coordsRef  = useRef<LngLat[]>([]);
@@ -175,6 +177,8 @@ export default function RunVideoShare() {
   const [errMsg, setErrMsg]   = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [status, setStatus]   = useState<"idle" | "playing" | "recording" | "done" | "error">("idle");
+  const [errorDetail, setErrorDetail] = useState<string>("");
+  const [probeDone, setProbeDone] = useState(false); // WebCodecs self-test finished (record gated on this)
   const [progress, setProgress] = useState(0);
   const [hasRoute, setHasRoute] = useState(false);
   const [units] = useState<"km" | "mi">(() => {
@@ -639,19 +643,22 @@ export default function RunVideoShare() {
   const finishWebCodecs = useCallback(async () => {
     const enc   = videoEncoderRef.current;
     const muxer = muxerRef.current;
-    if (!enc || !muxer) { setStatus("error"); return; }
+    if (!enc || !muxer) { setErrorDetail("WebCodecs: encoder missing"); setStatus("error"); return; }
     let ok = false;
     try {
       await enc.flush();
-      if (encFrameCountRef.current === 0) throw new Error("no frames encoded");
+      if (encFrameCountRef.current === 0) {
+        throw new Error(encErrRef.current || "no frames encoded (VideoFrame unsupported?)");
+      }
       muxer.finalize();
       const { buffer } = muxer.target;
       if (!buffer || buffer.byteLength === 0) throw new Error("empty output buffer");
       const blob = new Blob([buffer], { type: "video/mp4" });
       triggerDownload(blob, `run-summary-${runId || "video"}.mp4`);
       ok = true;
-    } catch (e) {
+    } catch (e: any) {
       console.error("[finishWebCodecs]", e);
+      setErrorDetail(`WebCodecs — ${encErrRef.current || e?.message || e} (frames: ${encFrameCountRef.current})`);
     } finally {
       try { enc.close(); } catch { /* already closed */ }
       videoEncoderRef.current = null;
@@ -676,6 +683,8 @@ export default function RunVideoShare() {
       useWebCodecsRef.current = false;
       lastEncMsRef.current    = -1;
       encFrameCountRef.current = 0;
+      encErrRef.current       = "";
+      setErrorDetail("");
       const W = window as any;
       const canWebCodecs = webCodecsSupportedRef.current && typeof W.VideoFrame === "function";
 
@@ -690,10 +699,13 @@ export default function RunVideoShare() {
           });
           const encoder = new W.VideoEncoder({
             output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
-            error:  (e: any) => { console.error("[VideoEncoder]", e); },
+            error:  (e: any) => {
+              console.error("[VideoEncoder]", e);
+              if (!encErrRef.current) encErrRef.current = `encoder: ${e?.message || e}`;
+            },
           });
           encoder.configure({
-            codec: "avc1.42E029",   // H.264 Baseline L4.1 — wide device + social-app support
+            codec: workingCodecRef.current, // codec proven to encode on THIS device by the self-test
             width: CW,
             height: CH,
             bitrate: 8_000_000,
@@ -702,8 +714,9 @@ export default function RunVideoShare() {
           muxerRef.current        = muxer;
           videoEncoderRef.current = encoder;
           useWebCodecsRef.current = true;
-        } catch (e) {
+        } catch (e: any) {
           console.error("[WebCodecs setup failed — falling back to MediaRecorder]", e);
+          if (!encErrRef.current) encErrRef.current = `setup: ${e?.message || e}`;
           useWebCodecsRef.current = false;
         }
       }
@@ -731,14 +744,15 @@ export default function RunVideoShare() {
           recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
           recorder.onstop = () => {
             const blob = new Blob(chunksRef.current, { type: blobType });
-            if (blob.size === 0) { setStatus("error"); return; }
+            if (blob.size === 0) { setErrorDetail("MediaRecorder produced empty file"); setStatus("error"); return; }
             triggerDownload(blob, `run-summary-${runId || "video"}.${ext}`);
             setStatus("done");
           };
           recorder.start(100);
           recorderRef.current = recorder;
-        } catch (e) {
+        } catch (e: any) {
           console.error("[MediaRecorder setup failed]", e);
+          setErrorDetail(`MediaRecorder — ${e?.message || e}`);
           setStatus("error");
           return; // recording unsupported — don't run a fake "recording" that ends in false success
         }
@@ -839,7 +853,10 @@ export default function RunVideoShare() {
             frame.close();
             encFrameCountRef.current++;
             lastEncMsRef.current = t;
-          } catch (e) { console.error("[VideoFrame encode]", e); }
+          } catch (e: any) {
+            console.error("[VideoFrame encode]", e);
+            if (!encErrRef.current) encErrRef.current = `frame: ${e?.message || e}`;
+          }
         }
       }
 
@@ -849,7 +866,7 @@ export default function RunVideoShare() {
         stopTimeoutRef.current = window.setTimeout(() => {
           if (useWebCodecsRef.current) finishWebCodecs();
           else if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-          else setStatus("error"); // no encoder or recorder ran → nothing was saved
+          else { setErrorDetail("no recorder was active"); setStatus("error"); } // nothing was saved
         }, HOLD_MS);
       } else {
         // Preview finished — nothing was saved, so return to the idle controls.
@@ -886,14 +903,50 @@ export default function RunVideoShare() {
     }
   }, [interpAt, compositeFrame]);
 
-  // Probe WebCodecs H.264 support once so we only commit to that path when it truly works.
+  // Runtime WebCodecs self-test. isConfigSupported() lies on some Android WebViews (returns
+  // true, then real encoding fails), so we actually encode + flush one real frame at the true
+  // recording resolution, walking a codec ladder. WebCodecs is only enabled if a chunk really
+  // comes out — otherwise we fall back to MediaRecorder from the start (no dead-end "failed").
   useEffect(() => {
     const W = window as any;
-    if (typeof W.VideoEncoder?.isConfigSupported !== "function") return;
+    if (typeof W.VideoEncoder !== "function" || typeof W.VideoFrame !== "function") { setProbeDone(true); return; }
     let cancelled = false;
-    W.VideoEncoder.isConfigSupported({ codec: "avc1.42E029", width: CW, height: CH, bitrate: 8_000_000, framerate: 30 })
-      .then((s: any) => { if (!cancelled) webCodecsSupportedRef.current = !!s?.supported; })
-      .catch(() => { /* leave false — MediaRecorder fallback */ });
+    (async () => {
+      const ladder = ["avc1.42E029", "avc1.42E028", "avc1.42001F", "avc1.4D0029", "avc1.640029"];
+      const test = document.createElement("canvas");
+      test.width = CW; test.height = CH;
+      const tctx = test.getContext("2d");
+      if (tctx) { tctx.fillStyle = "#0a0a0f"; tctx.fillRect(0, 0, CW, CH); }
+      for (const codec of ladder) {
+        if (cancelled) return;
+        let enc: any = null;
+        try {
+          if (typeof W.VideoEncoder.isConfigSupported === "function") {
+            const s = await W.VideoEncoder.isConfigSupported({ codec, width: CW, height: CH, bitrate: 8_000_000, framerate: 30 });
+            if (!s?.supported) continue;
+          }
+          let chunks = 0;
+          enc = new W.VideoEncoder({ output: () => { chunks++; }, error: () => {} });
+          enc.configure({ codec, width: CW, height: CH, bitrate: 8_000_000, framerate: 30 });
+          const frame = new W.VideoFrame(test, { timestamp: 0 });
+          enc.encode(frame, { keyFrame: true });
+          frame.close();
+          await enc.flush();
+          try { enc.close(); } catch { /* already closed */ }
+          if (!cancelled && chunks > 0) {
+            workingCodecRef.current     = codec;
+            webCodecsSupportedRef.current = true;
+            if (!cancelled) setProbeDone(true);
+            return; // proven working — done
+          }
+        } catch {
+          try { enc?.close(); } catch { /* ignore */ }
+          // try next codec in the ladder
+        }
+      }
+      // none worked — leave webCodecsSupportedRef false → MediaRecorder fallback
+      if (!cancelled) setProbeDone(true);
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -993,9 +1046,16 @@ export default function RunVideoShare() {
           </div>
         )}
         {status === "error" && (
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/10 border border-red-500/20">
-            <AlertCircle className="w-4 h-4 text-red-400" />
-            <span className="text-red-400 text-sm font-medium">Recording failed — please try again</span>
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/10 border border-red-500/20">
+              <AlertCircle className="w-4 h-4 text-red-400" />
+              <span className="text-red-400 text-sm font-medium">Recording failed — please try again</span>
+            </div>
+            {errorDetail && (
+              <span className="text-red-400/70 text-[11px] text-center max-w-[320px] break-words px-2" data-testid="text-error-detail">
+                {errorDetail}
+              </span>
+            )}
           </div>
         )}
 
@@ -1018,10 +1078,19 @@ export default function RunVideoShare() {
                 className="w-full font-bold"
                 style={{ background: TEAL, color: "#000" }}
                 data-testid="button-record"
-                disabled={!hasRoute}
+                disabled={!hasRoute || !probeDone}
               >
-                <Video className="w-4 h-4 mr-2" />
-                Record &amp; Download Video
+                {probeDone ? (
+                  <>
+                    <Video className="w-4 h-4 mr-2" />
+                    Record &amp; Download Video
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Checking video support…
+                  </>
+                )}
               </Button>
             </>
           )}
