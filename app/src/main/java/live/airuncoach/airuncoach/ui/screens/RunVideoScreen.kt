@@ -181,13 +181,14 @@ fun RunVideoScreen(
                 onDismiss         = { showShareSheet.value = false },
                 onShare           = {
                     showShareSheet.value = false
+                    val mime = if (file.name.endsWith(".mp4", true)) "video/mp4" else "video/webm"
                     val uri = FileProvider.getUriForFile(
                         context,
                         "${context.packageName}.fileprovider",
                         file
                     )
                     val intent = Intent(Intent.ACTION_SEND).apply {
-                        type = "video/webm"
+                        type = mime
                         putExtra(Intent.EXTRA_STREAM, uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
@@ -202,8 +203,9 @@ fun RunVideoScreen(
                         downloadsDir.mkdirs()
                         val dest = File(downloadsDir, file.name)
                         file.copyTo(dest, overwrite = true)
+                        val mime = if (file.name.endsWith(".mp4", true)) "video/mp4" else "video/webm"
                         android.media.MediaScannerConnection.scanFile(
-                            context, arrayOf(dest.absolutePath), arrayOf("video/webm"), null
+                            context, arrayOf(dest.absolutePath), arrayOf(mime), null
                         )
                     } catch (e: Exception) {
                         Log.e("RunVideoScreen", "Save to Downloads failed", e)

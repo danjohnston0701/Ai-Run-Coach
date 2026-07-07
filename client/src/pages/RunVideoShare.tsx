@@ -622,17 +622,31 @@ export default function RunVideoShare() {
     if (record) {
       try {
         const stream   = canvas.captureStream(30);
-        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-          ? "video/webm;codecs=vp9"
-          : "video/webm";
-        const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+        // Prefer MP4/H.264 — Instagram, WhatsApp, iMessage etc. reject WebM. Modern
+        // Android WebView can record MP4; older ones fall back to WebM.
+        const candidates = [
+          "video/mp4;codecs=avc1.42E01E",
+          "video/mp4;codecs=h264",
+          "video/mp4",
+          "video/webm;codecs=vp9",
+          "video/webm",
+        ];
+        const mimeType = candidates.find(t => {
+          try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
+        }) || "";
+        const isMp4    = mimeType.startsWith("video/mp4");
+        const ext      = isMp4 ? "mp4" : "webm";
+        const blobType = isMp4 ? "video/mp4" : "video/webm";
+        const recorder = mimeType
+          ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 })
+          : new MediaRecorder(stream, { videoBitsPerSecond: 8_000_000 });
         recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
         recorder.onstop = () => {
-          const blob = new Blob(chunksRef.current, { type: "video/webm" });
+          const blob = new Blob(chunksRef.current, { type: blobType });
           const url  = URL.createObjectURL(blob);
           const a    = document.createElement("a");
           a.href     = url;
-          a.download = `run-summary-${runId || "video"}.webm`;
+          a.download = `run-summary-${runId || "video"}.${ext}`;
           a.click();
           URL.revokeObjectURL(url);
           setStatus("done");
@@ -895,7 +909,7 @@ export default function RunVideoShare() {
 
         {/* Info note */}
         <p className="text-white/30 text-xs text-center max-w-xs leading-relaxed">
-          A 3D drone-style flyover of your route, saved as a .webm you can share to Instagram, WhatsApp, or any platform.
+          A 3D drone-style flyover of your route, saved as a video you can share to Instagram, WhatsApp, or any platform.
         </p>
       </div>
     </div>
