@@ -2712,25 +2712,24 @@ function transformRunForAndroid(run: any) {
       
       
       // ========== SESSION COACHING CONTEXT (Phase 2 Enhancement) ==========
-      // Fetch session instructions if this run is linked to a planned workout
+      // Fetch session instructions and planned workout if this run is linked to a planned workout
       let sessionInstructions: any = null;
       let coachingEvents: any[] = [];
       let expectedSessionGoal: string | undefined = undefined;
+      let linkedPlannedWorkout: any = null;
       
       if (run.linkedWorkoutId) {
         try {
-          // Fetch the planned workout
-          const plannedWorkout = await db.query.plannedWorkouts.findFirst({
-            where: eq(plannedWorkouts.id, run.linkedWorkoutId),
-          });
+          // Fetch the planned workout with all details for AI analysis context
+          linkedPlannedWorkout = await storage.getPlannedWorkout(run.linkedWorkoutId);
           
-          if (plannedWorkout?.sessionInstructionsId) {
+          if (linkedPlannedWorkout?.sessionInstructionsId) {
             // Fetch session instructions
             sessionInstructions = await db.query.sessionInstructions.findFirst({
-              where: eq(sessionInstructions.id, plannedWorkout.sessionInstructionsId),
+              where: eq(sessionInstructions.id, linkedPlannedWorkout.sessionInstructionsId),
             });
             
-            expectedSessionGoal = plannedWorkout.sessionGoal || undefined;
+            expectedSessionGoal = linkedPlannedWorkout.sessionGoal || undefined;
           }
           
           // Fetch all coaching events from this run
@@ -2738,7 +2737,7 @@ function transformRunForAndroid(run: any) {
             where: eq(coachingSessionEvents.runId, runId),
           });
           
-          console.log(`[comprehensive-analysis] Loaded session context: instructions=${!!sessionInstructions}, events=${coachingEvents.length}`);
+          console.log(`[comprehensive-analysis] Loaded session context: workout=${!!linkedPlannedWorkout}, instructions=${!!sessionInstructions}, events=${coachingEvents.length}`);
         } catch (sessionErr: any) {
           console.warn(`[comprehensive-analysis] Could not fetch session context: ${sessionErr?.message}`);
           // Proceed without session context - analysis still works
@@ -2845,6 +2844,36 @@ function transformRunForAndroid(run: any) {
         // Contains reason + recommendation from the AI coach's post-run training assessment.
         // May be null for users without a training plan (inline assessment handles this).
         coachingInsight: (run as any).coachingInsight ?? null,
+        // NEW: Planned workout context for comparative analysis
+        plannedWorkout: linkedPlannedWorkout ? {
+          workoutType: linkedPlannedWorkout.workoutType,
+          distance: linkedPlannedWorkout.distance,
+          duration: linkedPlannedWorkout.duration,
+          targetPace: linkedPlannedWorkout.targetPace,
+          intensity: linkedPlannedWorkout.intensity,
+          // HR Zone expectations
+          hrZoneNumber: linkedPlannedWorkout.hrZoneNumber,
+          hrZoneMinBpm: linkedPlannedWorkout.hrZoneMinBpm,
+          hrZoneMaxBpm: linkedPlannedWorkout.hrZoneMaxBpm,
+          hrZoneScenario: linkedPlannedWorkout.hrZoneScenario,
+          effortDescription: linkedPlannedWorkout.effortDescription,
+          // Interval/repeat workout details
+          intervalCount: linkedPlannedWorkout.intervalCount,
+          intervalDistanceMeters: linkedPlannedWorkout.intervalDistanceMeters,
+          intervalDurationSeconds: linkedPlannedWorkout.intervalDurationSeconds,
+          restDistanceMeters: linkedPlannedWorkout.restDistanceMeters,
+          restDurationSeconds: linkedPlannedWorkout.restDurationSeconds,
+          intervalTargetPace: linkedPlannedWorkout.intervalTargetPace,
+          restTargetPace: linkedPlannedWorkout.restTargetPace,
+          intervalHeartRateMin: linkedPlannedWorkout.intervalHeartRateMin,
+          intervalHeartRateMax: linkedPlannedWorkout.intervalHeartRateMax,
+          restHeartRateMax: linkedPlannedWorkout.restHeartRateMax,
+          // Session context
+          sessionGoal: linkedPlannedWorkout.sessionGoal,
+          sessionIntent: linkedPlannedWorkout.sessionIntent,
+          description: linkedPlannedWorkout.description,
+          instructions: linkedPlannedWorkout.instructions,
+        } : null,
       });
       const analysisEndTime = Date.now();
       console.log(`[comprehensive-analysis] AI analysis generated in ${analysisEndTime - analysisStartTime}ms for run ${runId}`);

@@ -78,6 +78,9 @@ export interface IStorage {
   createGoal(goal: InsertGoal): Promise<Goal>;
   updateGoal(id: string, data: Partial<Goal>): Promise<Goal | undefined>;
   deleteGoal(id: string): Promise<void>;
+
+  // Planned Workouts (for AI analysis context)
+  getPlannedWorkout(plannedWorkoutId: string): Promise<any | undefined>;
   
   // Notifications
   getUserNotifications(userId: string): Promise<Notification[]>;
@@ -746,6 +749,12 @@ export class DatabaseStorage implements IStorage {
 
   async deleteGoal(id: string): Promise<void> {
     await db.delete(goals).where(eq(goals.id, id));
+  }
+
+  // Planned Workouts (for AI analysis context)
+  async getPlannedWorkout(plannedWorkoutId: string): Promise<any | undefined> {
+    const [workout] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, plannedWorkoutId));
+    return workout || undefined;
   }
 
   // Notifications

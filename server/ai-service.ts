@@ -3795,8 +3795,35 @@ export async function generateComprehensiveRunAnalysis(params: {
     adjustmentType: string;
     needsAdjustment: boolean;
   } | null;
+  // NEW: Planned workout context for comparative analysis
+  plannedWorkout?: {
+    workoutType: string;
+    distance?: number;
+    duration?: number;
+    targetPace?: string;
+    intensity?: string;
+    hrZoneNumber?: number;
+    hrZoneMinBpm?: number;
+    hrZoneMaxBpm?: number;
+    hrZoneScenario?: string;
+    effortDescription?: string;
+    intervalCount?: number;
+    intervalDistanceMeters?: number;
+    intervalDurationSeconds?: number;
+    restDistanceMeters?: number;
+    restDurationSeconds?: number;
+    intervalTargetPace?: string;
+    restTargetPace?: string;
+    intervalHeartRateMin?: number;
+    intervalHeartRateMax?: number;
+    restHeartRateMax?: number;
+    sessionGoal?: string;
+    sessionIntent?: string;
+    description?: string;
+    instructions?: string;
+  } | null;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal, coachingInsight } = params;
+  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal, coachingInsight, plannedWorkout } = params;
 
   // ── Normalize units — DB rule: distance = km, duration = seconds.
   // Legacy rows from old Strava/Garmin importers may have been stored in meters/ms.
@@ -3996,6 +4023,84 @@ ${planProgressWeek && planProgressWeeks ? `- Week ${planProgressWeek} of ${planP
 ${planProgressWeek && planProgressWeeks ? `- Reference the week number and progression ("Week ${planProgressWeek} of ${planProgressWeeks}").` : ''}
 - If it's an easy/recovery workout, praise consistency and recovery focus. If it's a tempo or interval session, emphasize quality and progression.
 - Highlight how this specific run contributed to the overall plan progression.
+`;
+  }
+
+  // NEW: Add planned workout comparative context (Phase 2 Enhancement)
+  if (plannedWorkout) {
+    prompt += `
+## PLANNED WORKOUT EXPECTATIONS VS. ACTUAL PERFORMANCE:
+
+**Planned Session Goal**: ${plannedWorkout.sessionGoal || plannedWorkout.sessionIntent || 'General fitness building'}
+**Workout Type**: ${plannedWorkout.workoutType}
+`;
+
+    // Add specific expectations based on workout type
+    if (plannedWorkout.workoutType === 'easy' || plannedWorkout.workoutType === 'recovery') {
+      prompt += `
+**Easy/Recovery Run Expectations:**
+- Distance: ${plannedWorkout.distance || '?'}km
+- Duration: ${plannedWorkout.duration ? `${plannedWorkout.duration} minutes` : '?'}
+- Target Pace: ${plannedWorkout.targetPace || 'conversational pace'} /km
+${plannedWorkout.hrZoneNumber ? `- Heart Rate Zone: Zone ${plannedWorkout.hrZoneNumber} (${plannedWorkout.hrZoneMinBpm}-${plannedWorkout.hrZoneMaxBpm} BPM) — ${plannedWorkout.hrZoneScenario || 'steady aerobic'}` : ''}
+- Effort: ${plannedWorkout.effortDescription || 'recovery focused, build aerobic base'}
+
+**Performance Analysis**:
+Compare actual pace, HR, and distance to these targets. For easy runs, consistency is more important than speed — did they maintain steady effort?
+`;
+    } else if (plannedWorkout.workoutType === 'tempo') {
+      prompt += `
+**Tempo Run Expectations:**
+- Distance: ${plannedWorkout.distance || '?'}km
+- Duration: ${plannedWorkout.duration ? `${plannedWorkout.duration} minutes` : '?'}
+- Target Pace: ${plannedWorkout.targetPace || 'threshold pace'} /km
+${plannedWorkout.hrZoneNumber ? `- Heart Rate Zone: Zone ${plannedWorkout.hrZoneNumber} (${plannedWorkout.hrZoneMinBpm}-${plannedWorkout.hrZoneMaxBpm} BPM) — ${plannedWorkout.hrZoneScenario || 'sustained hard effort'}` : ''}
+- Effort: ${plannedWorkout.effortDescription || 'sustained, controlled effort at lactate threshold'}
+
+**Performance Analysis**:
+Did they hold the target pace? Monitor for form breakdown in the final third (sign of fatigue). Compare average HR to zone expectations. Praise steady effort and controlled pacing, flag any negative splits or pacing inconsistency.
+`;
+    } else if (plannedWorkout.workoutType === 'intervals' || plannedWorkout.workoutType === 'repeats') {
+      prompt += `
+**Interval/Repeat Workout Expectations:**
+- Structure: ${plannedWorkout.intervalCount || '?'} × ${plannedWorkout.intervalDistanceMeters ? `${(plannedWorkout.intervalDistanceMeters / 1000).toFixed(2)}km` : `${plannedWorkout.intervalDurationSeconds ? `${Math.round(plannedWorkout.intervalDurationSeconds / 60)} min` : '?'}`}
+- Interval Target Pace: ${plannedWorkout.intervalTargetPace || '?'} /km
+- Recovery Target Pace: ${plannedWorkout.restTargetPace || 'easy pace'} /km
+${plannedWorkout.intervalHeartRateMin && plannedWorkout.intervalHeartRateMax ? `- Interval HR Target: ${plannedWorkout.intervalHeartRateMin}-${plannedWorkout.intervalHeartRateMax} BPM` : ''}
+${plannedWorkout.restHeartRateMax ? `- Recovery HR Target: < ${plannedWorkout.restHeartRateMax} BPM` : ''}
+- Rest Period: ${plannedWorkout.restDistanceMeters ? `${(plannedWorkout.restDistanceMeters / 1000).toFixed(2)}km` : `${plannedWorkout.restDurationSeconds ? `${Math.round(plannedWorkout.restDurationSeconds / 60)} min` : '?'}`}
+- Effort: ${plannedWorkout.effortDescription || 'hard push with full recovery between reps'}
+
+**Performance Analysis**:
+- Check each interval: Did they hit target pace? Monitor for consistent pacing across intervals (should get slightly slower, but not dramatically).
+- Recovery sections: Were they truly easy, or did HR spike too high between efforts?
+- Positive/Negative Split: Intervals should be relatively consistent; large slowdowns signal fatigue.
+- Overall Quality: Did they complete all reps at target intensity?
+`;
+    } else if (plannedWorkout.workoutType === 'fartlek' || plannedWorkout.workoutType === 'mixed_pace') {
+      prompt += `
+**Fartlek/Mixed Pace Run Expectations:**
+- Structure: Varied pace with playful effort changes
+- Base Pace: ${plannedWorkout.targetPace || '?'} /km
+- Fast Sections: ${plannedWorkout.intervalTargetPace || '?'} /km (effort-based)
+- Easy Sections: ${plannedWorkout.restTargetPace || 'conversational'} /km
+- Effort: ${plannedWorkout.effortDescription || 'spontaneous, controlled intensity play'}
+
+**Performance Analysis**:
+Did they balance hard efforts with proper recovery? Look for varied HR spikes and good recovery between pushes. This workout is about feel and adaptability — positive if they executed varied efforts smoothly.
+`;
+    }
+
+    // Generic comparative section for all workout types
+    prompt += `
+
+**KEY COMPARISONS**:
+- Was distance close to plan? (${plannedWorkout.distance || '?'}km planned)
+- Did average pace align with targets?
+- Heart rate: Did they stay in the right zone for the session type?
+- Any struggles in form, fatigue, or pacing consistency?
+
+Use this context to explain whether they "nailed the session," "found it challenging but gutsy," or "played it conservative." Reference the specific planned targets in your feedback.
 `;
   }
 
