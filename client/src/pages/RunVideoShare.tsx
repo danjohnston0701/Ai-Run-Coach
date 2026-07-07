@@ -159,6 +159,11 @@ export default function RunVideoShare() {
   const encFrameCountRef = useRef<number>(0);
   const webCodecsSupportedRef = useRef<boolean>(false); // set at mount via a real encode self-test
   const workingCodecRef = useRef<string>("avc1.42E029");// H.264 codec proven to encode on THIS device
+  // Decoder config (avcC / SPS+PPS "description") captured during the self-test. Some Android
+  // WebViews emit it on a single-frame flush but NOT during continuous real-time encoding, so we
+  // reuse this proven one to seed the muxer when the live chunks arrive without it.
+  const provenDecoderConfigRef = useRef<any>(null);
+  const seededConfigRef = useRef<boolean>(false); // whether we seeded the muxer's decoderConfig (diagnostic)
   const encErrRef       = useRef<string>("");           // first runtime encoder/frame error (surfaced to UI)
 
   // Route geometry
@@ -659,7 +664,7 @@ export default function RunVideoShare() {
       ok = true;
     } catch (e: any) {
       console.error("[finishWebCodecs]", e);
-      setErrorDetail(`WebCodecs — ${encErrRef.current || e?.message || e} (frames: ${encFrameCountRef.current})`);
+      setErrorDetail(`WebCodecs — ${encErrRef.current || e?.message || e} (frames: ${encFrameCountRef.current}, seeded: ${seededConfigRef.current ? "yes" : "no"})`);
     } finally {
       try { enc.close(); } catch { /* already closed */ }
       videoEncoderRef.current = null;
@@ -698,8 +703,18 @@ export default function RunVideoShare() {
             video: { codec: "avc", width: CW, height: CH, frameRate: 30 },
             fastStart: "in-memory",
           });
+          seededConfigRef.current = false; // reset per recording; set true once muxer has a decoderConfig
           const encoder = new W.VideoEncoder({
-            output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+            output: (chunk: any, meta: any) => {
+              let m = meta;
+              // Some Android WebViews never attach decoderConfig to live chunks. Seed the muxer
+              // with the description proven during the self-test so finalize() doesn't crash.
+              if (!m?.decoderConfig && !seededConfigRef.current && provenDecoderConfigRef.current) {
+                m = { ...(meta || {}), decoderConfig: provenDecoderConfigRef.current };
+              }
+              if (m?.decoderConfig) seededConfigRef.current = true;
+              muxer.addVideoChunk(chunk, m);
+            },
             error:  (e: any) => {
               console.error("[VideoEncoder]", e);
               if (!encErrRef.current) encErrRef.current = `encoder: ${e?.message || e}`;
@@ -929,9 +944,21 @@ export default function RunVideoShare() {
             if (!s?.supported) continue;
           }
           let chunks = 0;
-          let gotDescription = false; // mp4-muxer requires decoderConfig.description (avcC/SPS+PPS)
+          let provenConfig: any = null; // full decoderConfig (with description) proven on THIS device
           enc = new W.VideoEncoder({
-            output: (_chunk: any, meta: any) => { chunks++; if (meta?.decoderConfig?.description) gotDescription = true; },
+            output: (_chunk: any, meta: any) => {
+              chunks++;
+              const dc = meta?.decoderConfig;
+              if (dc?.description && !provenConfig) {
+                // Deep-copy the description bytes so they survive after the encoder closes,
+                // respecting byteOffset/byteLength so we copy only this view's bytes.
+                const src = dc.description as ArrayBuffer | ArrayBufferView;
+                const bytes = src instanceof ArrayBuffer
+                  ? new Uint8Array(src.slice(0))
+                  : new Uint8Array(src.buffer, src.byteOffset, src.byteLength).slice();
+                provenConfig = { codec: dc.codec, codedWidth: dc.codedWidth, codedHeight: dc.codedHeight, description: bytes };
+              }
+            },
             error: () => {},
           });
           enc.configure({ codec, width: CW, height: CH, bitrate: 8_000_000, framerate: 30, avc: { format: "avc" } });
@@ -940,14 +967,16 @@ export default function RunVideoShare() {
           frame.close();
           await enc.flush();
           try { enc.close(); } catch { /* already closed */ }
-          // Require BOTH a real chunk AND the description — otherwise finalize() would crash
+          // Require a real chunk AND a captured description — otherwise finalize() would crash
           // reading colorSpace off a null decoderConfig, so this codec is unusable here.
-          if (!cancelled && chunks > 0 && gotDescription) {
-            workingCodecRef.current     = codec;
+          if (!cancelled && chunks > 0 && provenConfig) {
+            workingCodecRef.current       = codec;
+            provenDecoderConfigRef.current = provenConfig; // reused to seed the muxer during real recording
             webCodecsSupportedRef.current = true;
             if (!cancelled) setProbeDone(true);
             return; // proven working — done
           }
+          const gotDescription = !!provenConfig;
           if (chunks > 0 && !gotDescription) probeReason = "encoder gave no video description";
         } catch {
           try { enc?.close(); } catch { /* ignore */ }

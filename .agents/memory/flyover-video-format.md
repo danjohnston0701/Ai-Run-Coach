@@ -55,3 +55,18 @@ make the mount self-test require BOTH a chunk *and* `meta.decoderConfig.descript
 enabling WebCodecs — otherwise fall back to MediaRecorder instead of dead-ending at finalize.
 **Why:** WebCodecs default format can be Annex-B on some devices; the description is mandatory for
 a valid MP4 moov, so proving it's emitted (not just that frames come out) is what prevents the crash.
+
+**Self-test can PASS yet real encode still crash at finalize — flush emits the description, streaming doesn't.**
+Even with `avc:{format:"avc"}` and the self-test gated on `decoderConfig.description`, some Android
+WebViews emit the description only on a `flush()` of a single keyframe (the self-test), but during
+continuous real-time encoding they hand back chunks with NO `decoderConfig`. So the self-test enables
+WebCodecs (proving the encoder CAN emit it), yet every live chunk lacks it → muxer's decoderConfig stays
+null → finalize crashes on `.colorSpace`. Tell: crash persists AND the MediaRecorder fallback note never
+appears (self-test passed).
+**Fix:** during the self-test, deep-copy the proven `decoderConfig` (codec/codedWidth/codedHeight +
+`description` bytes, respecting byteOffset/byteLength) into a ref; in the real encoder's `output`
+callback, if a live chunk arrives without `decoderConfig`, seed the FIRST chunk (a keyframe) with the
+saved proven config before `muxer.addVideoChunk`. Safe because same codec+resolution → identical SPS/PPS,
+and `format:"avc"` means the sample data is AVCC (consistent with the injected avcC description).
+**Why:** the description is per-codec/resolution, not per-stream, so reusing the self-test's is valid and
+guarantees the muxer always has a non-null decoderConfig regardless of streaming quirks.
