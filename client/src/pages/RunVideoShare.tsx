@@ -30,8 +30,8 @@ const TOTAL_MS  = INTRO_MS + FOLLOW_MS + OUTRO_MS;
 const HOLD_MS   = 1400;    // hold the final frame before stopping the recorder
 
 // ─── Camera tuning ────────────────────────────────────────────────────────────
-const FOLLOW_ZOOM     = 16.0;
-const FOLLOW_PITCH    = 70;   // low, cinematic drone angle (more horizon, less top-down)
+const FOLLOW_ZOOM     = 16.6;  // closer in = lower apparent altitude + more terrain detail
+const FOLLOW_PITCH    = 76;   // near-horizon drone angle so hills read in profile, not top-down
 const LOOKAHEAD_M     = 95;   // camera centres this far ahead of the marker
 const BRG_LOOKAHEAD_M = 150;  // travel direction sampled over a longer span (smoother turns)
 const POS_SMOOTH      = 0.09; // camera-position easing per frame (lower = smoother/floatier)
@@ -331,7 +331,7 @@ export default function RunVideoShare() {
 
     map.on("load", () => {
       try {
-        map.setTerrain({ source: "terrain", exaggeration: 1.5 });
+        map.setTerrain({ source: "terrain", exaggeration: 2.4 });
       } catch { /* terrain unsupported — continue flat */ }
 
       try {
