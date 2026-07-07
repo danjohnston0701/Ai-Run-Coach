@@ -461,6 +461,23 @@ export default function RunVideoShare() {
 
       ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "600 42px 'Inter', sans-serif"; ctx.letterSpacing = "6px";
       ctx.fillText(distUnit, CW / 2, CH * 0.655); ctx.letterSpacing = "0px";
+
+      // Secondary stats beneath the hero distance — genuine total time + average pace.
+      const introDistVal = units === "mi" ? totalDistM / 1609.344 : totalDistM / 1000;
+      const introPaceSec = introDistVal > 0 ? totalDurSec / introDistVal : 0;
+      const introStats: { label: string; value: string }[] = [
+        { label: "TIME",     value: fmtClock(totalDurSec) },
+        { label: "AVG PACE", value: introPaceSec > 0 ? `${fmtClock(introPaceSec)}/${units}` : "—" },
+      ];
+      introStats.forEach((s, i) => {
+        const cx = i === 0 ? CW * 0.30 : CW * 0.70;
+        ctx.fillStyle = TEAL; ctx.font = "600 30px 'Inter', sans-serif"; ctx.letterSpacing = "5px";
+        ctx.fillText(s.label, cx, CH * 0.72); ctx.letterSpacing = "0px";
+        ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.font = "bold 62px 'Inter', sans-serif";
+        ctx.fillText(s.value, cx, CH * 0.785);
+      });
+      ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(CW * 0.5, CH * 0.705); ctx.lineTo(CW * 0.5, CH * 0.79); ctx.stroke();
       ctx.restore();
     }
 
