@@ -154,7 +154,7 @@ export default function RunVideoShare() {
   const cumRef     = useRef<number[]>([]);
   const totalRef   = useRef<number>(0);
   const timeFracRef = useRef<number[] | null>(null); // real elapsed-time fraction per point (0..1)
-  const elevFracRef = useRef<number[] | null>(null); // real cumulative elevation-gain fraction per point (0..1)
+  const altRef = useRef<number[] | null>(null); // real per-point altitude (metres), smoothed
   const dispBearingRef = useRef<number>(0);
   const dispCenterRef  = useRef<LngLat>([0, 0]); // smoothed (chase) camera centre
   const lastCamRef = useRef<{ center: LngLat; zoom: number; pitch: number; bearing: number } | null>(null);
@@ -231,31 +231,20 @@ export default function RunVideoShare() {
     }
     timeFracRef.current = timeFrac;
 
-    // Build a genuine cumulative elevation-gain fraction from the recorded altitudes, so
-    // the ELEV counter climbs on ascents and holds flat on descents — instead of rising
-    // linearly. Smoothed + dead-banded to tame GPS altitude noise, then pinned to the
-    // real total gain (the shape is real; the magnitude matches totalElevationGain).
+    // Genuine altitude profile from the recorded per-point altitudes, smoothed to tame
+    // GPS noise. Lets the ALTITUDE readout rise and fall with the real terrain instead of
+    // an evenly-climbing number. Null (→ linear-gain fallback) when the run has no altitudes.
     const alt: number[] = parsed.map((p: any) => p.alt);
-    let elevFrac: number[] | null = null;
+    let altSmooth: number[] | null = null;
     if (alt.length === coords.length && alt.length > 1 && alt.every(Number.isFinite)) {
       const win = 4;
-      const sm = alt.map((_, i) => {
+      altSmooth = alt.map((_, i) => {
         let s = 0, n = 0;
         for (let j = Math.max(0, i - win); j <= Math.min(alt.length - 1, i + win); j++) { s += alt[j]; n++; }
         return s / n;
       });
-      const gain: number[] = [0];
-      for (let i = 1; i < sm.length; i++) {
-        const dEl = sm[i] - sm[i - 1];
-        gain[i] = gain[i - 1] + (dEl > 0.3 ? dEl : 0); // dead-band ignores jitter
-      }
-      const totalGain = gain[gain.length - 1];
-      if (totalGain > 0) {
-        elevFrac = gain.map(g => g / totalGain);
-        elevFrac[elevFrac.length - 1] = 1; // anchor to the real total gain
-      }
     }
-    elevFracRef.current = elevFrac;
+    altRef.current = altSmooth;
 
     dispBearingRef.current = coords.length >= 2 ? bearing(coords[0], coords[1]) : 0;
     // Need at least a couple of points AND some real distance — a cluster of
@@ -448,21 +437,26 @@ export default function RunVideoShare() {
     // the real per-point timestamps. Falls back to even pace if the run has none.
     const cumArr = cumRef.current;
     const tfArr  = timeFracRef.current;
-    const efArr  = elevFracRef.current;
+    const altArr = altRef.current;
     const trackTotal = totalRef.current || 0;
     let elapsedFrac = routeProgress;
-    let elevFracV   = routeProgress;
-    if (trackTotal > 0 && routeProgress > 0 && cumArr.length > 1) {
+    let altAtMarker: number | null = null;
+    if (trackTotal > 0 && cumArr.length > 1) {
       const d = routeProgress * trackTotal;
       let i = 1;
       while (i < cumArr.length && cumArr[i] < d) i++;
       if (i >= cumArr.length) i = cumArr.length - 1;
       const seg = (d - cumArr[i - 1]) / ((cumArr[i] - cumArr[i - 1]) || 1);
-      if (tfArr && cumArr.length === tfArr.length) elapsedFrac = tfArr[i - 1] + (tfArr[i] - tfArr[i - 1]) * seg;
-      if (efArr && cumArr.length === efArr.length) elevFracV   = efArr[i - 1] + (efArr[i] - efArr[i - 1]) * seg;
+      if (tfArr  && cumArr.length === tfArr.length)  elapsedFrac = tfArr[i - 1]  + (tfArr[i]  - tfArr[i - 1])  * seg;
+      if (altArr && cumArr.length === altArr.length) altAtMarker = altArr[i - 1] + (altArr[i] - altArr[i - 1]) * seg;
     }
     elapsedFrac = Math.max(0, Math.min(1, elapsedFrac));
-    elevFracV   = Math.max(0, Math.min(1, elevFracV));
+
+    // Show the real altitude at the marker (rises/falls with the terrain). If the run has
+    // no altitude data, fall back to the evenly-climbing elevation-gain figure.
+    const elevStat = altAtMarker != null
+      ? { label: "ALTITUDE", value: fmtElev(altAtMarker, units),           unit: units === "mi" ? "ft" : "m" }
+      : { label: "ELEV",     value: fmtElev(elevGain * routeProgress, units), unit: units === "mi" ? "ft" : "m" };
 
     // Cross-fade: title card owns the intro, the HUD takes over once we're flying.
     const introFade = Math.max(0, Math.min(1, (INTRO_MS - tMs) / 500));
@@ -541,7 +535,7 @@ export default function RunVideoShare() {
       const stats = [
         { label: "TIME",     value: fmtClock(totalDurSec * elapsedFrac),        unit: "" },
         { label: "DISTANCE", value: fmtDist(totalDistM * routeProgress, units), unit: units, hero: true },
-        { label: "ELEV",     value: fmtElev(elevGain * elevFracV, units),       unit: units === "mi" ? "ft" : "m" },
+        elevStat,
       ] as { label: string; value: string; unit: string; hero?: boolean }[];
       const colW = panelW / 3;
       ctx.textAlign = "center";
