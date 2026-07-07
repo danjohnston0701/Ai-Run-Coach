@@ -23,16 +23,19 @@ const TERRAIN_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
 // ─── Animation timeline (ms) ──────────────────────────────────────────────────
-const INTRO_MS  = 1300;    // zoom/tilt into the start
-const FOLLOW_MS = 11000;   // drone follow along the route
-const OUTRO_MS  = 2700;    // pull up to reveal the whole route
+const INTRO_MS  = 2200;    // zoom/tilt into the start (slow, cinematic)
+const FOLLOW_MS = 18000;   // drone follow along the route (slower = smoother)
+const OUTRO_MS  = 3400;    // pull up to reveal the whole route
 const TOTAL_MS  = INTRO_MS + FOLLOW_MS + OUTRO_MS;
-const HOLD_MS   = 1200;    // hold the final frame before stopping the recorder
+const HOLD_MS   = 1400;    // hold the final frame before stopping the recorder
 
 // ─── Camera tuning ────────────────────────────────────────────────────────────
-const FOLLOW_ZOOM   = 15.2;
-const FOLLOW_PITCH  = 66;
-const LOOKAHEAD_M   = 70;   // camera centres slightly ahead of the marker
+const FOLLOW_ZOOM     = 15.6;
+const FOLLOW_PITCH    = 60;
+const LOOKAHEAD_M     = 90;   // camera centres this far ahead of the marker
+const BRG_LOOKAHEAD_M = 140;  // travel direction sampled over a longer span (smoother turns)
+const POS_SMOOTH      = 0.10; // camera-position easing per frame (lower = smoother/floatier)
+const BRG_SMOOTH      = 0.045;// camera-bearing easing per frame (lower = gentler turns)
 
 // ─── Geo helpers ──────────────────────────────────────────────────────────────
 type LngLat = [number, number]; // [lng, lat]
@@ -60,6 +63,24 @@ function bearing(a: LngLat, b: LngLat): number {
 function lerpAngle(from: number, to: number, t: number): number {
   let diff = ((to - from + 540) % 360) - 180;
   return (from + diff * t + 360) % 360;
+}
+
+// Moving-average smoothing to tame raw GPS jitter, so both the drawn line and
+// the camera path glide instead of jerking around. Endpoints are preserved.
+function smoothPath(coords: LngLat[], radius = 3): LngLat[] {
+  if (coords.length <= 2) return coords;
+  const out: LngLat[] = [];
+  for (let i = 0; i < coords.length; i++) {
+    let sx = 0, sy = 0, n = 0;
+    for (let j = i - radius; j <= i + radius; j++) {
+      if (j < 0 || j >= coords.length) continue;
+      sx += coords[j][0]; sy += coords[j][1]; n++;
+    }
+    out.push([sx / n, sy / n]);
+  }
+  out[0] = coords[0];
+  out[out.length - 1] = coords[coords.length - 1];
+  return out;
 }
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
@@ -97,6 +118,7 @@ export default function RunVideoShare() {
   const cumRef     = useRef<number[]>([]);
   const totalRef   = useRef<number>(0);
   const dispBearingRef = useRef<number>(0);
+  const dispCenterRef  = useRef<LngLat>([0, 0]); // smoothed (chase) camera centre
   const lastCamRef = useRef<{ center: LngLat; zoom: number; pitch: number; bearing: number } | null>(null);
   const overviewCamRef = useRef<{ center: LngLat; zoom: number } | null>(null);
 
@@ -131,11 +153,12 @@ export default function RunVideoShare() {
     if (!run) return;
     // Backend returns routePoints as { latitude, longitude }; older/phone formats
     // may use { lat, lng }. Normalise both, coerce numeric strings, drop invalids.
-    const coords: LngLat[] = Array.isArray(run.routePoints)
+    const raw: LngLat[] = Array.isArray(run.routePoints)
       ? run.routePoints
           .map((p: any): LngLat => [Number(p?.longitude ?? p?.lng), Number(p?.latitude ?? p?.lat)])
           .filter((c: LngLat) => Number.isFinite(c[0]) && Number.isFinite(c[1]))
       : [];
+    const coords = smoothPath(raw);
     coordsRef.current = coords;
 
     const cum: number[] = [0];
@@ -145,7 +168,9 @@ export default function RunVideoShare() {
     cumRef.current = cum;
     totalRef.current = cum[cum.length - 1] || 0;
     dispBearingRef.current = coords.length >= 2 ? bearing(coords[0], coords[1]) : 0;
-    setHasRoute(coords.length >= 2);
+    // Need at least a couple of points AND some real distance — a cluster of
+    // duplicate GPS fixes would otherwise produce a frozen, pointless flyover.
+    setHasRoute(coords.length >= 2 && (cum[cum.length - 1] || 0) > 50);
   }, [run]);
 
   // ── Interpolate a point (and travel bearing) at a distance along the route ──
@@ -192,6 +217,15 @@ export default function RunVideoShare() {
     if (coords.length < 2) { setMapReady(true); return; }
 
     const start = coords[0];
+
+    // Render the map at (approximately) the compositor's native resolution so the
+    // recorded frame is crisp instead of an upscaled blur. We size the container in
+    // CSS px = target / devicePixelRatio, so the WebGL canvas comes out ~1080×1920
+    // at the correct 9:16 aspect (no stretching). It sits behind the compositor,
+    // which is what the user actually sees, so overflow past the preview box is fine.
+    const dpr = window.devicePixelRatio || 1;
+    mapContainerRef.current.style.width  = `${Math.round(CW / dpr)}px`;
+    mapContainerRef.current.style.height = `${Math.round(CH / dpr)}px`;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -272,7 +306,7 @@ export default function RunVideoShare() {
         new maplibregl.LngLatBounds(coords[0] as any, coords[0] as any),
       );
       try {
-        const cam: any = map.cameraForBounds(bounds, { pitch: 32, bearing: 0, padding: 140 });
+        const cam: any = map.cameraForBounds(bounds, { pitch: 24, bearing: 0, padding: 48 });
         if (cam?.center) {
           const c = cam.center;
           overviewCamRef.current = {
@@ -284,6 +318,7 @@ export default function RunVideoShare() {
 
       // Frame the start (intro end-state) so the idle preview already looks good.
       const ahead = interpAt(LOOKAHEAD_M).pos;
+      dispCenterRef.current = ahead;
       map.jumpTo({ center: ahead, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
 
       map.once("idle", () => {
@@ -398,6 +433,7 @@ export default function RunVideoShare() {
     cancelAnimationFrame(animRef.current);
     chunksRef.current = [];
     dispBearingRef.current = bearing(coordsRef.current[0], coordsRef.current[1]);
+    dispCenterRef.current = interpAt(LOOKAHEAD_M).pos;
 
     if (record) {
       try {
@@ -435,24 +471,37 @@ export default function RunVideoShare() {
       let routeProgress: number;
 
       if (t < INTRO_MS) {
-        // ── Intro: tilt + zoom into the start ──
+        // ── Intro: slow, eased tilt + zoom into the start ──
         const k = t / INTRO_MS;
+        const e = 1 - Math.pow(1 - k, 3); // ease-out cubic
         routeProgress = 0;
         const ahead = interpAt(LOOKAHEAD_M).pos;
+        dispCenterRef.current = ahead;
         map.jumpTo({
           center: ahead,
-          zoom:  13.6 + (FOLLOW_ZOOM - 13.6) * k,
-          pitch: 46   + (FOLLOW_PITCH - 46) * k,
+          zoom:  13.4 + (FOLLOW_ZOOM - 13.4) * e,
+          pitch: 38   + (FOLLOW_PITCH - 38) * e,
           bearing: dispBearingRef.current,
         });
-        lastCamRef.current = { center: ahead, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
+        lastCamRef.current = { center: [ahead[0], ahead[1]], zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
       } else if (t < INTRO_MS + FOLLOW_MS) {
-        // ── Follow: drone chases the marker along the route ──
+        // ── Follow: a floaty "chase" drone that trails the marker ──
         routeProgress = (t - INTRO_MS) / FOLLOW_MS;
         const d = routeProgress * total;
-        const { pos: head, brg } = interpAt(d);
+        const head  = interpAt(d).pos;
         const ahead = interpAt(Math.min(d + LOOKAHEAD_M, total)).pos;
-        dispBearingRef.current = lerpAngle(dispBearingRef.current, brg, 0.09);
+
+        // Travel direction sampled over a long span so gentle bends don't jerk the camera.
+        const brgFrom = interpAt(Math.max(0, d - 20)).pos;
+        const brgTo   = interpAt(Math.min(d + BRG_LOOKAHEAD_M, total)).pos;
+        const targetBrg = bearing(brgFrom, brgTo);
+        dispBearingRef.current = lerpAngle(dispBearingRef.current, targetBrg, BRG_SMOOTH);
+
+        // Ease the camera centre toward the look-ahead point (smooth glide, no snapping).
+        dispCenterRef.current = [
+          dispCenterRef.current[0] + (ahead[0] - dispCenterRef.current[0]) * POS_SMOOTH,
+          dispCenterRef.current[1] + (ahead[1] - dispCenterRef.current[1]) * POS_SMOOTH,
+        ];
 
         map.getSource("routeProgress") && (map.getSource("routeProgress") as any).setData({
           type: "Feature", geometry: { type: "LineString", coordinates: buildProgressLine(d) }, properties: {},
@@ -460,8 +509,8 @@ export default function RunVideoShare() {
         (map.getSource("head") as any)?.setData({
           type: "Feature", geometry: { type: "Point", coordinates: head }, properties: {},
         });
-        map.jumpTo({ center: ahead, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
-        lastCamRef.current = { center: ahead, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
+        map.jumpTo({ center: dispCenterRef.current as any, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
+        lastCamRef.current = { center: [dispCenterRef.current[0], dispCenterRef.current[1]], zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
       } else {
         // ── Outro: pull up and out to reveal the whole route ──
         routeProgress = 1;
@@ -483,7 +532,7 @@ export default function RunVideoShare() {
               from.center[1] + (ov.center[1] - from.center[1]) * e,
             ],
             zoom:  from.zoom  + (ov.zoom  - from.zoom)  * e,
-            pitch: from.pitch + (32       - from.pitch) * e,
+            pitch: from.pitch + (24       - from.pitch) * e,
             bearing: lerpAngle(from.bearing, 0, e),
           });
         }
@@ -517,6 +566,7 @@ export default function RunVideoShare() {
       (map.getSource("head") as any)?.setData({ type: "Feature", geometry: { type: "Point", coordinates: coords[0] }, properties: {} });
       dispBearingRef.current = bearing(coords[0], coords[1]);
       const ahead = interpAt(LOOKAHEAD_M).pos;
+      dispCenterRef.current = ahead;
       map.jumpTo({ center: ahead, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
       map.once("idle", () => compositeFrame(0, 0));
     }
@@ -571,8 +621,8 @@ export default function RunVideoShare() {
           className="relative rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-[#0a0a0f]"
           style={{ width: "min(360px, 100%)", aspectRatio: "9/16" }}
         >
-          {/* MapLibre renders here (underneath); the compositor canvas covers it. */}
-          <div ref={mapContainerRef} className="absolute inset-0" />
+          {/* MapLibre renders here (underneath) at native res; the compositor covers it. */}
+          <div ref={mapContainerRef} className="absolute top-0 left-0 origin-top-left" />
           <canvas
             ref={canvasRef}
             width={CW}
