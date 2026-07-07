@@ -110,6 +110,16 @@ function pulseMarker(map: maplibregl.Map, t: number) {
 }
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
+// Stopwatch clock (m:ss, or h:mm:ss past an hour) — used for the counting-up timer.
+function fmtClock(totalSeconds: number): string {
+  const s   = Math.max(0, Math.floor(totalSeconds));
+  const h   = Math.floor(s / 3600);
+  const m   = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
 function fmtDist(meters: number, units: "km" | "mi"): string {
   if (units === "mi") return (meters / 1609.344).toFixed(1);
   return (meters / 1000).toFixed(2);
@@ -373,7 +383,7 @@ export default function RunVideoShare() {
     const runName    = run?.name || run?.routeName || "Run Summary";
     const totalDistM = run?.distance || 0;
     const elevGain   = run?.totalElevationGain || 0;
-    const avgPace    = run?.averagePace || run?.avgPace || "--'--\"";
+    const totalDurSec = run?.totalTime ?? run?.movingTime ?? run?.duration ?? 0;
     const dateStr    = fmtDate(run?.completedAt || run?.date || null);
     const distUnit   = units === "mi" ? "MILES" : "KILOMETRES";
 
@@ -435,7 +445,7 @@ export default function RunVideoShare() {
       ctx.restore();
 
       const stats = [
-        { label: "PACE",     value: avgPace,                                    unit: `/${units}` },
+        { label: "TIME",     value: fmtClock(totalDurSec * routeProgress),      unit: "" },
         { label: "DISTANCE", value: fmtDist(totalDistM * routeProgress, units), unit: units, hero: true },
         { label: "ELEV",     value: fmtElev(elevGain * routeProgress, units),   unit: units === "mi" ? "ft" : "m" },
       ] as { label: string; value: string; unit: string; hero?: boolean }[];
