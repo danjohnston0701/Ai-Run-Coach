@@ -409,7 +409,10 @@ export default function RunVideoShare() {
     const runName    = run?.name || run?.routeName || "Run Summary";
     const totalDistM = run?.distance || 0;
     const elevGain   = run?.totalElevationGain || 0;
-    const totalDurSec = run?.totalTime ?? run?.movingTime ?? run?.duration ?? 0;
+    // Duration may arrive in seconds (Garmin) or milliseconds (legacy Android uploads).
+    // No run lasts over 24h (86400s), so anything larger is milliseconds → convert.
+    const rawDur = run?.totalTime ?? run?.movingTime ?? run?.duration ?? 0;
+    const totalDurSec = rawDur > 86400 ? Math.round(rawDur / 1000) : rawDur;
     const dateStr    = fmtDate(run?.completedAt || run?.date || null);
     const distUnit   = units === "mi" ? "MILES" : "KILOMETRES";
 
