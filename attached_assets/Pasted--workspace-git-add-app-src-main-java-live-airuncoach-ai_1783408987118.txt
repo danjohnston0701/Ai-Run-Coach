@@ -1,0 +1,46 @@
+~/workspace$ git add app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunVideoScreen.kt
+git rebase --continue
+git push origin main
+fatal: no rebase in progress
+To https://github.com/danjohnston0701/Ai-Run-Coach
+ ! [rejected]          main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/danjohnston0701/Ai-Run-Coach'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. If you want to integrate the remote changes,
+hint: use 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+~/workspace$ git pull --no-rebase origin main
+git push origin main
+From https://github.com/danjohnston0701/Ai-Run-Coach
+ * branch              main       -> FETCH_HEAD
+Auto-merging app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunVideoScreen.kt
+CONFLICT (content): Merge conflict in app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunVideoScreen.kt
+Automatic merge failed; fix conflicts and then commit the result.
+To https://github.com/danjohnston0701/Ai-Run-Coach
+ ! [rejected]          main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/danjohnston0701/Ai-Run-Coach'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. If you want to integrate the remote changes,
+hint: use 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+~/workspace$ git pull --no-rebase origin main
+error: Pulling is not possible because you have unmerged files.
+hint: Fix them up in the work tree, and then use 'git add/rm <file>'
+hint: as appropriate to mark resolution and make a commit.
+fatal: Exiting because of an unresolved conflict.
+~/workspace$ git add app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunVideoScreen.kt
+git commit --no-edit
+git push origin main
+On branch main
+Your branch and 'origin/main' have diverged,
+and have 30 and 1 different commits each, respectively.
+
+nothing to commit, working tree clean
+To https://github.com/danjohnston0701/Ai-Run-Coach
+ ! [rejected]          main -> main (non-fast-forward)
+error: failed to push some refs to 'https://github.com/danjohnston0701/Ai-Run-Coach'
+hint: Updates were rejected because the tip of your current branch is behind
+hint: its remote counterpart. If you want to integrate the remote changes,
+hint: use 'git pull' before pushing again.
+hint: See the 'Note about fast-forwards' in 'git push --help' for details.
+~/workspace$ 
