@@ -46,10 +46,9 @@ fun RunVideoScreen(
 ) {
     val context = LocalContext.current
 
-    // Read auth token from SharedPreferences — same key used by all app login paths
+    // Read auth token from SessionManager — single source of truth for authentication
     val authToken = remember {
-        context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
-            .getString("auth_token", "") ?: ""
+        live.airuncoach.airuncoach.data.SessionManager(context).getAuthToken() ?: ""
     }
 
     val pendingVideoFile = remember { mutableStateOf<File?>(null) }
