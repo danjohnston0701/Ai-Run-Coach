@@ -197,8 +197,15 @@ export default function RunVideoShare() {
 
   useEffect(() => {
     if (!run) return;
+    // Backend returns route points as { latitude, longitude } (see transformRunForAndroid),
+    // while older/phone formats may use { lat, lng }. Normalise both to { lat, lng }.
     const pts: { lat: number; lng: number }[] = Array.isArray(run.routePoints)
-      ? run.routePoints.filter((p: any) => p?.lat && p?.lng)
+      ? run.routePoints
+          .map((p: any) => ({
+            lat: Number(p?.latitude ?? p?.lat),
+            lng: Number(p?.longitude ?? p?.lng),
+          }))
+          .filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
       : [];
     if (pts.length < 2) { setTilesReady(true); return; }
 
