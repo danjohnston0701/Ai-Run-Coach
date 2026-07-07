@@ -179,6 +179,7 @@ export default function RunVideoShare() {
   const [status, setStatus]   = useState<"idle" | "playing" | "recording" | "done" | "error">("idle");
   const [errorDetail, setErrorDetail] = useState<string>("");
   const [probeDone, setProbeDone] = useState(false); // WebCodecs self-test finished (record gated on this)
+  const probeReasonRef = useRef<string>(""); // why WebCodecs was rejected (surfaced for on-device diagnosis)
   const [progress, setProgress] = useState(0);
   const [hasRoute, setHasRoute] = useState(false);
   const [units] = useState<"km" | "mi">(() => {
@@ -710,6 +711,7 @@ export default function RunVideoShare() {
             height: CH,
             bitrate: 8_000_000,
             framerate: 30,
+            avc: { format: "avc" }, // force AVCC + decoderConfig.description (mp4-muxer needs it)
           });
           muxerRef.current        = muxer;
           videoEncoderRef.current = encoder;
@@ -912,6 +914,7 @@ export default function RunVideoShare() {
     if (typeof W.VideoEncoder !== "function" || typeof W.VideoFrame !== "function") { setProbeDone(true); return; }
     let cancelled = false;
     (async () => {
+      let probeReason = "";
       const ladder = ["avc1.42E029", "avc1.42E028", "avc1.42001F", "avc1.4D0029", "avc1.640029"];
       const test = document.createElement("canvas");
       test.width = CW; test.height = CH;
@@ -926,26 +929,33 @@ export default function RunVideoShare() {
             if (!s?.supported) continue;
           }
           let chunks = 0;
-          enc = new W.VideoEncoder({ output: () => { chunks++; }, error: () => {} });
-          enc.configure({ codec, width: CW, height: CH, bitrate: 8_000_000, framerate: 30 });
+          let gotDescription = false; // mp4-muxer requires decoderConfig.description (avcC/SPS+PPS)
+          enc = new W.VideoEncoder({
+            output: (_chunk: any, meta: any) => { chunks++; if (meta?.decoderConfig?.description) gotDescription = true; },
+            error: () => {},
+          });
+          enc.configure({ codec, width: CW, height: CH, bitrate: 8_000_000, framerate: 30, avc: { format: "avc" } });
           const frame = new W.VideoFrame(test, { timestamp: 0 });
           enc.encode(frame, { keyFrame: true });
           frame.close();
           await enc.flush();
           try { enc.close(); } catch { /* already closed */ }
-          if (!cancelled && chunks > 0) {
+          // Require BOTH a real chunk AND the description — otherwise finalize() would crash
+          // reading colorSpace off a null decoderConfig, so this codec is unusable here.
+          if (!cancelled && chunks > 0 && gotDescription) {
             workingCodecRef.current     = codec;
             webCodecsSupportedRef.current = true;
             if (!cancelled) setProbeDone(true);
             return; // proven working — done
           }
+          if (chunks > 0 && !gotDescription) probeReason = "encoder gave no video description";
         } catch {
           try { enc?.close(); } catch { /* ignore */ }
           // try next codec in the ladder
         }
       }
       // none worked — leave webCodecsSupportedRef false → MediaRecorder fallback
-      if (!cancelled) setProbeDone(true);
+      if (!cancelled) { if (probeReason) probeReasonRef.current = probeReason; setProbeDone(true); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -1092,6 +1102,11 @@ export default function RunVideoShare() {
                   </>
                 )}
               </Button>
+              {probeDone && !webCodecsSupportedRef.current && probeReasonRef.current && (
+                <span className="text-white/40 text-[11px] text-center px-2" data-testid="text-probe-note">
+                  Using basic recorder ({probeReasonRef.current})
+                </span>
+              )}
             </>
           )}
 

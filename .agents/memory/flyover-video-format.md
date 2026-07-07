@@ -44,3 +44,14 @@ recording. Disable the Record button until the probe finishes (else a fast tap s
 Because on-device client `console.error` is invisible, surface the actual failure reason in the
 UI (encoder/frame/finalize message + frame count) so device-only bugs are diagnosable.
 **Why:** WebView WebCodecs capability reporting is unreliable; a real encode is the only proof.
+
+**mp4-muxer needs `decoderConfig.description` — some Android WebView encoders never emit it.**
+Symptom: hundreds of frames encode fine, then `muxer.finalize()` throws "cannot read properties
+of null (reading 'colorSpace')". Cause: mp4-muxer only sets `track.info.decoderConfig` when a
+chunk's metadata carries `decoderConfig` (the avcC / SPS+PPS "description"); if the encoder emits
+Annex-B chunks with no description, decoderConfig stays null and finalize crashes reading it.
+**Fix:** pass `avc: { format: "avc" }` to `encoder.configure()` (forces AVCC + description), AND
+make the mount self-test require BOTH a chunk *and* `meta.decoderConfig.description` before
+enabling WebCodecs — otherwise fall back to MediaRecorder instead of dead-ending at finalize.
+**Why:** WebCodecs default format can be Annex-B on some devices; the description is mandatory for
+a valid MP4 moov, so proving it's emitted (not just that frames come out) is what prevents the crash.
