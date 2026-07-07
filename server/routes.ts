@@ -3740,7 +3740,7 @@ function transformRunForAndroid(run: any) {
           return res.status(500).json({ error: "Failed to invite observer" });
         }
 
-        // Get friend's info for notification
+        // Get friend's info for notification and email
         const friend = await storage.getUser(friendId);
         if (!friend) {
           return res.status(500).json({ error: "Friend not found" });
@@ -3762,9 +3762,20 @@ function transformRunForAndroid(run: any) {
           true
         );
 
-        console.log(`[Live Sessions] Invited ${friendId} to watch ${runnerId}'s run (session ${sessionId}). Push sent: ${pushSent}`);
+        // Also send email notification to friend if they have an email on file
+        let emailSent = false;
+        if (friend.email) {
+          emailSent = await emailService.sendFriendLiveRunInvitationEmail(
+            friend.email,
+            friend.name || "Friend",
+            runner.name || "A runner",
+            sessionId
+          );
+        }
 
-        return res.json({ success: true, type: "registered", pushSent });
+        console.log(`[Live Sessions] Invited friend ${friendId} to watch ${runnerId}'s run (session ${sessionId}). Push: ${pushSent}, Email: ${emailSent}`);
+
+        return res.json({ success: true, type: "registered", pushSent, emailSent });
       }
 
       // FLOW 2: Invite non-registered user via email
@@ -3781,13 +3792,13 @@ function transformRunForAndroid(run: any) {
         if (existingUser) {
           const isFriend = await storage.checkFriendship(runnerId, existingUser.id);
           if (isFriend) {
-            // Registered friend — invite via the session observer list and send a push notification
+            // Registered friend — invite via the session observer list and send push + email
             const updatedSession = await storage.inviteObserver(sessionId, existingUser.id);
             if (!updatedSession) {
               return res.status(500).json({ error: "Failed to invite observer" });
             }
 
-            // Data-only so onMessageReceived fires in all states
+            // Send push notification — data-only so onMessageReceived fires in all states
             const pushSent = await notificationService.sendFirebasePush(
               existingUser.id,
               `${runner.name} invited you to watch their run`,
@@ -3803,9 +3814,17 @@ function transformRunForAndroid(run: any) {
               true
             );
 
-            console.log(`[Live Sessions] Invited registered friend ${existingUser.id} (${trimmedEmail}) via email lookup. Push sent: ${pushSent}`);
+            // Also send email to the friend
+            const emailSent = await emailService.sendFriendLiveRunInvitationEmail(
+              trimmedEmail,
+              existingUser.name || "Friend",
+              runner.name || "A runner",
+              sessionId
+            );
 
-            return res.json({ success: true, type: "registered", pushSent });
+            console.log(`[Live Sessions] Invited registered friend ${existingUser.id} (${trimmedEmail}) via email lookup. Push: ${pushSent}, Email: ${emailSent}`);
+
+            return res.json({ success: true, type: "registered", pushSent, emailSent });
           }
           // Registered but not a friend — fall through and send them an email invitation anyway.
           // This covers cases like a runner inviting their own secondary account or a new user

@@ -250,3 +250,50 @@ export async function sendObserverInvitationEmail(
     return false;
   }
 }
+
+export async function sendFriendLiveRunInvitationEmail(
+  email: string,
+  friendName: string,
+  runnerName: string,
+  sessionId: string
+): Promise<boolean> {
+  try {
+    const { client, fromEmail } = await getResendClient();
+
+    // For registered friends, we send a simpler email (they have the app)
+    // Still provide the session link for web/email viewing
+    const appLink = `airuncoach://live/${sessionId}`;
+    const webLink = `https://airuncoach.live/live/${sessionId}`;
+
+    await client.emails.send({
+      from: `AI Run Coach <${fromEmail}>`,
+      to: email,
+      subject: `${runnerName} invited you to watch their run`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">🏃 Live Run Invite</h1>
+          </div>
+          <div style="padding: 40px 32px;">
+            <h2 style="margin: 0 0 16px; font-size: 20px; color: #ffffff;">Watch ${runnerName}'s run live</h2>
+            <p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6;">Hi ${friendName},</p>
+            <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">${runnerName} has invited you to watch their run in real-time. See their live location, route, and metrics as they run!</p>
+            <div style="text-align: center;">
+              <a href="${appLink}" style="display: inline-block; background: #00D4FF; color: #0A0A1A; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 999px; text-decoration: none; letter-spacing: 1px; text-transform: uppercase;">Watch Now →</a>
+            </div>
+            <p style="margin: 24px 0 0; color: #64748b; font-size: 12px; text-align: center;">You should also receive a push notification in the app</p>
+            <hr style="border: none; border-top: 1px solid #1a1a2e; margin: 32px 0; opacity: 0.5;" />
+            <p style="margin: 0; color: #64748b; font-size: 12px;">AI Run Coach — Your personal running coach</p>
+          </div>
+        </div>
+      `,
+      text: `${runnerName} invited you to watch their run!\n\nWatch their live location, route, and metrics as they run.\n\nTap the link below or open the notification in your app:\n${appLink}\n\n---\nAI Run Coach — Your personal running coach`,
+    });
+
+    console.log(`[Email] Friend live-run invitation sent to ${email} from ${runnerName}`);
+    return true;
+  } catch (error) {
+    console.error(`[Email] Failed to send friend live-run invitation to ${email}:`, error);
+    return false;
+  }
+}
