@@ -70,3 +70,16 @@ saved proven config before `muxer.addVideoChunk`. Safe because same codec+resolu
 and `format:"avc"` means the sample data is AVCC (consistent with the injected avcC description).
 **Why:** the description is per-codec/resolution, not per-stream, so reusing the self-test's is valid and
 guarantees the muxer always has a non-null decoderConfig regardless of streaming quirks.
+
+**REAL ROOT CAUSE of the persistent finalize `colorSpace` crash: non-zero FIRST timestamp + mp4-muxer strict mode.**
+The rAF loop stamps each frame `timestamp = (now - startTs)` µs, so the FIRST frame is ~16000µs, never 0.
+mp4-muxer defaults to `firstTimestampBehavior:"strict"`, which THROWS if the first chunk's DTS≠0 — and
+because that throw happens inside the async `VideoEncoder` output callback it's swallowed (invisible on
+device). Result: NO samples and NO decoderConfig are ever stored, so `finalize()` crashes reading
+`.colorSpace` off a null decoderConfig. The mount self-test passed only because its single frame used
+`timestamp:0` exactly. Symptom that pinpoints this vs the description issue: crash still fires with
+`seeded: yes` (our injected config "reached" addVideoChunk but the chunk was rejected before storage).
+**Fix:** pass `firstTimestampBehavior:"offset"` to the `Muxer` (rebases all timestamps so the first is 0).
+Keep the decoderConfig seeding too — they're complementary (offset lets chunks in; seeding covers encoders
+that still omit the description). **Why:** timestamp validation runs BEFORE decoderConfig storage in
+mp4-muxer's createSampleForTrack, so a first-timestamp throw silently defeats everything downstream.

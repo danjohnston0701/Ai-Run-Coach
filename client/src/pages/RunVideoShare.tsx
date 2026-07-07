@@ -702,6 +702,12 @@ export default function RunVideoShare() {
             target: new ArrayBufferTarget(),
             video: { codec: "avc", width: CW, height: CH, frameRate: 30 },
             fastStart: "in-memory",
+            // The first rAF frame fires ~16ms after start, so our first frame's timestamp is never
+            // exactly 0. mp4-muxer's default "strict" behavior THROWS on a non-zero first chunk —
+            // and because that throw happens inside the async encoder output callback it's swallowed,
+            // so NO samples (and no decoderConfig) are ever stored and finalize() crashes on null.
+            // "offset" rebases all timestamps so the first is 0. THIS is the real root cause.
+            firstTimestampBehavior: "offset",
           });
           seededConfigRef.current = false; // reset per recording; set true once muxer has a decoderConfig
           const encoder = new W.VideoEncoder({
