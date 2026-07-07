@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
-import { ArrowLeft, Play, Square, Download, Loader2, Video, AlertCircle } from "lucide-react";
+import { ArrowLeft, Play, Square, Download, Loader2, Video, AlertCircle, Share2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -25,10 +25,17 @@ const TERRAIN_TILES =
 
 // ─── Animation timeline (ms) ──────────────────────────────────────────────────
 const INTRO_MS  = 2200;    // zoom/tilt into the start (slow, cinematic)
-const FOLLOW_MS = 18000;   // drone follow along the route (slower = smoother)
 const OUTRO_MS  = 3400;    // pull up to reveal the whole route
-const TOTAL_MS  = INTRO_MS + FOLLOW_MS + OUTRO_MS;
 const HOLD_MS   = 1400;    // hold the final frame before stopping the recorder
+
+// The drone-follow segment scales with run distance so a marathon isn't crammed into the
+// same 18s as a 3km run. Square-root scaling keeps long runs watchable without dragging:
+//   3km → 18s · 5km → 23s · 10km → 33s · half → 48s · marathon → 60s (capped).
+const FOLLOW_MS_BASE = 18000; // follow duration tuned for a ~3 km run
+const followMsForMeters = (meters: number) => {
+  const km = Math.max(0.5, (meters > 0 ? meters : 3000) / 1000);
+  return Math.round(Math.min(60_000, Math.max(12_000, FOLLOW_MS_BASE * Math.sqrt(km / 3))));
+};
 
 // ─── Camera tuning ────────────────────────────────────────────────────────────
 const FOLLOW_ZOOM     = 16.6;  // closer in = lower apparent altitude + more terrain detail
@@ -165,6 +172,7 @@ export default function RunVideoShare() {
   const provenDecoderConfigRef = useRef<any>(null);
   const seededConfigRef = useRef<boolean>(false); // whether we seeded the muxer's decoderConfig (diagnostic)
   const muxStatsRef = useRef<{ added: number; failed: number; firstErr: string }>({ added: 0, failed: 0, firstErr: "" });
+  const videoFileRef = useRef<{ blob: Blob; name: string } | null>(null); // finished video, kept so Download/Share can be tapped repeatedly
   const encErrRef       = useRef<string>("");           // first runtime encoder/frame error (surfaced to UI)
 
   // Route geometry
@@ -646,7 +654,7 @@ export default function RunVideoShare() {
     }, 60_000);
   }, []);
 
-  // Flush the WebCodecs encoder, finalize the MP4, and trigger the download.
+  // Flush the WebCodecs encoder, finalize the MP4, and stash it for Download/Share.
   const finishWebCodecs = useCallback(async () => {
     const enc   = videoEncoderRef.current;
     const muxer = muxerRef.current;
@@ -665,7 +673,7 @@ export default function RunVideoShare() {
       const { buffer } = muxer.target;
       if (!buffer || buffer.byteLength === 0) throw new Error("empty output buffer");
       const blob = new Blob([buffer], { type: "video/mp4" });
-      triggerDownload(blob, `run-summary-${runId || "video"}.mp4`);
+      videoFileRef.current = { blob, name: `run-summary-${runId || "video"}.mp4` };
       ok = true;
     } catch (e: any) {
       console.error("[finishWebCodecs]", e);
@@ -678,7 +686,30 @@ export default function RunVideoShare() {
       useWebCodecsRef.current = false;
       setStatus(ok ? "done" : "error");
     }
-  }, [runId, triggerDownload]);
+  }, [runId]);
+
+  // Save the finished video to the device (the Android WebView bridge intercepts this
+  // and opens its native Save/Share sheet). The video is kept, so it can be tapped again.
+  const downloadVideo = useCallback(() => {
+    const f = videoFileRef.current;
+    if (f) triggerDownload(f.blob, f.name);
+  }, [triggerDownload]);
+
+  // Share the finished video. Prefer the Web Share API (real share sheet with the file
+  // attached); fall back to the download path, which on Android opens the native share sheet.
+  const shareVideo = useCallback(async () => {
+    const f = videoFileRef.current;
+    if (!f) return;
+    const nav: any = navigator;
+    try {
+      const file = new File([f.blob], f.name, { type: f.blob.type || "video/mp4" });
+      if (nav.canShare?.({ files: [file] })) {
+        try { await nav.share({ files: [file] }); return; }
+        catch (e: any) { if (e?.name === "AbortError") return; /* user cancelled */ }
+      }
+    } catch { /* File constructor or canShare unsupported — fall through */ }
+    triggerDownload(f.blob, f.name);
+  }, [triggerDownload]);
 
   // ── Animation driver ────────────────────────────────────────────────────────
   const runAnimation = useCallback((record: boolean) => {
@@ -696,6 +727,7 @@ export default function RunVideoShare() {
       lastEncMsRef.current    = -1;
       encFrameCountRef.current = 0;
       encErrRef.current       = "";
+      videoFileRef.current    = null; // starting a fresh recording invalidates the previous video
       setErrorDetail("");
       const W = window as any;
       const canWebCodecs = webCodecsSupportedRef.current && typeof W.VideoFrame === "function";
@@ -790,7 +822,7 @@ export default function RunVideoShare() {
           recorder.onstop = () => {
             const blob = new Blob(chunksRef.current, { type: blobType });
             if (blob.size === 0) { setErrorDetail("MediaRecorder produced empty file"); setStatus("error"); return; }
-            triggerDownload(blob, `run-summary-${runId || "video"}.${ext}`);
+            videoFileRef.current = { blob, name: `run-summary-${runId || "video"}.${ext}` };
             setStatus("done");
           };
           recorder.start(100);
@@ -808,10 +840,13 @@ export default function RunVideoShare() {
     setStatus(record ? "recording" : "playing");
 
     const total = totalRef.current;
+    // Timeline scaled to this run's distance (longer runs → longer, watchable flyovers).
+    const followMs = followMsForMeters(run?.distance || 0);
+    const totalMs  = INTRO_MS + followMs + OUTRO_MS;
 
     const tick = (now: number) => {
       const t = now - startTsRef.current;
-      const overall = Math.min(t / TOTAL_MS, 1);
+      const overall = Math.min(t / totalMs, 1);
       setProgress(overall);
 
       let routeProgress: number;
@@ -830,9 +865,9 @@ export default function RunVideoShare() {
           bearing: dispBearingRef.current,
         });
         lastCamRef.current = { center: [ahead[0], ahead[1]], zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
-      } else if (t < INTRO_MS + FOLLOW_MS) {
+      } else if (t < INTRO_MS + followMs) {
         // ── Follow: a floaty "chase" drone that trails the marker ──
-        routeProgress = (t - INTRO_MS) / FOLLOW_MS;
+        routeProgress = (t - INTRO_MS) / followMs;
         const d = routeProgress * total;
         const head  = interpAt(d).pos;
         const ahead = interpAt(Math.min(d + LOOKAHEAD_M, total)).pos;
@@ -870,7 +905,7 @@ export default function RunVideoShare() {
         });
         const from = lastCamRef.current!;
         const ov   = overviewCamRef.current;
-        const k = Math.min((t - INTRO_MS - FOLLOW_MS) / OUTRO_MS, 1);
+        const k = Math.min((t - INTRO_MS - followMs) / OUTRO_MS, 1);
         const e = 1 - Math.pow(1 - k, 3); // ease-out cubic
         if (ov && from) {
           map.jumpTo({
@@ -910,7 +945,7 @@ export default function RunVideoShare() {
         }
       }
 
-      if (t < TOTAL_MS) {
+      if (t < totalMs) {
         animRef.current = requestAnimationFrame(tick);
       } else if (record) {
         stopTimeoutRef.current = window.setTimeout(() => {
@@ -925,7 +960,7 @@ export default function RunVideoShare() {
     };
 
     animRef.current = requestAnimationFrame(tick);
-  }, [runId, interpAt, buildProgressLine, compositeFrame, finishWebCodecs, triggerDownload]);
+  }, [runId, run, interpAt, buildProgressLine, compositeFrame, finishWebCodecs, triggerDownload]);
 
   const stopAll = useCallback(() => {
     cancelAnimationFrame(animRef.current);
@@ -1102,7 +1137,7 @@ export default function RunVideoShare() {
         {status === "recording" && (
           <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/15 border border-red-500/30">
             <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
-            <span className="text-red-400 text-sm font-medium">Recording… {Math.round(progress * 100)}%</span>
+            <span className="text-red-400 text-sm font-medium">Generating video… {Math.round(progress * 100)}%</span>
           </div>
         )}
         {status === "playing" && (
@@ -1113,8 +1148,8 @@ export default function RunVideoShare() {
         )}
         {status === "done" && (
           <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-green-500/10 border border-green-500/20">
-            <Download className="w-4 h-4 text-green-400" />
-            <span className="text-green-400 text-sm font-medium">Video downloaded!</span>
+            <CheckCircle2 className="w-4 h-4 text-green-400" />
+            <span className="text-green-400 text-sm font-medium">Video ready — save or share it below</span>
           </div>
         )}
         {status === "error" && (
@@ -1133,18 +1168,41 @@ export default function RunVideoShare() {
 
         {/* Controls */}
         <div className="w-full max-w-sm flex flex-col gap-3">
-          {(status === "idle" || status === "done" || status === "error") && mapReady && (
+          {status === "done" && mapReady && (
             <>
               <Button
-                onClick={() => runAnimation(false)}
+                onClick={downloadVideo}
+                className="w-full font-bold"
+                style={{ background: TEAL, color: "#000" }}
+                data-testid="button-download"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download Video
+              </Button>
+              <Button
+                onClick={shareVideo}
                 variant="outline"
                 className="w-full border-white/10 bg-white/5 text-white hover:bg-white/10"
-                data-testid="button-preview"
-                disabled={!hasRoute}
+                data-testid="button-share"
               >
-                <Play className="w-4 h-4 mr-2" />
-                Preview Flyover
+                <Share2 className="w-4 h-4 mr-2" />
+                Share Video
               </Button>
+              <Button
+                onClick={() => runAnimation(true)}
+                variant="ghost"
+                className="w-full text-white/50 hover:text-white hover:bg-white/5"
+                data-testid="button-regenerate"
+                disabled={!hasRoute || !probeDone}
+              >
+                <Video className="w-4 h-4 mr-2" />
+                Generate Again
+              </Button>
+            </>
+          )}
+
+          {(status === "idle" || status === "error") && mapReady && (
+            <>
               <Button
                 onClick={() => runAnimation(true)}
                 className="w-full font-bold"
@@ -1155,7 +1213,7 @@ export default function RunVideoShare() {
                 {probeDone ? (
                   <>
                     <Video className="w-4 h-4 mr-2" />
-                    Record &amp; Download Video
+                    Generate Video
                   </>
                 ) : (
                   <>
