@@ -725,7 +725,18 @@ fun MainScreen(onNavigateToLogin: () -> Unit) {
                 val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
                 ObserverRunSessionScreen(
                     sessionId = sessionId,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    isStandaloneObserver = false
+                )
+            }
+
+            // Standalone observer session (accessed from login screen with token)
+            composable("observer_session_standalone/{sessionId}") { backStackEntry ->
+                val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
+                ObserverRunSessionScreen(
+                    sessionId = sessionId,
+                    onNavigateBack = { navController.popBackStack() },
+                    isStandaloneObserver = true
                 )
             }
             

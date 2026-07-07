@@ -30,7 +30,8 @@ import com.google.maps.android.compose.*
 @Composable
 fun ObserverRunSessionScreen(
     sessionId: String,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    isStandaloneObserver: Boolean = false  // True when accessed from login screen (no back nav)
 ) {
     val viewModel: ObserverRunSessionViewModel = hiltViewModel()
     val liveSession by viewModel.liveSession.collectAsState()
@@ -38,31 +39,50 @@ fun ObserverRunSessionScreen(
     val isLoading by viewModel.isLoading.collectAsState()
 
     LaunchedEffect(sessionId) {
-        Log.d("ObserverSession", "Loading session: $sessionId")
+        Log.d("ObserverSession", "Loading session: $sessionId (standalone: $isStandaloneObserver)")
         viewModel.loadRunnerSession(sessionId)
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { 
-                    Text(
-                        if (liveSession?.hasStarted == true) "Live Run" else "Run Invitation",
-                        style = AppTextStyles.h4,
-                        color = Color.White
+            if (!isStandaloneObserver) {
+                // Show top bar with back button for logged-in observers
+                TopAppBar(
+                    title = { 
+                        Text(
+                            if (liveSession?.hasStarted == true) "Live Run" else "Run Invitation",
+                            style = AppTextStyles.h4,
+                            color = Color.White
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Colors.primary,
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White
                     )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Colors.primary,
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
                 )
-            )
+            } else {
+                // Hide navigation for standalone observers (from login screen)
+                TopAppBar(
+                    title = { 
+                        Text(
+                            if (liveSession?.hasStarted == true) "Live Run" else "Run Invitation",
+                            style = AppTextStyles.h4,
+                            color = Color.White
+                        )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Colors.primary,
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White
+                    )
+                )
+            }
         },
         containerColor = Colors.backgroundRoot
     ) { paddingValues ->
@@ -150,7 +170,8 @@ fun ObserverRunSessionScreen(
                     // Run has ended — show the finished screen
                     RunFinishedScreen(
                         runnerName = liveSession?.runnerName ?: "The runner",
-                        onNavigateBack = onNavigateBack
+                        onNavigateBack = onNavigateBack,
+                        isStandaloneObserver = isStandaloneObserver
                     )
                 }
                 liveSession?.hasStarted != true -> {
@@ -402,12 +423,13 @@ fun formatTime(seconds: Int): String {
 
 /**
  * Shown to the observer when the runner has ended their session.
- * Registered users see a "Go to Dashboard" button; non-registered see a simple close message.
+ * Registered users see a "Go to Dashboard" button; standalone observers see "Close App" message.
  */
 @Composable
 fun RunFinishedScreen(
     runnerName: String,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    isStandaloneObserver: Boolean = false
 ) {
     Box(
         modifier = Modifier
@@ -423,14 +445,18 @@ fun RunFinishedScreen(
             Text("✅", fontSize = 56.sp)
 
             Text(
-                "Run finished!",
+                if (isStandaloneObserver) "Run has ended" else "Run finished!",
                 style = AppTextStyles.h3,
                 color = Colors.textPrimary,
                 textAlign = TextAlign.Center
             )
 
             Text(
-                "${runnerName}'s run has ended. Great job cheering them on!",
+                if (isStandaloneObserver) {
+                    "${runnerName}'s run has ended. You can close this app."
+                } else {
+                    "${runnerName}'s run has ended. Great job cheering them on!"
+                },
                 style = AppTextStyles.body,
                 color = Colors.textMuted,
                 textAlign = TextAlign.Center
@@ -445,7 +471,11 @@ fun RunFinishedScreen(
                     .height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
             ) {
-                Text("Go Back to Dashboard", fontSize = 16.sp, color = Color.White)
+                Text(
+                    if (isStandaloneObserver) "Close App" else "Go Back to Dashboard",
+                    fontSize = 16.sp,
+                    color = Color.White
+                )
             }
         }
     }

@@ -51,7 +51,8 @@ fun RootNavigationGraph(navController: NavHostController) {
                     navController.navigate(AppRoutes.FORGOT_PASSWORD)
                 },
                 onNavigateToObserverSession = { sessionId ->
-                    navController.navigate("observer_session/$sessionId") {
+                    // Navigate to standalone observer session (from login, not logged-in user)
+                    navController.navigate("observer_session_standalone/$sessionId") {
                         popUpTo(AppRoutes.LOGIN) { inclusive = true }
                     }
                 }

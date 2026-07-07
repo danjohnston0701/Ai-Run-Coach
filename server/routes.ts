@@ -3864,6 +3864,68 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // Validate observer invitation token and get session status
+  // Used by non-registered observers to check if they can watch a live run
+  app.post("/api/observer-invitations/validate", async (req: Request, res: Response) => {
+    try {
+      const { token } = req.body;
+
+      if (!token || typeof token !== "string") {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      // Get the invitation record
+      const invitation = await storage.getObserverInvitation(token);
+      if (!invitation) {
+        return res.status(404).json({ error: "Invalid invitation token" });
+      }
+
+      // Check if token has expired
+      if (invitation.expiresAt && new Date(invitation.expiresAt) < new Date()) {
+        return res.status(410).json({ error: "Invitation token has expired" });
+      }
+
+      // Get the live session
+      const session = await storage.getLiveSession(invitation.sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      // Check session status
+      // isActive = false means the run has finished
+      if (!session.isActive) {
+        return res.status(410).json({
+          error: "Sorry, this live run session has ended",
+          status: "ended",
+          sessionId: session.id,
+        });
+      }
+
+      // Get runner info for display
+      const runner = await storage.getUser(session.userId);
+
+      // Mark invitation as viewed if not already
+      if (!invitation.viewedAt) {
+        await storage.updateObserverInvitation(invitation.id, {
+          viewedAt: new Date(),
+        });
+      }
+
+      // Return session info for the observer
+      return res.json({
+        success: true,
+        sessionId: session.id,
+        runnerId: session.userId,
+        runnerName: runner?.name || "A runner",
+        hasStarted: session.hasStarted,
+        status: session.hasStarted ? "running" : "waiting",
+      });
+    } catch (error: any) {
+      console.error("Validate observer invitation error:", error);
+      res.status(500).json({ error: "Failed to validate invitation" });
+    }
+  });
+
   // Invite a registered friend to join a group run session (sends push notification)
   app.post("/api/live-sessions/:sessionId/invite-participant", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

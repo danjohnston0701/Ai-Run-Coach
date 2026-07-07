@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.ValidateObserverInvitationRequest
 import retrofit2.HttpException
 import javax.inject.Inject
 
@@ -16,9 +17,10 @@ import javax.inject.Inject
  *
  * Flow:
  * 1. User enters token from email or deep link provides it
- * 2. ViewModel validates token via GET /api/observe/{token}
- * 3. If valid, exposes the resolved session ID for navigation
- * 4. Caller navigates to ObserverRunSessionScreen with that session ID
+ * 2. ViewModel validates token via POST /api/observer-invitations/validate
+ * 3. If valid and run is active, exposes the resolved session ID for navigation
+ * 4. If run has ended, shows error message "Sorry, this live run session has ended"
+ * 5. Caller navigates to ObserverRunSessionScreen with that session ID
  */
 @HiltViewModel
 class ObserverLoginViewModel @Inject constructor(
@@ -59,24 +61,26 @@ class ObserverLoginViewModel @Inject constructor(
             try {
                 Log.d("ObserverLoginVM", "Validating token: $token")
 
-                val response = apiService.getObserveSession(token)
+                val response = apiService.validateObserverInvitation(
+                    ValidateObserverInvitationRequest(token)
+                )
 
-                // Extract the session ID from the session data
-                val sessionId = response.sessionData.id
-                if (sessionId.isBlank()) {
-                    _error.value = "Run session data is invalid. Please try again."
+                // Check if validation was successful
+                if (!response.success || response.sessionId == null) {
+                    _error.value = response.error ?: "Failed to validate token. Please try again."
                     return@launch
                 }
 
-                Log.d("ObserverLoginVM", "✅ Token valid — session ID: $sessionId")
-                _resolvedSessionId.value = sessionId
+                Log.d("ObserverLoginVM", "✅ Token valid — session ID: ${response.sessionId}, status: ${response.status}")
+                _resolvedSessionId.value = response.sessionId
 
             } catch (e: HttpException) {
                 Log.e("ObserverLoginVM", "❌ HTTP ${e.code()} validating token", e)
                 _error.value = when (e.code()) {
                     404 -> "Token not found. Check the token in your email and try again."
-                    410 -> "This token has expired. Ask the runner to send a new invite."
-                    else -> "Could not load the run session (error ${e.code()}). Please try again."
+                    410 -> "Sorry, this live run session has ended"  // Session is not active anymore
+                    400 -> "Invalid token format. Please check and try again."
+                    else -> "Could not validate the token (error ${e.code()}). Please try again."
                 }
             } catch (e: Exception) {
                 Log.e("ObserverLoginVM", "❌ Token validation failed: ${e.message}", e)
@@ -84,7 +88,7 @@ class ObserverLoginViewModel @Inject constructor(
                     e.message?.contains("Unable to resolve host") == true ||
                     e.message?.contains("timeout") == true ->
                         "No internet connection. Please check your connection and try again."
-                    else -> "Failed to load the run session. Please try again."
+                    else -> "Failed to validate the token. Please try again."
                 }
             } finally {
                 _isLoading.value = false

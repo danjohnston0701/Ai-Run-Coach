@@ -741,6 +741,16 @@ interface ApiService {
      */
     @PUT("/api/live-sessions/sync")
     suspend fun syncLiveSession(@Body body: SyncLiveSessionRequest): live.airuncoach.airuncoach.viewmodel.LiveSessionApiResponse
+
+    /**
+     * Validate an observer invitation token and check if the live session is still active.
+     * Used by non-registered observers to verify they can watch a run.
+     *
+     * @param body Contains the invitation token from the email
+     * @return Session info if valid and active, error if expired/invalid/ended
+     */
+    @POST("/api/observer-invitations/validate")
+    suspend fun validateObserverInvitation(@Body body: ValidateObserverInvitationRequest): ValidateObserverInvitationResponse
 }
 
 data class RefreshWatchTokenRequest(
@@ -839,6 +849,22 @@ data class InviteParticipantRequest(
 data class InviteParticipantResponse(
     val success: Boolean,
     val pushSent: Boolean = false,
+    val error: String? = null
+)
+
+// Request body for validating observer invitation token
+data class ValidateObserverInvitationRequest(
+    val token: String
+)
+
+// Response from validating observer invitation
+data class ValidateObserverInvitationResponse(
+    val success: Boolean,
+    val sessionId: String? = null,
+    val runnerId: String? = null,
+    val runnerName: String? = null,
+    val hasStarted: Boolean? = null,
+    val status: String? = null,  // "waiting" or "running" or null if error
     val error: String? = null
 )
 
