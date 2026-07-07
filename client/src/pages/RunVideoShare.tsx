@@ -174,7 +174,7 @@ export default function RunVideoShare() {
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg]   = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
-  const [status, setStatus]   = useState<"idle" | "playing" | "recording" | "done">("idle");
+  const [status, setStatus]   = useState<"idle" | "playing" | "recording" | "done" | "error">("idle");
   const [progress, setProgress] = useState(0);
   const [hasRoute, setHasRoute] = useState(false);
   const [units] = useState<"km" | "mi">(() => {
@@ -618,22 +618,38 @@ export default function RunVideoShare() {
     drawOverlay(ctx, routeProgress, tMs, run, units);
   }, [drawOverlay, run, units]);
 
+  // Trigger a file download. The Android WebView bridge intercepts the anchor click and
+  // reads the blob ASYNCHRONOUSLY (fetch → FileReader), so the object URL must stay alive
+  // well past click() — revoking it synchronously breaks the native share. Delay the revoke.
+  const triggerDownload = useCallback((blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement("a");
+    a.href     = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try { document.body.removeChild(a); } catch { /* already removed */ }
+      URL.revokeObjectURL(url);
+    }, 60_000);
+  }, []);
+
   // Flush the WebCodecs encoder, finalize the MP4, and trigger the download.
   const finishWebCodecs = useCallback(async () => {
     const enc   = videoEncoderRef.current;
     const muxer = muxerRef.current;
-    if (!enc || !muxer) { setStatus("done"); return; }
+    if (!enc || !muxer) { setStatus("error"); return; }
+    let ok = false;
     try {
       await enc.flush();
+      if (encFrameCountRef.current === 0) throw new Error("no frames encoded");
       muxer.finalize();
       const { buffer } = muxer.target;
+      if (!buffer || buffer.byteLength === 0) throw new Error("empty output buffer");
       const blob = new Blob([buffer], { type: "video/mp4" });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `run-summary-${runId || "video"}.mp4`;
-      a.click();
-      URL.revokeObjectURL(url);
+      triggerDownload(blob, `run-summary-${runId || "video"}.mp4`);
+      ok = true;
     } catch (e) {
       console.error("[finishWebCodecs]", e);
     } finally {
@@ -641,9 +657,9 @@ export default function RunVideoShare() {
       videoEncoderRef.current = null;
       muxerRef.current        = null;
       useWebCodecsRef.current = false;
-      setStatus("done");
+      setStatus(ok ? "done" : "error");
     }
-  }, [runId]);
+  }, [runId, triggerDownload]);
 
   // ── Animation driver ────────────────────────────────────────────────────────
   const runAnimation = useCallback((record: boolean) => {
@@ -715,17 +731,17 @@ export default function RunVideoShare() {
           recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
           recorder.onstop = () => {
             const blob = new Blob(chunksRef.current, { type: blobType });
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement("a");
-            a.href     = url;
-            a.download = `run-summary-${runId || "video"}.${ext}`;
-            a.click();
-            URL.revokeObjectURL(url);
+            if (blob.size === 0) { setStatus("error"); return; }
+            triggerDownload(blob, `run-summary-${runId || "video"}.${ext}`);
             setStatus("done");
           };
           recorder.start(100);
           recorderRef.current = recorder;
-        } catch { /* recording unsupported — still play */ }
+        } catch (e) {
+          console.error("[MediaRecorder setup failed]", e);
+          setStatus("error");
+          return; // recording unsupported — don't run a fake "recording" that ends in false success
+        }
       }
     }
 
@@ -833,15 +849,16 @@ export default function RunVideoShare() {
         stopTimeoutRef.current = window.setTimeout(() => {
           if (useWebCodecsRef.current) finishWebCodecs();
           else if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-          else setStatus("done");
+          else setStatus("error"); // no encoder or recorder ran → nothing was saved
         }, HOLD_MS);
       } else {
-        setStatus("done");
+        // Preview finished — nothing was saved, so return to the idle controls.
+        setStatus("idle");
       }
     };
 
     animRef.current = requestAnimationFrame(tick);
-  }, [runId, interpAt, buildProgressLine, compositeFrame, finishWebCodecs]);
+  }, [runId, interpAt, buildProgressLine, compositeFrame, finishWebCodecs, triggerDownload]);
 
   const stopAll = useCallback(() => {
     cancelAnimationFrame(animRef.current);
@@ -975,10 +992,16 @@ export default function RunVideoShare() {
             <span className="text-green-400 text-sm font-medium">Video downloaded!</span>
           </div>
         )}
+        {status === "error" && (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/10 border border-red-500/20">
+            <AlertCircle className="w-4 h-4 text-red-400" />
+            <span className="text-red-400 text-sm font-medium">Recording failed — please try again</span>
+          </div>
+        )}
 
         {/* Controls */}
         <div className="w-full max-w-sm flex flex-col gap-3">
-          {(status === "idle" || status === "done") && mapReady && (
+          {(status === "idle" || status === "done" || status === "error") && mapReady && (
             <>
               <Button
                 onClick={() => runAnimation(false)}
