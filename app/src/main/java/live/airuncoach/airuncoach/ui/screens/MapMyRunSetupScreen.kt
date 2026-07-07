@@ -106,7 +106,10 @@ fun MapMyRunSetupScreen(
 
     // Social toggles
     var isLiveTrackingEnabled by remember { mutableStateOf(false) }
-    var liveTrackingObservers by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs for invited observers
+    var liveTrackingObservers by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs / emails for invited observers
+    // Pending email text — lifted from LiveTrackingObserverSection so the Prepare Run button can
+    // auto-flush it into liveTrackingObservers even if the user never pressed the ✓ checkmark.
+    var liveTrackingPendingEmail by remember { mutableStateOf("") }
     var isGroupRunEnabled by remember { mutableStateOf(false) }
     var groupRunParticipants by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs for group run participants
     var isAiCoachEnabled by remember { mutableStateOf(initialAiCoachEnabled) } // Initialize from dashboard preference
@@ -288,6 +291,8 @@ fun MapMyRunSetupScreen(
                     onToggleLiveTracking = { isLiveTrackingEnabled = it },
                     liveTrackingObservers = liveTrackingObservers,
                     onObserversChanged = { liveTrackingObservers = it },
+                    pendingEmail = liveTrackingPendingEmail,
+                    onPendingEmailChange = { liveTrackingPendingEmail = it },
                     friends = friends,
 
                     groupRunEnabled = isGroupRunEnabled,
@@ -378,7 +383,17 @@ fun MapMyRunSetupScreen(
                                         )
                                         watchSendState = WatchSendState.SENT
                                         
-                                        // Also setup and navigate to run session (same as Prepare Run)
+                                        // Auto-flush any pending email before building config
+                                        val watchPending = liveTrackingPendingEmail.trim()
+                                        val watchObservers = if (watchPending.contains("@") && watchPending.isNotEmpty()
+                                            && !liveTrackingObservers.contains(watchPending)
+                                        ) {
+                                            liveTrackingPendingEmail = ""
+                                            liveTrackingObservers + watchPending
+                                        } else {
+                                            liveTrackingObservers
+                                        }
+
                                         val config = RunSetupConfig(
                                             activityType = if (activityMode == ActivityMode.WALK) {
                                                 PhysicalActivityType.WALK
@@ -391,14 +406,13 @@ fun MapMyRunSetupScreen(
                                             targetMinutes = minutesInt,
                                             targetSeconds = secondsInt,
                                             liveTrackingEnabled = isLiveTrackingEnabled,
-                                            liveTrackingObservers = liveTrackingObservers,
+                                            liveTrackingObservers = watchObservers,
                                             isGroupRun = isGroupRunEnabled,
                                             groupRunParticipants = groupRunParticipants
                                         )
                                         runSessionViewModel.setRunConfig(config)
                                         runSessionViewModel.fetchWellnessData()
                                         
-                                        // Navigate to run session UI
                                         onStartRunWithoutRoute(
                                             targetDistance,
                                             isTargetTimeEnabled,
@@ -406,7 +420,7 @@ fun MapMyRunSetupScreen(
                                             minutesInt,
                                             secondsInt,
                                             isLiveTrackingEnabled,
-                                            liveTrackingObservers,
+                                            watchObservers,
                                             isGroupRunEnabled,
                                             groupRunParticipants
                                         )
@@ -427,7 +441,17 @@ fun MapMyRunSetupScreen(
                                         R.drawable.icon_navigation_vector else null,
                                     enabled = canProceed && !runState.isStopping,
                                     onClick = {
-                                        // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
+                                        // Auto-flush any pending email before building config
+                                        val phonePending = liveTrackingPendingEmail.trim()
+                                        val phoneObservers = if (phonePending.contains("@") && phonePending.isNotEmpty()
+                                            && !liveTrackingObservers.contains(phonePending)
+                                        ) {
+                                            liveTrackingPendingEmail = ""
+                                            liveTrackingObservers + phonePending
+                                        } else {
+                                            liveTrackingObservers
+                                        }
+
                                         val config = RunSetupConfig(
                                             activityType = if (activityMode == ActivityMode.WALK) {
                                                 PhysicalActivityType.WALK
@@ -440,16 +464,13 @@ fun MapMyRunSetupScreen(
                                             targetMinutes = minutesInt,
                                             targetSeconds = secondsInt,
                                             liveTrackingEnabled = isLiveTrackingEnabled,
-                                            liveTrackingObservers = liveTrackingObservers,
+                                            liveTrackingObservers = phoneObservers,
                                             isGroupRun = isGroupRunEnabled,
                                             groupRunParticipants = groupRunParticipants
                                         )
                                         runSessionViewModel.setRunConfig(config)
                                         runSessionViewModel.fetchWellnessData()
-                                        // NOTE: prepareRun() is now called in RunSessionScreen when it loads
-                                        // to avoid duplicate API calls
 
-                                        // Navigate immediately
                                         onStartRunWithoutRoute(
                                             targetDistance,
                                             isTargetTimeEnabled,
@@ -457,7 +478,7 @@ fun MapMyRunSetupScreen(
                                             minutesInt,
                                             secondsInt,
                                             isLiveTrackingEnabled,
-                                            liveTrackingObservers,
+                                            phoneObservers,
                                             isGroupRunEnabled,
                                             groupRunParticipants
                                         )
@@ -466,7 +487,6 @@ fun MapMyRunSetupScreen(
                             }
                         }
                     } else {
-                        // Full-width button when watch is not available
                         PrimaryCtaButton(
                             text = when {
                                 !hasLocationPermission -> "GRANT LOCATION"
@@ -478,7 +498,17 @@ fun MapMyRunSetupScreen(
                                 R.drawable.icon_navigation_vector else null,
                             enabled = canProceed && !runState.isStopping,
                             onClick = {
-                                // Fire-and-forget prep (no gating). Run session UI should show loading/coach status.
+                                // Auto-flush any email the user typed but didn't confirm with ✓
+                                val trimmedPending = liveTrackingPendingEmail.trim()
+                                val finalObservers = if (trimmedPending.contains("@") && trimmedPending.isNotEmpty()
+                                    && !liveTrackingObservers.contains(trimmedPending)
+                                ) {
+                                    liveTrackingPendingEmail = ""
+                                    liveTrackingObservers + trimmedPending
+                                } else {
+                                    liveTrackingObservers
+                                }
+
                                 val config = RunSetupConfig(
                                     activityType = if (activityMode == ActivityMode.WALK) {
                                         PhysicalActivityType.WALK
@@ -491,16 +521,13 @@ fun MapMyRunSetupScreen(
                                     targetMinutes = minutesInt,
                                     targetSeconds = secondsInt,
                                     liveTrackingEnabled = isLiveTrackingEnabled,
-                                    liveTrackingObservers = liveTrackingObservers,
+                                    liveTrackingObservers = finalObservers,
                                     isGroupRun = isGroupRunEnabled,
                                     groupRunParticipants = groupRunParticipants
                                 )
                                 runSessionViewModel.setRunConfig(config)
                                 runSessionViewModel.fetchWellnessData()
-                                // NOTE: prepareRun() is now called in RunSessionScreen when it loads
-                                // to avoid duplicate API calls
 
-                                // Navigate immediately
                                 onStartRunWithoutRoute(
                                     targetDistance,
                                     isTargetTimeEnabled,
@@ -508,7 +535,7 @@ fun MapMyRunSetupScreen(
                                     minutesInt,
                                     secondsInt,
                                     isLiveTrackingEnabled,
-                                    liveTrackingObservers,
+                                    finalObservers,
                                     isGroupRunEnabled,
                                     groupRunParticipants
                                 )
@@ -1033,6 +1060,8 @@ private fun SocialSection(
     onToggleLiveTracking: (Boolean) -> Unit,
     liveTrackingObservers: List<String>,
     onObserversChanged: (List<String>) -> Unit,
+    pendingEmail: String,
+    onPendingEmailChange: (String) -> Unit,
     friends: List<Friend>,
 
     groupRunEnabled: Boolean,
@@ -1070,6 +1099,8 @@ private fun SocialSection(
                         LiveTrackingObserverSection(
                             observers = liveTrackingObservers,
                             onObserversChanged = onObserversChanged,
+                            pendingEmail = pendingEmail,
+                            onPendingEmailChange = onPendingEmailChange,
                             friends = friends
                         )
                     }
@@ -1269,10 +1300,20 @@ private fun GroupRunParticipantSection(
 private fun LiveTrackingObserverSection(
     observers: List<String>,
     onObserversChanged: (List<String>) -> Unit,
+    pendingEmail: String,
+    onPendingEmailChange: (String) -> Unit,
     friends: List<Friend>
 ) {
     var showFriendPicker by remember { mutableStateOf(false) }
-    var emailInput by remember { mutableStateOf("") }
+    // emailInput is now lifted to the parent screen so the Prepare Run button can auto-flush it
+    val emailInput = pendingEmail
+    fun addEmailIfValid() {
+        val trimmed = emailInput.trim()
+        if (trimmed.contains("@") && trimmed.isNotEmpty() && !observers.contains(trimmed)) {
+            onObserversChanged(observers + trimmed)
+            onPendingEmailChange("")
+        }
+    }
     
     // Friend picker dialog — only shows friend IDs (emails are added separately)
     if (showFriendPicker) {
@@ -1329,10 +1370,10 @@ private fun LiveTrackingObserverSection(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Email input field
+        // Email input field — pressing Done on the keyboard auto-adds the email
         TextField(
             value = emailInput,
-            onValueChange = { emailInput = it },
+            onValueChange = { onPendingEmailChange(it) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
@@ -1351,16 +1392,17 @@ private fun LiveTrackingObserverSection(
             ),
             textStyle = AppTextStyles.small,
             singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Email,
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                onDone = { addEmailIfValid() }
+            ),
             trailingIcon = {
                 if (emailInput.isNotEmpty()) {
                     IconButton(
-                        onClick = {
-                            val trimmed = emailInput.trim()
-                            if (trimmed.contains("@") && trimmed.isNotEmpty()) {
-                                onObserversChanged(observers + trimmed)
-                                emailInput = ""
-                            }
-                        },
+                        onClick = { addEmailIfValid() },
                         modifier = Modifier.size(24.dp)
                     ) {
                         Icon(

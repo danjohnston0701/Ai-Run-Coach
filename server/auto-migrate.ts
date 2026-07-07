@@ -271,6 +271,100 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.coaching_insight",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS coaching_insight JSONB",
     },
+
+    // ── live_run_sessions — columns added after initial table creation ────────
+    // These columns exist in shared/schema.ts but may be missing from the DB if
+    // the table was created before they were added.  All are safe to add with
+    // IF NOT EXISTS / DEFAULT values so existing rows are unaffected.
+    {
+      name: "live_run_sessions.has_started",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS has_started BOOLEAN DEFAULT false",
+    },
+    {
+      name: "live_run_sessions.started_at",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS started_at TIMESTAMP",
+    },
+    {
+      name: "live_run_sessions.last_synced_at",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP DEFAULT NOW()",
+    },
+    {
+      name: "live_run_sessions.shared_with_friends",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS shared_with_friends BOOLEAN DEFAULT false",
+    },
+    {
+      name: "live_run_sessions.session_key",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS session_key TEXT",
+    },
+    {
+      name: "live_run_sessions.difficulty",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS difficulty TEXT",
+    },
+    {
+      name: "live_run_sessions.cadence",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS cadence INTEGER",
+    },
+    {
+      name: "live_run_sessions.gps_track",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS gps_track JSONB",
+    },
+    {
+      name: "live_run_sessions.km_splits",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS km_splits JSONB",
+    },
+    {
+      name: "live_run_sessions.observers",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS observers JSONB",
+    },
+    {
+      name: "live_run_sessions.runner_name",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS runner_name TEXT",
+    },
+    {
+      name: "live_run_sessions.observe_token",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS observe_token TEXT",
+    },
+    {
+      name: "live_run_sessions.route_id",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS route_id VARCHAR REFERENCES routes(id)",
+    },
+    {
+      name: "live_run_sessions.viewer_count",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS viewer_count INTEGER DEFAULT 0",
+    },
+
+    // ── observer_invitations — full table for email-based live-run invites ────
+    // Created to support non-registered users receiving email invitations to
+    // watch a live run session.  Must be run before any email invite is sent.
+    {
+      name: "observer_invitations.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS observer_invitations (
+          id          VARCHAR(36)  PRIMARY KEY DEFAULT gen_random_uuid(),
+          session_id  VARCHAR(36)  NOT NULL REFERENCES live_run_sessions(id) ON DELETE CASCADE,
+          runner_id   VARCHAR(36)  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          email       VARCHAR(255) NOT NULL,
+          token       VARCHAR(255) NOT NULL UNIQUE,
+          status      TEXT DEFAULT 'sent',
+          created_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+          expires_at  TIMESTAMP,
+          viewed_at   TIMESTAMP,
+          clicked_at  TIMESTAMP
+        )
+      `,
+    },
+    {
+      name: "idx_observer_invitations_token",
+      sql: "CREATE INDEX IF NOT EXISTS idx_observer_invitations_token ON observer_invitations(token)",
+    },
+    {
+      name: "idx_observer_invitations_email",
+      sql: "CREATE INDEX IF NOT EXISTS idx_observer_invitations_email ON observer_invitations(email)",
+    },
+    {
+      name: "idx_observer_invitations_session",
+      sql: "CREATE INDEX IF NOT EXISTS idx_observer_invitations_session ON observer_invitations(session_id)",
+    },
   ];
 
   let succeeded = 0;

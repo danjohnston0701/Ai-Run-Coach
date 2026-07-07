@@ -536,6 +536,7 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   userId: varchar("user_id").notNull().references(() => users.id),
   routeId: varchar("route_id").references(() => routes.id),
   isActive: boolean("is_active").default(true),
+  runnerName: text("runner_name"),   // Display name shown to observers
   currentLat: real("current_lat"),
   currentLng: real("current_lng"),
   currentPace: text("current_pace"),
@@ -546,11 +547,13 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   startedAt: timestamp("started_at"),  // When the run actually started (not created)
   hasStarted: boolean("has_started").default(false),  // Whether the runner has begun the run
   sessionKey: text("session_key"),
+  observeToken: text("observe_token"),  // Random token for share links
   difficulty: text("difficulty"),
   cadence: integer("cadence"),
   gpsTrack: jsonb("gps_track"),
   kmSplits: jsonb("km_splits"),
   observers: jsonb("observers"),  // JSON array of { userId, status, invitedAt }
+  viewerCount: integer("viewer_count").default(0),  // Active viewer count (users who /join)
   lastSyncedAt: timestamp("last_synced_at").defaultNow(),
 });
 
