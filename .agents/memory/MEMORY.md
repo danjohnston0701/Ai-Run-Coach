@@ -1,3 +1,4 @@
 - [Which client is which](client-topology.md) — repo has 3 clients (Express backend, React web, Android); users test the ANDROID app, so bugs often live there, not in client/src.
 - [Android auth token storage](android-auth-token.md) — token lives in EncryptedSharedPreferences "session_prefs" via SessionManager, NOT plain "user_prefs".
+- [Web dev server serves prebuilt](web-dev-server-prebuilt.md) — dev has no Vite HMR; edits to client/ need `npx vite build` to appear. Trust vite build over `tsc` for `@/` imports.
 - [Run route point keys](run-routepoints-keys.md) — backend GET /api/runs/:id returns routePoints as {latitude,longitude}, NOT {lat,lng}; web/client code must normalize.
