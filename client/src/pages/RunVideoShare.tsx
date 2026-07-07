@@ -30,12 +30,14 @@ const TOTAL_MS  = INTRO_MS + FOLLOW_MS + OUTRO_MS;
 const HOLD_MS   = 1400;    // hold the final frame before stopping the recorder
 
 // ─── Camera tuning ────────────────────────────────────────────────────────────
-const FOLLOW_ZOOM     = 15.6;
-const FOLLOW_PITCH    = 60;
-const LOOKAHEAD_M     = 90;   // camera centres this far ahead of the marker
-const BRG_LOOKAHEAD_M = 140;  // travel direction sampled over a longer span (smoother turns)
-const POS_SMOOTH      = 0.10; // camera-position easing per frame (lower = smoother/floatier)
-const BRG_SMOOTH      = 0.045;// camera-bearing easing per frame (lower = gentler turns)
+const FOLLOW_ZOOM     = 16.0;
+const FOLLOW_PITCH    = 70;   // low, cinematic drone angle (more horizon, less top-down)
+const LOOKAHEAD_M     = 95;   // camera centres this far ahead of the marker
+const BRG_LOOKAHEAD_M = 150;  // travel direction sampled over a longer span (smoother turns)
+const POS_SMOOTH      = 0.09; // camera-position easing per frame (lower = smoother/floatier)
+const BRG_SMOOTH      = 0.04; // camera-bearing easing per frame (lower = gentler turns)
+const SUPERSAMPLE     = 1.25; // render the map above output res, then downscale = crisper
+const PULSE_MS        = 1600; // marker energy-ring pulse period
 
 // ─── Geo helpers ──────────────────────────────────────────────────────────────
 type LngLat = [number, number]; // [lng, lat]
@@ -81,6 +83,30 @@ function smoothPath(coords: LngLat[], radius = 3): LngLat[] {
   out[0] = coords[0];
   out[out.length - 1] = coords[coords.length - 1];
   return out;
+}
+
+// Rounded-rect path with a fallback for older canvas engines.
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  if (typeof (ctx as any).roundRect === "function") { (ctx as any).roundRect(x, y, w, h, r); return; }
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Animate the marker's two energy rings (expand + fade), phase-offset for rhythm.
+function pulseMarker(map: maplibregl.Map, t: number) {
+  const p1 = (t % PULSE_MS) / PULSE_MS;
+  const p2 = ((t + PULSE_MS / 2) % PULSE_MS) / PULSE_MS;
+  try {
+    map.setPaintProperty("headPulse1", "circle-radius", 12 + p1 * 48);
+    map.setPaintProperty("headPulse1", "circle-stroke-opacity", 0.6 * (1 - p1));
+    map.setPaintProperty("headPulse2", "circle-radius", 12 + p2 * 48);
+    map.setPaintProperty("headPulse2", "circle-stroke-opacity", 0.45 * (1 - p2));
+  } catch { /* layers not ready yet — ignore */ }
 }
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
@@ -224,8 +250,10 @@ export default function RunVideoShare() {
     // at the correct 9:16 aspect (no stretching). It sits behind the compositor,
     // which is what the user actually sees, so overflow past the preview box is fine.
     const dpr = window.devicePixelRatio || 1;
-    mapContainerRef.current.style.width  = `${Math.round(CW / dpr)}px`;
-    mapContainerRef.current.style.height = `${Math.round(CH / dpr)}px`;
+    const cssW = Math.round((CW * SUPERSAMPLE) / dpr);
+    const cssH = Math.round(cssW * (CH / CW)); // enforce exact 9:16 from one dimension
+    mapContainerRef.current.style.width  = `${cssW}px`;
+    mapContainerRef.current.style.height = `${cssH}px`;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -289,16 +317,25 @@ export default function RunVideoShare() {
       map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
+      // Aurora ribbon: a wide soft glow, a teal body, and a bright white-hot core.
       map.addLayer({ id: "routeProgressGlow", type: "line", source: "routeProgress",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": TEAL, "line-width": 18, "line-blur": 10, "line-opacity": 0.55 } });
+        paint: { "line-color": TEAL, "line-width": 34, "line-blur": 26, "line-opacity": 0.5 } });
       map.addLayer({ id: "routeProgress", type: "line", source: "routeProgress",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": TEAL, "line-width": 8 } });
-      map.addLayer({ id: "headHalo", type: "circle", source: "head",
-        paint: { "circle-radius": 15, "circle-color": TEAL, "circle-opacity": 0.35, "circle-blur": 0.7 } });
+        paint: { "line-color": TEAL, "line-width": 12 } });
+      map.addLayer({ id: "routeCore", type: "line", source: "routeProgress",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#eaffff", "line-width": 4, "line-opacity": 0.9 } });
+      // Signature marker: two expanding energy rings + soft glow + white-hot core.
+      map.addLayer({ id: "headPulse1", type: "circle", source: "head",
+        paint: { "circle-radius": 12, "circle-opacity": 0, "circle-stroke-color": TEAL, "circle-stroke-width": 3, "circle-stroke-opacity": 0.6 } });
+      map.addLayer({ id: "headPulse2", type: "circle", source: "head",
+        paint: { "circle-radius": 12, "circle-opacity": 0, "circle-stroke-color": TEAL, "circle-stroke-width": 3, "circle-stroke-opacity": 0.45 } });
+      map.addLayer({ id: "headGlow", type: "circle", source: "head",
+        paint: { "circle-radius": 24, "circle-color": TEAL, "circle-opacity": 0.4, "circle-blur": 1 } });
       map.addLayer({ id: "headDot", type: "circle", source: "head",
-        paint: { "circle-radius": 7, "circle-color": WHITE, "circle-stroke-color": TEAL, "circle-stroke-width": 3 } });
+        paint: { "circle-radius": 9, "circle-color": WHITE, "circle-stroke-color": TEAL, "circle-stroke-width": 4 } });
 
       // Pre-compute the "whole route" overview camera used for the outro.
       const bounds = coords.reduce(
@@ -331,97 +368,146 @@ export default function RunVideoShare() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run]);
 
-  // ── Draw the 2D overlay (stats, branding, progress) on top of the map image ─
-  const drawOverlay = useCallback((ctx: CanvasRenderingContext2D, routeProgress: number, run: any, units: "km" | "mi") => {
-    // Top stats gradient
-    const overlayH = 280;
-    const grad = ctx.createLinearGradient(0, 0, 0, overlayH);
-    grad.addColorStop(0,    "rgba(0,0,0,0.82)");
-    grad.addColorStop(0.75, "rgba(0,0,0,0.55)");
-    grad.addColorStop(1,    "rgba(0,0,0,0)");
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, CW, overlayH);
-
-    // Brand label
-    ctx.save();
-    ctx.fillStyle = TEAL;
-    ctx.font = "bold 36px 'Inter', sans-serif";
-    ctx.textAlign = "center";
-    ctx.letterSpacing = "4px";
-    ctx.fillText("AI RUN COACH", CW / 2, 64);
-    ctx.restore();
-
-    // Run name
-    const runName = run?.name || run?.routeName || "Run Summary";
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.font = "28px 'Inter', sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(runName, CW / 2, 108);
-    ctx.restore();
-
-    // Stats row (distance + elevation count up with progress)
+  // ── Draw the 2D overlay: branded intro card cross-fading into the flight HUD ─
+  const drawOverlay = useCallback((ctx: CanvasRenderingContext2D, routeProgress: number, tMs: number, run: any, units: "km" | "mi") => {
+    const runName    = run?.name || run?.routeName || "Run Summary";
     const totalDistM = run?.distance || 0;
     const elevGain   = run?.totalElevationGain || 0;
     const avgPace    = run?.averagePace || run?.avgPace || "--'--\"";
-    const stats = [
-      { label: "Pace",      value: avgPace,                             unit: `/${units}` },
-      { label: "Elevation", value: fmtElev(elevGain * routeProgress, units), unit: units === "mi" ? "ft" : "m" },
-      { label: "Distance",  value: fmtDist(totalDistM * routeProgress, units), unit: units },
-    ];
-    const colW = CW / 3;
-    stats.forEach((s, i) => {
-      const cx = colW * i + colW / 2;
-      ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "28px 'Inter', sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(s.label.toUpperCase(), cx, 158); ctx.restore();
-      ctx.save(); ctx.fillStyle = WHITE; ctx.font = "bold 84px 'Inter', sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(s.value, cx, 238); ctx.restore();
-      ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "28px 'Inter', sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(s.unit, cx, 272); ctx.restore();
-    });
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.lineWidth = 2;
-    [colW, colW * 2].forEach(dx => { ctx.beginPath(); ctx.moveTo(dx, 148); ctx.lineTo(dx, 268); ctx.stroke(); });
-    ctx.restore();
+    const dateStr    = fmtDate(run?.completedAt || run?.date || null);
+    const distUnit   = units === "mi" ? "MILES" : "KILOMETRES";
 
-    // Bottom branding strip
-    const botH = 120;
-    const botGrad = ctx.createLinearGradient(0, CH - botH, 0, CH);
-    botGrad.addColorStop(0, "rgba(0,0,0,0)");
-    botGrad.addColorStop(1, "rgba(0,0,0,0.75)");
-    ctx.fillStyle = botGrad;
-    ctx.fillRect(0, CH - botH, CW, botH);
+    // Cross-fade: title card owns the intro, the HUD takes over once we're flying.
+    const introFade = Math.max(0, Math.min(1, (INTRO_MS - tMs) / 500));
+    const hudFade   = 1 - introFade;
 
-    const dateStr = fmtDate(run?.completedAt || run?.date || null);
-    if (dateStr) {
-      ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "26px 'Inter', sans-serif"; ctx.textAlign = "center";
-      ctx.fillText(dateStr, CW / 2, CH - 36); ctx.restore();
+    // ── Intro title card ──
+    if (introFade > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = introFade;
+      const scrim = ctx.createLinearGradient(0, 0, 0, CH);
+      scrim.addColorStop(0,   "rgba(3,6,14,0.60)");
+      scrim.addColorStop(0.5, "rgba(3,6,14,0.22)");
+      scrim.addColorStop(1,   "rgba(3,6,14,0.60)");
+      ctx.fillStyle = scrim; ctx.fillRect(0, 0, CW, CH);
+
+      ctx.textAlign = "center";
+      ctx.fillStyle = TEAL; ctx.font = "bold 42px 'Inter', sans-serif"; ctx.letterSpacing = "8px";
+      ctx.fillText("AI RUN COACH", CW / 2, CH * 0.38); ctx.letterSpacing = "0px";
+
+      ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.font = "500 46px 'Inter', sans-serif";
+      ctx.fillText(runName, CW / 2, CH * 0.45);
+
+      ctx.save();
+      ctx.shadowColor = TEAL_GLOW; ctx.shadowBlur = 45;
+      ctx.fillStyle = WHITE; ctx.font = "bold 210px 'Inter', sans-serif";
+      ctx.fillText(fmtDist(totalDistM, units), CW / 2, CH * 0.60);
+      ctx.restore();
+
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "600 42px 'Inter', sans-serif"; ctx.letterSpacing = "6px";
+      ctx.fillText(distUnit, CW / 2, CH * 0.655); ctx.letterSpacing = "0px";
+      ctx.restore();
     }
 
-    // Progress bar
-    ctx.fillStyle = "rgba(255,255,255,0.15)";
-    ctx.fillRect(0, CH - 8, CW, 8);
-    ctx.fillStyle = TEAL;
-    ctx.fillRect(0, CH - 8, CW * routeProgress, 8);
+    // ── Flight HUD ──
+    if (hudFade > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = hudFade;
+
+      // Top-left brand lockup
+      ctx.save();
+      ctx.shadowColor = TEAL_GLOW; ctx.shadowBlur = 18;
+      ctx.fillStyle = TEAL;
+      ctx.beginPath(); ctx.arc(56, 58, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.font = "bold 30px 'Inter', sans-serif"; ctx.letterSpacing = "3px";
+      ctx.fillText("AI RUN COACH", 82, 68); ctx.letterSpacing = "0px";
+      ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "30px 'Inter', sans-serif";
+      ctx.fillText(runName, 56, 116);
+
+      // Bottom glass stat panel
+      const pad = 40, panelH = 250, panelY = CH - panelH - 56, panelW = CW - pad * 2;
+      ctx.save();
+      roundRectPath(ctx, pad, panelY, panelW, panelH, 34);
+      ctx.fillStyle = "rgba(6,11,22,0.55)"; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,191,255,0.35)"; ctx.stroke();
+      ctx.restore();
+
+      const stats = [
+        { label: "PACE",     value: avgPace,                                    unit: `/${units}` },
+        { label: "DISTANCE", value: fmtDist(totalDistM * routeProgress, units), unit: units, hero: true },
+        { label: "ELEV",     value: fmtElev(elevGain * routeProgress, units),   unit: units === "mi" ? "ft" : "m" },
+      ] as { label: string; value: string; unit: string; hero?: boolean }[];
+      const colW = panelW / 3;
+      ctx.textAlign = "center";
+      stats.forEach((s, i) => {
+        const cx = pad + colW * i + colW / 2;
+        ctx.fillStyle = TEAL; ctx.font = "600 26px 'Inter', sans-serif"; ctx.letterSpacing = "3px";
+        ctx.fillText(s.label, cx, panelY + 60); ctx.letterSpacing = "0px";
+        if (s.hero) { ctx.save(); ctx.shadowColor = TEAL_GLOW; ctx.shadowBlur = 26; }
+        ctx.fillStyle = WHITE; ctx.font = `bold ${s.hero ? 106 : 78}px 'Inter', sans-serif`;
+        ctx.fillText(s.value, cx, panelY + (s.hero ? 152 : 142));
+        if (s.hero) ctx.restore();
+        ctx.fillStyle = "rgba(255,255,255,0.55)"; ctx.font = "26px 'Inter', sans-serif";
+        ctx.fillText(s.unit, cx, panelY + 194);
+      });
+      ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 2;
+      [pad + colW, pad + colW * 2].forEach(dx => { ctx.beginPath(); ctx.moveTo(dx, panelY + 44); ctx.lineTo(dx, panelY + panelH - 44); ctx.stroke(); });
+
+      if (dateStr) {
+        ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = "26px 'Inter', sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(dateStr, CW / 2, CH - 26);
+      }
+      ctx.restore();
+    }
+
+    // Progress bar (always, with a soft glow)
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.12)"; ctx.fillRect(0, CH - 6, CW, 6);
+    const g = ctx.createLinearGradient(0, 0, CW, 0);
+    g.addColorStop(0, TEAL); g.addColorStop(1, "#8affff");
+    ctx.shadowColor = TEAL_GLOW; ctx.shadowBlur = 16;
+    ctx.fillStyle = g; ctx.fillRect(0, CH - 6, CW * routeProgress, 6);
+    ctx.restore();
   }, []);
 
   // ── Composite the map WebGL canvas + overlay into the recording canvas ──────
-  const compositeFrame = useCallback((routeProgress: number, _overall: number) => {
+  const compositeFrame = useCallback((routeProgress: number, tMs: number) => {
     const canvas = canvasRef.current;
     const map = mapRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.fillStyle = "#0a0a0f";
+    ctx.fillStyle = "#05070d";
     ctx.fillRect(0, 0, CW, CH);
+
+    // Map imagery with a cinematic colour grade (supersampled → downscaled = crisp).
     if (map) {
       const mc = map.getCanvas();
       if (mc.width > 0 && mc.height > 0) {
+        ctx.save();
+        ctx.filter = "saturate(1.22) contrast(1.08) brightness(1.03)";
         try { ctx.drawImage(mc, 0, 0, CW, CH); } catch { /* tainted-canvas guard */ }
+        ctx.restore();
       }
     }
-    drawOverlay(ctx, routeProgress, run, units);
+
+    // Atmospheric depth haze — melts the far, low-res distance into brand air.
+    const haze = ctx.createLinearGradient(0, 0, 0, CH * 0.5);
+    haze.addColorStop(0,   "rgba(122,170,202,0.42)");
+    haze.addColorStop(0.5, "rgba(122,170,202,0.10)");
+    haze.addColorStop(1,   "rgba(122,170,202,0)");
+    ctx.fillStyle = haze; ctx.fillRect(0, 0, CW, CH * 0.5);
+
+    // Cinematic vignette (under the HUD so text stays crisp).
+    const vig = ctx.createRadialGradient(CW / 2, CH * 0.46, CW * 0.30, CW / 2, CH * 0.5, CH * 0.72);
+    vig.addColorStop(0, "rgba(0,0,0,0)");
+    vig.addColorStop(1, "rgba(3,5,12,0.55)");
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, CW, CH);
+
+    drawOverlay(ctx, routeProgress, tMs, run, units);
   }, [drawOverlay, run, units]);
 
   // ── Animation driver ────────────────────────────────────────────────────────
@@ -511,6 +597,7 @@ export default function RunVideoShare() {
         });
         map.jumpTo({ center: dispCenterRef.current as any, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
         lastCamRef.current = { center: [dispCenterRef.current[0], dispCenterRef.current[1]], zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
+        pulseMarker(map, t);
       } else {
         // ── Outro: pull up and out to reveal the whole route ──
         routeProgress = 1;
@@ -536,9 +623,10 @@ export default function RunVideoShare() {
             bearing: lerpAngle(from.bearing, 0, e),
           });
         }
+        pulseMarker(map, t);
       }
 
-      compositeFrame(routeProgress, overall);
+      compositeFrame(routeProgress, t);
 
       if (t < TOTAL_MS) {
         animRef.current = requestAnimationFrame(tick);
