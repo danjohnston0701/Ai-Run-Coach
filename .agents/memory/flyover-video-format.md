@@ -57,3 +57,13 @@ truly comes out AND a `decoderConfig.description` is captured; store the proven 
 Disable the Record button until the probe finishes. On-device `console.error` is invisible, so
 surface the real failure reason in the UI (encoder/frame/finalize message + frame count +
 `seeded: yes/no`) — that diagnostic is what let us finally distinguish these failure modes.
+
+## Rule 6 — Never let the muxer validate WebView-provided chunk fields; use addVideoChunkRaw + try/catch
+Even with an explicit VideoFrame duration, some WebViews hand back EncodedVideoChunks that fail
+`addVideoChunk`'s validations (null duration not propagated, instanceof mismatch). Any throw inside the
+async `VideoEncoder.output` callback is SWALLOWED, silently emptying the muxer. So: copy chunk bytes via
+`copyTo` into a fresh Uint8Array and call `muxer.addVideoChunkRaw(data, type, ts, dur, meta)` with
+sanitized finite values; wrap the whole callback in try/catch recording added/failed counts + first error;
+set the "seeded" flag only AFTER a successful add (so injection retries until one lands); and before
+`finalize()`, throw an informative error if 0 chunks were muxed. This converts the blind
+"null colorSpace" crash into either success or a self-diagnosing error string.

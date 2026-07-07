@@ -164,6 +164,7 @@ export default function RunVideoShare() {
   // reuse this proven one to seed the muxer when the live chunks arrive without it.
   const provenDecoderConfigRef = useRef<any>(null);
   const seededConfigRef = useRef<boolean>(false); // whether we seeded the muxer's decoderConfig (diagnostic)
+  const muxStatsRef = useRef<{ added: number; failed: number; firstErr: string }>({ added: 0, failed: 0, firstErr: "" });
   const encErrRef       = useRef<string>("");           // first runtime encoder/frame error (surfaced to UI)
 
   // Route geometry
@@ -656,6 +657,10 @@ export default function RunVideoShare() {
       if (encFrameCountRef.current === 0) {
         throw new Error(encErrRef.current || "no frames encoded (VideoFrame unsupported?)");
       }
+      if (muxStatsRef.current.added === 0) {
+        // Surface the REAL reason the muxer is empty instead of letting finalize() crash cryptically.
+        throw new Error(`muxer received 0 chunks (${muxStatsRef.current.failed} rejected${muxStatsRef.current.firstErr ? `: ${muxStatsRef.current.firstErr}` : ""})`);
+      }
       muxer.finalize();
       const { buffer } = muxer.target;
       if (!buffer || buffer.byteLength === 0) throw new Error("empty output buffer");
@@ -664,7 +669,8 @@ export default function RunVideoShare() {
       ok = true;
     } catch (e: any) {
       console.error("[finishWebCodecs]", e);
-      setErrorDetail(`WebCodecs — ${encErrRef.current || e?.message || e} (frames: ${encFrameCountRef.current}, seeded: ${seededConfigRef.current ? "yes" : "no"})`);
+      const mux = muxStatsRef.current;
+      setErrorDetail(`WebCodecs — ${encErrRef.current || e?.message || e} (frames: ${encFrameCountRef.current}, muxed: ${mux.added}, rejected: ${mux.failed}${mux.firstErr ? `, muxErr: ${mux.firstErr}` : ""}, seeded: ${seededConfigRef.current ? "yes" : "no"})`);
     } finally {
       try { enc.close(); } catch { /* already closed */ }
       videoEncoderRef.current = null;
@@ -710,16 +716,32 @@ export default function RunVideoShare() {
             firstTimestampBehavior: "offset",
           });
           seededConfigRef.current = false; // reset per recording; set true once muxer has a decoderConfig
+          muxStatsRef.current = { added: 0, failed: 0, firstErr: "" };
           const encoder = new W.VideoEncoder({
             output: (chunk: any, meta: any) => {
-              let m = meta;
-              // Some Android WebViews never attach decoderConfig to live chunks. Seed the muxer
-              // with the description proven during the self-test so finalize() doesn't crash.
-              if (!m?.decoderConfig && !seededConfigRef.current && provenDecoderConfigRef.current) {
-                m = { ...(meta || {}), decoderConfig: provenDecoderConfigRef.current };
+              try {
+                let m = meta;
+                // Some Android WebViews never attach decoderConfig to live chunks. Seed the muxer
+                // with the description proven during the self-test so finalize() doesn't crash.
+                if (!m?.decoderConfig && !seededConfigRef.current && provenDecoderConfigRef.current) {
+                  m = { ...(meta || {}), decoderConfig: provenDecoderConfigRef.current };
+                }
+                // Feed the muxer via addVideoChunkRaw with values WE control. addVideoChunk
+                // re-validates chunk.duration / instanceof EncodedVideoChunk, and some WebViews
+                // hand back chunks that fail those checks (e.g. null duration even when the
+                // VideoFrame had one) — the resulting throw inside this async callback is
+                // swallowed, silently emptying the muxer until finalize() crashes.
+                const data = new Uint8Array(chunk.byteLength);
+                chunk.copyTo(data);
+                const ts  = Number.isFinite(chunk.timestamp) && chunk.timestamp >= 0 ? chunk.timestamp : muxStatsRef.current.added * 33333;
+                const dur = Number.isFinite(chunk.duration)  && chunk.duration  >= 0 ? chunk.duration  : 33333;
+                muxer.addVideoChunkRaw(data, chunk.type === "key" ? "key" : "delta", ts, dur, m);
+                muxStatsRef.current.added++;
+                if (m?.decoderConfig) seededConfigRef.current = true; // only after a SUCCESSFUL add
+              } catch (err: any) {
+                muxStatsRef.current.failed++;
+                if (!muxStatsRef.current.firstErr) muxStatsRef.current.firstErr = String(err?.message || err);
               }
-              if (m?.decoderConfig) seededConfigRef.current = true;
-              muxer.addVideoChunk(chunk, m);
             },
             error:  (e: any) => {
               console.error("[VideoEncoder]", e);
