@@ -50,11 +50,10 @@ fun RootNavigationGraph(navController: NavHostController) {
                 onNavigateToForgotPassword = {
                     navController.navigate(AppRoutes.FORGOT_PASSWORD)
                 },
-                onNavigateToObserverLogin = {
-                    navController.navigate(AppRoutes.MAIN) {
+                onNavigateToObserverSession = { sessionId ->
+                    navController.navigate("observer_session/$sessionId") {
                         popUpTo(AppRoutes.LOGIN) { inclusive = true }
                     }
-                    // Will trigger with deep link observer_login route
                 }
             )
         }

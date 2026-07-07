@@ -42,6 +42,7 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
+import live.airuncoach.airuncoach.viewmodel.ObserverLoginViewModel
 import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.text.input.ImeAction
@@ -55,13 +56,14 @@ fun LoginScreen(
     onNavigateToMain: () -> Unit = {},
     onNavigateToSignUp: () -> Unit = {},
     onNavigateToForgotPassword: () -> Unit = {},
-    onNavigateToObserverLogin: () -> Unit = {},
+    onNavigateToObserverSession: (sessionId: String) -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val loginState by viewModel.loginState.collectAsState()
     var passwordVisible by remember { mutableStateOf(false) }
     var isCheckingAuth by remember { mutableStateOf(true) }
+    var showObserverTokenInput by remember { mutableStateOf(false) }
     
     // Keyboard handling
     val emailBringIntoView = remember { BringIntoViewRequester() }
@@ -401,34 +403,15 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(Spacing.lg))
 
             // Divider
-            Divider(color = Colors.primary.copy(alpha = 0.2f))
+            HorizontalDivider(color = Colors.primary.copy(alpha = 0.2f))
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
-            // Observer button for non-registered users
-            OutlinedButton(
-                onClick = onNavigateToObserverLogin,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = Colors.primary
-                ),
-                border = BorderStroke(1.dp, Colors.primary)
-            ) {
-                Text(
-                    "🏃 Observe Live Run",
-                    style = AppTextStyles.body,
-                    color = Colors.primary
-                )
-            }
-
-            Text(
-                "Invited to watch a run? Enter your token",
-                style = AppTextStyles.small,
-                color = Colors.textMuted,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 8.dp)
+            // Observer token input — expands when user taps the button
+            ObserverTokenInputSection(
+                isExpanded = showObserverTokenInput,
+                onExpandToggle = { showObserverTokenInput = it },
+                onSessionStarted = onNavigateToObserverSession
             )
 
             Spacer(modifier = Modifier.height(Spacing.xxxl))
@@ -439,6 +422,135 @@ fun LoginScreen(
                 style = AppTextStyles.small,
                 color = Colors.textMuted,
                 textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+/**
+ * Expandable observer token input section on the login screen.
+ * User taps "Observe Live Run" button to expand, then enters invitation token and confirms.
+ */
+@Composable
+private fun ObserverTokenInputSection(
+    isExpanded: Boolean,
+    onExpandToggle: (Boolean) -> Unit,
+    onSessionStarted: (sessionId: String) -> Unit
+) {
+    val viewModel: ObserverLoginViewModel = hiltViewModel()
+    val token by viewModel.token.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    val resolvedSessionId by viewModel.resolvedSessionId.collectAsState()
+
+    // Navigate when session is resolved
+    LaunchedEffect(resolvedSessionId) {
+        resolvedSessionId?.let { onSessionStarted(it) }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // Tap to expand button
+        OutlinedButton(
+            onClick = { onExpandToggle(!isExpanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = Colors.primary
+            ),
+            border = BorderStroke(1.dp, Colors.primary)
+        ) {
+            Text(
+                "🏃 Observe Live Run",
+                style = AppTextStyles.body,
+                color = Colors.primary
+            )
+        }
+
+        // Expanded input area
+        if (isExpanded) {
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            Text(
+                "Enter your invitation token",
+                style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.textPrimary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            // Token input field
+            TextField(
+                value = token,
+                onValueChange = { viewModel.setToken(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                placeholder = {
+                    Text(
+                        "Paste token from email",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.5f),
+                    unfocusedContainerColor = Colors.backgroundTertiary.copy(alpha = 0.3f),
+                    focusedIndicatorColor = Colors.primary,
+                    unfocusedIndicatorColor = Colors.backgroundTertiary.copy(alpha = 0.5f)
+                ),
+                textStyle = AppTextStyles.small,
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            // Error message
+            if (error != null) {
+                Text(
+                    error ?: "",
+                    style = AppTextStyles.small,
+                    color = Colors.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                )
+            }
+
+            // Confirm button
+            Button(
+                onClick = { viewModel.validateAndLoadSession(token) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                enabled = token.isNotBlank() && !isLoading,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    disabledContainerColor = Colors.backgroundTertiary.copy(alpha = 0.5f)
+                )
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Colors.textPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        "Watch Now",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            Text(
+                "Invited to watch a run? Enter your token",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }
