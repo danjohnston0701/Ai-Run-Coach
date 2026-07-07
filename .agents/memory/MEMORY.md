@@ -1,0 +1,2 @@
+- [Which client is which](client-topology.md) — repo has 3 clients (Express backend, React web, Android); users test the ANDROID app, so bugs often live there, not in client/src.
+- [Android auth token storage](android-auth-token.md) — token lives in EncryptedSharedPreferences "session_prefs" via SessionManager, NOT plain "user_prefs".

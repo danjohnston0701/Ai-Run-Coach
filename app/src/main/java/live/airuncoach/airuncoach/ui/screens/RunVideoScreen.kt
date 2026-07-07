@@ -46,10 +46,13 @@ fun RunVideoScreen(
 ) {
     val context = LocalContext.current
 
-    // Read auth token from SharedPreferences — same key used by all app login paths
+    // Read auth token from SessionManager (EncryptedSharedPreferences "session_prefs").
+    // This is the SAME source the Retrofit interceptor uses, so the token here matches
+    // the one sent on all native API calls. The old code read a plain, unencrypted
+    // "user_prefs" file where the token was never stored, so it injected an empty token
+    // into the WebView and every /api/runs/:id request returned 401 "No token provided".
     val authToken = remember {
-        context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
-            .getString("auth_token", "") ?: ""
+        live.airuncoach.airuncoach.data.SessionManager(context).getAuthToken() ?: ""
     }
 
     val pendingVideoFile = remember { mutableStateOf<File?>(null) }
