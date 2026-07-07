@@ -23,5 +23,14 @@ downloaded video on Instagram — the container/codec was unsupported, not the a
   MIME must NOT be hardcoded to `video/webm` — derive from the saved file extension
   (`.mp4` → `video/mp4`). The JS bridge already forwards `blob.type` + `lnk.download`.
 
-**Known limitation:** older Android WebViews without MP4 `MediaRecorder` support fall
-back to WebM (still broken on IG). Modern Chrome-based WebView records MP4 fine.
+**Do NOT record with `MediaRecorder` MP4 as the primary path.** Android WebView's
+MP4 muxer writes broken/missing duration metadata → players (and Instagram) show only
+~3s even though all frames are present. Preview looks full-length; the file is the problem.
+
+**Correct approach:** encode with **WebCodecs (`VideoEncoder` + `VideoFrame`) → `mp4-muxer`**
+(`fastStart:'in-memory'`, codec `avc1.42E029` H.264 Baseline L4.1). Stamp each frame with an
+explicit `timestamp` (µs) in the rAF loop, throttle to ~30fps, keyframe periodically, then
+`await encoder.flush()` → `muxer.finalize()` → Blob(`video/mp4`). This yields correct duration.
+Gate it behind `VideoEncoder.isConfigSupported(...)` at mount; keep `MediaRecorder` only as a
+last-resort fallback for WebViews without WebCodecs.
+**Why:** explicit per-frame timestamps + a real (non-fragmented) moov are what fix the duration.

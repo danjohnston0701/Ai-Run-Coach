@@ -4,6 +4,7 @@ import { ArrowLeft, Play, Square, Download, Loader2, Video, AlertCircle } from "
 import { Button } from "@/components/ui/button";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { Muxer, ArrayBufferTarget } from "mp4-muxer";
 
 // ─── Brand colours ────────────────────────────────────────────────────────────
 const TEAL       = "#00BFFF";   // hsl(190 100% 50%) – AI Run Coach primary
@@ -148,6 +149,15 @@ export default function RunVideoShare() {
   const chunksRef       = useRef<Blob[]>([]);
   const startTsRef      = useRef<number>(0);
   const stopTimeoutRef  = useRef<number | null>(null);
+
+  // WebCodecs encoder path (produces a correct-duration H.264 MP4 — the MediaRecorder
+  // MP4 muxer on Android WebView writes broken duration metadata, so players show ~3s).
+  const videoEncoderRef = useRef<any>(null);
+  const muxerRef        = useRef<any>(null);
+  const useWebCodecsRef = useRef<boolean>(false);
+  const lastEncMsRef    = useRef<number>(-1);
+  const encFrameCountRef = useRef<number>(0);
+  const webCodecsSupportedRef = useRef<boolean>(false); // set at mount via isConfigSupported
 
   // Route geometry
   const coordsRef  = useRef<LngLat[]>([]);
@@ -608,6 +618,33 @@ export default function RunVideoShare() {
     drawOverlay(ctx, routeProgress, tMs, run, units);
   }, [drawOverlay, run, units]);
 
+  // Flush the WebCodecs encoder, finalize the MP4, and trigger the download.
+  const finishWebCodecs = useCallback(async () => {
+    const enc   = videoEncoderRef.current;
+    const muxer = muxerRef.current;
+    if (!enc || !muxer) { setStatus("done"); return; }
+    try {
+      await enc.flush();
+      muxer.finalize();
+      const { buffer } = muxer.target;
+      const blob = new Blob([buffer], { type: "video/mp4" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `run-summary-${runId || "video"}.mp4`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("[finishWebCodecs]", e);
+    } finally {
+      try { enc.close(); } catch { /* already closed */ }
+      videoEncoderRef.current = null;
+      muxerRef.current        = null;
+      useWebCodecsRef.current = false;
+      setStatus("done");
+    }
+  }, [runId]);
+
   // ── Animation driver ────────────────────────────────────────────────────────
   const runAnimation = useCallback((record: boolean) => {
     const canvas = canvasRef.current;
@@ -620,40 +657,76 @@ export default function RunVideoShare() {
     dispCenterRef.current = interpAt(LOOKAHEAD_M).pos;
 
     if (record) {
-      try {
-        const stream   = canvas.captureStream(30);
-        // Prefer MP4/H.264 — Instagram, WhatsApp, iMessage etc. reject WebM. Modern
-        // Android WebView can record MP4; older ones fall back to WebM.
-        const candidates = [
-          "video/mp4;codecs=avc1.42E01E",
-          "video/mp4;codecs=h264",
-          "video/mp4",
-          "video/webm;codecs=vp9",
-          "video/webm",
-        ];
-        const mimeType = candidates.find(t => {
-          try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
-        }) || "";
-        const isMp4    = mimeType.startsWith("video/mp4");
-        const ext      = isMp4 ? "mp4" : "webm";
-        const blobType = isMp4 ? "video/mp4" : "video/webm";
-        const recorder = mimeType
-          ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 })
-          : new MediaRecorder(stream, { videoBitsPerSecond: 8_000_000 });
-        recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-        recorder.onstop = () => {
-          const blob = new Blob(chunksRef.current, { type: blobType });
-          const url  = URL.createObjectURL(blob);
-          const a    = document.createElement("a");
-          a.href     = url;
-          a.download = `run-summary-${runId || "video"}.${ext}`;
-          a.click();
-          URL.revokeObjectURL(url);
-          setStatus("done");
-        };
-        recorder.start(100);
-        recorderRef.current = recorder;
-      } catch { /* recording unsupported — still play */ }
+      useWebCodecsRef.current = false;
+      lastEncMsRef.current    = -1;
+      encFrameCountRef.current = 0;
+      const W = window as any;
+      const canWebCodecs = webCodecsSupportedRef.current && typeof W.VideoFrame === "function";
+
+      // ── Preferred path: WebCodecs → mp4-muxer. Explicit per-frame timestamps give a
+      //    correct-duration, non-fragmented H.264 MP4 that Instagram/WhatsApp accept. ──
+      if (canWebCodecs) {
+        try {
+          const muxer = new Muxer({
+            target: new ArrayBufferTarget(),
+            video: { codec: "avc", width: CW, height: CH, frameRate: 30 },
+            fastStart: "in-memory",
+          });
+          const encoder = new W.VideoEncoder({
+            output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+            error:  (e: any) => { console.error("[VideoEncoder]", e); },
+          });
+          encoder.configure({
+            codec: "avc1.42E029",   // H.264 Baseline L4.1 — wide device + social-app support
+            width: CW,
+            height: CH,
+            bitrate: 8_000_000,
+            framerate: 30,
+          });
+          muxerRef.current        = muxer;
+          videoEncoderRef.current = encoder;
+          useWebCodecsRef.current = true;
+        } catch (e) {
+          console.error("[WebCodecs setup failed — falling back to MediaRecorder]", e);
+          useWebCodecsRef.current = false;
+        }
+      }
+
+      // ── Fallback path: MediaRecorder (older WebViews; MP4 duration may be imperfect). ──
+      if (!useWebCodecsRef.current) {
+        try {
+          const stream   = canvas.captureStream(30);
+          const candidates = [
+            "video/mp4;codecs=avc1.42E01E",
+            "video/mp4;codecs=h264",
+            "video/mp4",
+            "video/webm;codecs=vp9",
+            "video/webm",
+          ];
+          const mimeType = candidates.find(t => {
+            try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
+          }) || "";
+          const isMp4    = mimeType.startsWith("video/mp4");
+          const ext      = isMp4 ? "mp4" : "webm";
+          const blobType = isMp4 ? "video/mp4" : "video/webm";
+          const recorder = mimeType
+            ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 })
+            : new MediaRecorder(stream, { videoBitsPerSecond: 8_000_000 });
+          recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+          recorder.onstop = () => {
+            const blob = new Blob(chunksRef.current, { type: blobType });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement("a");
+            a.href     = url;
+            a.download = `run-summary-${runId || "video"}.${ext}`;
+            a.click();
+            URL.revokeObjectURL(url);
+            setStatus("done");
+          };
+          recorder.start(100);
+          recorderRef.current = recorder;
+        } catch { /* recording unsupported — still play */ }
+      }
     }
 
     startTsRef.current = performance.now();
@@ -740,22 +813,46 @@ export default function RunVideoShare() {
 
       compositeFrame(routeProgress, t);
 
+      // ── WebCodecs: encode this frame with an explicit timestamp (throttled to ~30fps). ──
+      if (useWebCodecsRef.current && videoEncoderRef.current) {
+        const enc = videoEncoderRef.current;
+        if (enc.state === "configured" && (lastEncMsRef.current < 0 || t - lastEncMsRef.current >= 33)) {
+          try {
+            const frame = new (window as any).VideoFrame(canvas, { timestamp: Math.round(t * 1000) });
+            enc.encode(frame, { keyFrame: encFrameCountRef.current % 60 === 0 });
+            frame.close();
+            encFrameCountRef.current++;
+            lastEncMsRef.current = t;
+          } catch (e) { console.error("[VideoFrame encode]", e); }
+        }
+      }
+
       if (t < TOTAL_MS) {
         animRef.current = requestAnimationFrame(tick);
-      } else if (record && recorderRef.current?.state === "recording") {
-        stopTimeoutRef.current = window.setTimeout(() => recorderRef.current?.stop(), HOLD_MS);
+      } else if (record) {
+        stopTimeoutRef.current = window.setTimeout(() => {
+          if (useWebCodecsRef.current) finishWebCodecs();
+          else if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+          else setStatus("done");
+        }, HOLD_MS);
       } else {
         setStatus("done");
       }
     };
 
     animRef.current = requestAnimationFrame(tick);
-  }, [runId, interpAt, buildProgressLine, compositeFrame]);
+  }, [runId, interpAt, buildProgressLine, compositeFrame, finishWebCodecs]);
 
   const stopAll = useCallback(() => {
     cancelAnimationFrame(animRef.current);
     if (stopTimeoutRef.current !== null) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    if (videoEncoderRef.current) {
+      try { videoEncoderRef.current.close(); } catch { /* already closed */ }
+      videoEncoderRef.current = null;
+      muxerRef.current        = null;
+      useWebCodecsRef.current = false;
+    }
     setStatus("idle");
     setProgress(0);
     // Reset visuals back to the framed start
@@ -772,10 +869,22 @@ export default function RunVideoShare() {
     }
   }, [interpAt, compositeFrame]);
 
+  // Probe WebCodecs H.264 support once so we only commit to that path when it truly works.
+  useEffect(() => {
+    const W = window as any;
+    if (typeof W.VideoEncoder?.isConfigSupported !== "function") return;
+    let cancelled = false;
+    W.VideoEncoder.isConfigSupported({ codec: "avc1.42E029", width: CW, height: CH, bitrate: 8_000_000, framerate: 30 })
+      .then((s: any) => { if (!cancelled) webCodecsSupportedRef.current = !!s?.supported; })
+      .catch(() => { /* leave false — MediaRecorder fallback */ });
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => () => {
     cancelAnimationFrame(animRef.current);
     if (stopTimeoutRef.current !== null) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
     if (recorderRef.current?.state === "recording") { try { recorderRef.current.stop(); } catch { /* already stopped */ } }
+    if (videoEncoderRef.current) { try { videoEncoderRef.current.close(); } catch { /* already closed */ } }
   }, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────
