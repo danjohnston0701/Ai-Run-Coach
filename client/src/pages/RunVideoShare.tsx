@@ -153,6 +153,7 @@ export default function RunVideoShare() {
   const coordsRef  = useRef<LngLat[]>([]);
   const cumRef     = useRef<number[]>([]);
   const totalRef   = useRef<number>(0);
+  const timeFracRef = useRef<number[] | null>(null); // real elapsed-time fraction per point (0..1)
   const dispBearingRef = useRef<number>(0);
   const dispCenterRef  = useRef<LngLat>([0, 0]); // smoothed (chase) camera centre
   const lastCamRef = useRef<{ center: LngLat; zoom: number; pitch: number; bearing: number } | null>(null);
@@ -187,13 +188,18 @@ export default function RunVideoShare() {
   // ── Normalise route points → coords + cumulative distances ──────────────────
   useEffect(() => {
     if (!run) return;
-    // Backend returns routePoints as { latitude, longitude }; older/phone formats
-    // may use { lat, lng }. Normalise both, coerce numeric strings, drop invalids.
-    const raw: LngLat[] = Array.isArray(run.routePoints)
-      ? run.routePoints
-          .map((p: any): LngLat => [Number(p?.longitude ?? p?.lng), Number(p?.latitude ?? p?.lat)])
-          .filter((c: LngLat) => Number.isFinite(c[0]) && Number.isFinite(c[1]))
-      : [];
+    // Backend returns routePoints as { latitude, longitude, timestamp }; older/phone
+    // formats may use { lat, lng, time }. Parse coord + timestamp together and drop
+    // invalids as pairs, so the timestamp array stays index-aligned with the coords.
+    const parsed = (Array.isArray(run.routePoints) ? run.routePoints : [])
+      .map((p: any) => ({
+        lng: Number(p?.longitude ?? p?.lng),
+        lat: Number(p?.latitude  ?? p?.lat),
+        ts:  Number(p?.timestamp ?? p?.time ?? NaN),
+      }))
+      .filter((p: any) => Number.isFinite(p.lng) && Number.isFinite(p.lat));
+
+    const raw: LngLat[] = parsed.map((p: any): LngLat => [p.lng, p.lat]);
     const coords = smoothPath(raw);
     coordsRef.current = coords;
 
@@ -203,6 +209,26 @@ export default function RunVideoShare() {
     }
     cumRef.current = cum;
     totalRef.current = cum[cum.length - 1] || 0;
+
+    // Build a genuine elapsed-time fraction per point from the recorded timestamps.
+    // Normalising by the total span makes it unit-agnostic (epoch ms or seconds) and
+    // pins the end to the real total time — the *shape* comes from real pace changes.
+    const ts: number[] = parsed.map((p: any) => p.ts);
+    let timeFrac: number[] | null = null;
+    if (ts.length === coords.length && ts.every(Number.isFinite)) {
+      const span = ts[ts.length - 1] - ts[0];
+      if (span > 0) {
+        // Clamp to [0,1] so an out-of-order spike can't push the timer past the real
+        // total, then enforce monotonic-increasing so it never ticks backwards.
+        timeFrac = ts.map(t => Math.min(1, Math.max(0, (t - ts[0]) / span)));
+        for (let i = 1; i < timeFrac.length; i++) {
+          if (timeFrac[i] < timeFrac[i - 1]) timeFrac[i] = timeFrac[i - 1];
+        }
+        timeFrac[0] = 0; timeFrac[timeFrac.length - 1] = 1; // anchor endpoints exactly
+      }
+    }
+    timeFracRef.current = timeFrac;
+
     dispBearingRef.current = coords.length >= 2 ? bearing(coords[0], coords[1]) : 0;
     // Need at least a couple of points AND some real distance — a cluster of
     // duplicate GPS fixes would otherwise produce a frozen, pointless flyover.
@@ -387,6 +413,22 @@ export default function RunVideoShare() {
     const dateStr    = fmtDate(run?.completedAt || run?.date || null);
     const distUnit   = units === "mi" ? "MILES" : "KILOMETRES";
 
+    // Genuine elapsed time at the marker's actual position on the track: interpolate
+    // the real per-point timestamps. Falls back to even pace if the run has none.
+    const cumArr = cumRef.current;
+    const tfArr  = timeFracRef.current;
+    const trackTotal = totalRef.current || 0;
+    let elapsedFrac = routeProgress;
+    if (tfArr && cumArr.length === tfArr.length && trackTotal > 0 && routeProgress > 0) {
+      const d = routeProgress * trackTotal;
+      let i = 1;
+      while (i < cumArr.length && cumArr[i] < d) i++;
+      if (i >= cumArr.length) i = cumArr.length - 1;
+      const seg = (d - cumArr[i - 1]) / ((cumArr[i] - cumArr[i - 1]) || 1);
+      elapsedFrac = tfArr[i - 1] + (tfArr[i] - tfArr[i - 1]) * seg;
+    }
+    elapsedFrac = Math.max(0, Math.min(1, elapsedFrac));
+
     // Cross-fade: title card owns the intro, the HUD takes over once we're flying.
     const introFade = Math.max(0, Math.min(1, (INTRO_MS - tMs) / 500));
     const hudFade   = 1 - introFade;
@@ -445,7 +487,7 @@ export default function RunVideoShare() {
       ctx.restore();
 
       const stats = [
-        { label: "TIME",     value: fmtClock(totalDurSec * routeProgress),      unit: "" },
+        { label: "TIME",     value: fmtClock(totalDurSec * elapsedFrac),        unit: "" },
         { label: "DISTANCE", value: fmtDist(totalDistM * routeProgress, units), unit: units, hero: true },
         { label: "ELEV",     value: fmtElev(elevGain * routeProgress, units),   unit: units === "mi" ? "ft" : "m" },
       ] as { label: string; value: string; unit: string; hero?: boolean }[];
