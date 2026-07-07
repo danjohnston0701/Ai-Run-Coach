@@ -703,10 +703,10 @@ export default function RunVideoShare() {
             video: { codec: "avc", width: CW, height: CH, frameRate: 30 },
             fastStart: "in-memory",
             // The first rAF frame fires ~16ms after start, so our first frame's timestamp is never
-            // exactly 0. mp4-muxer's default "strict" behavior THROWS on a non-zero first chunk —
-            // and because that throw happens inside the async encoder output callback it's swallowed,
-            // so NO samples (and no decoderConfig) are ever stored and finalize() crashes on null.
-            // "offset" rebases all timestamps so the first is 0. THIS is the real root cause.
+            // exactly 0. mp4-muxer's default "strict" behavior would THROW on a non-zero first chunk,
+            // and such a throw (inside the async encoder callback) is swallowed → empty muxer →
+            // finalize() crashes on null. "offset" rebases all timestamps so the first is 0.
+            // (Defense-in-depth; the primary crash cause was a missing VideoFrame duration — see below.)
             firstTimestampBehavior: "offset",
           });
           seededConfigRef.current = false; // reset per recording; set true once muxer has a decoderConfig
@@ -871,7 +871,12 @@ export default function RunVideoShare() {
         const enc = videoEncoderRef.current;
         if (enc.state === "configured" && (lastEncMsRef.current < 0 || t - lastEncMsRef.current >= 33)) {
           try {
-            const frame = new (window as any).VideoFrame(canvas, { timestamp: Math.round(t * 1000) });
+            // duration is REQUIRED: mp4-muxer's addVideoChunk throws on a null/undefined chunk
+            // duration (Number.isFinite(null) === false) BEFORE it stores anything, and that throw
+            // is swallowed inside the async encoder callback → no samples, no decoderConfig →
+            // finalize() crashes on null. VideoFrames without an explicit duration yield a null
+            // chunk.duration, so we set one (~1/30s in µs). THIS is the real root cause.
+            const frame = new (window as any).VideoFrame(canvas, { timestamp: Math.round(t * 1000), duration: Math.round(1_000_000 / 30) });
             enc.encode(frame, { keyFrame: encFrameCountRef.current % 60 === 0 });
             frame.close();
             encFrameCountRef.current++;
