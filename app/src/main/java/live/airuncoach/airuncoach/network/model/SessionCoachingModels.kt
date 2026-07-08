@@ -285,7 +285,7 @@ data class SessionTriggerLiveRequest(
     @com.google.gson.annotations.SerializedName("currentCadence") val currentCadence: Int? = null,
     @com.google.gson.annotations.SerializedName("distanceKm") val distanceKm: Double,
     @com.google.gson.annotations.SerializedName("targetDistanceKm") val targetDistanceKm: Double? = null,
-    @com.google.gson.annotations.SerializedName("elapsedMinutes") val elapsedMinutes: Int,
+    @com.google.gson.annotations.SerializedName("elapsedMinutes") val elapsedMinutes: Double,
     @com.google.gson.annotations.SerializedName("currentGrade") val currentGrade: Double? = null,
     @com.google.gson.annotations.SerializedName("elevationGainM") val elevationGainM: Double? = null,
 

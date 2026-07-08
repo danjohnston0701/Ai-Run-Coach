@@ -3,6 +3,11 @@ package live.airuncoach.airuncoach.network.model
 import com.google.gson.annotations.SerializedName
 import live.airuncoach.airuncoach.domain.model.KmSplit
 
+data class HRZoneTarget(
+    @SerializedName("min") val min: Int? = null,
+    @SerializedName("max") val max: Int? = null,
+)
+
 data class PaceUpdate(
     @SerializedName("distance") val distance: Double,
     @SerializedName("targetDistance") val targetDistance: Double?,
@@ -21,6 +26,7 @@ data class PaceUpdate(
     @SerializedName("kmSplits") val kmSplits: List<KmSplit>,
     // Additional context for richer split coaching
     @SerializedName("heartRate") val heartRate: Int? = null,
+    @SerializedName("heartRateZoneTarget") val heartRateZoneTarget: HRZoneTarget? = null,
     @SerializedName("cadence") val cadence: Int? = null,
     @SerializedName("targetTime") val targetTime: Int? = null,
     @SerializedName("targetPace") val targetPace: String? = null,

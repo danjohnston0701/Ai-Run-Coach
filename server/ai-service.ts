@@ -738,6 +738,9 @@ export async function generatePaceUpdate(params: {
   isOnHill?: boolean;
   kmSplits?: Array<{ km: number; time: number; pace: string }>;
   hasRoute?: boolean;
+  // Heart rate — available when athlete has HR monitor (Garmin watch, chest strap)
+  heartRate?: number;
+  heartRateZoneTarget?: { min?: number; max?: number };
   // User profile
   fitnessLevel?: string;
   runnerName?: string;
@@ -755,10 +758,25 @@ export async function generatePaceUpdate(params: {
   // Activity type — "run", "walk", or "interval"
   sessionType?: string;
 }): Promise<string> {
-  const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory } = params;
+  const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory, heartRate, heartRateZoneTarget } = params;
   const workoutType = (params as any).workoutType as string | undefined;
   const sessionType = (params as any).sessionType as string | undefined;
   const accentRule = accentDirective((params as any).coachAccent);
+
+  // Build HR context for split coaching — only when athlete has an HR monitor
+  let hrContext = '';
+  if (heartRate && heartRate > 0) {
+    hrContext = `\n- Heart rate: ${heartRate} bpm`;
+    if (heartRateZoneTarget?.max) {
+      if (heartRate > heartRateZoneTarget.max) {
+        hrContext += ` (ABOVE target zone ${heartRateZoneTarget.min ?? '?'}–${heartRateZoneTarget.max} bpm — ${heartRate - heartRateZoneTarget.max} bpm over)`;
+      } else if (heartRateZoneTarget.min && heartRate < heartRateZoneTarget.min) {
+        hrContext += ` (below target zone ${heartRateZoneTarget.min}–${heartRateZoneTarget.max} bpm)`;
+      } else {
+        hrContext += ` (in target zone ${heartRateZoneTarget.min ?? '?'}–${heartRateZoneTarget.max} bpm)`;
+      }
+    }
+  }
   
   const progress = Math.round((distance / targetDistance) * 100);
   const timeMin = Math.floor(elapsedTime / 60);  // kept for backward compat
@@ -902,7 +920,7 @@ The runner just completed kilometer ${splitKm} with a split pace of ${spokenSpli
 - Overall progress: ${formatDistanceForCoaching(distance)} of ${targetDistance ? `${formatDistanceForCoaching(targetDistance)} (${progress}%)` : '?'}
 - Time elapsed: ${timeFormatted}
 - Overall average pace: ${spokenCurrentPace}
-- This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}${cadenceContext}
+- This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}${hrContext}${cadenceContext}
 ${splitTargetVerdict ? `\nPACE ASSESSMENT: ${splitTargetVerdict}` : ''}
 ${trainingSessionContext}
 ${routeCtxBlock ? `\n${routeCtxBlock}` : ''}
@@ -5222,6 +5240,9 @@ export interface GenerateSessionCoachingParams {
     workoutType?: string;          // e.g. "easy", "intervals", "tempo", "long_run", "recovery"
     isHardSession?: boolean;       // true if this was a high-intensity session (intervals, tempo, threshold, hills)
   }>;
+  // HR monitor availability — inferred from whether recent runs have HR data.
+  // When false, OpenAI should not design HR-based triggers (they will never fire).
+  hasHeartRateMonitor?: boolean;
 }
 
 export interface SessionCoachingPlan {
@@ -5654,7 +5675,8 @@ Session Details:
 - Target Duration: ${targetDurationMinutes} minutes
 - Target Distance: ${targetDistanceKm} km
 - Overall Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
-- Overall HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm${intervalContext}${perPhaseTargets}${trainingWeekContext}${recoveryContextNote}
+- Overall HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm
+- Heart Rate Monitor: ${params.hasHeartRateMonitor === false ? "NOT AVAILABLE — do NOT design any hr-based trigger conditions, they will never fire. Use pace, cadence, elapsed time, and distance instead." : params.hasHeartRateMonitor === true ? "Available — HR data will be live during the run" : "Unknown"}${intervalContext}${perPhaseTargets}${trainingWeekContext}${recoveryContextNote}
 ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
 
   const systemPrompt = `You are ${coachName}, an AI running coach. You design live coaching plans that execute during a GPS training session.
@@ -5727,12 +5749,7 @@ Design a complete, bespoke coaching plan for this specific athlete and session.
 
 You are the coaching brain. Decide what to monitor, when to intervene, and what live data to include in messages. Think: what would a world-class coach actually say to THIS person at each moment of THIS run? Include data in messages using {hr}, {cadence}, {pace}, {repNum}, {repsLeft}, {targetHRMax} etc. where helpful.
 
-For reactive and periodic triggers — you decide what makes sense to monitor for this session. Don't limit yourself to the obvious. Consider:
-- Is cadence likely to be an issue for this athlete at this pace?
-- Should there be periodic HR check-ins during jog intervals (every 90 seconds)?  
-- Is there a moment 30 seconds before each walk where a heads-up would help?
-- Should the recovery walk get a HR check at the 60-second mark to confirm recovery?
-- Would a mid-session morale boost at 60% completion feel right?
+For reactive and periodic triggers — you decide what makes sense to monitor for this session. Use the FULL range of available metrics, not just heart rate. Consider pace drift, cadence, distance milestones, remaining distance/time, effort level, and terrain — whatever is most relevant to THIS session type and THIS athlete.
 You decide. We execute.
 
 Return ONLY valid JSON matching this schema exactly:

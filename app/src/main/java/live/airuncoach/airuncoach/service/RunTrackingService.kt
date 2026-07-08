@@ -1968,7 +1968,7 @@ class RunTrackingService : Service(), SensorEventListener {
      * Format pace in seconds per km to a "M:SS" string.
      */
     private fun formatPace(secondsPerKm: Double): String {
-        if (secondsPerKm <= 0 || secondsPerKm > 3600) return "0:00"
+        if (secondsPerKm <= 0 || secondsPerKm > 900) return "0:00"
         val minutes = (secondsPerKm / 60).toInt()
         val seconds = (secondsPerKm % 60).toInt()
         return String.format("%d:%02d", minutes, seconds)
@@ -2531,7 +2531,9 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
                 
                 // Update current real-time pace display (use smoothed for better UX)
-                currentPace = if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 3600) {
+                // Cap at 900 sec/km (15 min/km) — below this speed, GPS drift from a
+                // stationary phone produces absurd values. A real runner is never slower.
+                currentPace = if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
                     val minutes = (smoothedPaceSeconds / 60).toInt()
                     val seconds = (smoothedPaceSeconds % 60).toInt()
                     String.format("%d:%02d", minutes, seconds)
@@ -2886,20 +2888,12 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Elite coaching final-stretch triggers — preserved for coached sessions (final 500m/250m/100m)
-        // Generic milestone/pace-trend/technique elite triggers are suppressed during coached sessions.
-        // EXCEPTION: interval plan sessions suppress ALL generic prompts including final-stretch — the
-        // dynamic plan owns all cueing; a "final 250m!" shout mid-interval is disruptive and confusing.
-        val isIntervalSession = dynamicCoachingPlan?.cueingStrategy == "interval" ||
-                                sessionInstructions?.sessionStructure?.type?.contains("interval") == true
-        if (!hasCoachingFiredThisTick && canFireCoaching()) {
-            if (isCoachingPlanActive && !isIntervalSession) {
-                // Coached non-interval session: only fire final 500m / 250m / 100m motivation
-                maybeFinalStretchCoaching(displayDistance, duration, avgSpeed)
-            } else if (!isCoachingPlanActive) {
-                maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
-            }
-            // isCoachingPlanActive && isIntervalSession → all generic prompts suppressed
+        // Standard coaching triggers (elite coaching, final stretch motivation).
+        // FULLY SUPPRESSED during planned workout sessions — the dynamic coaching plan
+        // owns ALL cueing. Final 250m, pace trend, technique form triggers are disruptive
+        // and clash with the session's own trigger design.
+        if (!hasCoachingFiredThisTick && canFireCoaching() && !isCoachingPlanActive) {
+            maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
         }
         
         _currentRunSession.value = RunSession(
@@ -3118,11 +3112,16 @@ class RunTrackingService : Service(), SensorEventListener {
     
     private fun generateRouteHash(): String = MessageDigest.getInstance("MD5").digest(routePoints.joinToString(",") { "${String.format("%.4f", it.latitude)},${String.format("%.4f", it.longitude)}" }.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    private fun calculatePace(speedKmh: Float): String = if (speedKmh <= 0) "0:00" else {
+    private fun calculatePace(speedKmh: Float): String {
+        // Below 2 km/h (~30 min/km) the runner is effectively stationary — GPS drift
+        // at typical phone accuracy (5-15m) at any update rate produces speeds in the
+        // 0.01-1 km/h range, creating absurd "1433:25 min/km" displays.
+        // 2 km/h = 30 min/km cap — slower than a brisk walk, safe upper bound.
+        if (speedKmh <= 0 || speedKmh < 2.0f) return "0:00"
         val paceMinPerKm = 60.0 / speedKmh
         val minutes = paceMinPerKm.toInt()
         val seconds = ((paceMinPerKm - minutes) * 60).toInt()
-        "${minutes}:${String.format("%02d", seconds)}"
+        return "${minutes}:${String.format("%02d", seconds)}"
     }
 
     private fun calculateCalories(distMeters: Double, durationMillis: Long): Int = (70 * (distMeters / 1000.0)).toInt()
@@ -4313,7 +4312,7 @@ class RunTrackingService : Service(), SensorEventListener {
         val snapshotPaceSecPerKm = parsePaceToSeconds(currentPace).let { if (it > 0) it.toInt() else null }
         val snapshotCadence = currentCadence.takeIf { it > 0 }
         val snapshotDistKm = currentDistanceKm
-        val snapshotElapsedMin = (getActiveRunDuration() / 60_000L).toInt()
+        val snapshotElapsedMin = getActiveRunDuration() / 60_000.0
         val snapshotGrade = currentSmoothedGrade
         val snapshotElevGain = totalElevationGain
         val snapshotTargetDistKm = targetDistance?.let { it / 1000.0 }
@@ -4378,7 +4377,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Full session context — GPT needs this to understand what the session IS
                     preRunBrief = plan.preRunBrief,
                     whyThisSession = plan.whyThisSession,
-                    sessionInstructions = sessionInstructions?.preRunBrief,  // training plan description
+                    sessionInstructions = planWorkoutDescription,  // raw training plan workout description
                     cueingStrategy = plan.cueingStrategy,
                     totalSessionDurationMin = plan.targetMetrics.totalDurationMinutes,
                     totalSessionDistanceKm = plan.targetMetrics.totalDistanceKm,
@@ -5318,6 +5317,12 @@ class RunTrackingService : Service(), SensorEventListener {
                     targetPace = targetPaceStr,   // Target pace so AI can compare split vs target
                     averagePace = overallAvgPaceStr,
                     cadence = currentCadence.takeIf { it > 0 },  // Live cadence for tempo/form coaching
+                    heartRate = currentHeartRate.takeIf { it > 0 },  // Live HR for zone-aware split coaching
+                    heartRateZoneTarget = dynamicCoachingPlan?.targetMetrics?.let { tm ->
+                        if (tm.mainEffortHRMin != null || tm.mainEffortHRMax != null)
+                            live.airuncoach.airuncoach.network.model.HRZoneTarget(min = tm.mainEffortHRMin, max = tm.mainEffortHRMax)
+                        else null
+                    },
                     // User profile
                     fitnessLevel = currentUser?.fitnessLevel,
                     runnerName = currentUser?.name,

@@ -762,6 +762,9 @@ export async function getOrGenerateSessionCoaching(
     coachTone:        (user as any).coachTone  ?? "motivational",
     coachAccent:      (user as any).coachAccent ?? undefined,
     aiRunnerProfile,       // "What I know about you" personalisation block
+    // HR monitor availability — inferred from recent runs. If none of the last 5 runs have avgHR,
+    // the athlete likely doesn't have an HR monitor and OpenAI should design pace/effort triggers instead.
+    hasHeartRateMonitor: recentRuns.some(r => r.avgHR && r.avgHR > 0),
     sessionIntent:    workout.sessionIntent ?? undefined,  // What this session is designed to achieve
     trainingWeekNumber,    // Current week in plan (e.g. 3) — sets tone and progression expectations
     trainingTotalWeeks,    // Total weeks in plan (e.g. 16)
