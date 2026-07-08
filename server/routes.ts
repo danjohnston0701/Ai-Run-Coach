@@ -2130,6 +2130,16 @@ function transformRunForAndroid(run: any) {
               mergeFields.wasTargetAchieved = wasTargetAchieved;
             }
 
+            // Workout/plan linking — phone sends linkedWorkoutId and linkedPlanId when starting
+            // from a coaching plan session; the Garmin run record won't have these.
+            if (runData.linkedWorkoutId && !(existingByExternalId as any).linkedWorkoutId) {
+              mergeFields.linkedWorkoutId = runData.linkedWorkoutId;
+              console.log(`[POST /api/runs] Case 0: merging linkedWorkoutId=${runData.linkedWorkoutId} into run ${existingByExternalId.id}`);
+            }
+            if (runData.linkedPlanId && !(existingByExternalId as any).linkedPlanId) {
+              mergeFields.linkedPlanId = runData.linkedPlanId;
+            }
+
             if (Object.keys(mergeFields).length > 0) {
               console.log(`[POST /api/runs] Merging ${Object.keys(mergeFields).join(', ')} into run ${existingByExternalId.id}`);
               const [merged] = await db.update(runs)
