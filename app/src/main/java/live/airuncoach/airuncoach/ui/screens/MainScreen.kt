@@ -58,6 +58,13 @@ import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
 import live.airuncoach.airuncoach.viewmodel.RouteGenerationViewModel
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 import live.airuncoach.airuncoach.viewmodel.TrainingPlanViewModel
+import live.airuncoach.airuncoach.viewmodel.VersionCheckViewModel
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 
 sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
@@ -77,12 +84,103 @@ val items = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(onNavigateToLogin: () -> Unit) {
+fun MainScreen(
+    onNavigateToLogin: () -> Unit,
+    onNavigateToGarminUpdate: (version: String, releaseNote: String) -> Unit = { _, _ -> },
+) {
     val navController = rememberNavController()
     var showLocationPermissionDialog by remember { mutableStateOf(false) }
     var onLocationPermissionGranted: (() -> Unit)? by remember { mutableStateOf(null) }
     var showPromoCodeDialog by remember { mutableStateOf(false) }
     var promoCodeLoading by remember { mutableStateOf(false) }
+
+    // ── Version checking ───────────────────────────────────────────────────
+    val versionCheckVm: VersionCheckViewModel = hiltViewModel()
+    val androidUpdate by versionCheckVm.androidUpdateAvailable.collectAsState()
+    val garminUpdate  by versionCheckVm.garminUpdateAvailable.collectAsState()
+    val context = LocalContext.current
+
+    // Trigger version check once on entry
+    LaunchedEffect(Unit) {
+        delay(2_000L) // give auth + initial loads time to settle before checking
+        versionCheckVm.checkVersions()
+    }
+
+    // When a Garmin companion update is detected, navigate to the update screen
+    // (same destination as the push notification path)
+    LaunchedEffect(garminUpdate) {
+        val update = garminUpdate ?: return@LaunchedEffect
+        delay(500L) // let the main UI render first
+        onNavigateToGarminUpdate(update.latestVersion, update.releaseNote)
+        versionCheckVm.dismissGarminUpdate()
+    }
+
+    // Android update dialog — shown inline rather than navigating away
+    if (androidUpdate != null) {
+        val update = androidUpdate!!
+        AlertDialog(
+            onDismissRequest = {
+                if (!update.isForced) versionCheckVm.dismissAndroidUpdate()
+                // Forced updates cannot be dismissed
+            },
+            containerColor = Colors.backgroundSecondary,
+            title = {
+                Text(
+                    text = if (update.isForced) "Update Required" else "Update Available",
+                    style = AppTextStyles.h3,
+                    color = Colors.textPrimary
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Version ${update.latestVersionName} is available on the Play Store.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary
+                    )
+                    if (update.releaseNote.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = update.releaseNote,
+                            style = AppTextStyles.small,
+                            color = Colors.textSecondary
+                        )
+                    }
+                    if (update.isForced) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "This update is required to continue using AI Run Coach.",
+                            style = AppTextStyles.small,
+                            color = Colors.warning
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(update.playStoreUrl))
+                            )
+                        } catch (e: Exception) {
+                            Log.w("MainScreen", "Could not open Play Store: ${e.message}")
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Text("Update Now", color = Colors.buttonText, style = AppTextStyles.body)
+                }
+            },
+            dismissButton = {
+                if (!update.isForced) {
+                    TextButton(onClick = { versionCheckVm.dismissAndroidUpdate() }) {
+                        Text("Later", color = Colors.textSecondary, style = AppTextStyles.body)
+                    }
+                }
+            }
+        )
+    }
 
     // ── Trial expiry gate ──────────────────────────────────────────────────
     // Checks the locally-cached user profile on every composition.

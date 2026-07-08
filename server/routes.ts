@@ -15378,6 +15378,50 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     }
   });
 
+  // ==================== APP VERSION CHECK ====================
+  //
+  // Called by the Android app at startup (no auth required — runs before login in some paths).
+  // Returns the minimum required and latest recommended versions for:
+  //   - The Android app (versionCode + versionName)
+  //   - The Garmin Connect IQ companion app (semantic version string)
+  //
+  // Versions are configured via environment variables so they can be updated instantly
+  // without a server deploy. Defaults are hardcoded here as the current known-good versions.
+  //
+  // ENV VARS:
+  //   ANDROID_MIN_VERSION_CODE   – minimum versionCode still allowed (older = force update)
+  //   ANDROID_LATEST_VERSION_CODE – latest versionCode on Play Store
+  //   ANDROID_LATEST_VERSION_NAME – human-readable e.g. "1.6.0"
+  //   ANDROID_PLAY_STORE_URL      – Play Store listing URL
+  //   GARMIN_LATEST_VERSION       – latest Connect IQ companion version e.g. "1.4.0"
+  //   GARMIN_RELEASE_NOTE         – one-sentence what's new for the Garmin app
+  //   GARMIN_CONNECT_IQ_STORE_URL – Connect IQ listing URL
+  //   GARMIN_MIN_VERSION          – optional: minimum required companion version (older = show update prompt)
+  app.get("/api/app/version-check", async (req: Request, res: Response) => {
+    try {
+      res.json({
+        android: {
+          latestVersionCode: parseInt(process.env.ANDROID_LATEST_VERSION_CODE || "12"),
+          latestVersionName: process.env.ANDROID_LATEST_VERSION_NAME || "1.5.0",
+          minVersionCode:    parseInt(process.env.ANDROID_MIN_VERSION_CODE    || "1"),
+          playStoreUrl:      process.env.ANDROID_PLAY_STORE_URL ||
+                             "https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach",
+          releaseNote:       process.env.ANDROID_RELEASE_NOTE || "",
+        },
+        garmin: {
+          latestVersion:    process.env.GARMIN_LATEST_VERSION     || "1.4.0",
+          minVersion:       process.env.GARMIN_MIN_VERSION        || "1.0.0",
+          connectIqStoreUrl: process.env.GARMIN_CONNECT_IQ_STORE_URL ||
+                             "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017",
+          releaseNote:       process.env.GARMIN_RELEASE_NOTE      || "",
+        },
+      });
+    } catch (error: any) {
+      console.error("Version check error:", error);
+      res.status(500).json({ error: "Failed to get version info" });
+    }
+  });
+
   // ==================== HEALTH INSIGHTS ENDPOINTS ====================
   
   // HEALTH - Get today's health snapshot

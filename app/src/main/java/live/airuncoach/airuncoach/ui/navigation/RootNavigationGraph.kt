@@ -148,6 +148,9 @@ fun RootNavigationGraph(navController: NavHostController) {
                     navController.navigate(AppRoutes.LOGIN) {
                         popUpTo(AppRoutes.MAIN) { inclusive = true }
                     }
+                },
+                onNavigateToGarminUpdate = { version, releaseNote ->
+                    navController.navigate(AppRoutes.garminWatchUpdate(version, releaseNote))
                 }
             )
         }

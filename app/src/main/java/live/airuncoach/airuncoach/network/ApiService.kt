@@ -9,6 +9,7 @@ import live.airuncoach.airuncoach.network.model.GroupRunCompleteRequest
 import live.airuncoach.airuncoach.network.model.GroupRunResultsResponse
 import live.airuncoach.airuncoach.network.model.GroupRunLookupResponse
 import live.airuncoach.airuncoach.network.model.*
+import live.airuncoach.airuncoach.network.model.AppVersionCheckResponse
 import live.airuncoach.airuncoach.network.model.GeneratePlanRequest
 import live.airuncoach.airuncoach.network.model.GeneratePlanResponse
 import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
@@ -759,6 +760,14 @@ interface ApiService {
      */
     @POST("/api/observer-invitations/validate")
     suspend fun validateObserverInvitation(@Body body: ValidateObserverInvitationRequest): ValidateObserverInvitationResponse
+
+    /**
+     * Version check — called at startup (no auth required).
+     * Returns latest Android and Garmin companion app versions so the app can
+     * prompt for updates without a Play Store poll.
+     */
+    @GET("/api/app/version-check")
+    suspend fun checkAppVersion(): AppVersionCheckResponse
 }
 
 data class RefreshWatchTokenRequest(
