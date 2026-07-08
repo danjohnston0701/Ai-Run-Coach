@@ -230,6 +230,93 @@ data class DynamicCoachingTrigger(
 )
 
 /**
+ * Request to generate a live AI coaching message when a session trigger fires.
+ *
+ * Instead of using the pre-written template message from the plan, this hits the
+ * /api/coaching/session-trigger-live endpoint to get a bespoke AI-generated message
+ * based on the athlete's actual live data at this precise moment — same quality as
+ * normal run coaching (generateEliteCoaching / generatePaceUpdate).
+ */
+data class SessionTriggerLiveRequest(
+    // What triggered this message
+    @com.google.gson.annotations.SerializedName("triggerId") val triggerId: String,
+    @com.google.gson.annotations.SerializedName("triggerType") val triggerType: String,
+    @com.google.gson.annotations.SerializedName("triggerCondition") val triggerCondition: String,
+
+    // ── Full session context — OpenAI needs to know what the session IS before it can coach ──
+
+    // What GPT told the runner before they started (the session summary and briefing)
+    @com.google.gson.annotations.SerializedName("preRunBrief") val preRunBrief: String? = null,
+    // Why this session is in the plan
+    @com.google.gson.annotations.SerializedName("whyThisSession") val whyThisSession: String? = null,
+    // The raw training plan workout description (from the training plan, e.g. "3×2km tempo at threshold")
+    @com.google.gson.annotations.SerializedName("sessionInstructions") val sessionInstructions: String? = null,
+    // How this session is structured — tells GPT the coaching strategy
+    @com.google.gson.annotations.SerializedName("cueingStrategy") val cueingStrategy: String? = null,
+    // Total planned session duration and distance
+    @com.google.gson.annotations.SerializedName("totalSessionDurationMin") val totalSessionDurationMin: Int? = null,
+    @com.google.gson.annotations.SerializedName("totalSessionDistanceKm") val totalSessionDistanceKm: Double? = null,
+    // For interval sessions: which rep we are on and how many total
+    @com.google.gson.annotations.SerializedName("currentRepNumber") val currentRepNumber: Int? = null,
+    @com.google.gson.annotations.SerializedName("totalRepsInSession") val totalRepsInSession: Int? = null,
+    // Explicitly whether this is a work interval or a recovery phase (don't leave GPT to infer from name)
+    @com.google.gson.annotations.SerializedName("isWorkPhase") val isWorkPhase: Boolean? = null,
+    // How far through this phase and how much is left (in minutes). Null for distance-based phases.
+    @com.google.gson.annotations.SerializedName("phaseElapsedMinutes") val phaseElapsedMinutes: Double? = null,
+    @com.google.gson.annotations.SerializedName("phaseRemainingMinutes") val phaseRemainingMinutes: Double? = null,
+    // Summary of all phases (compact description of the session structure)
+    @com.google.gson.annotations.SerializedName("phasesSummary") val phasesSummary: String? = null,
+
+    // Session type and goal
+    @com.google.gson.annotations.SerializedName("sessionType") val sessionType: String,
+    @com.google.gson.annotations.SerializedName("sessionGoal") val sessionGoal: String,
+    @com.google.gson.annotations.SerializedName("sessionPhase") val sessionPhase: String,
+    @com.google.gson.annotations.SerializedName("phaseInstructions") val phaseInstructions: String? = null,
+
+    // Phase targets (what the athlete SHOULD be hitting)
+    @com.google.gson.annotations.SerializedName("phaseHRMin") val phaseHRMin: Int? = null,
+    @com.google.gson.annotations.SerializedName("phaseHRMax") val phaseHRMax: Int? = null,
+    @com.google.gson.annotations.SerializedName("phasePaceMinSecPerKm") val phasePaceMinSecPerKm: Int? = null,
+    @com.google.gson.annotations.SerializedName("phasePaceMaxSecPerKm") val phasePaceMaxSecPerKm: Int? = null,
+
+    // Current live metrics at the moment the trigger fired
+    @com.google.gson.annotations.SerializedName("currentHR") val currentHR: Int,
+    @com.google.gson.annotations.SerializedName("currentPaceSecPerKm") val currentPaceSecPerKm: Int? = null,
+    @com.google.gson.annotations.SerializedName("currentCadence") val currentCadence: Int? = null,
+    @com.google.gson.annotations.SerializedName("distanceKm") val distanceKm: Double,
+    @com.google.gson.annotations.SerializedName("targetDistanceKm") val targetDistanceKm: Double? = null,
+    @com.google.gson.annotations.SerializedName("elapsedMinutes") val elapsedMinutes: Int,
+    @com.google.gson.annotations.SerializedName("currentGrade") val currentGrade: Double? = null,
+    @com.google.gson.annotations.SerializedName("elevationGainM") val elevationGainM: Double? = null,
+
+    // Recent context for coherent coaching
+    @com.google.gson.annotations.SerializedName("recentCoachingMessages") val recentCoachingMessages: List<String>? = null,
+    @com.google.gson.annotations.SerializedName("recentSplits") val recentSplits: List<RecentSplit>? = null,
+
+    // Coach profile
+    @com.google.gson.annotations.SerializedName("coachName") val coachName: String? = null,
+    @com.google.gson.annotations.SerializedName("coachTone") val coachTone: String? = null,
+    @com.google.gson.annotations.SerializedName("coachGender") val coachGender: String? = null,
+    @com.google.gson.annotations.SerializedName("coachAccent") val coachAccent: String? = null,
+
+    // Athlete profile
+    @com.google.gson.annotations.SerializedName("userId") val userId: String? = null,
+    @com.google.gson.annotations.SerializedName("runnerName") val runnerName: String? = null,
+    @com.google.gson.annotations.SerializedName("fitnessLevel") val fitnessLevel: String? = null,
+)
+
+data class RecentSplit(
+    @com.google.gson.annotations.SerializedName("km") val km: Int,
+    @com.google.gson.annotations.SerializedName("pace") val pace: String,
+)
+
+data class SessionTriggerLiveResponse(
+    @com.google.gson.annotations.SerializedName("message") val message: String,
+    @com.google.gson.annotations.SerializedName("audio") val audio: String? = null,
+    @com.google.gson.annotations.SerializedName("format") val format: String? = null,
+)
+
+/**
  * Metrics targets and session classification.
  * Used by the live run engine to know what to measure and compare.
  */

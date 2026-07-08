@@ -2233,16 +2233,29 @@ function transformRunForAndroid(run: any) {
           }
 
           // Cadence / altitude time-series
-          // paceData: phone's watchPaceSeries is a flat number[] at 1-sample/sec.
-          // Upgrade whenever existing is absent or is an object array (inferior kmSplit/batch format).
+          // paceData: phone's watchPaceSeries is a flat number[] at 1-sample/sec, but it is a
+          // heavily SMOOTHED series — Garmin's BT frames report a rolling-average pace that looks
+          // almost flat (all values clustered around avg pace with < 5 sec/km variation).
+          //
+          // The watch's offline upload-batch produces a per-second {time,value} object array
+          // with real pace variation (20–80 sec/km range across the run) that is far superior
+          // for chart rendering and pacing analysis.
+          //
+          // Rule: only upgrade from the minimal kmSplits stub (≤ 5 entries, one per km) to the
+          // phone's flat series.  If the existing paceData already has ≥ 20 entries it has
+          // been populated by the offline batch — NEVER overwrite it with the smoothed BT data.
           const c2ExistingPace = (garminDup as any).paceData;
           const c2IncomingPaceIsFlat = Array.isArray(runData.paceData) && (runData.paceData as any[]).length > 0 &&
             typeof (runData.paceData as any[])[0] !== 'object';
           const c2ExistingPaceIsFlatArray = Array.isArray(c2ExistingPace) && c2ExistingPace.length > 0 &&
             typeof c2ExistingPace[0] !== 'object';
-          if (c2IncomingPaceIsFlat && !c2ExistingPaceIsFlatArray) {
+          // Rich = offline batch already stored per-second data (>= 20 entries, object format)
+          const c2ExistingPaceIsRich = Array.isArray(c2ExistingPace) && c2ExistingPace.length >= 20;
+          if (c2IncomingPaceIsFlat && !c2ExistingPaceIsFlatArray && !c2ExistingPaceIsRich) {
             c2Merge.paceData = runData.paceData;
             console.log(`[POST /api/runs] Case 2: upgrading paceData to phone flat watchPaceSeries (${(runData.paceData as any[]).length} samples)`);
+          } else if (c2ExistingPaceIsRich) {
+            console.log(`[POST /api/runs] Case 2: preserved rich offline-batch paceData (${(c2ExistingPace as any[]).length} entries) — phone BT series skipped`);
           }
 
           // cadenceData: same logic — upgrade from object array to flat number[]
@@ -10217,6 +10230,57 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Session Trigger Live Message — real-time AI coaching when a plan trigger fires
+  // Called from Android when a coaching plan session trigger condition becomes true.
+  // Unlike the pre-run plan (templates), this generates a bespoke message from live data.
+  // ─────────────────────────────────────────────────────────────────────────
+  app.post("/api/coaching/session-trigger-live", async (req: Request, res: Response) => {
+    try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+
+      // Lightweight rate limit — max 1 live trigger message per 60 seconds per user
+      const cooldown = await checkCooldown('session-trigger-live', req.body, coachingUserId);
+      if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
+
+      // Resolve voice settings from DB
+      const { coachGender, coachAccent, coachTone: dbCoachTone, coachName: dbCoachName } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
+      req.body.coachTone   = dbCoachTone;
+      req.body.coachName   = dbCoachName;
+
+      const aiService = await import("./ai-service");
+      const runnerProfile = await getCoachingProfile(req.body);
+
+      const message = await aiService.generateSessionTriggerMessage({
+        ...req.body,
+        runnerProfile,
+      });
+
+      // Generate TTS audio
+      let base64Audio: string | null = null;
+      try {
+        const voice = mapCoachVoice(coachGender, coachAccent, dbCoachTone);
+        const ttsInstructions = await getCoachTTSInstructions(coachAccent, dbCoachTone, coachGender, dbCoachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions, coachAccent, coachGender);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Session trigger TTS failed, returning text only:", ttsError);
+      }
+
+      recordFired(coachingUserId, false);
+      res.json({
+        message,
+        audio: base64Audio,
+        format: base64Audio ? 'mp3' : null,
+      });
+    } catch (error: any) {
+      console.error("Session trigger live coaching error:", error);
+      res.status(500).json({ error: "Failed to generate session trigger message" });
+    }
+  });
+
   // Struggle Coaching with TTS
   app.post("/api/coaching/struggle-coaching", async (req: Request, res: Response) => {
     try {
@@ -11586,44 +11650,71 @@ function transformRunForAndroid(run: any) {
       const finalAscent = totalAscent && totalAscent > 0 ? totalAscent : computedAscent;
 
       // ── Patch the run record ─────────────────────────────────────────────
-      // CRITICAL: Never overwrite data fields that already exist on the run.
-      // If this run was tracked by the phone the existing data is RICHER than
-      // what the watch offline batch can provide (phone has per-point speed,
-      // HR, cadence, inclineDegrees; watch batch only has lat/lng/alt).
-      // Only fill in fields that are genuinely missing (null / empty array).
-      const hasExistingGps      = Array.isArray((existingRun as any).gpsTrack)      && (existingRun as any).gpsTrack.length      > 0;
-      // For HR, pace, cadence: ONLY skip overwrite if the existing data is ALREADY
-      // a flat number[] (meaning it came from a phone upload or a previous watch batch
-      // that already did the conversion).  Object-array formats like [{time,value}] or
-      // [{km,value}] are the inferior kmSplits-derived stubs created by session/end —
-      // the offline batch's per-point arrays are far richer and should replace them.
+      // Priority: offline-batch data (per-second from watch GPS) > phone watchPaceSeries (smoothed BT)
+      //           > kmSplits stubs (avg per km only).
+      //
+      // GPS track: phone has richer data (per-point speed, HR, cadence, inclineDegrees from live
+      //            GPS) EXCEPT when the phone GPS track has NO speed values — in that case the batch
+      //            GPS (speed computed from 1000/pace) is better for map coloring.
+      const _existingGpsRaw = (existingRun as any).gpsTrack;
+      const hasExistingGps  = Array.isArray(_existingGpsRaw) && _existingGpsRaw.length > 0;
+      // Does the existing GPS track have at least some points with speed? (needed for map coloring)
+      const existingGpsHasSpeed = hasExistingGps &&
+        (_existingGpsRaw as any[]).some((pt: any) => (pt.speed ?? pt.pace ?? null) != null && (pt.speed ?? pt.pace ?? 0) > 0);
+      // Allow batch GPS to replace existing only when existing track has NO speed values.
+      const shouldUpdateGps = (!hasExistingGps || !existingGpsHasSpeed) && gpsTrack.length > 0;
+
       const _existingHrRaw      = (existingRun as any).heartRateData;
       const _existingPaceRaw    = (existingRun as any).paceData;
       const _existingCadRaw     = (existingRun as any).cadenceData;
       const _existingAltRaw     = (existingRun as any).altitudeData;
+
+      // HR: prefer flat number[] (phone live data, 1 sample/sec) over object arrays.
       const hasExistingHr       = Array.isArray(_existingHrRaw)   && _existingHrRaw.length   > 0 && typeof _existingHrRaw[0]   !== 'object';
-      const hasExistingPace     = Array.isArray(_existingPaceRaw) && _existingPaceRaw.length > 0 && typeof _existingPaceRaw[0] !== 'object';
-      const hasExistingCadence  = Array.isArray(_existingCadRaw)  && _existingCadRaw.length  > 0 && typeof _existingCadRaw[0]  !== 'object';
+
+      // paceData: the offline batch produces per-second {time,value} objects — this is the
+      // RICHEST source, showing real pace variation across the run.  Phone watchPaceSeries is a
+      // flat number[] of heavily-smoothed BT frames from Garmin (almost flat at avg pace).
+      // Rule: offline batch ALWAYS replaces:
+      //   • null / absent data
+      //   • kmSplits stubs (object array with ≤ 5 entries)
+      //   • phone watchPaceSeries (flat number[], regardless of entry count)
+      // Offline batch does NOT replace a previous offline-batch result (object array ≥ 20 entries).
+      const existingPaceIsObjectArray = Array.isArray(_existingPaceRaw) && _existingPaceRaw.length > 0 && typeof _existingPaceRaw[0] === 'object';
+      const existingPaceIsRichBatch   = existingPaceIsObjectArray && _existingPaceRaw.length >= 20;
+      const shouldUpdatePace          = !existingPaceIsRichBatch && paceData.length > 0;
+
+      // Cadence: same logic as paceData
+      const existingCadIsObjectArray = Array.isArray(_existingCadRaw) && _existingCadRaw.length > 0 && typeof _existingCadRaw[0] === 'object';
+      const existingCadIsRichBatch   = existingCadIsObjectArray && _existingCadRaw.length >= 20;
+      const shouldUpdateCadence      = !existingCadIsRichBatch && cadenceData.length > 0;
+
       // Altitude: treat ANY object array ({time,value} or {km,value}) as absent so
       // the batch's GPS-based {time,value} series always replaces the kmSplits stub.
       const hasExistingAlt      = Array.isArray(_existingAltRaw)  && _existingAltRaw.length  > 0 && typeof _existingAltRaw[0]  !== 'object';
       const hasExistingKmSplits = Array.isArray((existingRun as any).kmSplits)      && (existingRun as any).kmSplits.length      > 0;
 
       const updatePayload: any = {
-        gpsTrack:      (!hasExistingGps      && gpsTrack.length      > 0) ? gpsTrack      : undefined,
+        gpsTrack:      shouldUpdateGps                              ? gpsTrack      : undefined,
         heartRateData: (!hasExistingHr       && heartRateData.length > 0) ? heartRateData : undefined,
-        paceData:      (!hasExistingPace     && paceData.length      > 0) ? paceData      : undefined,
+        paceData:      shouldUpdatePace                             ? paceData      : undefined,
         altitudeData:  (!hasExistingAlt      && altitudeData.length  > 0) ? altitudeData  : undefined,
-        cadenceData:   (!hasExistingCadence  && cadenceData.length   > 0) ? cadenceData   : undefined,
+        cadenceData:   shouldUpdateCadence                          ? cadenceData   : undefined,
         kmSplits:      (!hasExistingKmSplits && kmSplits.length      > 0) ? kmSplits      : undefined,
       };
 
-      // Log what was skipped so it's easy to diagnose in future
-      if (hasExistingGps)      console.log(`[Offline Batch] Preserved existing GPS track (${(existingRun as any).gpsTrack.length} pts) — watch batch skipped`);
-      if (hasExistingHr)       console.log(`[Offline Batch] Preserved existing HR data — watch batch skipped`);
-      if (hasExistingPace)     console.log(`[Offline Batch] Preserved existing pace data — watch batch skipped`);
-      if (hasExistingAlt)      console.log(`[Offline Batch] Preserved existing altitude data — watch batch skipped`);
-      if (hasExistingCadence)  console.log(`[Offline Batch] Preserved existing cadence data — watch batch skipped`);
+      // Log what was skipped / updated so it's easy to diagnose
+      if (!shouldUpdateGps && hasExistingGps) {
+        console.log(`[Offline Batch] Preserved existing GPS track (${_existingGpsRaw.length} pts, hasSpeed=${existingGpsHasSpeed}) — watch batch skipped`);
+      } else if (shouldUpdateGps) {
+        console.log(`[Offline Batch] Updating GPS track with batch data (${gpsTrack.length} pts) — existing had no speed values`);
+      }
+      if (hasExistingHr)          console.log(`[Offline Batch] Preserved existing HR data — watch batch skipped`);
+      if (!shouldUpdatePace && _existingPaceRaw)  console.log(`[Offline Batch] Preserved existing pace data (${(_existingPaceRaw as any[]).length} entries, richBatch=${existingPaceIsRichBatch}) — watch batch skipped`);
+      if (!shouldUpdatePace && !_existingPaceRaw) { /* no existing, batch will write */ }
+      if (shouldUpdatePace)       console.log(`[Offline Batch] Updating paceData with batch per-second series (${paceData.length} pts) — existing was ${existingPaceIsRichBatch ? 'already-rich' : (Array.isArray(_existingPaceRaw) ? 'phone-flat/kmSplits' : 'absent')}`);
+      if (hasExistingAlt)         console.log(`[Offline Batch] Preserved existing altitude data — watch batch skipped`);
+      if (!shouldUpdateCadence && _existingCadRaw) console.log(`[Offline Batch] Preserved existing cadence data (richBatch=${existingCadIsRichBatch}) — watch batch skipped`);
       if (hasExistingKmSplits) console.log(`[Offline Batch] Preserved existing km splits — watch batch skipped`);
 
       if (finalAscent != null) {

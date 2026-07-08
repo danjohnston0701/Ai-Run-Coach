@@ -48,5 +48,9 @@ data class PaceUpdate(
     @SerializedName("workoutType") val workoutType: String? = null,
     // ========== Route Memory Engine ==========
     @SerializedName("routeIntelligence") val routeIntelligence: RouteIntelligenceContext? = null,
-    @SerializedName("lastKmSplitSeconds") val lastKmSplitSeconds: Int? = null
+    @SerializedName("lastKmSplitSeconds") val lastKmSplitSeconds: Int? = null,
+    // Session target pace from the coaching plan — used to compare km splits against the session's
+    // prescribed pace (not the long-term race goal). Provided in seconds/km.
+    @SerializedName("sessionTargetPaceMin") val sessionTargetPaceMin: Int? = null,
+    @SerializedName("sessionTargetPaceMax") val sessionTargetPaceMax: Int? = null
 )

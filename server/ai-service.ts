@@ -822,8 +822,41 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
   // We suppress the race-goal pace comparison (targetPace is the user's long-term race goal,
   // not the session's prescribed pace) and frame the split around the training objective.
   const isTrainingSession = !!workoutType;
+
+  // Session target pace — for training sessions, use the session's prescribed pace (not the race goal).
+  // sessionTargetPaceMin / sessionTargetPaceMax are in sec/km and come from the coaching plan's targetMetrics.
+  const sessionTargetPaceMinSec = (params as any).sessionTargetPaceMin as number | undefined;
+  const sessionTargetPaceMaxSec = (params as any).sessionTargetPaceMax as number | undefined;
+  const currentCadence = (params as any).cadence as number | undefined;
+
+  // Build session pace verdict for training runs — compares split against session target, not race goal
+  let sessionSplitVerdict = '';
+  if (isTrainingSession && splitPace && (sessionTargetPaceMinSec || sessionTargetPaceMaxSec)) {
+    const sParts = splitPace.split(':').map(Number);
+    if (sParts.length === 2) {
+      const splitSec = sParts[0] * 60 + sParts[1];
+      const targetMin = sessionTargetPaceMinSec ?? (sessionTargetPaceMaxSec! - 30);
+      const targetMax = sessionTargetPaceMaxSec ?? (sessionTargetPaceMinSec! + 30);
+      const midTarget = Math.round((targetMin + targetMax) / 2);
+      const diffSec = splitSec - midTarget;
+      const sessionPaceRange = `${formatPaceForTTS(formatPaceForPrompt(targetMin))} to ${formatPaceForTTS(formatPaceForPrompt(targetMax))}`;
+      if (diffSec > 20) {
+        sessionSplitVerdict = `⚠️ BELOW SESSION TARGET: Split was ${Math.abs(diffSec)}s/km SLOWER than the ${workoutType} session target of ${sessionPaceRange}. Encourage them to pick up the effort.`;
+      } else if (diffSec < -20) {
+        sessionSplitVerdict = `⚠️ ABOVE SESSION TARGET: Split was ${Math.abs(diffSec)}s/km FASTER than the ${workoutType} session target of ${sessionPaceRange}. Warn them they may be going too hard for this session type.`;
+      } else {
+        sessionSplitVerdict = `✅ ON SESSION TARGET: Split pace is within ${Math.abs(diffSec)}s/km of the ${workoutType} session target of ${sessionPaceRange}. Reinforce that they're nailing the prescribed effort.`;
+      }
+    }
+  }
+
+  // Cadence context for training sessions (especially relevant for tempo/threshold)
+  const cadenceContext = (isTrainingSession && currentCadence && currentCadence > 0)
+    ? `\n- Current cadence: ${currentCadence} spm${workoutType === 'tempo' || workoutType === 'threshold' ? ` (optimal tempo cadence is 170–180 spm${currentCadence < 165 ? ' — slightly low for tempo effort' : currentCadence >= 170 ? ' — excellent' : ''})` : ''}`
+    : '';
+
   const trainingSessionContext = isTrainingSession
-    ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the runner's coaching plan — NOT a race or goal attempt. Do NOT compare their pace to a race target or imply they are "behind" or "ahead of target". Instead, frame the coaching around what this session is building (e.g. aerobic base, lactate threshold, endurance). Comment on split consistency and whether the effort level feels appropriate for a ${workoutType!.replace(/_/g, ' ')} session.`
+    ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the runner's coaching plan — NOT a race or goal attempt. Do NOT compare their pace to their long-term race goal. Instead, frame the coaching around what this session is building.${sessionSplitVerdict ? `\nSESSION PACE ASSESSMENT: ${sessionSplitVerdict}` : ` Comment on whether the effort level feels appropriate for a ${workoutType!.replace(/_/g, ' ')} session.`}`
     : '';
 
   // Compute target pace comparison for split coaching (so AI can tell runner if they're on track)
@@ -869,7 +902,7 @@ The runner just completed kilometer ${splitKm} with a split pace of ${spokenSpli
 - Overall progress: ${formatDistanceForCoaching(distance)} of ${targetDistance ? `${formatDistanceForCoaching(targetDistance)} (${progress}%)` : '?'}
 - Time elapsed: ${timeFormatted}
 - Overall average pace: ${spokenCurrentPace}
-- This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}
+- This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}${cadenceContext}
 ${splitTargetVerdict ? `\nPACE ASSESSMENT: ${splitTargetVerdict}` : ''}
 ${trainingSessionContext}
 ${routeCtxBlock ? `\n${routeCtxBlock}` : ''}
@@ -877,7 +910,7 @@ ${terrainContext}${paceTrend}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${varietySeed}
-Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : isTrainingSession ? ` how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
+Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : sessionSplitVerdict ? ' whether they hit their session pace target (CRITICAL — use the SESSION PACE ASSESSMENT verdict above, not the race goal).' : isTrainingSession ? ` how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${cadenceContext && (workoutType === 'tempo' || workoutType === 'threshold') ? 'If cadence is below 170, include a brief cadence cue. ' : ''}${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
@@ -5289,6 +5322,212 @@ function formatPaceForPrompt(secPerKm?: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}/km`;
 }
 
+/**
+ * generateSessionTriggerMessage — live AI coaching message at the moment a session trigger fires.
+ *
+ * Called in real-time during a coaching plan session when a trigger condition becomes true.
+ * Unlike the pre-run plan generation (which writes template messages), this function calls
+ * OpenAI with the athlete's ACTUAL live data at that precise moment and returns a bespoke,
+ * analytically grounded coaching message — identical in quality to the normal run coaching.
+ *
+ * The pre-run plan's triggers define WHEN to coach (conditions, frequency).
+ * This function defines WHAT to say (genuine analysis of the live situation).
+ */
+export async function generateSessionTriggerMessage(params: {
+  // What triggered this message
+  triggerId: string;
+  triggerType: string;
+  triggerCondition: string;
+
+  // ── Full session context — everything GPT needs to know about what the session IS ──
+  preRunBrief?: string;          // What the athlete was briefed before starting
+  whyThisSession?: string;       // Why this session is in the plan
+  sessionInstructions?: string;  // Raw training plan workout description
+  cueingStrategy?: string;       // "interval" | "threshold" | "paced" | "freerun"
+  totalSessionDurationMin?: number;
+  totalSessionDistanceKm?: number;
+  currentRepNumber?: number;     // For interval sessions: which rep we're on
+  totalRepsInSession?: number;
+  phasesSummary?: string;        // Compact summary of all phases e.g. "warmup(5min) → tempo_block(20min @4:50-5:05/km) → cooldown(5min)"
+
+  // Session type and current phase
+  sessionType: string;
+  sessionGoal: string;
+  sessionPhase: string;
+  phaseInstructions?: string;
+
+  // Phase targets
+  phaseHRMin?: number;
+  phaseHRMax?: number;
+  phasePaceMinSecPerKm?: number;
+  phasePaceMaxSecPerKm?: number;
+
+  // Current live metrics
+  currentHR: number;
+  currentPaceSecPerKm?: number;
+  currentCadence?: number;
+  distanceKm: number;
+  targetDistanceKm?: number;
+  elapsedMinutes: number;
+  currentGrade?: number;
+  elevationGainM?: number;
+
+  // Recent context
+  recentCoachingMessages?: string[];
+  recentSplits?: Array<{ km: number; pace: string }>;
+
+  // Coach profile
+  coachName: string;
+  coachTone: string;
+  coachGender?: string;
+  coachAccent?: string;
+
+  // Athlete profile
+  runnerName?: string;
+  fitnessLevel?: string;
+  runnerProfile?: string | null;
+}): Promise<string> {
+  const {
+    triggerId, triggerType, triggerCondition,
+    preRunBrief, whyThisSession, sessionInstructions, cueingStrategy,
+    totalSessionDurationMin, totalSessionDistanceKm,
+    currentRepNumber, totalRepsInSession, phasesSummary,
+    sessionType, sessionGoal, sessionPhase, phaseInstructions,
+    phaseHRMin, phaseHRMax, phasePaceMinSecPerKm, phasePaceMaxSecPerKm,
+    currentHR, currentPaceSecPerKm, currentCadence,
+    distanceKm, targetDistanceKm, elapsedMinutes, currentGrade, elevationGainM,
+    recentCoachingMessages, recentSplits,
+    coachName, coachTone, coachAccent,
+    runnerName, runnerProfile,
+  } = params;
+
+  // ── Format current metrics ─────���───────────────────────────────────────────
+  const paceFormatted = currentPaceSecPerKm ? formatPaceForPrompt(currentPaceSecPerKm) : "unknown";
+  const targetPaceRange = (phasePaceMinSecPerKm || phasePaceMaxSecPerKm)
+    ? `${formatPaceForPrompt(phasePaceMinSecPerKm)} – ${formatPaceForPrompt(phasePaceMaxSecPerKm)}`
+    : null;
+  const progressPct = (targetDistanceKm && distanceKm > 0)
+    ? Math.round((distanceKm / targetDistanceKm) * 100) : null;
+  const remainingKm = targetDistanceKm ? Math.max(0, targetDistanceKm - distanceKm) : null;
+
+  // ── Plain-English status for HR and pace (so GPT knows if they're on/off target) ──
+  const hrStatus = phaseHRMax && currentHR > 0
+    ? currentHR > phaseHRMax
+      ? `ABOVE zone — ${currentHR} bpm vs zone ceiling ${phaseHRMax} bpm (+${currentHR - phaseHRMax} bpm over)`
+      : phaseHRMin && currentHR < phaseHRMin
+        ? `BELOW zone — ${currentHR} bpm vs zone floor ${phaseHRMin} bpm (${phaseHRMin - currentHR} bpm under)`
+        : `IN ZONE — ${currentHR} bpm (range ${phaseHRMin ?? '?'}–${phaseHRMax} bpm)`
+    : currentHR > 0 ? `${currentHR} bpm (no zone target set)` : "unavailable";
+
+  const paceStatus = (phasePaceMinSecPerKm || phasePaceMaxSecPerKm) && currentPaceSecPerKm
+    ? phasePaceMaxSecPerKm && currentPaceSecPerKm > phasePaceMaxSecPerKm
+      ? `SLOWER than target — ${paceFormatted} vs ceiling ${formatPaceForPrompt(phasePaceMaxSecPerKm)} (+${currentPaceSecPerKm - phasePaceMaxSecPerKm}s/km too slow)`
+      : phasePaceMinSecPerKm && currentPaceSecPerKm < phasePaceMinSecPerKm
+        ? `FASTER than target — ${paceFormatted} vs floor ${formatPaceForPrompt(phasePaceMinSecPerKm)} (${phasePaceMinSecPerKm - currentPaceSecPerKm}s/km too fast for this session type)`
+        : `ON TARGET — ${paceFormatted} (target range ${targetPaceRange})`
+    : paceFormatted;
+
+  const gradeStr = currentGrade !== undefined && Math.abs(currentGrade) > 1
+    ? `${currentGrade > 0 ? '+' : ''}${currentGrade.toFixed(1)}% grade` : null;
+  const splitSummary = recentSplits && recentSplits.length > 0
+    ? `Recent km splits: ${recentSplits.slice(-3).map(s => `km${s.km}: ${s.pace}`).join(', ')}` : '';
+  const recentMessagesBlock = recentCoachingMessages && recentCoachingMessages.length > 0
+    ? `Recent coaching given (do not repeat): ${recentCoachingMessages.slice(-2).join(' | ')}` : '';
+
+  // ── Interval rep context ───────────────────────────────────────────────────
+  const isWorkPhase = (params as any).isWorkPhase as boolean | undefined;
+  const phaseElapsedMinutes = (params as any).phaseElapsedMinutes as number | undefined;
+  const phaseRemainingMinutes = (params as any).phaseRemainingMinutes as number | undefined;
+
+  const repContext = (currentRepNumber && totalRepsInSession)
+    ? [
+        `Rep ${currentRepNumber} of ${totalRepsInSession}`,
+        isWorkPhase !== undefined ? (isWorkPhase ? '(WORK interval)' : '(RECOVERY phase)') : '',
+        totalRepsInSession - currentRepNumber > 0
+          ? `${totalRepsInSession - currentRepNumber} rep${totalRepsInSession - currentRepNumber > 1 ? 's' : ''} remaining after this`
+          : 'FINAL rep',
+        phaseElapsedMinutes !== undefined && phaseRemainingMinutes !== undefined
+          ? `${Math.round(phaseElapsedMinutes * 10) / 10} min into this phase, ${Math.round(phaseRemainingMinutes * 10) / 10} min remaining`
+          : '',
+      ].filter(Boolean).join(' — ')
+    : '';
+
+  // Phase time context for non-interval sessions
+  const phaseTimeContext = (!currentRepNumber && phaseElapsedMinutes !== undefined && phaseRemainingMinutes !== undefined)
+    ? `${Math.round(phaseElapsedMinutes * 10) / 10} min into current phase, ${Math.round(phaseRemainingMinutes * 10) / 10} min remaining`
+    : '';
+
+  // ── Build the full session context block ──────────────────────────────────
+  // This is the critical part that was missing — GPT needs to understand the WHOLE session,
+  // not just the current phase, to give coaching that makes sense in context.
+  const sessionContextBlock = [
+    sessionInstructions ? `WORKOUT DESCRIPTION: ${sessionInstructions}` : null,
+    preRunBrief ? `PRE-RUN BRIEF (what the athlete was told): "${preRunBrief}"` : null,
+    whyThisSession ? `WHY THIS SESSION: ${whyThisSession}` : null,
+    phasesSummary ? `FULL SESSION STRUCTURE: ${phasesSummary}` : null,
+    cueingStrategy ? `COACHING STRATEGY: ${cueingStrategy}` : null,
+    (totalSessionDurationMin || totalSessionDistanceKm)
+      ? `SESSION TARGETS: ${totalSessionDistanceKm ? `${totalSessionDistanceKm}km total` : ''} ${totalSessionDurationMin ? `${totalSessionDurationMin} min total` : ''}`.trim()
+      : null,
+    repContext ? `INTERVAL PROGRESS: ${repContext}` : null,
+    phaseTimeContext ? `PHASE TIMING: ${phaseTimeContext}` : null,
+  ].filter(Boolean).join('\n');
+
+  // ── Build the prompt ───────────────────────────────────────────────────────
+  const prompt = `You are ${coachName}, an elite AI running coach. A coaching trigger just fired during a live training session.
+
+━━ SESSION CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Session type: ${sessionType.replace(/_/g, ' ')}
+Session goal: ${sessionGoal}
+${sessionContextBlock}
+
+━━ CURRENT STATE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Current phase: ${sessionPhase.replace(/_/g, ' ')}${phaseInstructions ? ` — ${phaseInstructions}` : ''}
+
+WHAT JUST TRIGGERED THIS MESSAGE (condition: "${triggerCondition}"):
+${triggerType.replace(/_/g, ' ')}
+
+━━ ATHLETE'S LIVE NUMBERS AT THIS MOMENT ━━━━━━━━━━━━━━━━
+Heart rate: ${hrStatus}
+Pace: ${paceStatus}${currentCadence && currentCadence > 0 ? `\nCadence: ${currentCadence} spm${sessionType === 'tempo' || sessionType === 'threshold' ? ' (optimal tempo: 170-180 spm)' : ''}` : ''}
+Distance: ${distanceKm.toFixed(2)} km${targetDistanceKm ? ` of ${targetDistanceKm} km (${progressPct}%)` : ''}${remainingKm !== null ? ` — ${remainingKm.toFixed(1)} km to go` : ''}
+Time elapsed: ${elapsedMinutes} min${gradeStr ? `\nTerrain: ${gradeStr}` : ''}${elevationGainM ? `\nElevation gained: ${Math.round(elevationGainM)}m` : ''}
+${splitSummary}
+
+Phase targets: ${[
+  phaseHRMin || phaseHRMax ? `heart rate ${phaseHRMin ?? '?'}–${phaseHRMax ?? '?'} bpm` : null,
+  targetPaceRange ? `pace ${targetPaceRange}` : null,
+].filter(Boolean).join(', ') || 'none specified'}
+${recentMessagesBlock}
+
+━━ YOUR COACHING MESSAGE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Deliver ONE message (max 20 words, spoken aloud) that reacts to what is ACTUALLY happening above.
+- If the athlete is off target: be honest, give a specific corrective cue using the exact numbers
+- If the athlete is on target: give a genuine observation tied to their actual data, not generic praise
+- Reference the session context — this is a ${sessionType.replace(/_/g, ' ')} session with specific objectives, not a free run
+- Write "heart rate" never "HR"
+${PACE_FORMAT_RULE}`;
+
+  const systemPrompt = `You are ${coachName}, a ${coachTone} running coach with full knowledge of this athlete's training session objectives.
+You have been given the complete session context above — use it. A tempo run trigger is not the same as an easy run trigger. An interval session rep 3 of 5 message should acknowledge where they are in the session.
+The message will be read aloud by TTS — keep it under 20 words, natural speech, specific to the actual numbers given.
+NEVER give generic feedback like "great work!" or "keep it up" — that tells the athlete nothing.
+${toneDirective(coachTone)}${accentDirective(coachAccent)}${runnerProfileBlock(runnerProfile)}`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 80,
+    temperature: 0.7,
+  });
+
+  return completion.choices[0].message.content?.trim()
+    ?? `Heart rate at ${currentHR}${phaseHRMax && currentHR > phaseHRMax ? ` — ease back, over your zone ceiling of ${phaseHRMax}` : ' — keep this effort'}.`;
+}
+
 export async function generateSessionCoaching(
   params: GenerateSessionCoachingParams
 ): Promise<SessionCoachingPlan> {
@@ -5524,27 +5763,72 @@ These are heart-rate-controlled sessions. You MUST design explicit HR zone guard
 The targetHRMin and targetHRMax values ARE ALWAYS PROVIDED — use them in every HR trigger condition.
 
 REQUIRED triggers for continuous sessions:
-1. "hr_too_high" — reactive trigger:
+1. "hr_too_high" — reactive trigger when HR is ABOVE the target zone:
    - condition: "hr > targetHRMax AND elapsed_min > 3"  (don't alert in the first 3 min warmup)
    - message: embed {hr} and {targetHRMax} — "Heart rate's at {hr} — ease off just a touch, keep it under {targetHRMax}."
    - frequency: "on_condition"
    - Include 3–4 alternativeMessages, each embedding {hr} and {targetHRMax}
+   - THESE MESSAGES MUST sound like the athlete is going TOO HARD, NOT praise them.
 
-2. "hr_in_zone" — periodic check-in that references ACTUAL hr relative to the zone:
-   - condition: "always"
+2. "hr_in_zone" — periodic check-in that ONLY fires when heart rate is actually in zone:
+   ⚠️ CRITICAL: condition MUST be "hr <= targetHRMax AND elapsed_min > 3" — NOT "always"
+   - condition: "hr <= targetHRMax AND elapsed_min > 3"
    - frequency: "periodic", frequencySeconds: 120
-   - message: embed {hr} and {targetHRMax} — give DIFFERENT feedback depending on whether hr is above, in, or below zone
-     GOOD: "Heart rate sitting at {hr} — perfect, right in the zone."
-     BAD (DO NOT DO THIS): "Nice and easy, just right." — this is useless without data
-   - The periodic message MUST embed {hr} so the athlete hears their actual number
+   - message: embed {hr} and {targetHRMin} ��� ONLY use positive/in-zone language here because this ONLY fires when they ARE in zone
+     GOOD: "Heart rate sitting at {hr} — bang on, that's right where we want you."
+     GOOD: "Heart rate at {hr} — lovely, right in your zone. This is the effort."
+     BAD (DO NOT DO THIS): "Always" as the condition — messages saying "great!" will fire even when HR is 50 bpm over target.
    - Include 4–5 alternativeMessages, each mentioning {hr}
+   WHY THIS MATTERS: If condition is "always", the in-zone message fires at 148 bpm when target is 121 bpm and tells
+   the athlete they're "in the zone and doing great" — which is wrong. The hr_too_high trigger handles out-of-zone cases.
 
 3. "halfway_checkin" — milestone trigger at 50% distance:
    - condition: "distance_pct > 50"
    - frequency: "once"
-   - message: reference {hr} and progress — don't give a generic motivation cue
+   - message: reference {hr}, progress, and whether they're on track — don't give a generic motivation cue
 
 NEVER output a continuous session with periodic messages that don't reference {hr}. The engine can substitute live data — USE IT.
+NEVER use condition "always" for in-zone check-ins. Only fire positive zone feedback when the athlete is ACTUALLY in zone.
+
+TEMPO / THRESHOLD SESSIONS (sessionType = "tempo", "threshold", "lactate_threshold"):
+These are precision sessions where the athlete must stay locked in a specific pace band AND heart rate zone simultaneously.
+The coaching must be technically precise — the athlete needs to KNOW their targets at all times, not just be told "good effort".
+
+REQUIRED triggers for tempo/threshold sessions:
+1. "tempo_pace_high" — reactive trigger when pace is TOO FAST (athlete burning out):
+   - condition: "pace < targetPaceMin AND elapsed_min > 3"  (pace is LOWER sec/km = going faster than intended)
+   - message: embed {pace} and {targetPaceMin} — "Pace is {pace} — ease back, tempo target is {targetPaceMin} to {targetPaceMax} per km."
+   - frequency: "on_condition"
+
+2. "tempo_pace_low" — reactive trigger when pace is TOO SLOW (athlete not hitting tempo effort):
+   - condition: "pace > targetPaceMax AND elapsed_min > 3"
+   - message: embed {pace} and {targetPaceMax} — "Pace slipping to {pace} — push back to {targetPaceMax}, this is tempo effort."
+   - frequency: "on_condition"
+
+3. "tempo_hr_too_high" — reactive trigger when HR exceeds zone:
+   - condition: "hr > targetHRMax AND elapsed_min > 3"
+   - message: embed {hr} and {targetHRMax} — "Heart rate's at {hr} — that's above your tempo zone ceiling of {targetHRMax}. Ease back."
+   - frequency: "on_condition"
+
+4. "tempo_pace_locked_in" — periodic check-in (ONLY fires when pace is within target band):
+   - condition: "pace >= targetPaceMin AND pace <= targetPaceMax"
+   - frequency: "periodic", frequencySeconds: 90
+   - message: embed {pace} and {hr} — "Pace is {pace} — that's the tempo zone, heart rate at {hr}. Stay locked in."
+   - Include 4–5 alternativeMessages, each referencing {pace} and {hr}
+
+5. "cadence_check" — periodic cadence coaching for tempo efficiency:
+   Tempo running demands a higher, more efficient cadence than easy running.
+   - condition: "cadence < 170 AND elapsed_min > 5"
+   - frequency: "on_condition"
+   - message: embed {cadence} — "Cadence sitting at {cadence} — quick up the turnover a touch, aim for 170-plus."
+   - Include 3 alternativeMessages varying the cadence cue
+
+The preRunBrief for tempo/threshold MUST state ALL of the following clearly:
+  (a) the exact target pace range (e.g. "4:50 to 5:05 per km")
+  (b) the target heart rate zone AND the bpm range (e.g. "Zone 3, keeping heart rate between 145 and 160")
+  (c) what tempo effort should feel like ("comfortably hard — you can speak a few words but not hold a full conversation")
+  (d) the session goal (e.g. "building lactate threshold")
+This is the single most important message the athlete hears — they must know EXACTLY what they're aiming for.
 
 CUEING STRATEGY — choose the one that best fits this session:
 - "interval" — sessions with structured repeating effort phases (walk_run, intervals, hill reps, fartlek blocks) — REQUIRED for walk_run

@@ -874,6 +874,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var dynamicCurrentPhaseIndex: Int = 0
     private var dynamicCurrentPhaseName: String? = null
     private var dynamicPhaseDistanceStartKm: Double = 0.0
+    private var dynamicPhaseTimeStartMin: Double = 0.0  // elapsed minutes when current phase began
+    private var dynamicPhaseIsWorkInterval: Boolean = true  // false for recovery/walk phases
+    private var dynamicPhaseDurationMin: Double = 0.0  // planned duration of current phase (0 = distance-based)
 
     // Whether there is an active coaching plan (either system) — used to suppress generic prompts
     private val isCoachingPlanActive: Boolean
@@ -913,50 +916,64 @@ class RunTrackingService : Service(), SensorEventListener {
     private val gson = com.google.gson.Gson()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
-        // Normalize to METRES here so all internal calculations use metres consistently.
-        val rawTargetDist = intent?.getDoubleExtra(EXTRA_TARGET_DISTANCE, 0.0)?.takeIf { it > 0 }
-        targetDistance = rawTargetDist?.let {
-            // If value <= 100, it's in km (e.g., 5.0, 10.0, 42.195). Convert to metres.
-            // If value > 100, it's already in metres (e.g., 5000, 10000). Keep as-is.
-            if (it <= 100.0) it * 1000.0 else it
-        }
-        targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
-        hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
-        navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
-        // Coaching programme context
-        planTrainingPlanId = intent?.getStringExtra(EXTRA_TRAINING_PLAN_ID)
-        planWorkoutId = intent?.getStringExtra(EXTRA_WORKOUT_ID)
-        planWorkoutType = intent?.getStringExtra(EXTRA_WORKOUT_TYPE)
-        planWorkoutIntensity = intent?.getStringExtra(EXTRA_WORKOUT_INTENSITY)
-        planWorkoutDescription = intent?.getStringExtra(EXTRA_WORKOUT_DESCRIPTION)
-        planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
-        planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
-        planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
-        // Group run context
-        groupRunId = intent?.getStringExtra(EXTRA_GROUP_RUN_ID)
-        // Deserialize AI-generated session instructions from JSON if present (legacy plan)
-        val sessionJson = intent?.getStringExtra(EXTRA_SESSION_INSTRUCTIONS_JSON)
-        if (sessionJson != null) {
-            try {
-                sessionInstructions = gson.fromJson(sessionJson, SessionInstructionsResponse::class.java)
-                sessionCoachingTone = sessionInstructions?.aiDeterminedTone
-                sessionCoachingIntensity = sessionInstructions?.aiDeterminedIntensity
-                Log.d("RunTrackingService", "✅ Session instructions loaded: tone=${sessionCoachingTone}, phases=${sessionInstructions?.sessionStructure?.phases?.size}")
-            } catch (e: Exception) {
-                Log.w("RunTrackingService", "Failed to deserialize session instructions: ${e.message}")
-                sessionInstructions = null
+        // Run-config extras (targetDistance, planWorkoutId, etc.) are ONLY parsed for start-type
+        // actions.  Stop / pause / resume / finish intents carry no extras, so parsing them
+        // unconditionally would silently wipe planWorkoutId (and other plan context) right before
+        // stopTracking() uploads the run — causing linked_workout_id to be null in the database.
+        val isStartAction = intent?.action in setOf(
+            ACTION_START_TRACKING,
+            ACTION_PREPARE_FOR_WATCH,
+            ACTION_START_TRACKING_FROM_WATCH,
+            ACTION_START_SIMULATION,
+            ACTION_START_NAV_SIMULATION
+        )
+
+        if (isStartAction) {
+            // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
+            // Normalize to METRES here so all internal calculations use metres consistently.
+            val rawTargetDist = intent?.getDoubleExtra(EXTRA_TARGET_DISTANCE, 0.0)?.takeIf { it > 0 }
+            targetDistance = rawTargetDist?.let {
+                // If value <= 100, it's in km (e.g., 5.0, 10.0, 42.195). Convert to metres.
+                // If value > 100, it's already in metres (e.g., 5000, 10000). Keep as-is.
+                if (it <= 100.0) it * 1000.0 else it
             }
-        }
-        // Deserialize rich dynamic coaching plan (prepare-coaching) — primary reactive trigger source
-        val dynamicPlanJson = intent?.getStringExtra(EXTRA_DYNAMIC_COACHING_PLAN_JSON)
-        if (dynamicPlanJson != null) {
-            try {
-                dynamicCoachingPlan = gson.fromJson(dynamicPlanJson, live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan::class.java)
-                Log.d("RunTrackingService", "✅ Dynamic coaching plan loaded: strategy=${dynamicCoachingPlan?.cueingStrategy}, phases=${dynamicCoachingPlan?.phases?.size}, triggers=${dynamicCoachingPlan?.triggers?.size}")
-            } catch (e: Exception) {
-                Log.w("RunTrackingService", "Failed to deserialize dynamic coaching plan: ${e.message}")
-                dynamicCoachingPlan = null
+            targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
+            hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
+            navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
+            // Coaching programme context
+            planTrainingPlanId = intent?.getStringExtra(EXTRA_TRAINING_PLAN_ID)
+            planWorkoutId = intent?.getStringExtra(EXTRA_WORKOUT_ID)
+            planWorkoutType = intent?.getStringExtra(EXTRA_WORKOUT_TYPE)
+            planWorkoutIntensity = intent?.getStringExtra(EXTRA_WORKOUT_INTENSITY)
+            planWorkoutDescription = intent?.getStringExtra(EXTRA_WORKOUT_DESCRIPTION)
+            planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
+            planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
+            planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
+            // Group run context
+            groupRunId = intent?.getStringExtra(EXTRA_GROUP_RUN_ID)
+            // Deserialize AI-generated session instructions from JSON if present (legacy plan)
+            val sessionJson = intent?.getStringExtra(EXTRA_SESSION_INSTRUCTIONS_JSON)
+            if (sessionJson != null) {
+                try {
+                    sessionInstructions = gson.fromJson(sessionJson, SessionInstructionsResponse::class.java)
+                    sessionCoachingTone = sessionInstructions?.aiDeterminedTone
+                    sessionCoachingIntensity = sessionInstructions?.aiDeterminedIntensity
+                    Log.d("RunTrackingService", "✅ Session instructions loaded: tone=${sessionCoachingTone}, phases=${sessionInstructions?.sessionStructure?.phases?.size}")
+                } catch (e: Exception) {
+                    Log.w("RunTrackingService", "Failed to deserialize session instructions: ${e.message}")
+                    sessionInstructions = null
+                }
+            }
+            // Deserialize rich dynamic coaching plan (prepare-coaching) — primary reactive trigger source
+            val dynamicPlanJson = intent?.getStringExtra(EXTRA_DYNAMIC_COACHING_PLAN_JSON)
+            if (dynamicPlanJson != null) {
+                try {
+                    dynamicCoachingPlan = gson.fromJson(dynamicPlanJson, live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan::class.java)
+                    Log.d("RunTrackingService", "✅ Dynamic coaching plan loaded: strategy=${dynamicCoachingPlan?.cueingStrategy}, phases=${dynamicCoachingPlan?.phases?.size}, triggers=${dynamicCoachingPlan?.triggers?.size}")
+                } catch (e: Exception) {
+                    Log.w("RunTrackingService", "Failed to deserialize dynamic coaching plan: ${e.message}")
+                    dynamicCoachingPlan = null
+                }
             }
         }
 
@@ -3304,11 +3321,18 @@ class RunTrackingService : Service(), SensorEventListener {
                         }
                         val finalDurationMs = (System.currentTimeMillis() - startTime) - finalPausedMs
 
+                        // Snapshot coachingHistory HERE (after the async weather call) so we catch
+                        // any live-trigger coroutines that resolved during the weather fetch.
+                        // This is the definitive source of truth — RunSession.aiCoachingNotes is
+                        // rebuilt from GPS ticks so may lag by up to one tick (~3-5 s).
+                        val finalCoachingNotes = coachingHistory.toList()
+
                         val finalSession = session.copy(
                             endTime = System.currentTimeMillis(),
                             duration = finalDurationMs.coerceAtLeast(0L),
                             weatherAtEnd = weatherAtEnd,
-                            isActive = false
+                            isActive = false,
+                            aiCoachingNotes = finalCoachingNotes
                         )
                         _currentRunSession.value = finalSession
 
@@ -4204,10 +4228,17 @@ class RunTrackingService : Service(), SensorEventListener {
                     trigger.condition != "always" &&
                     !evaluateConditionExpression(trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName)) continue
 
-                val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax, phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax)
                 triggerLastFiredMs[trigger.id] = now
-                Log.d("RunTrackingService", "⏱️ Periodic trigger [${trigger.type}] ${trigger.id}: $message")
-                fireDynamicTrigger(message, trigger.type, dynamicCurrentPhaseName ?: "unknown")
+                Log.d("RunTrackingService", "⏱️ Periodic trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
+                // Mark fired BEFORE async call to prevent duplicate triggers this tick
+                hasCoachingFiredThisTick = true
+                fireLiveTriggerMessage(
+                    trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
+                    phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+                    phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
+                    currentDistanceKm = currentDistanceKm, plan = plan,
+                    currentPhase = currentPhase,
+                )
                 continue
             }
 
@@ -4238,12 +4269,174 @@ class RunTrackingService : Service(), SensorEventListener {
 
             if (!conditionMet) continue
 
-            val message = pickTriggerMessage(trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax, phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax)
             triggerLastFiredMs[trigger.id] = now
             if (trigger.frequency == "once") triggerFiredOnce.add(trigger.id)
 
-            Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id}: $message")
-            fireDynamicTrigger(message, trigger.type, dynamicCurrentPhaseName ?: "unknown")
+            Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
+            // Mark fired BEFORE async call to prevent duplicate triggers this tick
+            hasCoachingFiredThisTick = true
+            fireLiveTriggerMessage(
+                trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
+                phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+                phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
+                currentDistanceKm = currentDistanceKm, plan = plan,
+                currentPhase = currentPhase,
+            )
+        }
+    }
+
+    /**
+     * Fires a session coaching trigger by making a LIVE OpenAI call with the athlete's
+     * actual metrics at the moment the trigger fires.
+     *
+     * This replaces the old template-substitution approach ({hr} → 148) with genuine
+     * AI analysis — the same quality as normal run coaching (generatePaceUpdate /
+     * generateEliteCoaching). OpenAI sees the actual live data and generates a bespoke,
+     * contextually correct message, not a pre-written phrase.
+     *
+     * On API failure or timeout, falls back to the pre-written template message
+     * so the athlete always hears something.
+     */
+    private fun fireLiveTriggerMessage(
+        trigger: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger,
+        phaseName: String,
+        phaseHRMin: Int?,
+        phaseHRMax: Int?,
+        phasePaceMin: Int?,
+        phasePaceMax: Int?,
+        currentDistanceKm: Double,
+        plan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan,
+        currentPhase: live.airuncoach.airuncoach.network.model.DynamicCoachingPhase?,
+    ) {
+        // Snapshot live metrics immediately (don't capture lambdas that reference mutable state)
+        val snapshotHR = currentHeartRate
+        val snapshotPaceSecPerKm = parsePaceToSeconds(currentPace).let { if (it > 0) it.toInt() else null }
+        val snapshotCadence = currentCadence.takeIf { it > 0 }
+        val snapshotDistKm = currentDistanceKm
+        val snapshotElapsedMin = (getActiveRunDuration() / 60_000L).toInt()
+        val snapshotGrade = currentSmoothedGrade
+        val snapshotElevGain = totalElevationGain
+        val snapshotTargetDistKm = targetDistance?.let { it / 1000.0 }
+
+        // Snapshot recent coaching context (last 2 messages for coherence)
+        val recentMessages = coachingHistory.takeLast(2).map { it.message }
+
+        // Snapshot recent km splits for trend context
+        val recentSplits = kmSplits.takeLast(3).map { split ->
+            live.airuncoach.airuncoach.network.model.RecentSplit(km = split.km, pace = split.pace)
+        }
+
+        // Pre-written fallback — resolved with live data, used if API fails or times out
+        val fallbackMessage = pickTriggerMessage(
+            trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+            phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax
+        )
+
+        // Build a compact phases summary so GPT understands the full session structure.
+        // e.g. "warmup (5min easy) → tempo_block (20min threshold 4:50-5:05/km) → cooldown (5min easy)"
+        val phasesSummary = plan.phases.joinToString(" → ") { ph ->
+            val reps = if ((ph.repetitions ?: 1) > 1) "${ph.repetitions}×" else ""
+            val duration = ph.durationMinutes?.let { "${it.toInt()}min" }
+                ?: ph.distanceKm?.let { "${it}km" }
+                ?: ""
+            val effort = ph.effort.takeIf { it != "moderate" } ?: ""
+            val paceRange = if (ph.targetPaceMin != null && ph.targetPaceMax != null) {
+                val minStr = "${ph.targetPaceMin / 60}:${(ph.targetPaceMin % 60).toString().padStart(2, '0')}"
+                val maxStr = "${ph.targetPaceMax / 60}:${(ph.targetPaceMax % 60).toString().padStart(2, '0')}"
+                " @${minStr}-${maxStr}/km"
+            } else ""
+            val hrRange = if (ph.targetHRMin != null && ph.targetHRMax != null) " HR:${ph.targetHRMin}-${ph.targetHRMax}" else ""
+            "${reps}${ph.name}(${listOfNotNull(duration.takeIf { it.isNotBlank() }, effort.takeIf { it.isNotBlank() }).joinToString(" ")}${paceRange}${hrRange})"
+        }
+
+        // Find interval rep context from the current phase name (encoded as "work_rep_3_of_5")
+        val repRegex = Regex("_rep_(\\d+)_of_(\\d+)$")
+        val repMatch = repRegex.find(phaseName)
+        val currentRepNum = repMatch?.groupValues?.get(1)?.toIntOrNull()
+        val totalRepsNum = repMatch?.groupValues?.get(2)?.toIntOrNull()
+            ?: plan.phases.mapNotNull { it.repetitions }.maxOrNull()
+
+        // Phase time progress — how far into the current phase and how much is left.
+        // Only meaningful for time-based phases (durationMin > 0), not distance-based.
+        val phaseElapsedMin: Double?
+        val phaseRemainingMin: Double?
+        if (dynamicPhaseDurationMin > 0) {
+            val phaseElapsed = snapshotElapsedMin - dynamicPhaseTimeStartMin
+            phaseElapsedMin = phaseElapsed.coerceAtLeast(0.0)
+            phaseRemainingMin = (dynamicPhaseDurationMin - phaseElapsed).coerceAtLeast(0.0)
+        } else {
+            phaseElapsedMin = null
+            phaseRemainingMin = null
+        }
+
+        serviceScope.launch {
+            try {
+                val request = live.airuncoach.airuncoach.network.model.SessionTriggerLiveRequest(
+                    triggerId = trigger.id,
+                    triggerType = trigger.type,
+                    triggerCondition = trigger.condition,
+                    // Full session context — GPT needs this to understand what the session IS
+                    preRunBrief = plan.preRunBrief,
+                    whyThisSession = plan.whyThisSession,
+                    sessionInstructions = sessionInstructions?.preRunBrief,  // training plan description
+                    cueingStrategy = plan.cueingStrategy,
+                    totalSessionDurationMin = plan.targetMetrics.totalDurationMinutes,
+                    totalSessionDistanceKm = plan.targetMetrics.totalDistanceKm,
+                    currentRepNumber = currentRepNum,
+                    totalRepsInSession = totalRepsNum,
+                    isWorkPhase = dynamicPhaseIsWorkInterval.takeIf { currentRepNum != null },
+                    phaseElapsedMinutes = phaseElapsedMin,
+                    phaseRemainingMinutes = phaseRemainingMin,
+                    phasesSummary = phasesSummary,
+                    sessionType = plan.sessionType ?: "run",
+                    sessionGoal = plan.sessionGoal ?: "",
+                    sessionPhase = phaseName,
+                    phaseInstructions = currentPhase?.phaseInstructions,
+                    phaseHRMin = phaseHRMin,
+                    phaseHRMax = phaseHRMax,
+                    phasePaceMinSecPerKm = phasePaceMin,
+                    phasePaceMaxSecPerKm = phasePaceMax,
+                    currentHR = snapshotHR,
+                    currentPaceSecPerKm = snapshotPaceSecPerKm,
+                    currentCadence = snapshotCadence,
+                    distanceKm = snapshotDistKm,
+                    targetDistanceKm = snapshotTargetDistKm,
+                    elapsedMinutes = snapshotElapsedMin,
+                    currentGrade = snapshotGrade,
+                    elevationGainM = snapshotElevGain,
+                    recentCoachingMessages = recentMessages.ifEmpty { null },
+                    recentSplits = recentSplits.ifEmpty { null },
+                    coachName = currentUser?.coachName,
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent,
+                    userId = currentUser?.id,
+                    runnerName = currentUser?.name,
+                    fitnessLevel = currentUser?.fitnessLevel,
+                )
+
+                val response = withTimeoutOrNull(3_500L) {
+                    apiService.getSessionTriggerLive(request)
+                }
+
+                if (response != null) {
+                    Log.d("RunTrackingService", "🤖 Live trigger AI message [${trigger.type}]: ${response.message}")
+                    // Play with AI-generated TTS audio if available, otherwise Android TTS
+                    fireDynamicTrigger(
+                        message = response.message,
+                        triggerType = trigger.type,
+                        phaseName = phaseName,
+                        overrideAudio = response.audio,
+                        overrideAudioFormat = response.format,
+                    )
+                } else {
+                    Log.w("RunTrackingService", "⚠️ Live trigger timed out — using fallback for [${trigger.type}]")
+                    fireDynamicTrigger(fallbackMessage, trigger.type, phaseName)
+                }
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "⚠️ Live trigger API failed (${e.message}) — using fallback for [${trigger.type}]")
+                fireDynamicTrigger(fallbackMessage, trigger.type, phaseName)
+            }
         }
     }
 
@@ -4511,6 +4704,8 @@ class RunTrackingService : Service(), SensorEventListener {
             dynamicCurrentPhaseIndex = resolvedEntryIdx
             dynamicCurrentPhaseName = resolvedPhaseName
             dynamicPhaseDistanceStartKm = currentDistanceKm
+            dynamicPhaseTimeStartMin = elapsedMinutes
+            dynamicPhaseDurationMin = entry.durationMin
 
             // "walk", "recovery", "rest", and "float" are rest/recovery phases.
             // NOTE: "jog" is intentionally NOT classified as recovery — in walk-run interval
@@ -4521,6 +4716,7 @@ class RunTrackingService : Service(), SensorEventListener {
             val isRecovery = resolvedPhase.name.lowercase().let {
                 it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("float")
             }
+            dynamicPhaseIsWorkInterval = !isRecovery
 
             // Reset ALL reactive ("on_condition") trigger cooldowns on every phase transition.
             // Each new interval phase (jog → walk → jog → walk…) deserves fresh HR/pace monitoring.
@@ -4830,7 +5026,14 @@ class RunTrackingService : Service(), SensorEventListener {
             .joinToString("") { "%02x".format(it) }
     }
 
-    private fun fireDynamicTrigger(message: String, triggerType: String, phaseName: String) {
+    private fun fireDynamicTrigger(
+        message: String,
+        triggerType: String,
+        phaseName: String,
+        // Pre-fetched audio from live AI response — skips Polly lookup if provided
+        overrideAudio: String? = null,
+        overrideAudioFormat: String? = null,
+    ) {
         if (hasCoachingFiredThisTick) return
         hasCoachingFiredThisTick = true
         recordCoachingFired()
@@ -4857,24 +5060,20 @@ class RunTrackingService : Service(), SensorEventListener {
             try {
                 if (!isMuted) {
                     // ── Polly audio routing ─────────────────────────────────────────────
+                    // Priority 0: audio from live AI response (session-trigger-live endpoint
+                    //             returns TTS audio alongside the message — use it directly).
                     // Priority 1: pre-cached Polly file (written at "Prepare Run" time for
                     //             static messages without live-data template variables).
-                    // Priority 2: real-time Polly call — covers two cases:
-                    //             a) Messages that originally had {hr}/{pace}/etc. — by the
-                    //                time they reach here the variables are already substituted
-                    //                (e.g. "Heart rate at 142"), so pre-cache misses correctly.
-                    //             b) Static messages that weren't pre-cached for any reason.
+                    // Priority 2: real-time Polly call — covers template-substituted messages
+                    //             and any static messages not pre-cached.
                     // Priority 3: Android TTS fallback (Polly unavailable / network failure).
-                    //
-                    // NOTE: We do NOT branch on message.contains('{') here because template
-                    // variables are resolved before this call — the message is always a plain
-                    // string at this point. Always try pre-cache first; real-time Polly if not
-                    // found; Android TTS as last resort.
-                    val base64Audio: String? = getPreCachedPollyAudio(sanitisedMessage)
-                        ?.also { Log.d("RunTrackingService", "🎵 Pre-cached Polly: ${sanitisedMessage.take(40)}") }
+                    val base64Audio: String? = overrideAudio
+                        ?.also { Log.d("RunTrackingService", "🎵 Live AI audio: ${sanitisedMessage.take(40)}") }
+                        ?: getPreCachedPollyAudio(sanitisedMessage)
+                            ?.also { Log.d("RunTrackingService", "🎵 Pre-cached Polly: ${sanitisedMessage.take(40)}") }
                         ?: getRealtimePollyAudio(sanitisedMessage)
                             ?.also { Log.d("RunTrackingService", "🎵 Real-time Polly: ${sanitisedMessage.take(40)}") }
-                    val audioFormat: String? = if (base64Audio != null) "mp3" else null
+                    val audioFormat: String? = overrideAudioFormat ?: if (base64Audio != null) "mp3" else null
                     CoachingAudioQueue.enqueue(
                         context = this@RunTrackingService,
                         base64Audio = base64Audio,
@@ -5104,6 +5303,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     hasRoute = hasGpsElevation,   // True when GPS altitude data is available
                     targetPace = targetPaceStr,   // Target pace so AI can compare split vs target
                     averagePace = overallAvgPaceStr,
+                    cadence = currentCadence.takeIf { it > 0 },  // Live cadence for tempo/form coaching
                     // User profile
                     fitnessLevel = currentUser?.fitnessLevel,
                     runnerName = currentUser?.name,
@@ -5117,7 +5317,12 @@ class RunTrackingService : Service(), SensorEventListener {
                     workoutType = planWorkoutType,  // Tells AI this is a training session (not a race)
                     // ========== Route Memory Engine ==========
                     routeIntelligence = routeIntelligenceContext,
-                    lastKmSplitSeconds = (split.time / 1000).toInt()
+                    lastKmSplitSeconds = (split.time / 1000).toInt(),
+                    // Session target pace — from the coaching plan's targetMetrics.
+                    // Lets the AI compare the split against the session's prescribed effort,
+                    // not the long-term race goal pace.
+                    sessionTargetPaceMin = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMin,
+                    sessionTargetPaceMax = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMax
                 )
                 val response = apiService.getPaceUpdate(update)
                 coachingHistory.add(AiCoachingNote(

@@ -108,6 +108,14 @@ interface ApiService {
     @POST("/api/coaching/pace-update")
     suspend fun getPaceUpdate(@Body request: PaceUpdate): PaceUpdateResponse
 
+    /**
+     * Live AI coaching message when a session plan trigger fires.
+     * Replaces the pre-written template substitution with a genuine OpenAI call
+     * that analyzes the athlete's actual live data at the moment the trigger fires.
+     */
+    @POST("/api/coaching/session-trigger-live")
+    suspend fun getSessionTriggerLive(@Body request: SessionTriggerLiveRequest): SessionTriggerLiveResponse
+
     @POST("/api/coaching/struggle-coaching")
     suspend fun getStruggleCoaching(@Body request: StruggleUpdate): StruggleUpdateResponse
 
