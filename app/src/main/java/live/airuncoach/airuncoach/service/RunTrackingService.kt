@@ -699,8 +699,14 @@ class RunTrackingService : Service(), SensorEventListener {
         sessionManager = SessionManager(this)
         coachingFeaturePrefs = live.airuncoach.airuncoach.data.CoachingFeaturePreferences(this)
         
-        // Initialize API service
-        apiService = RetrofitClient.apiService
+        // Initialize API service — RetrofitClient may not be initialized if the service was
+        // started directly from a push notification (no MainActivity was launched first).
+        apiService = try {
+            RetrofitClient.apiService
+        } catch (e: IllegalStateException) {
+            android.util.Log.w("RunTrackingService", "RetrofitClient not initialized — initializing now from service context")
+            RetrofitClient.initialize(applicationContext, sessionManager)
+        }
         
         // Initialize Text-to-Speech for AI coaching (fallback)
         textToSpeechHelper = TextToSpeechHelper(this)
