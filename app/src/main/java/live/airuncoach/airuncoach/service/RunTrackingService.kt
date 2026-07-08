@@ -4529,6 +4529,20 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (td > 0) (currentDistanceKm / td * 100.0) else return false
             }
             "elapsed_min"    -> getActiveRunDuration() / 60_000.0
+            // Metres remaining to target distance (e.g. "remaining_m < 500" for final 500m cue)
+            "remaining_m"    -> {
+                val td = targetDistance ?: inferredTargetDistance ?: return false
+                val remainingM = td - (currentDistanceKm * 1000.0)
+                if (remainingM < 0) return false  // Already past target — don't fire
+                remainingM
+            }
+            // Minutes remaining to target duration (e.g. "remaining_min < 5" for final 5-min cue)
+            "remaining_min"  -> {
+                val totalDurMs = (dynamicCoachingPlan?.targetMetrics?.totalDurationMinutes ?: return false) * 60_000.0
+                val remainingMs = totalDurMs - getActiveRunDuration()
+                if (remainingMs < 0) return false  // Already past target duration
+                remainingMs / 60_000.0
+            }
             // Terrain — grade in % (positive = uphill, negative = downhill)
             "grade"          -> currentSmoothedGrade
             // Cumulative elevation gain in metres this session

@@ -5657,26 +5657,1329 @@ Session Details:
 - Overall HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm${intervalContext}${perPhaseTargets}${trainingWeekContext}${recoveryContextNote}
 ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
 
-  const systemPrompt = `You are ${coachName}, an elite AI running coach delivering a world-class, hyper-personalised coaching experience for a single training session. Your mission is to make this athlete feel like they have a dedicated personal coach running beside them — not a robot rattling off commands.
+  const systemPrompt = `You are ${coachName}, an AI running coach. You design live coaching plans that execute during a GPS training session.
 
-THE GOLDEN RULE: Never say "run now", "walk now", "speed up", "slow down" as isolated commands. Your competitors do this and runners hate it. Instead, coach like a real human: acknowledge what the athlete is doing, give a specific cue, and say something encouraging. Every message should feel personal, warm, and specific to this session.
+The plan runs in real time: a live engine evaluates your trigger conditions against the athlete's sensor data every second and fires your messages through text-to-speech the instant conditions are met.
 
-LANGUAGE RULE — WRITE "HEART RATE" IN FULL, NEVER "HR":
-The messages are read aloud by a text-to-speech voice. "HR" sounds robotic; "heart rate" sounds human.
-ALWAYS write "heart rate" in full — in every trigger message, alternativeMessage, preRunBrief, and whyThisSession. No exceptions.
-✓ "Heart rate at {hr} — ease back a touch."   ✗ "HR at {hr} — ease back."
-✓ "Heart rate sitting nicely in zone."          ✗ "HR in zone."
+ONE REQUIRED OUTPUT: preRunBrief — a spoken summary the athlete hears before they start. Cover what they're about to do, their specific targets (pace, heart rate, distance/duration), and what to expect. This is the most important message in the plan. Make it feel like a personal coach talking directly to them.
 
-You have full creative authority over how you design this session's coaching plan. Choose the phase structure, coaching approach, tone, and messaging that YOU believe will give this specific athlete the best performance and experience in this specific session. Do not default to a generic template.
+Everything else — phases, triggers, conditions, messages — you design freely based on your coaching expertise.
 
-Your coaching plan must include:
-- A session breakdown into phases that reflect how this session actually works (warmup, effort blocks, recovery jogs, reps, cooldown — whatever structure genuinely fits this session type)
-- Reactive coaching triggers — live conditions evaluated against GPS/heart rate data that fire when the athlete needs guidance  
-- A pre-run brief (2-4 sentences) that is specific, motivating, and tells the athlete exactly what they are doing today and why
-- A "why this session matters" explanation (1-2 sentences) connecting this session to the athlete's goal
-- The coaching tone you judge to be most effective for this session and this athlete
+CONDITION METRICS (what you can measure in trigger conditions):
+  hr               current heart rate (bpm)
+  pace             current pace (sec/km — lower = faster)
+  cadence          steps per minute
+  distance         total distance run (km)
+  distance_pct     % of target distance complete (0–100)
+  elapsed_min      elapsed run time (minutes)
+  remaining_m      metres remaining to target distance
+  remaining_min    minutes remaining to target duration
+  grade            current gradient (%, positive = uphill)
+  elevation_gain   cumulative elevation gain (metres)
 
-COACHING PRINCIPLES:
+RHS target keywords: targetHRMax, targetHRMin, targetPaceMax, targetPaceMin (arithmetic: targetHRMax + 10)
+Syntax: "hr > 155"  |  "remaining_m < 500"  |  "pace < targetPaceMin AND elapsed_min > 3"
+Condition "always" fires unconditionally every frequencySeconds.
+
+MESSAGE VARIABLES — substituted live at trigger time:
+{hr} {pace} {cadence} {repNum} {totalReps} {repsLeft} {targetHRMax} {targetHRMin} {targetPaceMin} {targetPaceMax}
+
+VOICE: messages are read aloud — keep under 18 words. Write "heart rate" not "HR".
+
+PHASE REPETITIONS (for interval/walk-run sessions):
+Set repetitions > 1 on consecutive work+recovery phases — the engine interleaves them automatically:
+  { "name": "jog", "durationMinutes": 5, "repetitions": 4 }
+  { "name": "recovery_walk", "durationMinutes": 2, "repetitions": 4 }
+  → jog rep 1 → walk rep 1 → jog rep 2 → walk rep 2 → … × 4
+Name recovery phases starting with "recovery_" so the runtime identifies them correctly.
+
+${getPaceContextDirective(runnerProfile.recentPaceAvgSecPerKm, runnerProfile.fitnessLevel, targetPaceMin, sessionType || 'run')}
+${toneDirective(coachTone)}
+${accentDirective(params.coachAccent)}
+${runnerProfileBlock(params.aiRunnerProfile)}
+Return ONLY valid JSON. No markdown, no code blocks.`;
+
+
+  const userPrompt = `${runnerContext}
+
+${recentRunsContext}
+
+${sessionContext}
+
+Design the best coaching plan you can for this athlete and session. Return ONLY valid JSON matching this schema:
+{
+  "sessionType": "${sessionType}",
+  "sessionGoal": "${sessionGoal}",
+  "coachingTone": "calm|motivational|energetic|technical|supportive",
+  "cueingStrategy": "interval|threshold|paced|freerun",
+  "preRunBrief": "2-4 sentence brief — name the specific structure, HR targets, what it should feel like. Speak directly to the athlete as 'you'.",
+  "whyThisSession": "1-2 sentences — why this session matters for their specific goal",
+  "phases": [
+    {
+      "name": "phase_name",
+      "order": 0,
+      "durationMinutes": 5.0,
+      "distanceKm": null,
+      "targetPaceMin": null,
+      "targetPaceMax": null,
+      "targetHRMin": ${intervalHRMin ?? targetHRMin ?? null},
+      "targetHRMax": ${intervalHRMax ?? targetHRMax ?? null},
+      "effort": "easy|moderate|threshold|hard|max",
+      "coachingFocus": "relaxation|rhythm|power|endurance|recovery",
+      "phaseInstructions": "What this phase requires from the athlete",
+      "repetitions": 1
+    }
+  ],
+  "triggers": [
+    {
+      "id": "unique_trigger_id",
+      "type": "descriptive_type_name",
+      "condition": "metric op value [AND metric op value]",
+      "message": "Coach message — include {hr}, {cadence}, {pace}, {repNum} etc. where relevant. Under 18 words.",
+      "frequency": "once|on_condition|periodic",
+      "frequencySeconds": null,
+      "alternativeMessages": ["Variation 1 — different wording", "Variation 2", "Variation 3", "Variation 4"],
+      "alertType": "none|vibrate",
+      "suppressWhenIntensity": []
+    }
+  ],
+  "targetMetrics": {
+    "totalDurationMinutes": ${targetDurationMinutes},
+    "totalDistanceKm": ${targetDistanceKm},
+    "primaryMetric": "pace|heart_rate|effort|distance|time",
+    "secondaryMetric": "pace|heart_rate|cadence|null",
+    "mainEffortPaceMin": ${intervalTargetPaceSecPerKm ?? targetPaceMin ?? null},
+    "mainEffortPaceMax": ${intervalTargetPaceSecPerKm ? intervalTargetPaceSecPerKm + 30 : (targetPaceMax ?? null)},
+    "mainEffortHRMin": ${intervalHRMin ?? targetHRMin ?? null},
+    "mainEffortHRMax": ${intervalHRMax ?? targetHRMax ?? null},
+    "structure": "continuous|repeats|progression|threshold_block",
+    "isSpeedWork": false,
+    "isEnduranceWork": true,
+    "isStrengthWork": false,
+    "isRecovery": false
+  }
+}
+
+PHASE DESIGN GUIDANCE:
+Design the phase structure that genuinely fits this session. You choose the number of phases, their names, and their sequence based on what makes coaching sense for this specific session type and athlete. Some principles that typically apply:
+- Sessions generally benefit from a warmup phase (to prepare the athlete physically and mentally) and a cooldown phase
+- Interval/rep sessions work best with alternating work and recovery phases so each phase has its own targets and coaching triggers
+- Continuous effort sessions (tempo, easy, long run) can be a single main effort or broken into logical sub-phases with milestone triggers
+- Zone-based sessions benefit from reactive HR triggers throughout to keep the athlete in the target zone
+
+CRITICAL — Phase duration and repetitions:
+- For time-based phases, set durationMinutes to the EXACT duration in minutes (e.g. 5 for a 5-minute jog). The live engine uses this to detect phase transitions in real time.
+- For distance-based phases (warmup/cooldown by distance), set distanceKm.
+- INTERVAL SESSIONS: use the "repetitions" field instead of generating one phase per rep. Set repetitions > 1 on consecutive work/recovery phases — the engine interleaves them automatically. Example for "5 min jog + 2 min walk × 4 reps":
+  { "name": "jog", "order": 0, "durationMinutes": 5, "repetitions": 4 }
+  { "name": "recovery_walk", "order": 1, "durationMinutes": 2, "repetitions": 4 }
+  This produces: jog rep 1 → walk rep 1 → jog rep 2 → walk rep 2 → … × 4
+- WALK-RUN: do NOT include a warmup or cooldown phase unless the workout explicitly states one — the walk phases serve as built-in recovery. The jog phase named "jog" is the work phase.
+- Name recovery phases starting with "recovery_" so the runtime detects them as recovery.
+
+MESSAGE QUALITY RULES — every trigger message must pass these tests:
+1. Would a real coach say this? Not a robot?
+2. Does it acknowledge what the athlete just did or is doing?
+3. Does it give ONE specific, actionable cue?
+4. Is it under 15 words?
+5. Does it vary across alternativeMessages (no phrase repeated, no word repeated for same trigger)?
+
+TRIGGER ids must be unique. Format: "{phase_name}_{trigger_type}".
+For rep triggers: include 4-5 alternativeMessages with varied language — the athlete will hear these across multiple reps.
+For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely different wording.`;
+
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { 
+          role: "system", 
+          content: `You are ${coachName}, an expert running coach with deep knowledge of exercise physiology, training methodology, and athlete psychology. 
+
+YOUR COACHING PHILOSOPHY:
+- Interpret data in the context of their training journey, not just report numbers
+- Identify patterns and trends that reveal their running style, strengths, and areas to develop
+- Balance honest feedback with motivation and recognition of effort
+- Provide specific, actionable guidance they can use immediately
+- Explain the "why" behind your recommendations - help them understand their body and fitness
+
+RESPONSE STYLE:
+- Write conversationally, as if you're having a coaching session with them
+- Use their actual performance data to back up your observations
+- Reference their previous runs when analyzing patterns
+- Make personalized recommendations based on their fitness level and goals
+
+Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`
+        },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 2500,
+      temperature: 0.7,
+    });
+
+    const content = completion.choices[0].message.content || "{}";
+    const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
+    
+    // Build response with only relevant fields based on available data
+    const response: any = {
+      summary: parsed.summary || "Great run today!",
+      performanceScore: parsed.performanceScore || 75,
+      highlights: parsed.highlights || ["Completed your run!"],
+      struggles: parsed.struggles || [],
+      personalBests: parsed.personalBests || [],
+      improvementTips: parsed.improvementTips || ["Keep up the great work!"],
+      trainingLoadAssessment: parsed.trainingLoadAssessment || "Moderate training load.",
+      recoveryAdvice: parsed.recoveryAdvice || "Get adequate rest and hydration.",
+      nextRunSuggestion: parsed.nextRunSuggestion || "An easy recovery run in 24-48 hours.",
+    };
+
+    // Add performance breakdown if provided
+    if (parsed.performanceBreakdown) {
+      response.performanceBreakdown = {
+        executionScore: parsed.performanceBreakdown.executionScore || parsed.performanceScore || 75,
+        effortScore: parsed.performanceBreakdown.effortScore || parsed.performanceScore || 75,
+        consistencyScore: parsed.performanceBreakdown.consistencyScore || parsed.performanceScore || 75,
+      };
+    }
+
+    // Add professional coaching fields if provided
+    if (parsed.coachMotivationalMessage) {
+      response.coachMotivationalMessage = parsed.coachMotivationalMessage;
+    }
+
+    if (parsed.comparisonToPreviousRuns) {
+      response.comparisonToPreviousRuns = parsed.comparisonToPreviousRuns;
+    }
+
+    if (parsed.progressionTrend) {
+      response.progressionTrend = parsed.progressionTrend;
+    }
+
+    if (parsed.runPatternAnalysis) {
+      response.runPatternAnalysis = parsed.runPatternAnalysis;
+    }
+
+    if (parsed.pacingStrategy) {
+      response.pacingStrategy = {
+        assessment: parsed.pacingStrategy.assessment || "",
+        whatWentWell: parsed.pacingStrategy.whatWentWell || "",
+        whatToAdjust: parsed.pacingStrategy.whatToAdjust || "",
+      };
+    }
+
+    if (parsed.fitnessContext) {
+      response.fitnessContext = {
+        whatThisRunMeans: parsed.fitnessContext.whatThisRunMeans || "",
+        sequenceInPlan: parsed.fitnessContext.sequenceInPlan || "",
+        adaptationSignals: parsed.fitnessContext.adaptationSignals || "",
+      };
+    }
+
+    if (parsed.mentalGame) {
+      response.mentalGame = {
+        effortQuality: parsed.mentalGame.effortQuality || "",
+        paceVariability: parsed.mentalGame.paceVariability || "",
+        coachingForNextTime: parsed.mentalGame.coachingForNextTime || "",
+      };
+    }
+
+    if (parsed.strugglePointsAnalysis) {
+      response.strugglePointsAnalysis = {
+        identified: parsed.strugglePointsAnalysis.identified || [],
+        likelyReasons: parsed.strugglePointsAnalysis.likelyReasons || "",
+        preventionStrategy: parsed.strugglePointsAnalysis.preventionStrategy || "",
+      };
+    }
+
+    if (parsed.nextWorkoutCoaching) {
+      response.nextWorkoutCoaching = {
+        recommendation: parsed.nextWorkoutCoaching.recommendation || "",
+        reasonWhy: parsed.nextWorkoutCoaching.reasonWhy || "",
+        focusPoints: parsed.nextWorkoutCoaching.focusPoints || [],
+      };
+    }
+
+    // Include wellness impact only if we have wellness data
+    if (wellness) {
+      response.wellnessImpact = parsed.wellnessImpact || "Your wellness state supported this effort.";
+    }
+
+    // Include weather analysis if available
+    if (weatherImpactAnalysis) {
+      response.weatherImpactAnalysis = weatherImpactAnalysis;
+    }
+
+    // Include technical analysis and Garmin insights only if we have Garmin metrics
+    if (hasGarminMetrics) {
+      response.technicalAnalysis = {
+        paceAnalysis: parsed.technicalAnalysis?.paceAnalysis || "Pace data not available.",
+        heartRateAnalysis: parsed.technicalAnalysis?.heartRateAnalysis || "Heart rate data not available.",
+        cadenceAnalysis: parsed.technicalAnalysis?.cadenceAnalysis || "Cadence data not available.",
+        runningDynamics: parsed.technicalAnalysis?.runningDynamics || "Running dynamics not available.",
+        elevationPerformance: parsed.technicalAnalysis?.elevationPerformance || "Elevation data not available.",
+      };
+      response.garminInsights = {
+        trainingEffect: parsed.garminInsights?.trainingEffect || "Training effect data not available.",
+        vo2MaxTrend: parsed.garminInsights?.vo2MaxTrend || "VO2 max data not available.",
+        recoveryTime: parsed.garminInsights?.recoveryTime || "Recovery time estimate not available.",
+      };
+    }
+
+    return response;
+  } catch (error) {
+    console.error("Error generating comprehensive run analysis:", error);
+    // Build error response with only relevant fields
+    const errorResponse: any = {
+      summary: "Great effort on your run today!",
+      performanceScore: 70,
+      highlights: ["Completed your run", "Stayed consistent"],
+      struggles: [],
+      personalBests: [],
+      improvementTips: ["Keep training consistently", "Focus on recovery"],
+      trainingLoadAssessment: "Training load recorded.",
+      recoveryAdvice: "Rest well and stay hydrated.",
+      nextRunSuggestion: "Take a rest day or do an easy run.",
+    };
+
+    // Include wellness impact only if we have wellness data
+    if (wellness) {
+      errorResponse.wellnessImpact = "Unable to assess wellness impact.";
+    }
+
+    // Include weather analysis if available
+    if (weatherImpactAnalysis) {
+      errorResponse.weatherImpactAnalysis = weatherImpactAnalysis;
+    }
+
+    // Include technical analysis and Garmin insights only if we have Garmin metrics
+    if (hasGarminMetrics) {
+      errorResponse.technicalAnalysis = {
+        paceAnalysis: "Analysis unavailable.",
+        heartRateAnalysis: "Analysis unavailable.",
+        cadenceAnalysis: "Analysis unavailable.",
+        runningDynamics: "Analysis unavailable.",
+        elevationPerformance: "Analysis unavailable.",
+      };
+      errorResponse.garminInsights = {
+        trainingEffect: "Data unavailable.",
+        vo2MaxTrend: "Data unavailable.",
+        recoveryTime: "Data unavailable.",
+      };
+    }
+
+    return errorResponse;
+  }
+}
+
+// ============================================================
+// REAL-TIME ELITE COACHING — additional coaching triggers
+// beyond the existing pace/split/struggle/phase/cadence system
+// ============================================================
+
+export type EliteCoachingType =
+  | 'technique_form'        // Periodic running form & technique coaching
+  | 'milestone'             // Progress milestone celebrations (25%, 50%, 75%)
+  | 'positive_reinforcement'// Reinforce consistent pacing, negative splits, strong effort
+  | 'target_eta'            // Projected finish time vs target
+  | 'pace_trend'            // Gradual pace drift detection (not sudden drop like struggle)
+  | 'elevation_insight'     // How elevation is affecting their pace right now
+  | 'heart_rate_check'      // HR-focused coaching for zone 2 sessions (with HR device)
+  | 'final_500m'            // Last 500m motivational push
+  | 'final_100m';           // Last 100m — maximum intensity finish line push
+
+export interface EliteCoachingParams {
+  coachingType: EliteCoachingType;
+  distance: number;
+  targetDistance?: number;
+  currentPace: string;
+  averagePace: string;
+  elapsedTime: number; // seconds
+  coachName: string;
+  coachTone: string;
+  hasRoute: boolean;
+
+  // Optional context — sent when available
+  heartRate?: number;
+  cadence?: number;
+  currentGrade?: number;
+  totalElevationGain?: number;
+  totalElevationLoss?: number;
+  targetTime?: number; // seconds
+  targetPace?: string;
+  targetHeartRateZone?: number; // 1-5; for Zone 1-2, skip speed-focused coaching
+
+  // Type-specific context
+  milestonePercent?: number;              // for 'milestone'
+  kmSplits?: Array<{ km: number; pace: string }>;  // for pace_trend, positive_reinforcement
+  paceTrendDirection?: 'slowing' | 'speeding_up' | 'consistent'; // for pace_trend
+  paceTrendDeltaPerKm?: number;           // seconds drift per km
+  projectedFinishTime?: number;           // seconds, for target_eta
+  consecutiveConsistentSplits?: number;   // for positive_reinforcement
+  isNegativeSplitting?: boolean;          // for positive_reinforcement
+  fastestSplitKm?: number;               // for positive_reinforcement
+  fastestSplitPace?: string;             // for positive_reinforcement
+  targetTimeCategory?: 'on_track' | 'strong_effort' | 'no_mention'; // for final_500m, final_100m
+  etaOverTargetPercent?: number;         // how far over target as % (negative = under)
+  remainingMeters?: number;              // meters remaining for final triggers
+
+  // Coaching programme context — populated when run is a scheduled plan workout
+  trainingPlanId?: string;
+  workoutId?: string;
+  workoutType?: string;       // easy | tempo | intervals | long_run | hill_repeats | recovery
+  workoutDescription?: string;
+  planGoalType?: string;      // 5k | 10k | half_marathon | marathon
+  planWeekNumber?: number;
+  planTotalWeeks?: number;
+  runnerProfile?: string | null;
+}
+
+export async function generateEliteCoaching(params: EliteCoachingParams): Promise<string> {
+  const {
+    coachingType, distance, targetDistance, currentPace, averagePace, elapsedTime,
+    coachName, coachTone, hasRoute,
+    heartRate, cadence, currentGrade, totalElevationGain, totalElevationLoss,
+    targetTime, targetPace, targetHeartRateZone, milestonePercent, kmSplits,
+    paceTrendDirection, paceTrendDeltaPerKm,
+    projectedFinishTime, consecutiveConsistentSplits, isNegativeSplitting,
+    fastestSplitKm, fastestSplitPace,
+    targetTimeCategory, etaOverTargetPercent, remainingMeters,
+    trainingPlanId, workoutType, workoutDescription, planGoalType, planWeekNumber, planTotalWeeks
+  } = params;
+
+  // For Zone 1-2 aerobic/recovery runs, skip speed-focused coaching (final pushes, sprint finishes)
+  // FINAL KM is different — if they're in Zone 4-5, that's appropriate for a finishing push
+  // Only constrain HR if they're in a recovery/easy zone (Z1-Z2) during the final stage
+  // For interval/threshold work in the final km, pushing into Z4-5 is EXPECTED and GOOD
+  if ((coachingType === 'final_500m' || coachingType === 'final_100m') && targetHeartRateZone && targetHeartRateZone <= 2) {
+    // Only suppress sprint coaching if this is a RECOVERY session (Z1-Z2 target)
+    return `Great work maintaining Zone ${targetHeartRateZone}! Keep the effort steady to the finish. Focus on your breathing and heart rate, not the pace.`;
+  }
+
+  // For training plan sessions, disable "push hard" final sprint coaching
+  // Training sessions are about executing the plan, not racing — "finish strong" is not relevant
+  if ((coachingType === 'final_500m' || coachingType === 'final_100m') && trainingPlanId && workoutType) {
+    // Instead of sprint motivation, focus on steady effort and plan completion
+    return `Excellent effort on this ${workoutType.replace(/_/g, ' ')} session! Keep your current effort steady for the final stretch. You're right on track with your training plan.`;
+  }
+
+  const timeMin = Math.floor(elapsedTime / 60);
+  const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
+  const remaining = targetDistance ? formatDistanceForCoaching(targetDistance - distance) : '?';
+  const spokenPace = formatPaceForTTS(currentPace);
+  const spokenAvgPace = formatPaceForTTS(averagePace);
+  const spokenTargetPace = formatPaceForTTS(targetPace);
+
+  const _elevGradeKnown = typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5;
+  const noTerrainRule = (hasRoute || _elevGradeKnown) ? '' : `\nCRITICAL: No GPS elevation data. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain characteristics.`;
+
+  // Build runner status block (shared across all types)
+  let status = `Runner Status:
+- Distance: ${formatDistanceForCoaching(distance)}${targetDistance ? ` of ${formatDistanceForCoaching(targetDistance)} (${progress}%)` : ''} — ${remaining} remaining
+- Time: ${timeMin} minutes
+- Current pace: ${spokenPace}
+- Average pace: ${spokenAvgPace}`;
+  if (heartRate && heartRate > 0) status += `\n- Heart rate: ${heartRate} bpm`;
+  if (cadence && cadence > 0) status += `\n- Cadence: ${cadence} spm`;
+  if (hasRoute && totalElevationGain && totalElevationGain > 0) status += `\n- Elevation climbed: ${Math.round(totalElevationGain)}m`;
+  if (hasRoute && typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 2) status += `\n- Current gradient: ${currentGrade.toFixed(1)}%`;
+  if (kmSplits && kmSplits.length > 0) status += `\n- Splits: ${kmSplits.map(s => `km${s.km}=${s.pace}`).join(', ')}`;
+
+  // Coaching programme context — adds plan awareness to every insight
+  if (trainingPlanId && planGoalType) {
+    const goalLabel = planGoalType.replace('_', ' ').toUpperCase();
+    status += `\n\nCoaching Programme Context:`;
+    status += `\n- This run is a SCHEDULED WORKOUT in the runner's AI coaching programme`;
+    status += `\n- Programme goal: ${goalLabel}`;
+    if (planWeekNumber && planTotalWeeks) {
+      status += `\n- Week ${planWeekNumber} of ${planTotalWeeks}`;
+    }
+    if (workoutType) {
+      status += `\n- Session type: ${workoutType.replace('_', ' ')}`;
+    }
+    if (workoutDescription) {
+      status += `\n- Today's workout: "${workoutDescription}"`;
+    }
+    status += `\nUse this context to give plan-aware coaching — reference their ${goalLabel} goal, compare current effort to what this workout is building towards, and reinforce how today's session fits the bigger picture.`;
+  }
+
+  let typePrompt = '';
+  let systemExtra = '';
+
+  switch (coachingType) {
+
+    case 'technique_form': {
+      // For Zone 1-2 aerobic runs, focus on breathing/comfort, NOT posture/form correction
+      const isAerobicZone = targetHeartRateZone && targetHeartRateZone <= 2;
+      
+      typePrompt = `COACHING TYPE: Running technique & form check.
+
+${status}
+${noTerrainRule}
+
+Give a focused technique coaching cue (2-3 sentences). Pick ONE technique area and coach it with specific, actionable cues the runner can apply RIGHT NOW:
+
+${isAerobicZone ? `
+For this Zone 2 AEROBIC BASE BUILD session, focus on COMFORT and RELAXATION:
+- Breathing should be steady and conversational — if you can't speak in full sentences, ease up
+- Relax your jaw, shoulders, and arms — tension here wastes energy
+- Let your natural rhythm settle in — your body is adapting right now, building capillaries and mitochondria
+- Stay comfortable and patient. This "easy" pace is exactly where the adaptation happens. Elite runners built their speed HERE.
+` : `
+Choose the most relevant for this moment in the run:
+${progress < 30 ? `- EARLY RUN: Focus on establishing good form — relaxed shoulders, arms at 90 degrees, slight forward lean from ankles, landing under hips.` :
+  progress < 70 ? `- MID RUN: Focus on efficiency — are they bouncing too much? Arms crossing midline? Tension creeping into shoulders or jaw? Quick feet.` :
+  `- LATE RUN: Focus on fatigue management — when tired, form breaks down. Cue them to check posture (tall spine), relax hands (no clenching), drive arms forward.`}
+${cadence && cadence < 165 ? `- Their cadence is ${cadence} spm — below optimal. Cue quicker steps: "Think quick, light feet. Your arms set the rhythm — pump them faster and your legs will follow."` : ''}
+${heartRate && heartRate > 170 ? `- HR is high (${heartRate}bpm) — cue breathing technique: "Breathe from your belly. Try a 2-in, 2-out pattern matched to your footstrike."` : ''}
+${hasRoute && currentGrade && currentGrade > 3 ? `- On uphill: "Shorten your stride, lean into the hill from your ankles, pump your arms, and maintain effort — not pace."` : ''}
+${hasRoute && currentGrade && currentGrade < -3 ? `- On downhill: "Lean slightly forward, increase turnover, stay light on your feet. Don't brake with your heels."` : ''}
+`}
+
+Reference at least one data point. Keep it conversational — this is spoken aloud while running.`;
+      systemExtra = isAerobicZone 
+        ? 'For this Zone 2 session, emphasize comfort and sustainability. Coach breathing rhythm, relaxation, and how to stay comfortable at effort.' 
+        : 'You specialize in running biomechanics and form coaching. Give one specific, actionable technique cue — not a generic reminder.';
+      break;
+    }
+
+    case 'milestone': {
+      // For Zone 2 runs, emphasize aerobic adaptation happening in real-time
+      const isAerobicMilestone = targetHeartRateZone && targetHeartRateZone <= 2;
+      const aerobicMilestoneContext = isAerobicMilestone 
+        ? `\nZONE 2 AEROBIC MILESTONE: Every kilometer at this steady effort is building your aerobic base. You're accumulating time in the mitochondrial adaptation zone. This sustainable effort is where real endurance is built.`
+        : '';
+      
+      typePrompt = `COACHING TYPE: Milestone celebration — runner just hit ${milestonePercent}% of their target distance!
+
+${status}
+${noTerrainRule}
+${aerobicMilestoneContext}
+
+Give a celebratory, motivating message (2-3 sentences):
+1. Acknowledge the milestone (${milestonePercent}% done, ${formatDistanceForCoaching(distance)} covered)
+2. Reinforce what they've done well so far (reference their actual pace, consistency, or effort)
+3. Set the tone for the next phase:
+${milestonePercent && milestonePercent <= 25 ? '   - Quarter way: "Great start, settle into your rhythm, lots of running ahead"' :
+  milestonePercent && milestonePercent <= 50 ? '   - Halfway: "You\'re at the turnaround point — everything from here is the home stretch"' :
+  '   - Three quarters: "The hard work is almost done — finish strong"'}
+${isAerobicMilestone && milestonePercent && milestonePercent <= 50 ? '\nRemind them: the second half of this aerobic run is where they build the most adaptation. Sustain this effort.' : ''}
+${targetTime ? `\nProjected finish: ${projectedFinishTime ? Math.floor(projectedFinishTime / 60) + ' minutes' : 'unknown'} (target: ${Math.floor(targetTime / 60)} minutes)${projectedFinishTime && projectedFinishTime < targetTime ? ' — AHEAD OF TARGET, let them know!' : projectedFinishTime && projectedFinishTime > targetTime ? ' — behind target, encourage them to push' : ''}` : ''}
+
+Make them feel like they've accomplished something meaningful. Reference their actual numbers.`;
+      systemExtra = isAerobicMilestone
+        ? 'For Zone 2 milestones, celebrate the aerobic adaptation work happening right now. Reinforce that consistent, steady effort at aerobic pace is exactly how elite runners build their foundation.'
+        : 'Celebrate the milestone with genuine enthusiasm while weaving in their real data. Make them feel proud of what they\'ve achieved so far.';
+      break;
+    }
+
+    case 'positive_reinforcement':
+      typePrompt = `COACHING TYPE: Positive reinforcement — the runner is executing well!
+
+${status}
+${noTerrainRule}
+
+The runner deserves recognition for strong execution:
+${consecutiveConsistentSplits && consecutiveConsistentSplits >= 3 ? `- They've run ${consecutiveConsistentSplits} consecutive consistent splits — excellent pacing discipline!` : ''}
+${isNegativeSplitting ? '- They are NEGATIVE SPLITTING (getting faster as the run progresses) — this is elite-level pacing!' : ''}
+${fastestSplitKm && fastestSplitPace ? `- Their fastest split was km ${fastestSplitKm} at ${formatPaceForTTS(fastestSplitPace)} — call this out!` : ''}
+
+Give a reinforcing message (2-3 sentences):
+1. Call out SPECIFICALLY what they're doing well (consistent pacing, negative splitting, etc.)
+2. Explain briefly WHY this is good running (e.g., "consistent pacing means you're running efficiently and saving energy for when it counts")
+3. Encourage them to maintain it
+
+This is about reinforcing excellence with substance — not empty praise.`;
+      systemExtra = 'Reinforce strong running with specific praise. Explain why what they\'re doing is good technique/strategy.';
+      break;
+
+    case 'target_eta': {
+      const projMin = projectedFinishTime ? Math.floor(projectedFinishTime / 60) : 0;
+      const projSec = projectedFinishTime ? Math.round(projectedFinishTime % 60) : 0;
+      const targetMin = targetTime ? Math.floor(targetTime / 60) : 0;
+      const diff = projectedFinishTime && targetTime ? Math.round((projectedFinishTime - targetTime) / 60) : 0;
+
+      typePrompt = `COACHING TYPE: Target time ETA update.
+
+${status}
+${noTerrainRule}
+
+Target: ${targetTime ? `${targetMin} minutes` : 'no target set'}
+Projected finish: ${projectedFinishTime ? `${projMin} minutes ${projSec} seconds` : 'insufficient data'}
+${diff > 1 ? `STATUS: ${Math.abs(diff)} minute(s) BEHIND target. They need to pick up the pace gradually — not panic.` :
+  diff < -1 ? `STATUS: ${Math.abs(diff)} minute(s) AHEAD of target. They have a cushion — smart pacing.` :
+  `STATUS: ON TARGET. They're executing their race plan perfectly.`}
+${targetPace ? `Target pace: ${spokenTargetPace} (current: ${spokenPace})` : ''}
+
+Give a brief ETA coaching message (2 sentences):
+1. State their projected finish time clearly vs their target
+2. Coach on pacing strategy — should they maintain, push slightly, or ease off?
+${PACE_FORMAT_RULE}`;
+      systemExtra = 'Give clear projected finish time updates with actionable pacing advice.';
+      break;
+    }
+
+    case 'pace_trend':
+      typePrompt = `COACHING TYPE: Pace trend insight.
+
+${status}
+${noTerrainRule}
+
+TREND DETECTED: ${
+  paceTrendDirection === 'slowing' ? `Pace is GRADUALLY DRIFTING SLOWER — approximately ${paceTrendDeltaPerKm ? Math.round(paceTrendDeltaPerKm) + 's/km' : 'noticeably'} per kilometer. This is different from a sudden struggle — it's a gradual fade.` :
+  paceTrendDirection === 'speeding_up' ? `Pace is GRADUALLY GETTING FASTER — approximately ${paceTrendDeltaPerKm ? Math.round(paceTrendDeltaPerKm) + 's/km' : 'noticeably'} per kilometer. They're building momentum.` :
+  'Pace has been remarkably CONSISTENT across splits.'
+}
+
+Give a trend-aware coaching message (2-3 sentences):
+${paceTrendDirection === 'slowing' ? `- Acknowledge the gradual slowdown without alarming them
+- Give a specific technique cue to arrest the fade (e.g., "reset your form — drop your shoulders, pump your arms, quicken your feet")
+- Remind them of their target or what good pacing looks like` :
+  paceTrendDirection === 'speeding_up' ? `- Reinforce the positive trend — they're running smart
+- Caution against going too fast too early if they're under 60% done
+- If they're past 60%, encourage the push` :
+  `- Praise the consistency — this is disciplined running
+- Give a quick form or mental cue to maintain`}
+
+Reference their actual split data.`;
+      systemExtra = 'Analyze pace trends and give targeted coaching. For slowing: technique reset cues. For speeding: smart encouragement.';
+      break;
+
+    case 'elevation_insight': {
+      // Build terrain correlation analysis from split data
+      let terrainAnalysis = '';
+      if (kmSplits && kmSplits.length >= 2) {
+        terrainAnalysis = '\nSPLIT-BY-SPLIT TERRAIN ANALYSIS:\n';
+        const splitPaces = kmSplits.map(s => {
+          const parts = s.pace.split(':');
+          return parts.length === 2 ? (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) : 0;
+        });
+        terrainAnalysis += kmSplits.map((s: any, i: number) => {
+          let delta = '';
+          if (i > 0 && splitPaces[i] > 0 && splitPaces[i-1] > 0) {
+            const diff = splitPaces[i] - splitPaces[i-1];
+            delta = diff > 0 ? ` [+${diff}s slower]` : diff < 0 ? ` [${diff}s faster]` : ' [steady]';
+          }
+          return `  km${s.km}: ${s.pace}/km${delta}`;
+        }).join('\n');
+        
+        const validPaces = splitPaces.filter(p => p > 0);
+        if (validPaces.length >= 2) {
+          const spread = Math.max(...validPaces) - Math.min(...validPaces);
+          terrainAnalysis += `\n  Pace spread: ${spread}s | Consistency: ${spread <= 10 ? 'EXCELLENT' : spread <= 20 ? 'GOOD' : spread <= 30 ? 'MODERATE' : 'VARIABLE'}`;
+        }
+      }
+
+      const isFlat = !currentGrade || (currentGrade > -3 && currentGrade < 3);
+      const isUphill = currentGrade && currentGrade >= 3;
+      const isDownhill = currentGrade && currentGrade <= -3;
+
+      typePrompt = `COACHING TYPE: Terrain-aware run analysis — sound like you know EVERYTHING about this route.
+
+${status}
+${noTerrainRule}
+
+TERRAIN PROFILE:
+- Route classification: ${totalElevationGain && distance > 0.5 ? (totalElevationGain / distance < 5 ? 'FLAT' : totalElevationGain / distance < 15 ? 'UNDULATING' : totalElevationGain / distance < 30 ? 'HILLY' : 'MOUNTAINOUS') : 'unknown'}
+- Current gradient: ${currentGrade ? currentGrade.toFixed(1) + '%' : '~0% (flat)'}
+- Total climb: ${totalElevationGain ? Math.round(totalElevationGain) + 'm' : '0m'} | Total descent: ${totalElevationLoss ? Math.round(totalElevationLoss) + 'm' : '0m'}
+- Elevation gain per km: ${totalElevationGain && distance > 0.5 ? (totalElevationGain / distance).toFixed(1) + 'm/km' : 'minimal'}
+${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
+${cadence ? `- Cadence: ${cadence} spm` : ''}
+${terrainAnalysis}
+
+${isUphill ? `UPHILL — They're on a ${currentGrade!.toFixed(1)}% climb right now.
+YOUR COACHING MUST:
+- Correlate their pace change with the gradient — "your pace dropped Xs on this climb, that's exactly proportional to the grade"
+- Coach uphill technique: shorter stride, ankle lean, arm drive, effort > pace
+- If HR is high + climbing: "heart rate is elevated because of the gradient — that's physics, not fitness. Stay controlled."
+- If cadence dropped: "shorten your stride and quicken your feet — shorter faster steps are more efficient uphill"` :
+  isDownhill ? `DOWNHILL — They're on a ${Math.abs(currentGrade!).toFixed(1)}% descent right now.
+YOUR COACHING MUST:
+- Coach them to use this descent strategically — "this is free speed, let gravity do the work"
+- Technique: lean forward from ankles, increase cadence to 175+, light feet, avoid heel braking
+- If their pace is much faster than average: praise it but caution on quad fatigue
+- If they're banking time: "great section to recover heart rate while keeping pace up"` :
+  `FLAT/UNDULATING TERRAIN — The route is ${totalElevationGain && distance > 0.5 && totalElevationGain / distance < 5 ? 'very flat with minimal undulation' : 'gently undulating'}.
+YOUR COACHING MUST:
+- Acknowledge the terrain: "You're on a beautifully flat stretch" or "this route has gentle undulation"
+- On flat terrain, pace consistency is everything — praise tight splits or address drift
+- If pace spread is < 15s: "Your splits are incredibly consistent on this flat terrain — that's disciplined, smart running"
+- If they're negative splitting on flat: "You're getting faster as the run goes on — textbook pacing on a flat route"
+- If pace is drifting on flat: "On flat ground, pace drift usually means form is breaking down — reset: drop shoulders, pump arms, quick feet"
+- Coach one flat-specific technique: cadence rhythm, hip extension, relaxed upper body, forward lean
+- If HR is stable: "Your heart rate is steady — you've found a sustainable effort level, that's great running"
+- Energy management: if they look comfortable and have distance remaining, suggest conserving for a strong finish push`}
+
+Give 2-3 sentences that sound like you've analyzed every metre of this route. Reference SPECIFIC data points.`;
+      systemExtra = 'You are an elite running coach specializing in terrain analysis. You can see the full elevation profile, every split, and every metric. Sound like you KNOW this route. Correlate terrain with pace/HR/cadence changes. Be specific, not generic.';
+      break;
+    }
+
+    case 'heart_rate_check': {
+      // Zone 2 aerobic focus: check HR, encourage steady breathing, reinforce aerobic base building
+      const targetHRMin = targetHeartRateZone === 2 ? Math.round(heartRate ? heartRate * 0.85 : 120) : 0;
+      const targetHRMax = targetHeartRateZone === 2 ? Math.round(heartRate ? heartRate * 1.05 : 150) : 0;
+      
+      // Aerobic base building context
+      const aerobicBaseContext = `
+AEROBIC BASE BUILDING:
+This steady-state Zone 2 work is building the foundation for all your faster running. Here's why it matters:
+- Increases mitochondrial density in your muscles (more aerobic power)
+- Improves capillary density (better oxygen delivery)
+- Trains your body to burn fat efficiently (sustainable energy source)
+- Increases stroke volume (your heart pumps more blood per beat)
+- Allows faster paces to feel easier later (your "easy" pace will speed up naturally)
+
+Elite runners spend 80% of their training time at easy/aerobic paces for exactly this reason. You're not wasting time here — you're building the engine that makes speed possible.`;
+      
+      typePrompt = `COACHING TYPE: Heart rate focus check for Zone 2 aerobic session.
+
+${status}
+${noTerrainRule}
+
+This is a Zone 2 AEROBIC BASE BUILDING session. The goal is HEART RATE CONTROL, not pace.
+
+${aerobicBaseContext}
+
+${heartRate ? `Current HR: ${heartRate} bpm. Target Zone 2 range: roughly ${targetHRMin}-${targetHRMax} bpm.
+${heartRate > targetHRMax ? `Your HR is above the Zone 2 target. Slow down slightly to bring it back into range. This is exactly the work — controlling your heart rate is how you build aerobic capacity. Stay patient.` : heartRate < targetHRMin ? `Your HR is below the Zone 2 target. You can pick up the pace slightly if you feel good. You want to work at that sustainable effort level where adaptation happens.` : `Your HR is right where it should be! This is the sweet spot for aerobic training. You're building your cardiovascular engine right now.`}` : `Keep checking your heart rate if you have a device. Zone 2 is about maintaining that sustainable effort where your heart is working, but you could hold a conversation.`}
+
+Give a brief (1-2 sentences) HR-focused coaching message:
+1. Acknowledge their heart rate and where it sits relative to Zone 2
+2. Reinforce the LONG-TERM BENEFIT: steady aerobic work builds your base so faster paces become sustainable
+3. Remind them: patience at easy paces = confidence and speed later
+
+${PACE_FORMAT_RULE}`;
+      systemExtra = 'For Zone 2 aerobic sessions, emphasize the long-term payoff. This isn\'t just about today — it\'s about building the aerobic foundation that makes all future running stronger. Coaching should reinforce: steady HR control = developing running economy and endurance capacity.';
+      break;
+    }
+
+    case 'final_500m': {
+      const etaProjMin = projectedFinishTime ? Math.floor(projectedFinishTime / 60) : 0;
+      const etaProjSec = projectedFinishTime ? Math.round(projectedFinishTime % 60) : 0;
+      const tgtMin = targetTime ? Math.floor(targetTime / 60) : 0;
+      const tgtSec = targetTime ? Math.round(targetTime % 60) : 0;
+
+      let targetContext = '';
+      if (targetTime && targetTimeCategory === 'on_track') {
+        targetContext = `\nTARGET TIME CONTEXT — MENTION THIS:
+The runner's target time is ${tgtMin} minutes ${tgtSec > 0 ? tgtSec + ' seconds' : ''}. Their projected finish is ${etaProjMin} minutes ${etaProjSec > 0 ? etaProjSec + ' seconds' : ''}.
+${etaOverTargetPercent !== undefined && etaOverTargetPercent <= 0
+  ? `They are ON TRACK or UNDER their target — tell them! "You're going to beat your target!" or "Your ${tgtMin}-minute goal is RIGHT THERE!"`
+  : `They are within ${etaOverTargetPercent?.toFixed(1)}% of their target — they can still make it with a push! Tell them exactly what they're chasing.`}`;
+      } else if (targetTime && targetTimeCategory === 'strong_effort') {
+        targetContext = `\nTARGET TIME CONTEXT — POSITIVE FRAMING:
+Their target was ${tgtMin} minutes but projected finish is ${etaProjMin} minutes ${etaProjSec > 0 ? etaProjSec + ' seconds' : ''} (${etaOverTargetPercent?.toFixed(1)}% over).
+Frame this positively — "strong effort today" or "you've pushed hard" — do NOT dwell on missing the target. Focus the energy on finishing strong.`;
+      }
+      // targetTimeCategory === 'no_mention' → no target context at all
+
+      typePrompt = `COACHING TYPE: FINAL 500 METERS — the finish line is close!
+
+${status}
+${noTerrainRule}
+${targetContext}
+
+The runner has ${remainingMeters || 500} meters left. This is the FINAL PUSH.
+
+Give a HIGH-ENERGY motivational coaching message (2-3 sentences):
+1. Tell them they have 500 meters to go — make them feel the finish line
+2. ${targetContext ? 'Reference their target time if context above says to' : 'Pure motivation — dig deep, strong finish, leave nothing out there'}
+3. Give ONE final technique cue: "Pump your arms! Lift your knees! Drive to the finish!"
+
+This must sound like a coach screaming at the finish line — maximum energy, maximum belief. Make them SPRINT.`;
+      systemExtra = 'Maximum motivational energy. This is the final 500m — coach like you\'re at the finish line cheering them in. Brief, powerful, electric.';
+      break;
+    }
+
+    case 'final_100m': {
+      let targetContext100 = '';
+      if (targetTime && targetTimeCategory === 'on_track') {
+        const tgt100Min = Math.floor(targetTime / 60);
+        targetContext100 = `They are about to SMASH their ${tgt100Min}-minute target! Tell them!`;
+      }
+
+      typePrompt = `COACHING TYPE: FINAL 100 METERS — FINISH LINE!
+
+The runner has approximately 100 meters to the finish. THIS IS IT.
+${targetContext100}
+
+Give the most intense, powerful 1-2 sentence motivational burst possible:
+- "100 meters! EVERYTHING YOU'VE GOT! FINISH STRONG!"
+- This is pure adrenaline. No data, no technique. Just raw, passionate coaching.
+- Make them feel like a champion crossing the finish line.
+- Keep it SHORT — they're sprinting.`;
+      systemExtra = 'This is the final 100m. Maximum intensity. 1-2 sentences of pure fire. Sound like a coach screaming at the finish line.';
+      break;
+    }
+  }
+
+  const prompt = `You are ${coachName}, an ELITE running coach with a ${coachTone} style. You're coaching this runner IN REAL-TIME via audio.
+
+${typePrompt}
+${PACE_FORMAT_RULE}
+
+Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add value.`;
+
+  const systemMsg = `You are ${coachName}, an elite ${coachTone} running coach delivering real-time audio coaching during a run. You combine data-driven insight with elite technique coaching. Reference the runner's actual numbers. Never give empty motivation — every word is backed by data or technique knowledge. ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${runnerProfileBlock(params.runnerProfile)}`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemMsg },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 160,
+      temperature: 0.75,
+    });
+
+    return completion.choices[0].message.content || "Keep pushing, you're running strong!";
+  } catch (error) {
+    console.error(`Elite coaching (${coachingType}) error:`, error);
+    return "";
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// generateSessionCoaching
+//
+// Unified AI function that generates a complete, bespoke coaching plan for ANY
+// session type — intervals, tempo, long run, hill repeats, recovery, or any
+// future session type added to the plan.
+//
+// Key principles:
+//  - No hardcoded session type branches — AI determines structure from context
+//  - Called once at "Prepare Run" time, stored in DB, reused during the run
+//  - Returns phases, triggers, tone, targets, and cueingStrategy
+//  - Simple sessions (recovery, race pace) get cueingStrategy = "freerun"
+//    so they reuse the existing free-run coaching infrastructure
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GenerateSessionCoachingParams {
+  sessionType: string;          // "easy", "intervals", "tempo", "long_run", "hill_repeats", "walk_run", etc.
+  sessionGoal: string;          // "speed", "endurance", "recovery", "threshold", "power"
+  targetDurationMinutes: number;
+  targetDistanceKm: number;
+  targetPaceMin?: number;       // sec/km  e.g. 330 = 5:30/km
+  targetPaceMax?: number;       // sec/km
+  targetHRMin?: number;         // BPM
+  targetHRMax?: number;         // BPM
+  sessionInstructions?: string; // Full AI-generated session instructions text
+  // Interval/repeat-specific fields — present when the session has structured repeating reps
+  intervalCount?: number;           // Number of repetitions (e.g. 10)
+  intervalDistanceMeters?: number;  // Distance per work interval in meters (e.g. 400)
+  intervalDurationSeconds?: number; // Duration per work interval in seconds (e.g. 300 for 5-min jog)
+  recoveryDurationSeconds?: number; // Duration per recovery/walk phase in seconds (e.g. 120 for 2-min walk)
+  // Per-phase HR and pace targets — enables per-phase coaching accuracy
+  intervalHRMin?: number;               // Min HR for work intervals (BPM)
+  intervalHRMax?: number;               // Max HR for work intervals (BPM)
+  recoveryHRMax?: number;               // Max HR during recovery phase — if exceeded, coach prompts to slow down
+  intervalTargetPaceSecPerKm?: number;  // Target pace for work intervals (sec/km)
+  recoveryTargetPaceSecPerKm?: number;  // Target pace for recovery phase (sec/km)
+  runnerProfile: {
+    age?: number;
+    gender?: string;
+    fitnessLevel?: string;
+    recentPaceAvgSecPerKm?: number;
+    recentHRAvg?: number;
+    injuries?: string[];
+    weeklyMileageKm?: number;
+  };
+  coachName?: string;
+  coachTone?: string;
+  coachAccent?: string;
+  aiRunnerProfile?: string | null; // AI "What I know about you" text — separate from structured runnerProfile
+  sessionIntent?: string;          // Free-text description of what this session is designed to achieve
+  trainingWeekNumber?: number;     // Current week in the training plan (e.g. 3)
+  trainingTotalWeeks?: number;     // Total weeks in the plan (e.g. 16) — shows where athlete is in their journey
+  recentRuns?: Array<{
+    distanceKm: number;
+    durationMinutes: number;
+    avgPaceSecPerKm: number;
+    avgHR?: number;
+    workoutType?: string;          // e.g. "easy", "intervals", "tempo", "long_run", "recovery"
+    isHardSession?: boolean;       // true if this was a high-intensity session (intervals, tempo, threshold, hills)
+  }>;
+}
+
+export interface SessionCoachingPlan {
+  sessionType: string;
+  sessionGoal: string;
+  coachingTone: string;
+  cueingStrategy: string;  // "interval" | "threshold" | "paced" | "freerun"
+  preRunBrief: string;
+  whyThisSession: string;
+  phases: SessionCoachingPhase[];
+  triggers: SessionCoachingTrigger[];
+  targetMetrics: {
+    totalDurationMinutes: number;
+    totalDistanceKm: number;
+    primaryMetric: string;
+    secondaryMetric?: string;
+    mainEffortPaceMin?: number;
+    mainEffortPaceMax?: number;
+    mainEffortHRMin?: number;
+    mainEffortHRMax?: number;
+    structure: string;
+    isSpeedWork: boolean;
+    isEnduranceWork: boolean;
+    isStrengthWork: boolean;
+    isRecovery: boolean;
+  };
+}
+
+export interface SessionCoachingPhase {
+  name: string;
+  order: number;
+  durationMinutes?: number;
+  distanceKm?: number;
+  targetPaceMin?: number;
+  targetPaceMax?: number;
+  targetHRMin?: number;
+  targetHRMax?: number;
+  effort: string;
+  coachingFocus: string;
+  phaseInstructions?: string;
+  /** > 1 for repeating interval phases. Consecutive phases with repetitions > 1 are
+   *  interleaved as a group: (work rep 1, recovery rep 1, work rep 2, recovery rep 2, …).
+   *  Use this instead of generating one phase per rep for high-rep interval sessions. */
+  repetitions?: number;
+}
+
+export interface SessionCoachingTrigger {
+  id: string;
+  type: string;           // Descriptive name chosen by OpenAI — e.g. "hr_drift", "cadence_check", "rep_start"
+  condition: string;      // Metric expression — e.g. "hr > targetHRMax AND elapsed_min > 2"
+  message: string;        // May contain {hr}, {pace}, {cadence}, {repNum}, {repsLeft}, {targetHRMax} etc.
+  frequency: string;      // "once" | "on_condition" | "periodic"
+  frequencySeconds?: number;   // For "periodic" triggers: seconds between fires
+  alternativeMessages?: string[];
+  alertType?: string;
+  suppressWhenIntensity?: string[];
+}
+
+// Determine the cueingStrategy from session type + characteristics
+// This tells the runtime HOW to use the coaching plan during a run
+function determineCueingStrategy(
+  sessionType: string,
+  sessionGoal: string,
+  phases: SessionCoachingPhase[]
+): string {
+  // Sessions with repeating rep phases = interval strategy
+  const hasReps = phases.some(p =>
+    p.name.includes("rep") ||
+    p.name.includes("interval") ||
+    p.name.includes("hill") ||
+    p.name.includes("fartlek")
+  );
+  if (hasReps) return "interval";
+
+  // Sustained hard effort without reps = threshold strategy
+  if (
+    sessionType === "tempo" ||
+    sessionType === "threshold" ||
+    sessionGoal === "threshold"
+  ) return "threshold";
+
+  // Target pace focus (race pace, progression) = paced strategy
+  if (
+    sessionType === "race_pace" ||
+    sessionType === "progression_run"
+  ) return "paced";
+
+  // Everything else: recovery, easy, long run = freerun strategy
+  // (reuses existing free-run coaching with session targets injected)
+  return "freerun";
+}
+
+// Format sec/km pace as human-readable string for AI prompt
+function formatPaceForPrompt(secPerKm?: number): string {
+  if (!secPerKm) return "not specified";
+  const mins = Math.floor(secPerKm / 60);
+  const secs = Math.round(secPerKm % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}/km`;
+}
+
+/**
+ * generateSessionTriggerMessage — live AI coaching message at the moment a session trigger fires.
+ *
+ * Called in real-time during a coaching plan session when a trigger condition becomes true.
+ * Unlike the pre-run plan generation (which writes template messages), this function calls
+ * OpenAI with the athlete's ACTUAL live data at that precise moment and returns a bespoke,
+ * analytically grounded coaching message — identical in quality to the normal run coaching.
+ *
+ * The pre-run plan's triggers define WHEN to coach (conditions, frequency).
+ * This function defines WHAT to say (genuine analysis of the live situation).
+ */
+export async function generateSessionTriggerMessage(params: {
+  // What triggered this message
+  triggerId: string;
+  triggerType: string;
+  triggerCondition: string;
+
+  // ── Full session context — everything GPT needs to know about what the session IS ──
+  preRunBrief?: string;          // What the athlete was briefed before starting
+  whyThisSession?: string;       // Why this session is in the plan
+  sessionInstructions?: string;  // Raw training plan workout description
+  cueingStrategy?: string;       // "interval" | "threshold" | "paced" | "freerun"
+  totalSessionDurationMin?: number;
+  totalSessionDistanceKm?: number;
+  currentRepNumber?: number;     // For interval sessions: which rep we're on
+  totalRepsInSession?: number;
+  phasesSummary?: string;        // Compact summary of all phases e.g. "warmup(5min) → tempo_block(20min @4:50-5:05/km) → cooldown(5min)"
+
+  // Session type and current phase
+  sessionType: string;
+  sessionGoal: string;
+  sessionPhase: string;
+  phaseInstructions?: string;
+
+  // Phase targets
+  phaseHRMin?: number;
+  phaseHRMax?: number;
+  phasePaceMinSecPerKm?: number;
+  phasePaceMaxSecPerKm?: number;
+
+  // Current live metrics
+  currentHR: number;
+  currentPaceSecPerKm?: number;
+  currentCadence?: number;
+  distanceKm: number;
+  targetDistanceKm?: number;
+  elapsedMinutes: number;
+  currentGrade?: number;
+  elevationGainM?: number;
+
+  // Recent context
+  recentCoachingMessages?: string[];
+  recentSplits?: Array<{ km: number; pace: string }>;
+
+  // Coach profile
+  coachName: string;
+  coachTone: string;
+  coachGender?: string;
+  coachAccent?: string;
+
+  // Athlete profile
+  runnerName?: string;
+  fitnessLevel?: string;
+  runnerProfile?: string | null;
+}): Promise<string> {
+  const {
+    triggerId, triggerType, triggerCondition,
+    preRunBrief, whyThisSession, sessionInstructions, cueingStrategy,
+    totalSessionDurationMin, totalSessionDistanceKm,
+    currentRepNumber, totalRepsInSession, phasesSummary,
+    sessionType, sessionGoal, sessionPhase, phaseInstructions,
+    phaseHRMin, phaseHRMax, phasePaceMinSecPerKm, phasePaceMaxSecPerKm,
+    currentHR, currentPaceSecPerKm, currentCadence,
+    distanceKm, targetDistanceKm, elapsedMinutes, currentGrade, elevationGainM,
+    recentCoachingMessages, recentSplits,
+    coachName, coachTone, coachAccent,
+    runnerName, runnerProfile,
+  } = params;
+
+  // ── Format current metrics ─────���───────────────────────────────────────────
+  const paceFormatted = currentPaceSecPerKm ? formatPaceForPrompt(currentPaceSecPerKm) : "unknown";
+  const targetPaceRange = (phasePaceMinSecPerKm || phasePaceMaxSecPerKm)
+    ? `${formatPaceForPrompt(phasePaceMinSecPerKm)} – ${formatPaceForPrompt(phasePaceMaxSecPerKm)}`
+    : null;
+  const progressPct = (targetDistanceKm && distanceKm > 0)
+    ? Math.round((distanceKm / targetDistanceKm) * 100) : null;
+  const remainingKm = targetDistanceKm ? Math.max(0, targetDistanceKm - distanceKm) : null;
+
+  // ── Plain-English status for HR and pace (so GPT knows if they're on/off target) ──
+  const hrStatus = phaseHRMax && currentHR > 0
+    ? currentHR > phaseHRMax
+      ? `ABOVE zone — ${currentHR} bpm vs zone ceiling ${phaseHRMax} bpm (+${currentHR - phaseHRMax} bpm over)`
+      : phaseHRMin && currentHR < phaseHRMin
+        ? `BELOW zone — ${currentHR} bpm vs zone floor ${phaseHRMin} bpm (${phaseHRMin - currentHR} bpm under)`
+        : `IN ZONE — ${currentHR} bpm (range ${phaseHRMin ?? '?'}–${phaseHRMax} bpm)`
+    : currentHR > 0 ? `${currentHR} bpm (no zone target set)` : "unavailable";
+
+  const paceStatus = (phasePaceMinSecPerKm || phasePaceMaxSecPerKm) && currentPaceSecPerKm
+    ? phasePaceMaxSecPerKm && currentPaceSecPerKm > phasePaceMaxSecPerKm
+      ? `SLOWER than target — ${paceFormatted} vs ceiling ${formatPaceForPrompt(phasePaceMaxSecPerKm)} (+${currentPaceSecPerKm - phasePaceMaxSecPerKm}s/km too slow)`
+      : phasePaceMinSecPerKm && currentPaceSecPerKm < phasePaceMinSecPerKm
+        ? `FASTER than target — ${paceFormatted} vs floor ${formatPaceForPrompt(phasePaceMinSecPerKm)} (${phasePaceMinSecPerKm - currentPaceSecPerKm}s/km too fast for this session type)`
+        : `ON TARGET — ${paceFormatted} (target range ${targetPaceRange})`
+    : paceFormatted;
+
+  const gradeStr = currentGrade !== undefined && Math.abs(currentGrade) > 1
+    ? `${currentGrade > 0 ? '+' : ''}${currentGrade.toFixed(1)}% grade` : null;
+  const splitSummary = recentSplits && recentSplits.length > 0
+    ? `Recent km splits: ${recentSplits.slice(-3).map(s => `km${s.km}: ${s.pace}`).join(', ')}` : '';
+  const recentMessagesBlock = recentCoachingMessages && recentCoachingMessages.length > 0
+    ? `Recent coaching given (do not repeat): ${recentCoachingMessages.slice(-2).join(' | ')}` : '';
+
+  // ── Interval rep context ───────────────────────────────────────────────────
+  const isWorkPhase = (params as any).isWorkPhase as boolean | undefined;
+  const phaseElapsedMinutes = (params as any).phaseElapsedMinutes as number | undefined;
+  const phaseRemainingMinutes = (params as any).phaseRemainingMinutes as number | undefined;
+
+  const repContext = (currentRepNumber && totalRepsInSession)
+    ? [
+        `Rep ${currentRepNumber} of ${totalRepsInSession}`,
+        isWorkPhase !== undefined ? (isWorkPhase ? '(WORK interval)' : '(RECOVERY phase)') : '',
+        totalRepsInSession - currentRepNumber > 0
+          ? `${totalRepsInSession - currentRepNumber} rep${totalRepsInSession - currentRepNumber > 1 ? 's' : ''} remaining after this`
+          : 'FINAL rep',
+        phaseElapsedMinutes !== undefined && phaseRemainingMinutes !== undefined
+          ? `${Math.round(phaseElapsedMinutes * 10) / 10} min into this phase, ${Math.round(phaseRemainingMinutes * 10) / 10} min remaining`
+          : '',
+      ].filter(Boolean).join(' — ')
+    : '';
+
+  // Phase time context for non-interval sessions
+  const phaseTimeContext = (!currentRepNumber && phaseElapsedMinutes !== undefined && phaseRemainingMinutes !== undefined)
+    ? `${Math.round(phaseElapsedMinutes * 10) / 10} min into current phase, ${Math.round(phaseRemainingMinutes * 10) / 10} min remaining`
+    : '';
+
+  // ── Build the full session context block ──────────────────────────────────
+  // This is the critical part that was missing — GPT needs to understand the WHOLE session,
+  // not just the current phase, to give coaching that makes sense in context.
+  const sessionContextBlock = [
+    sessionInstructions ? `WORKOUT DESCRIPTION: ${sessionInstructions}` : null,
+    preRunBrief ? `PRE-RUN BRIEF (what the athlete was told): "${preRunBrief}"` : null,
+    whyThisSession ? `WHY THIS SESSION: ${whyThisSession}` : null,
+    phasesSummary ? `FULL SESSION STRUCTURE: ${phasesSummary}` : null,
+    cueingStrategy ? `COACHING STRATEGY: ${cueingStrategy}` : null,
+    (totalSessionDurationMin || totalSessionDistanceKm)
+      ? `SESSION TARGETS: ${totalSessionDistanceKm ? `${totalSessionDistanceKm}km total` : ''} ${totalSessionDurationMin ? `${totalSessionDurationMin} min total` : ''}`.trim()
+      : null,
+    repContext ? `INTERVAL PROGRESS: ${repContext}` : null,
+    phaseTimeContext ? `PHASE TIMING: ${phaseTimeContext}` : null,
+  ].filter(Boolean).join('\n');
+
+  // ── Build the prompt ───────────────────────────────────────────────────────
+  const prompt = `You are ${coachName}, an elite AI running coach. A coaching trigger just fired during a live training session.
+
+━━ SESSION CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Session type: ${sessionType.replace(/_/g, ' ')}
+Session goal: ${sessionGoal}
+${sessionContextBlock}
+
+━━ CURRENT STATE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Current phase: ${sessionPhase.replace(/_/g, ' ')}${phaseInstructions ? ` — ${phaseInstructions}` : ''}
+
+WHAT JUST TRIGGERED THIS MESSAGE (condition: "${triggerCondition}"):
+${triggerType.replace(/_/g, ' ')}
+
+━━ ATHLETE'S LIVE NUMBERS AT THIS MOMENT ━━━━━━━━━━━━━━━━
+Heart rate: ${hrStatus}
+Pace: ${paceStatus}${currentCadence && currentCadence > 0 ? `\nCadence: ${currentCadence} spm${sessionType === 'tempo' || sessionType === 'threshold' ? ' (optimal tempo: 170-180 spm)' : ''}` : ''}
+Distance: ${distanceKm.toFixed(2)} km${targetDistanceKm ? ` of ${targetDistanceKm} km (${progressPct}%)` : ''}${remainingKm !== null ? ` — ${remainingKm.toFixed(1)} km to go` : ''}
+Time elapsed: ${elapsedMinutes} min${gradeStr ? `\nTerrain: ${gradeStr}` : ''}${elevationGainM ? `\nElevation gained: ${Math.round(elevationGainM)}m` : ''}
+${splitSummary}
+
+Phase targets: ${[
+  phaseHRMin || phaseHRMax ? `heart rate ${phaseHRMin ?? '?'}–${phaseHRMax ?? '?'} bpm` : null,
+  targetPaceRange ? `pace ${targetPaceRange}` : null,
+].filter(Boolean).join(', ') || 'none specified'}
+${recentMessagesBlock}
+
+━━ YOUR COACHING MESSAGE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Deliver ONE message (max 20 words, spoken aloud) that reacts to what is ACTUALLY happening above.
+- If the athlete is off target: be honest, give a specific corrective cue using the exact numbers
+- If the athlete is on target: give a genuine observation tied to their actual data, not generic praise
+- Reference the session context — this is a ${sessionType.replace(/_/g, ' ')} session with specific objectives, not a free run
+- Write "heart rate" never "HR"
+${PACE_FORMAT_RULE}`;
+
+  const systemPrompt = `You are ${coachName}, a ${coachTone} running coach with full knowledge of this athlete's training session objectives.
+You have been given the complete session context above — use it. A tempo run trigger is not the same as an easy run trigger. An interval session rep 3 of 5 message should acknowledge where they are in the session.
+The message will be read aloud by TTS — keep it under 20 words, natural speech, specific to the actual numbers given.
+NEVER give generic feedback like "great work!" or "keep it up" — that tells the athlete nothing.
+${toneDirective(coachTone)}${accentDirective(coachAccent)}${runnerProfileBlock(runnerProfile)}`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 80,
+    temperature: 0.7,
+  });
+
+  return completion.choices[0].message.content?.trim()
+    ?? `Heart rate at ${currentHR}${phaseHRMax && currentHR > phaseHRMax ? ` — ease back, over your zone ceiling of ${phaseHRMax}` : ' — keep this effort'}.`;
+}
+
+export async function generateSessionCoaching(
+  params: GenerateSessionCoachingParams
+): Promise<SessionCoachingPlan> {
+  const {
+    sessionType,
+    sessionGoal,
+    targetDurationMinutes,
+    targetDistanceKm,
+    targetPaceMin,
+    targetPaceMax,
+    targetHRMin,
+    targetHRMax,
+    sessionInstructions,
+    sessionIntent,
+    trainingWeekNumber,
+    trainingTotalWeeks,
+    intervalCount,
+    intervalDistanceMeters,
+    intervalDurationSeconds,
+    recoveryDurationSeconds,
+    intervalHRMin,
+    intervalHRMax,
+    recoveryHRMax,
+    intervalTargetPaceSecPerKm,
+    recoveryTargetPaceSecPerKm,
+    runnerProfile,
+    coachName = "Coach",
+    coachTone = "motivational",
+    recentRuns = [],
+  } = params;
+
+  // Build runner context
+  const runnerContext = `
+Runner Profile:
+- Age: ${runnerProfile.age ?? "unknown"}
+- Gender: ${runnerProfile.gender ?? "unknown"}
+- Fitness Level: ${runnerProfile.fitnessLevel ?? "intermediate"}
+- Average Recent Pace: ${formatPaceForPrompt(runnerProfile.recentPaceAvgSecPerKm)}
+- Average Recent HR: ${runnerProfile.recentHRAvg ?? "unknown"} bpm
+- Weekly Mileage: ${runnerProfile.weeklyMileageKm ?? "unknown"} km/week
+- Injuries: ${runnerProfile.injuries?.join(", ") || "none"}`.trim();
+
+  // Build recent runs context (last 3) — include workout type, effort level, and recovery impact
+  const recentRunsContext = recentRuns.slice(0, 3).length > 0
+    ? `\nRecent Runs (last ${recentRuns.slice(0, 3).length}):\n` +
+      recentRuns.slice(0, 3).map((r, i) => {
+        const typeLabel = r.workoutType ? ` [${r.workoutType.replace(/_/g, " ")}]` : "";
+        const effortLabel = r.isHardSession ? " ⚡ hard session" : r.workoutType === "recovery" ? " 💤 recovery" : "";
+        return `  Run ${i + 1}${typeLabel}${effortLabel}: ${formatDistanceForCoaching(r.distanceKm)} in ${r.durationMinutes}min ` +
+          `@ ${formatPaceForPrompt(r.avgPaceSecPerKm)}${r.avgHR ? ` / ${r.avgHR}bpm avg HR` : ""}`;
+      }).join("\n")
+    : "\nRecent Runs: No data available";
+
+  // Build training plan progression context — critical for appropriate tone and targets
+  const trainingWeekContext = trainingWeekNumber && trainingTotalWeeks
+    ? `\nTraining Plan Progression: Week ${trainingWeekNumber} of ${trainingTotalWeeks}`
+      + (trainingWeekNumber <= 2 ? " — EARLY BASE PHASE: conservative pacing, build slowly, prioritise form" : "")
+      + (trainingWeekNumber >= trainingTotalWeeks - 2 ? " — PEAK/TAPER PHASE: confidence is high, athlete is prepared" : "")
+      + (trainingWeekNumber > 2 && trainingWeekNumber < trainingTotalWeeks - 2
+          ? ` — ${Math.round((trainingWeekNumber / trainingTotalWeeks) * 100)}% through the plan`
+          : "")
+    : "";
+
+  // Check if the most recent run was a hard session — informs recovery context for today's session
+  const lastRunWasHard = recentRuns[0]?.isHardSession === true;
+  const recoveryContextNote = lastRunWasHard
+    ? "\nIMPORTANT: The athlete's most recent session was HIGH INTENSITY. Factor residual fatigue into your coaching tone and effort guidance — be alert for elevated HR and pace that feels harder than expected."
+    : "";
+
+  // Build interval-specific context string with full rep+recovery structure
+  const intervalContext = (() => {
+    if (!intervalCount) return "";
+
+    const workDetails: string[] = [];
+    const recDetails: string[] = [];
+
+    if (intervalDurationSeconds) {
+      const mins = Math.floor(intervalDurationSeconds / 60);
+      const secs = intervalDurationSeconds % 60;
+      workDetails.push(secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`);
+    }
+    if (intervalDistanceMeters) workDetails.push(`${intervalDistanceMeters}m`);
+    if (intervalTargetPaceSecPerKm) workDetails.push(`target ${formatPaceForPrompt(intervalTargetPaceSecPerKm)}/km`);
+    if (intervalHRMin || intervalHRMax) {
+      workDetails.push(`HR ${intervalHRMin ?? "—"}–${intervalHRMax ?? "—"} bpm`);
+    }
+
+    if (recoveryDurationSeconds) {
+      const mins = Math.floor(recoveryDurationSeconds / 60);
+      const secs = recoveryDurationSeconds % 60;
+      recDetails.push(secs > 0 ? `${mins} min ${secs} sec` : `${mins} min`);
+    }
+    if (recoveryTargetPaceSecPerKm) recDetails.push(`target ${formatPaceForPrompt(recoveryTargetPaceSecPerKm)}/km`);
+    if (recoveryHRMax) recDetails.push(`HR recovery target: below ${recoveryHRMax} bpm`);
+
+    const workDesc = workDetails.length > 0 ? ` (${workDetails.join(", ")})` : "";
+    const recDesc = recDetails.length > 0 ? ` / Recovery${recDetails.length > 0 ? ` (${recDetails.join(", ")})` : ""}` : "";
+    return `\n- Interval Structure: ${intervalCount} × work${workDesc}${recDesc}`;
+  })();
+
+  // Build per-phase HR/pace targets summary for context
+  const perPhaseTargets = (() => {
+    const lines: string[] = [];
+    if (intervalHRMin || intervalHRMax) {
+      lines.push(`- Work Phase HR Zone: ${intervalHRMin ?? "—"}–${intervalHRMax ?? "—"} bpm`);
+    }
+    if (recoveryHRMax) {
+      lines.push(`- Recovery Phase HR Target: drop below ${recoveryHRMax} bpm before next rep`);
+    }
+    if (intervalTargetPaceSecPerKm) {
+      lines.push(`- Work Phase Pace: ${formatPaceForPrompt(intervalTargetPaceSecPerKm)}/km`);
+    }
+    if (recoveryTargetPaceSecPerKm) {
+      lines.push(`- Recovery Pace: ${formatPaceForPrompt(recoveryTargetPaceSecPerKm)}/km (easy walk/jog)`);
+    }
+    return lines.length > 0 ? `\nPer-Phase Targets:\n${lines.join("\n")}` : "";
+  })();
+
+  // Build session context — includes intent, training week, and last-session recovery awareness
+  const sessionContext = `
+Session Details:
+- Type: ${sessionType}
+- Goal: ${sessionGoal}${sessionIntent ? `\n- Intent: ${sessionIntent}` : ""}
+- Target Duration: ${targetDurationMinutes} minutes
+- Target Distance: ${targetDistanceKm} km
+- Overall Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
+- Overall HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm${intervalContext}${perPhaseTargets}${trainingWeekContext}${recoveryContextNote}
+${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
+
+  const systemPrompt = `You are ${coachName}, an AI running coach. You design live coaching plans that execute during a GPS training session.
+
+The plan runs in real time: a live engine evaluates your trigger conditions against the athlete's sensor data every second and fires your messages through text-to-speech the instant conditions are met.
+
+ONE REQUIRED OUTPUT: preRunBrief — a spoken summary the athlete hears before they start. Cover what they're about to do, their specific targets (pace, heart rate, distance/duration), and what to expect. This is the most important message in the plan. Make it feel like a personal coach talking directly to them.
+
+Everything else — phases, triggers, conditions, messages — you design freely based on your coaching expertise.
+
+CONDITION METRICS (what you can measure in trigger conditions):
+  hr               current heart rate (bpm)
+  pace             current pace (sec/km — lower = faster)
+  cadence          steps per minute
+  distance         total distance run (km)
+  distance_pct     % of target distance complete (0–100)
+  elapsed_min      elapsed run time (minutes)
+  remaining_m      metres remaining to target distance
+  remaining_min    minutes remaining to target duration
+  grade            current gradient (%, positive = uphill)
+  elevation_gain   cumulative elevation gain (metres)
+
+RHS target keywords: targetHRMax, targetHRMin, targetPaceMax, targetPaceMin (arithmetic: targetHRMax + 10)
+Syntax: "hr > 155"  |  "remaining_m < 500"  |  "pace < targetPaceMin AND elapsed_min > 3"
+Condition "always" fires unconditionally every frequencySeconds.
+
+MESSAGE VARIABLES — substituted live at trigger time:
+{hr} {pace} {cadence} {repNum} {totalReps} {repsLeft} {targetHRMax} {targetHRMin} {targetPaceMin} {targetPaceMax}
+
+VOICE: messages are read aloud — keep under 18 words. Write "heart rate" not "HR".
+
+PHASE REPETITIONS (for interval/walk-run sessions):
+Set repetitions > 1 on consecutive work+recovery phases — the engine interleaves them automatically:
+  { "name": "jog", "durationMinutes": 5, "repetitions": 4 }
+  { "name": "recovery_walk", "durationMinutes": 2, "repetitions": 4 }
+  → jog rep 1 → walk rep 1 → jog rep 2 → walk rep 2 → … × 4
+Name recovery phases starting with "recovery_" so the runtime identifies them correctly.
+
+${getPaceContextDirective(runnerProfile.recentPaceAvgSecPerKm, runnerProfile.fitnessLevel, targetPaceMin, sessionType || 'run')}
+${toneDirective(coachTone)}
+${accentDirective(params.coachAccent)}
+${runnerProfileBlock(params.aiRunnerProfile)}
+Return ONLY valid JSON. No markdown, no code blocks.`;
+
+  const DELETED_COACHING_PRINCIPLES = \`COACHING PRINCIPLES:
 - Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
 - Trigger messages must be SHORT (under 20 words), direct, conversational, and actionable — like a coach talking in your ear mid-run
 - CRITICAL: NEVER use robotic commands like "Run now", "Walk now", "Speed up", "Slow down" in isolation. That's what every other app does. We are better than that.
