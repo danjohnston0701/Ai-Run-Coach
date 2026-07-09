@@ -1527,6 +1527,9 @@ private fun GraphsTabContent(
 
             item { HeartRateZonesVisualCard(heartRateData = run.heartRateData, run = run, userAge = userAge) }
 
+            // HR vs Pace scatter chart — shows cardiac cost curve for this run
+            item { HRPaceScatterCard(run = run, userAge = userAge) }
+
             // Intensity Distribution Donut
             item { IntensityDistributionCard(run = run) }
         }
@@ -6016,6 +6019,315 @@ private fun RunningDynamicsStatsRow(run: RunSession) {
                 // If only one item in the last row, add an invisible spacer to keep grid aligned
                 if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
             }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HR VS PACE SCATTER CHART
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Paired data point for the HR-vs-Pace scatter chart.
+ * @param paceSecPerKm  pace in seconds per km (e.g. 442 for 7:22/km)
+ * @param hrBpm         heart rate sample at the same time index
+ * @param zone          HR zone 1-5 computed from maxHR
+ */
+private data class HRPacePoint(
+    val paceSecPerKm: Double,
+    val hrBpm: Int,
+    val zone: Int
+)
+
+/** Zone colour palette — matches HeartRateZonesVisualCard */
+private val ZONE_COLORS = listOf(
+    Color(0xFF42A5F5),  // Z1 Recovery    – blue
+    Color(0xFF4CAF50),  // Z2 Endurance   – green
+    Color(0xFFFFC107),  // Z3 Tempo       – amber
+    Color(0xFFFF9800),  // Z4 VO2Max      – orange
+    Color(0xFFE53935),  // Z5 Maximum     – red
+)
+
+/**
+ * Build paired (pace, HR) points from GPS route data.
+ * Applies a sliding-window smooth to reduce GPS/sensor noise before pairing.
+ * Returns an empty list if insufficient data exists (no HR sensor, no GPS, etc.).
+ */
+private fun buildHRPaceData(
+    routePoints: List<LocationPoint>,
+    maxHr: Int
+): List<HRPacePoint> {
+    // Filter to points with valid HR and speed
+    val valid = routePoints.filter {
+        (it.heartRate ?: 0) > 40 && (it.speed ?: 0f) > 0.3f  // >0.3 m/s (~1 km/h) avoids stops
+    }
+    if (valid.size < 10) return emptyList()
+
+    // Sliding window average (window = ~15 points, ~15 sec at 1 Hz)
+    val window = 15.coerceAtMost(valid.size / 3).coerceAtLeast(1)
+    fun smoothed(index: Int): Pair<Double, Int> {
+        val from = (index - window / 2).coerceAtLeast(0)
+        val to   = (index + window / 2 + 1).coerceAtMost(valid.size)
+        val slice = valid.subList(from, to)
+        val avgSpeed = slice.map { (it.speed ?: 0f).toDouble() }.average()
+        val avgHr    = slice.map { (it.heartRate ?: 0).toDouble() }.average()
+        val pace = if (avgSpeed > 0) 1000.0 / avgSpeed else 0.0
+        return pace to avgHr.roundToInt()
+    }
+
+    val zThresholds = listOf(0.50, 0.60, 0.70, 0.80, 0.90, 1.0).map { (it * maxHr).toInt() }
+
+    fun hrZone(hr: Int): Int = when {
+        hr < zThresholds[1] -> 1
+        hr < zThresholds[2] -> 2
+        hr < zThresholds[3] -> 3
+        hr < zThresholds[4] -> 4
+        else -> 5
+    }
+
+    // Sample every 5th smoothed point so the chart doesn't have thousands of dots
+    val step = (valid.size / 80).coerceAtLeast(1)
+    return (valid.indices step step).mapNotNull { i ->
+        val (pace, hr) = smoothed(i)
+        // Discard clearly unrealistic values (stopped, sprint anomaly)
+        if (pace < 150 || pace > 1200) return@mapNotNull null  // 2:30 – 20:00/km
+        HRPacePoint(pace, hr, hrZone(hr))
+    }
+}
+
+/**
+ * Fits a simple OLS linear regression y = a + b·x and returns a pair of
+ * start/end Y values clamped to [xMin, xMax] for drawing a trend line.
+ * Returns null if fewer than 5 points.
+ */
+private fun linearRegressionLine(
+    points: List<HRPacePoint>,
+    xMin: Double, xMax: Double
+): Pair<Double, Double>? {
+    if (points.size < 5) return null
+    val n  = points.size.toDouble()
+    val mx = points.map { it.paceSecPerKm }.average()
+    val my = points.map { it.hrBpm.toDouble() }.average()
+    val sx = points.sumOf { (it.paceSecPerKm - mx) * (it.paceSecPerKm - mx) }
+    if (sx < 1e-9) return null
+    val b = points.sumOf { (it.paceSecPerKm - mx) * (it.hrBpm - my) } / sx
+    val a = my - b * mx
+    return (a + b * xMin) to (a + b * xMax)
+}
+
+/**
+ * Card composable — Heart Rate vs Pace scatter chart.
+ * Shows how HR responds to pace changes throughout this run.
+ * Zone bands reveal which HR zone the runner was in at each pace.
+ * The trend line shows the overall HR-pace relationship (steeper = harder effort per km).
+ */
+@Composable
+private fun HRPaceScatterCard(run: RunSession, userAge: Int?) {
+    val userMaxHr = tanakaMaxHr(userAge)
+    val maxHr = (run.heartRateData?.filter { it > 0 }?.maxOrNull() ?: 0)
+        .coerceAtLeast(userMaxHr)
+
+    val points = remember(run.routePoints, maxHr) {
+        buildHRPaceData(run.routePoints, maxHr)
+    }
+    if (points.isEmpty()) return
+
+    val minPace = points.minOf { it.paceSecPerKm }
+    val maxPace = points.maxOf { it.paceSecPerKm }
+    val minHr   = points.minOf { it.hrBpm }
+    val maxHrPt = points.maxOf { it.hrBpm }
+
+    // Format pace as "M:SS"
+    fun fmtPace(secPerKm: Double): String {
+        val s = secPerKm.toInt().coerceAtLeast(0)
+        return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
+    }
+
+    // Zone HR thresholds for bands (% of maxHr)
+    val z2 = (0.60 * maxHr).toInt()
+    val z3 = (0.70 * maxHr).toInt()
+    val z4 = (0.80 * maxHr).toInt()
+    val z5 = (0.90 * maxHr).toInt()
+
+    val trendLine = remember(points) {
+        linearRegressionLine(points, minPace, maxPace)
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+        border = BorderStroke(1.dp, Colors.border.copy(alpha = 0.6f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header
+            Text(
+                "Heart Rate vs Pace",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary
+            )
+            Text(
+                "How your HR responds to pace changes • faster pace → left, slower → right",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted
+            )
+
+            // Zone legend row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                (1..5).forEach { z ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(ZONE_COLORS[z - 1])
+                        )
+                        Text("Z$z", style = AppTextStyles.caption.copy(fontSize = 9.sp), color = Colors.textMuted)
+                    }
+                }
+            }
+
+            // Scatter canvas
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Colors.backgroundTertiary.copy(alpha = 0.3f))
+                    .border(1.dp, Colors.border.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    val leftPad  = 36.dp.toPx()
+                    val botPad   = 28.dp.toPx()
+                    val topPad   = 6.dp.toPx()
+                    val rightPad = 8.dp.toPx()
+                    val plotW = (w - leftPad - rightPad).coerceAtLeast(1f)
+                    val plotH = (h - topPad - botPad).coerceAtLeast(1f)
+
+                    // X: pace (min → left is FASTER, max → right is SLOWER)
+                    val paceRange = (maxPace - minPace).coerceAtLeast(30.0)
+                    fun xFor(pace: Double): Float =
+                        leftPad + ((pace - minPace) / paceRange * plotW).toFloat()
+
+                    // Y: HR bpm (min → bottom, max → top)
+                    val hrPad  = 15.0  // visual padding in bpm
+                    val yMin   = (minHr  - hrPad).coerceAtLeast(40.0)
+                    val yMax   = (maxHrPt + hrPad).coerceAtMost(maxHr.toDouble() + hrPad)
+                    val hrRange = (yMax - yMin).coerceAtLeast(1.0)
+                    fun yFor(hr: Double): Float =
+                        topPad + plotH - ((hr - yMin) / hrRange * plotH).toFloat()
+
+                    // Zone boundary HR values clamped to [yMin, yMax]
+                    val zoneBands = listOf(
+                        yMin.toInt()..z2  to ZONE_COLORS[0],
+                        z2..z3            to ZONE_COLORS[1],
+                        z3..z4            to ZONE_COLORS[2],
+                        z4..z5            to ZONE_COLORS[3],
+                        z5..yMax.toInt()  to ZONE_COLORS[4],
+                    )
+
+                    // Draw zone bands as horizontal stripes
+                    zoneBands.forEach { (range, color) ->
+                        val top = yFor(range.last.toDouble().coerceIn(yMin, yMax))
+                        val bot = yFor(range.first.toDouble().coerceIn(yMin, yMax))
+                        if (bot > top) {
+                            drawRect(
+                                color = color.copy(alpha = 0.12f),
+                                topLeft = androidx.compose.ui.geometry.Offset(leftPad, top),
+                                size = androidx.compose.ui.geometry.Size(plotW, bot - top)
+                            )
+                        }
+                    }
+
+                    // Y-axis gridlines + labels (4 ticks)
+                    val mutedArgb = Colors.textMuted.copy(alpha = 0.75f).toArgb()
+                    val gridDash = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                    for (tick in 0..3) {
+                        val hrVal = yMin + tick * hrRange / 3
+                        val yp = yFor(hrVal)
+                        drawLine(
+                            color = Colors.border.copy(alpha = 0.2f),
+                            start  = androidx.compose.ui.geometry.Offset(leftPad, yp),
+                            end    = androidx.compose.ui.geometry.Offset(leftPad + plotW, yp),
+                            strokeWidth = 0.5.dp.toPx(),
+                            pathEffect = gridDash
+                        )
+                        drawContext.canvas.nativeCanvas.drawText(
+                            "${hrVal.roundToInt()}",
+                            0f, yp + 4.dp.toPx(),
+                            android.graphics.Paint().apply {
+                                isAntiAlias = true
+                                textSize = 9.dp.toPx()
+                                color = mutedArgb
+                            }
+                        )
+                    }
+
+                    // X-axis pace labels (3 ticks: min, mid, max)
+                    listOf(minPace, (minPace + maxPace) / 2.0, maxPace).forEach { pv ->
+                        val xp = xFor(pv)
+                        drawContext.canvas.nativeCanvas.drawText(
+                            fmtPace(pv),
+                            xp, h - 4.dp.toPx(),
+                            android.graphics.Paint().apply {
+                                isAntiAlias = true
+                                textSize = 9.dp.toPx()
+                                color = mutedArgb
+                                textAlign = android.graphics.Paint.Align.CENTER
+                            }
+                        )
+                    }
+
+                    // Scatter dots
+                    val dotRadius = 3.5.dp.toPx()
+                    points.forEach { pt ->
+                        val cx = xFor(pt.paceSecPerKm)
+                        val cy = yFor(pt.hrBpm.toDouble())
+                        if (cx in leftPad..(leftPad + plotW) && cy in topPad..(topPad + plotH)) {
+                            drawCircle(
+                                color = ZONE_COLORS[(pt.zone - 1).coerceIn(0, 4)].copy(alpha = 0.75f),
+                                radius = dotRadius,
+                                center = androidx.compose.ui.geometry.Offset(cx, cy)
+                            )
+                        }
+                    }
+
+                    // Linear regression trend line
+                    trendLine?.let { (yAtMin, yAtMax) ->
+                        val x0 = xFor(minPace)
+                        val y0 = yFor(yAtMin.coerceIn(yMin, yMax))
+                        val x1 = xFor(maxPace)
+                        val y1 = yFor(yAtMax.coerceIn(yMin, yMax))
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.55f),
+                            start = androidx.compose.ui.geometry.Offset(x0, y0),
+                            end   = androidx.compose.ui.geometry.Offset(x1, y1),
+                            strokeWidth = 1.5.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 6f), 0f)
+                        )
+                    }
+                }
+            }
+
+            // Footer insight
+            val avgHr = points.map { it.hrBpm }.average().roundToInt()
+            val zone2Points = points.count { it.zone == 2 }
+            val zone3PlusPoints = points.count { it.zone >= 3 }
+            val dominantZone = if (zone2Points > zone3PlusPoints) "Zone 2 (aerobic)" else "Zone ${points.groupBy { it.zone }.maxByOrNull { it.value.size }?.key ?: 2}"
+            Text(
+                "Avg HR: $avgHr bpm · Most time in $dominantZone",
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary
+            )
         }
     }
 }

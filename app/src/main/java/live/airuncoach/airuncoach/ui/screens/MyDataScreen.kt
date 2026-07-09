@@ -614,10 +614,12 @@ private fun PerformanceTrendsSection(
     val hrTrend by viewModel.hrTrend.collectAsState()
     val elevationTrend by viewModel.elevationTrend.collectAsState()
     val cadenceTrend by viewModel.cadenceTrend.collectAsState()
+    val aerobicEfficiencyTrend by viewModel.aerobicEfficiencyTrend.collectAsState()
     val selectedPeriod by viewModel.selectedTimePeriod.collectAsState()
 
     val allEmpty = pacesTrend.isEmpty() && hrTrend.isEmpty() &&
-            elevationTrend.isEmpty() && cadenceTrend.isEmpty()
+            elevationTrend.isEmpty() && cadenceTrend.isEmpty() &&
+            aerobicEfficiencyTrend.isEmpty()
 
     if (allEmpty) {
         EmptyStateCard(message = "No run data for this period.\nComplete a run to see your trends!")
@@ -628,6 +630,23 @@ private fun PerformanceTrendsSection(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
+        // ── Aerobic Efficiency Index ──────────────────────────────────────────
+        // Shows how fast you run at a given cardiac effort over time.
+        // Formula: speed (km/h) / avg HR × 100 = "km/h at 100 bpm" (normalised).
+        // Higher = more efficient. Should rise over weeks/months with consistent training.
+        if (aerobicEfficiencyTrend.size >= 2) {
+            TrendBarChart(
+                title = "🫀 Aerobic Efficiency",
+                points = aerobicEfficiencyTrend,
+                unit = "",
+                period = selectedPeriod,
+                invertColors = false,          // higher = better
+                usePerformanceGradient = true,
+                yFormatter = { v -> String.format(java.util.Locale.US, "%.1f", v) },
+                footerNote = "km/h at 100 bpm — higher = fitter. Rises as your aerobic base develops."
+            )
+        }
+
         if (pacesTrend.isNotEmpty()) {
             TrendBarChart(
                 title = "⚡ Avg Pace (min/km)",
@@ -675,7 +694,9 @@ private fun TrendBarChart(
     unit: String,
     period: TimePeriod = TimePeriod.MONTH,
     invertColors: Boolean = false,
-    usePerformanceGradient: Boolean = false
+    usePerformanceGradient: Boolean = false,
+    yFormatter: ((Double) -> String)? = null,   // custom label formatter (default: value + unit)
+    footerNote: String? = null                  // optional explanatory note below chart
 ) {
     if (points.isEmpty()) return
 
@@ -750,6 +771,8 @@ private fun TrendBarChart(
         Spacer(modifier = Modifier.height(12.dp))
 
         // Summary statistics row
+        val fmt: (Double) -> String = yFormatter
+            ?: { v -> String.format(Locale.getDefault(), "%.1f", v) }
         Row(
             modifier = Modifier
                 .fillMaxWidth(),
@@ -757,19 +780,19 @@ private fun TrendBarChart(
         ) {
             SummaryStatItem(
                 label = "Min",
-                value = String.format(Locale.getDefault(), "%.1f", minVal),
+                value = fmt(minVal),
                 unit = unit,
                 color = minColor
             )
             SummaryStatItem(
                 label = "Avg",
-                value = String.format(Locale.getDefault(), "%.1f", avgVal),
+                value = fmt(avgVal),
                 unit = unit,
                 color = avgColor
             )
             SummaryStatItem(
                 label = "Max",
-                value = String.format(Locale.getDefault(), "%.1f", maxVal),
+                value = fmt(maxVal),
                 unit = unit,
                 color = maxColor
             )
@@ -778,6 +801,17 @@ private fun TrendBarChart(
                 value = "${display.size}",
                 unit = "",
                 color = Colors.textSecondary
+            )
+        }
+
+        // Optional explanatory footer
+        if (footerNote != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = footerNote,
+                style = AppTextStyles.caption,
+                color = Colors.textMuted,
+                fontSize = 10.sp
             )
         }
     }

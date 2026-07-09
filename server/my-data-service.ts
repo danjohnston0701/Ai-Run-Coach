@@ -286,16 +286,17 @@ export async function getDetailedTrends(userId: string, days: number) {
   startDate.setDate(startDate.getDate() - days);
 
   try {
-    // ⚡ Only fetch the 5 columns needed for charts — not SELECT *
+    // ⚡ Only fetch the columns needed for charts — not SELECT *
     // Coaching plan sessions are EXCLUDED (linked_plan_id/linked_workout_id IS NULL)
     // so trends only reflect the runner's natural free-run performance.
     const userRuns = await db
       .select({
-        completedAt:   runs.completedAt,
-        avgPace:       runs.avgPace,
-        avgHeartRate:  runs.avgHeartRate,
-        elevationGain: runs.elevationGain,
-        cadence:       runs.cadence,
+        completedAt:      runs.completedAt,
+        avgPace:          runs.avgPace,
+        avgHeartRate:     runs.avgHeartRate,
+        avgHeartRateZone: runs.avgHeartRateZone,
+        elevationGain:    runs.elevationGain,
+        cadence:          runs.cadence,
       })
       .from(runs)
       .where(and(
@@ -355,10 +356,32 @@ export async function getDetailedTrends(userId: string, days: number) {
         d.value !== null && d.value >= 100 && d.value <= 260
       );
 
-    return { paceTrend, hrTrend, elevationTrend, cadenceTrend };
+    // ─── Aerobic Efficiency Trend ─────────────────────────────────────────────
+    // Measures how fast you can run at a given heart rate effort.
+    // Formula: (speed_km_h / avgHR) × 100 — "km/h at 100 bpm" normalised.
+    // Higher = more efficient (faster pace per unit of cardiac effort).
+    // As aerobic fitness improves, this index increases over weeks/months.
+    // Guard: only include runs where both avgPace (parseable) and avgHR > 40 exist.
+    const aerobicEfficiencyTrend = userRuns
+      .map(r => {
+        const date = r.completedAt?.toISOString().split('T')[0] || '';
+        const paceMinPerKm = r.avgPace ? parsePaceToMinutes(r.avgPace) : null;
+        const hr = r.avgHeartRate ?? null;
+        if (!paceMinPerKm || paceMinPerKm <= 0 || !hr || hr < 40) return null;
+        // Convert pace (min/km) → speed (km/h): speed = 60 / paceMinPerKm
+        const speedKmH = 60 / paceMinPerKm;
+        // Normalise to "km/h at 100 bpm"
+        const efficiencyIndex = (speedKmH / hr) * 100;
+        // Sanity-check: meaningful range is ~3–20 for recreational runners
+        if (efficiencyIndex < 1 || efficiencyIndex > 30) return null;
+        return { date, value: Math.round(efficiencyIndex * 100) / 100 };
+      })
+      .filter((d): d is { date: string; value: number } => d !== null);
+
+    return { paceTrend, hrTrend, elevationTrend, cadenceTrend, aerobicEfficiencyTrend };
   } catch (error) {
     console.error('Error getting detailed trends:', error);
-    return { paceTrend: [], hrTrend: [], elevationTrend: [], cadenceTrend: [] };
+    return { paceTrend: [], hrTrend: [], elevationTrend: [], cadenceTrend: [], aerobicEfficiencyTrend: [] };
   }
 }
 

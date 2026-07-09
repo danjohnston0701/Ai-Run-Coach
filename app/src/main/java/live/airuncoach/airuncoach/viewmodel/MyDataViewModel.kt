@@ -155,7 +155,13 @@ class MyDataViewModel @Inject constructor(
     
     private val _cadenceTrend = MutableStateFlow<List<TrendDataPoint>>(emptyList())
     val cadenceTrend: StateFlow<List<TrendDataPoint>> = _cadenceTrend.asStateFlow()
-    
+
+    // Aerobic Efficiency Index — "km/h at 100 bpm" normalised speed.
+    // Higher = more aerobically efficient (faster for the same cardiac effort).
+    // Derived server-side from avgPace + avgHR for each free run in the period.
+    private val _aerobicEfficiencyTrend = MutableStateFlow<List<TrendDataPoint>>(emptyList())
+    val aerobicEfficiencyTrend: StateFlow<List<TrendDataPoint>> = _aerobicEfficiencyTrend.asStateFlow()
+
     // All-time stats
     private val _allTimeStats = MutableStateFlow<Map<String, Any>>(emptyMap())
     val allTimeStats: StateFlow<Map<String, Any>> = _allTimeStats.asStateFlow()
@@ -353,6 +359,7 @@ class MyDataViewModel @Inject constructor(
                 _hrTrend.value = parsePoints("hrTrend")
                 _elevationTrend.value = parsePoints("elevationTrend")
                 _cadenceTrend.value = parsePoints("cadenceTrend")
+                _aerobicEfficiencyTrend.value = parsePoints("aerobicEfficiencyTrend")
                 
                 Log.d(tag, "Loaded detailed trends for ${period.label}: pace=${_pacesTrend.value.size} runs")
             } else {
