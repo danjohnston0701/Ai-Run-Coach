@@ -725,7 +725,7 @@ function buildGpsRouteElite(
 function computeMapView(
   track: Array<{ lat: number; lng: number }>,
   reqW: number, reqH: number
-): { centerLat: number; centerLng: number; zoom: number } {
+): { centerLat: number; centerLng: number; zoom: number; zoomFrac: number } {
   const lats = track.map(p => p.lat);
   const lngs = track.map(p => p.lng);
   const minLat = Math.min(...lats), maxLat = Math.max(...lats);
@@ -741,12 +741,15 @@ function computeMapView(
   const latSpan = mY(minLat) - mY(maxLat);
   const lngSpan = (maxLng - minLng) / 360 * 256;
 
-  // 30 % padding on every side → multiply span by 1.6
-  const pad = 1.6;
+  // ~12 % padding on every side → multiply span by 1.25
+  const pad = 1.25;
   const zLat = latSpan > 0 ? Math.log2(reqH / (latSpan * pad)) : 17;
   const zLng = lngSpan > 0 ? Math.log2(reqW / (lngSpan * pad)) : 17;
-  const zoom = Math.max(1, Math.min(17, Math.floor(Math.min(zLat, zLng))));
-  return { centerLat, centerLng, zoom };
+  // Fractional zoom gives a tight fit; the tile fetcher requests the integer
+  // zoom below it with a proportionally smaller tile size to match coverage.
+  const zoomFrac = Math.max(1, Math.min(17.9, Math.min(zLat, zLng)));
+  const zoom = Math.max(1, Math.min(17, Math.floor(zoomFrac)));
+  return { centerLat, centerLng, zoom, zoomFrac: Math.min(zoomFrac, zoom + 0.99) };
 }
 
 /**
@@ -850,15 +853,26 @@ function buildMercatorRouteSvg(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?: string, hasMapTile?: boolean): string {
+/**
+ * Layout for the route-map template: the map fills the content area down to
+ * the stat cards, which sit just above the brand banner (no dead white space).
+ */
+function getRouteMapLayout(w: number, h: number): { mapH: number; statsY: number; statH: number; footerY: number } {
   const isVertical = h > w;
-  const contentEndY = h - LOGO_ZONE_H;
-  const mapH = Math.round(isVertical ? contentEndY * 0.6 : contentEndY * 0.58);
-  const statsY = mapH + 16;
+  const statH = isVertical ? 100 : 90;
+  // Content must end above the banner's gradient bleed so nothing gets darkened
+  const bottomSafe = h - LOGO_ZONE_H - LOGO_GRADIENT_H - 8;
+  const footerY = bottomSafe - 10;
+  const statsY = footerY - 34 - statH;
+  const mapH = statsY - 16;
+  return { mapH, statsY, statH, footerY };
+}
+
+function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?: string, hasMapTile?: boolean): string {
+  const { mapH, statsY, statH, footerY } = getRouteMapLayout(w, h);
 
   const gap = 12;
   const statW = (w - gap * 4) / 3;
-  const statH = isVertical ? 100 : 90;
 
   const stats = [
     { label: "DISTANCE", value: run.distance?.toFixed(2) || "0", unit: "km", color: C.cyan },
@@ -904,22 +918,25 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
     if (fastest != null && slowest != null) {
       const fastPace = `${Math.floor(fastest / 60)}:${String(Math.round(fastest % 60)).padStart(2, "0")}`;
       const slowPace = `${Math.floor(slowest / 60)}:${String(Math.round(slowest % 60)).padStart(2, "0")}`;
-      const legendY = mapH - 50;
+      // Dark legend box matching the app's run summary map
+      const lgW = 280, lgH = 118;
+      const lgX = 28;
+      const lgY = mapH - lgH - 28;
+      const barX = lgX + 24, barW = lgW - 48;
       const gradStops = PACE_GRADIENT.map((c, i) =>
         `<stop offset="${Math.round((i / (PACE_GRADIENT.length - 1)) * 100)}%" stop-color="${c}"/>`
       ).join("");
       legend = `
-        <rect x="20" y="${legendY}" width="160" height="40" rx="10" fill="${C.bgCard}" opacity="0.92" stroke="${C.border}" stroke-width="1"/>
-        <text x="30" y="${legendY + 14}" font-family="${FONT}" font-size="10" font-weight="600" fill="${C.textMuted}" letter-spacing="1">PACE</text>
+        <rect x="${lgX}" y="${lgY}" width="${lgW}" height="${lgH}" rx="18" fill="#1A2233" opacity="0.93"/>
+        <text x="${barX}" y="${lgY + 40}" font-family="${FONT}" font-size="28" font-weight="700" fill="#FFFFFF">Pace</text>
         <linearGradient id="paceGradLegend" x1="0" y1="0" x2="1" y2="0">${gradStops}</linearGradient>
-        <rect x="30" y="${legendY + 20}" width="80" height="6" rx="3" fill="url(#paceGradLegend)"/>
-        <text x="30" y="${legendY + 36}" font-family="${FONT}" font-size="9" fill="${PACE_GRADIENT[0]}">${fastPace}</text>
-        <text x="110" y="${legendY + 36}" font-family="${FONT}" font-size="9" fill="${PACE_GRADIENT[PACE_GRADIENT.length - 1]}" text-anchor="end">${slowPace}</text>
+        <rect x="${barX}" y="${lgY + 54}" width="${barW}" height="14" rx="7" fill="url(#paceGradLegend)"/>
+        <text x="${barX}" y="${lgY + 98}" font-family="${FONT}" font-size="24" font-weight="600" fill="#FFFFFF">${fastPace}</text>
+        <text x="${barX + barW}" y="${lgY + 98}" font-family="${FONT}" font-size="24" font-weight="600" fill="#FFFFFF" text-anchor="end">${slowPace}</text>
       `;
     }
   }
 
-  const footerY = statsY + statH + 28;
   const nameDate = userName
     ? `${esc(userName)}  ·  ${esc(formatDate(run.completedAt, run.timezone))}`
     : esc(formatDate(run.completedAt, run.timezone));
@@ -950,9 +967,7 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
 }
 
 function getRouteMapHeight(w: number, h: number): number {
-  const isVertical = h > w;
-  const contentEndY = h - LOGO_ZONE_H;
-  return Math.round(isVertical ? contentEndY * 0.6 : contentEndY * 0.58);
+  return getRouteMapLayout(w, h).mapH;
 }
 
 /** Color a split relative to the run's average pace (matches app's on-pace/slightly-slower/notably-slow logic). */
@@ -1748,27 +1763,36 @@ async function fetchMapTileWithRoute(
     return null;
   }
 
-  const reqW = Math.min(Math.round(tileW / 2), 640);
-  const reqH = Math.min(Math.round(tileH / 2), 640);
+  // Coverage canvas: same aspect as the on-image map region, as large as the
+  // Static Maps 640-px cap allows for maximum detail.
+  let covW = 640;
+  let covH = Math.round(640 * tileH / tileW);
+  if (covH > 640) { covH = 640; covW = Math.round(640 * tileW / tileH); }
 
-  const { centerLat, centerLng, zoom } = computeMapView(gpsTrack, reqW, reqH);
+  const { centerLat, centerLng, zoomFrac } = computeMapView(gpsTrack, covW, covH);
 
-  const mapStyle = [
-    "style=feature:poi|visibility:off",
-    "style=feature:transit|visibility:off",
-    "style=feature:road|element:labels|visibility:simplified",
-    "style=feature:administrative|element:labels|visibility:simplified",
-    "style=feature:water|element:geometry|color:0xc8e6f5",
-    "style=feature:landscape.natural|element:geometry|color:0xeef3e8",
-    "style=feature:road|element:geometry|color:0xffffff",
-    "style=feature:road.highway|element:geometry|color:0xf0f0f0",
-    "style=feature:road|element:geometry.stroke|color:0xe2e8f0",
-  ].join("&");
+  // Static Maps only accepts integer zoom, so request the tile at the integer
+  // zoom just below the fractional fit, shrinking the requested size so the
+  // tile covers exactly the world area of the fractional zoom. This keeps map
+  // labels near native size (no crop-and-upscale blur) and preserves Google's
+  // baked-in attribution.
+  const zInt = Math.max(1, Math.min(17, Math.floor(zoomFrac)));
+  const k = Math.pow(2, zInt - zoomFrac); // ≤ 1
+  const sW = Math.min(640, Math.max(2, Math.round(covW * k)));
+  // Derive height from width so the tile aspect exactly matches the map
+  // region — keeps the overlay's uniform pixRatio valid on both axes.
+  const sH = Math.min(640, Math.max(2, Math.round(sW * tileH / tileW)));
 
+  // Logical dimensions of the covered area at the fractional zoom — used by
+  // the Mercator route overlay (pixRatio = svgW / reqW).
+  const reqW = sW / k;
+  const reqH = sH / k;
+
+  // Default Google Maps styling — matches the run summary map in the app.
   // Clean background — no path/markers (route is drawn as an SVG overlay)
-  const url = `https://maps.googleapis.com/maps/api/staticmap?size=${reqW}x${reqH}&scale=2&maptype=roadmap&center=${centerLat.toFixed(6)},${centerLng.toFixed(6)}&zoom=${zoom}&${mapStyle}&key=${apiKey}`;
+  const url = `https://maps.googleapis.com/maps/api/staticmap?size=${sW}x${sH}&scale=2&maptype=roadmap&center=${centerLat.toFixed(6)},${centerLng.toFixed(6)}&zoom=${zInt}&key=${apiKey}`;
 
-  console.log(`Map tile: center=${centerLat.toFixed(4)},${centerLng.toFixed(4)} zoom=${zoom} urlLen=${url.length}`);
+  console.log(`Map tile: center=${centerLat.toFixed(4)},${centerLng.toFixed(4)} zoom=${zInt} zoomFrac=${zoomFrac.toFixed(2)} size=${sW}x${sH} urlLen=${url.length}`);
 
   try {
     const controller = new AbortController();
@@ -1789,7 +1813,7 @@ async function fetchMapTileWithRoute(
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.length < 1000) console.error("Map tile suspiciously small:", buf.length, "bytes");
     console.log(`Map tile fetched: ${buf.length} bytes`);
-    return { buffer: buf, centerLat, centerLng, zoom, reqW, reqH };
+    return { buffer: buf, centerLat, centerLng, zoom: zoomFrac, reqW, reqH };
   } catch (err: any) {
     console.error("Map tile fetch error:", err.message);
     return null;
