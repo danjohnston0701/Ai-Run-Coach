@@ -946,17 +946,25 @@ class RunTrackingService : Service(), SensorEventListener {
             targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
             hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
             navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
-            // Coaching programme context
-            planTrainingPlanId = intent?.getStringExtra(EXTRA_TRAINING_PLAN_ID)
-            planWorkoutId = intent?.getStringExtra(EXTRA_WORKOUT_ID)
-            planWorkoutType = intent?.getStringExtra(EXTRA_WORKOUT_TYPE)
-            planWorkoutIntensity = intent?.getStringExtra(EXTRA_WORKOUT_INTENSITY)
-            planWorkoutDescription = intent?.getStringExtra(EXTRA_WORKOUT_DESCRIPTION)
-            planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE)
-            planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 }
-            planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 }
+            // Coaching programme context — only overwrite if the intent carries plan extras.
+            // ACTION_START_TRACKING_FROM_WATCH and ACTION_START_TRACKING (from ViewModel's
+            // startRun()) may arrive AFTER ACTION_PREPARE_FOR_WATCH already set plan context.
+            // If the new intent has empty extras, unconditionally assigning would silently
+            // wipe planWorkoutId → linked_workout_id becomes null in the uploaded run.
+            val incomingPlanId = intent?.getStringExtra(EXTRA_TRAINING_PLAN_ID)
+            val incomingWorkoutId = intent?.getStringExtra(EXTRA_WORKOUT_ID)
+            if (incomingPlanId != null || incomingWorkoutId != null) {
+                planTrainingPlanId = incomingPlanId ?: planTrainingPlanId
+                planWorkoutId = incomingWorkoutId ?: planWorkoutId
+                planWorkoutType = intent?.getStringExtra(EXTRA_WORKOUT_TYPE) ?: planWorkoutType
+                planWorkoutIntensity = intent?.getStringExtra(EXTRA_WORKOUT_INTENSITY) ?: planWorkoutIntensity
+                planWorkoutDescription = intent?.getStringExtra(EXTRA_WORKOUT_DESCRIPTION) ?: planWorkoutDescription
+                planGoalType = intent?.getStringExtra(EXTRA_PLAN_GOAL_TYPE) ?: planGoalType
+                planWeekNumber = intent?.getIntExtra(EXTRA_PLAN_WEEK_NUMBER, 0)?.takeIf { it > 0 } ?: planWeekNumber
+                planTotalWeeks = intent?.getIntExtra(EXTRA_PLAN_TOTAL_WEEKS, 0)?.takeIf { it > 0 } ?: planTotalWeeks
+            }
             // Group run context
-            groupRunId = intent?.getStringExtra(EXTRA_GROUP_RUN_ID)
+            groupRunId = intent?.getStringExtra(EXTRA_GROUP_RUN_ID) ?: groupRunId
             // Deserialize AI-generated session instructions from JSON if present (legacy plan)
             val sessionJson = intent?.getStringExtra(EXTRA_SESSION_INSTRUCTIONS_JSON)
             if (sessionJson != null) {

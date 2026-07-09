@@ -11445,25 +11445,86 @@ function transformRunForAndroid(run: any) {
                 cadence:   d.cadence    ?? null,
               }));
             }
+
+            // ── Compute accurate per-km splits from garminRealtimeData ────────────
+            // The watch's kmSplits often have identical pace/duration for every km
+            // (because it divides total_time / total_km instead of tracking each km
+            // boundary individually).  We can do better using cumulativeDistance,
+            // elapsedTime, heartRate, cadence, and altitude from the data stream.
+            const withDist = allDataPoints.filter(
+              d => d.cumulativeDistance != null && d.elapsedTime != null
+            );
+            if (withDist.length >= 5) {
+              const computedSplits: any[] = [];
+              let nextKmBoundary = 1000;  // metres
+              let prevIdx = 0;            // index of previous km boundary (or start)
+
+              for (let i = 1; i < withDist.length; i++) {
+                const dist = withDist[i].cumulativeDistance!;
+                if (dist >= nextKmBoundary) {
+                  // Interpolate the exact crossing time
+                  const prevDist = withDist[i - 1].cumulativeDistance!;
+                  const prevTime = withDist[i - 1].elapsedTime!;
+                  const currTime = withDist[i].elapsedTime!;
+                  const frac = (nextKmBoundary - prevDist) / Math.max(dist - prevDist, 0.01);
+                  const crossTime = prevTime + frac * (currTime - prevTime);
+
+                  // Elapsed time for just this km
+                  const startTime = prevIdx === 0 ? (withDist[0].elapsedTime ?? 0) : computedSplits.length > 0
+                    ? computedSplits.reduce((s, sp) => s + sp.duration, 0) + (withDist[0].elapsedTime ?? 0)
+                    : 0;
+                  const splitDuration = Math.round(crossTime - startTime);
+
+                  // Slice data points within this km for HR, cadence, altitude
+                  const slice = withDist.slice(prevIdx, i + 1);
+                  const hrs = slice.filter(d => d.heartRate && d.heartRate > 20).map(d => d.heartRate!);
+                  const cads = slice.filter(d => d.cadence && d.cadence > 0).map(d => d.cadence!);
+                  const alts = slice.filter(d => d.altitude != null).map(d => d.altitude!);
+                  const elevGain = alts.length >= 2
+                    ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
+                    : 0;
+
+                  computedSplits.push({
+                    km: computedSplits.length + 1,
+                    distance: 1000,
+                    duration: splitDuration,
+                    pace: splitDuration,  // for 1km, duration in sec = sec/km
+                    hr: hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+                    cadence: cads.length > 0 ? Math.round(cads.reduce((a, b) => a + b, 0) / cads.length) : null,
+                    elevGain: Math.round(elevGain * 10) / 10,
+                  });
+
+                  prevIdx = i;
+                  nextKmBoundary += 1000;
+                }
+              }
+
+              if (computedSplits.length > 0) {
+                storedKmSplits = computedSplits;
+                console.log(`[Companion] Computed ${computedSplits.length} km splits from garminRealtimeData (paces: ${computedSplits.map(s => s.pace).join(', ')})`);
+              }
+            }
           }
 
-          // Fall back to km splits for any series not already built from garminRealtimeData
-          if (kmSplits && Array.isArray(kmSplits) && kmSplits.length > 0) {
+          // Fall back to watch-provided km splits if we couldn't compute better ones
+          if (!storedKmSplits && kmSplits && Array.isArray(kmSplits) && kmSplits.length > 0) {
             storedKmSplits = kmSplits;
+          }
 
-            // Only build from kmSplits if garminRealtimeData didn't provide better data
+          // Build time-series from splits if garminRealtimeData didn't provide them
+          if (storedKmSplits && storedKmSplits.length > 0) {
             let elapsed = 0;
             const kmHr: any[]   = [];
             const kmPace: any[] = [];
             const kmAlt: any[]  = [];
-            for (const split of kmSplits) {
+            for (const split of storedKmSplits) {
               const midpoint = elapsed + Math.round((split.duration || 0) / 2);
               if (split.hr != null)   kmHr.push({ time: midpoint, value: split.hr });
               if (split.pace != null && split.pace > 0) kmPace.push({ time: midpoint, value: split.pace });
               elapsed += (split.duration || 0);
             }
             let cumAscent = 0;
-            for (const split of kmSplits) {
+            for (const split of storedKmSplits) {
               cumAscent += (split.elevGain || 0);
               kmAlt.push({ km: split.km, value: cumAscent });
             }
