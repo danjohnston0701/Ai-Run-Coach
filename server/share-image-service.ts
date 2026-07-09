@@ -78,9 +78,11 @@ export interface RunDataForImage {
   elevationGain?: number;
   elevationLoss?: number;
   difficulty?: string;
-  gpsTrack?: Array<{ lat: number; lng: number; elevation?: number; alt?: number; altitude?: number }>;
+  gpsTrack?: Array<{ lat: number; lng: number; elevation?: number; alt?: number; altitude?: number; speed?: number; timestamp?: number }>;
   heartRateData?: Array<{ timestamp: number; value: number }>;
   paceData?: Array<{ km: number; pace: string; paceSeconds: number }>;
+  /** Raw fine-grained pace samples ({time: elapsed seconds, value: pace sec/km}) — used for per-point route colouring */
+  paceSamples?: Array<{ time: number; value: number }>;
   completedAt?: string;
   name?: string;
   weatherData?: { temperature?: number; conditions?: string };
@@ -233,6 +235,123 @@ function paceColor(seconds: number, fastest: number, slowest: number): string {
   if (ratio <= 0.33) return C.green;
   if (ratio <= 0.66) return C.yellow;
   return C.orange;
+}
+
+// ── Fine-grained pace colouring (matches the in-app run summary map) ─────────
+
+/** 5-stop gradient: fast → slow (green → light green → yellow → orange → red) */
+const PACE_GRADIENT = ["#4CAF50", "#8BC34A", "#FFC107", "#FF9800", "#FF5252"];
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function lerpHex(a: string, b: string, t: number): string {
+  const ca = hexToRgb(a), cb = hexToRgb(b);
+  const r = Math.round(ca[0] + (cb[0] - ca[0]) * t);
+  const g = Math.round(ca[1] + (cb[1] - ca[1]) * t);
+  const bl = Math.round(ca[2] + (cb[2] - ca[2]) * t);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1)}`;
+}
+
+/** Smoothly interpolate a pace value across the 5-stop gradient. */
+function paceToGradientColor(paceSec: number, fast: number, slow: number): string {
+  if (slow - fast < 1) return PACE_GRADIENT[0];
+  const t = Math.max(0, Math.min(1, (paceSec - fast) / (slow - fast)));
+  const scaled = t * (PACE_GRADIENT.length - 1);
+  const i = Math.min(Math.floor(scaled), PACE_GRADIENT.length - 2);
+  return lerpHex(PACE_GRADIENT[i], PACE_GRADIENT[i + 1], scaled - i);
+}
+
+function percentileOf(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.max(0, Math.min(sorted.length - 1, Math.round(p * (sorted.length - 1))));
+  return sorted[idx];
+}
+
+/**
+ * Compute a smoothed per-GPS-point pace series (sec/km) for route colouring.
+ * Priority: per-point speed (m/s) embedded in the GPS track → raw pace samples
+ * aligned by timestamp/index → km splits spread proportionally.
+ * Returns null when no pace information exists at all.
+ */
+function computePointPaces(
+  track: Array<{ lat: number; lng: number; speed?: number; timestamp?: number }>,
+  paceSamples?: Array<{ time: number; value: number }>,
+  paceData?: Array<{ km: number; pace: string; paceSeconds: number }>
+): number[] | null {
+  const n = track.length;
+  if (n < 2) return null;
+  let paces: Array<number | null> | null = null;
+
+  // 1. Per-point speed embedded in the GPS track (best — exactly what the app uses)
+  const speedCount = track.reduce((c, p) => c + (typeof p.speed === "number" && p.speed > 0.3 ? 1 : 0), 0);
+  if (speedCount > n * 0.5) {
+    paces = track.map(p => (typeof p.speed === "number" && p.speed > 0.3 ? 1000 / p.speed : null));
+  }
+
+  // 2. Raw pace samples ({time, value} in sec/km)
+  if (!paces && paceSamples && paceSamples.length > 1) {
+    const valid = paceSamples
+      .filter(s => typeof s.value === "number" && s.value > 30 && s.value < 1800 && typeof s.time === "number")
+      .sort((a, b) => a.time - b.time);
+    if (valid.length > 1) {
+      const tsCount = track.reduce((c, p) => c + (typeof p.timestamp === "number" ? 1 : 0), 0);
+      // Timestamps must also be monotonically non-decreasing for two-pointer alignment
+      let monotonic = tsCount > n * 0.9;
+      if (monotonic) {
+        for (let i = 1; i < n; i++) {
+          const prev = track[i - 1].timestamp, cur = track[i].timestamp;
+          if (typeof prev === "number" && typeof cur === "number" && cur < prev) { monotonic = false; break; }
+        }
+      }
+      if (monotonic) {
+        let j = 0;
+        paces = track.map(p => {
+          const t = p.timestamp as number;
+          while (j < valid.length - 1 && valid[j + 1].time <= t) j++;
+          return valid[j].value;
+        });
+      } else {
+        paces = track.map((_, i) => valid[Math.min(Math.floor((i / n) * valid.length), valid.length - 1)].value);
+      }
+    }
+  }
+
+  // 3. Km splits spread proportionally along the track
+  if (!paces && paceData && paceData.length > 0) {
+    const splits = paceData.filter(p => typeof p.paceSeconds === "number" && p.paceSeconds > 0);
+    if (splits.length > 0) {
+      paces = track.map((_, i) => splits[Math.min(Math.floor((i / n) * splits.length), splits.length - 1)].paceSeconds);
+    }
+  }
+
+  if (!paces) return null;
+
+  // Fill gaps with the nearest previous value, back-fill leading gaps
+  const firstVal = paces.find(v => v != null);
+  if (firstVal == null) return null;
+  let last = firstVal;
+  const filled = paces.map(v => { if (v != null) { last = v; return v; } return last; });
+
+  // Moving-average smoothing so colour transitions are gradual, like the app map
+  const win = Math.max(2, Math.round(filled.length * 0.02));
+  const smoothed: number[] = new Array(filled.length);
+  let sum = 0, count = 0;
+  for (let i = 0; i < filled.length; i++) {
+    const lo = Math.max(0, i - win), hi = Math.min(filled.length - 1, i + win);
+    sum = 0; count = 0;
+    for (let k = lo; k <= hi; k++) { sum += filled[k]; count++; }
+    smoothed[i] = sum / count;
+  }
+  return smoothed;
+}
+
+/** Percentile-clamped colour range so a single GPS blip doesn't wash out the gradient. */
+function paceColorRange(paces: number[]): { fast: number; slow: number } {
+  const sorted = [...paces].sort((a, b) => a - b);
+  return { fast: percentileOf(sorted, 0.05), slow: percentileOf(sorted, 0.95) };
 }
 
 function globalDefs(w: number, h: number): string {
@@ -527,8 +646,9 @@ function buildRunMetricsSvg(w: number, h: number, run: RunDataForImage, userName
 
 function buildGpsRouteElite(
   x: number, y: number, w: number, h: number,
-  track: Array<{ lat: number; lng: number }>,
-  paceData?: Array<{ km: number; pace: string; paceSeconds: number }>
+  track: Array<{ lat: number; lng: number; speed?: number; timestamp?: number }>,
+  paceData?: Array<{ km: number; pace: string; paceSeconds: number }>,
+  paceSamples?: Array<{ time: number; value: number }>
 ): string {
   if (!track || track.length < 2) return "";
 
@@ -554,16 +674,14 @@ function buildGpsRouteElite(
     py: offsetY + (maxLat - p.lat) * scale,
   }));
 
-  let routeSvg = "";
-  if (paceData && paceData.length > 0) {
-    const paceSeconds = paceData.map(p => p.paceSeconds);
-    const fastest = Math.min(...paceSeconds);
-    const slowest = Math.max(...paceSeconds);
-    const segmentLength = Math.max(1, Math.floor(mapped.length / paceData.length));
+  const pointPaces = computePointPaces(track, paceSamples, paceData);
 
+  let routeSvg = "";
+  if (pointPaces && pointPaces.length === mapped.length) {
+    const { fast, slow } = paceColorRange(pointPaces);
     for (let i = 0; i < mapped.length - 1; i++) {
-      const paceIdx = Math.min(Math.floor(i / segmentLength), paceData.length - 1);
-      const color = paceColor(paceData[paceIdx].paceSeconds, fastest, slowest);
+      const segPace = (pointPaces[i] + pointPaces[i + 1]) / 2;
+      const color = paceToGradientColor(segPace, fast, slow);
       routeSvg += `<line x1="${mapped[i].px}" y1="${mapped[i].py}" x2="${mapped[i + 1].px}" y2="${mapped[i + 1].py}" stroke="${color}" stroke-width="5" stroke-linecap="round"/>`;
     }
   } else {
@@ -572,7 +690,7 @@ function buildGpsRouteElite(
   }
 
   const glowPoints = mapped.map(p => `${p.px},${p.py}`).join(" ");
-  const glowRoute = `<polyline points="${glowPoints}" fill="none" stroke="${C.cyan}" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>`;
+  const glowRoute = `<polyline points="${glowPoints}" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>`;
 
   const sp = mapped[0];
   const ep = mapped[mapped.length - 1];
@@ -639,23 +757,35 @@ function computeMapView(
  */
 function buildMercatorRouteSvg(
   svgW: number, svgH: number,
-  track: Array<{ lat: number; lng: number }>,
+  track: Array<{ lat: number; lng: number; speed?: number; timestamp?: number }>,
   paceData: Array<{ km: number; pace: string; paceSeconds: number }> | undefined,
   centerLat: number, centerLng: number,
   zoom: number,
-  reqW: number, reqH: number
+  reqW: number, reqH: number,
+  paceSamples?: Array<{ time: number; value: number }>
 ): string {
   if (!track || track.length < 2) return "";
+
+  // Per-point pace on the FULL track first, so thinning keeps colours aligned
+  const fullPaces = computePointPaces(track, paceSamples, paceData);
 
   // Thin the track to ≤ 600 pts to keep SVG size manageable
   const MAX_PTS = 600;
   let pts = track;
+  let ptPaces = fullPaces;
   if (pts.length > MAX_PTS) {
     const step = pts.length / MAX_PTS;
-    const thinned: Array<{ lat: number; lng: number }> = [];
-    for (let i = 0; i < MAX_PTS - 1; i++) thinned.push(pts[Math.floor(i * step)]);
+    const thinned: typeof track = [];
+    const thinnedPaces: number[] = [];
+    for (let i = 0; i < MAX_PTS - 1; i++) {
+      const idx = Math.floor(i * step);
+      thinned.push(pts[idx]);
+      if (fullPaces) thinnedPaces.push(fullPaces[idx]);
+    }
     thinned.push(pts[pts.length - 1]);
+    if (fullPaces) thinnedPaces.push(fullPaces[fullPaces.length - 1]);
     pts = thinned;
+    ptPaces = fullPaces ? thinnedPaces : null;
   }
 
   const tileScale = Math.pow(2, zoom) * 256;
@@ -674,23 +804,20 @@ function buildMercatorRouteSvg(
     y: +(svgH / 2 + (mY(p.lat) - cY) * pixRatio).toFixed(1),
   }));
 
-  let glowSvg = "";
+  // White casing under the route — matches the crisp look of the app summary map
+  const polyPts = mapped.map(p => `${p.x},${p.y}`).join(" ");
+  const glowSvg = `<polyline points="${polyPts}" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
   let routeSvg = "";
 
-  if (paceData && paceData.length > 0) {
-    const secs    = paceData.map(p => p.paceSeconds);
-    const fastest = Math.min(...secs);
-    const slowest = Math.max(...secs);
+  if (ptPaces && ptPaces.length === mapped.length) {
+    const { fast, slow } = paceColorRange(ptPaces);
     for (let i = 0; i < mapped.length - 1; i++) {
-      const pIdx  = Math.min(Math.floor(i / (mapped.length / paceData.length)), paceData.length - 1);
-      const color = paceColor(paceData[pIdx].paceSeconds, fastest, slowest);
+      const segPace = (ptPaces[i] + ptPaces[i + 1]) / 2;
+      const color = paceToGradientColor(segPace, fast, slow);
       const a = mapped[i], b = mapped[i + 1];
-      glowSvg  += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#00D4FF" stroke-width="16" stroke-linecap="round" opacity="0.18"/>`;
       routeSvg += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="6" stroke-linecap="round"/>`;
     }
   } else {
-    const polyPts = mapped.map(p => `${p.x},${p.y}`).join(" ");
-    glowSvg  = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>`;
     routeSvg = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
 
@@ -754,24 +881,42 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
   });
 
   let legend = "";
-  if (run.paceData && run.paceData.length > 0) {
-    const paceSeconds = run.paceData.map(p => p.paceSeconds);
-    const fastest = Math.min(...paceSeconds);
-    const slowest = Math.max(...paceSeconds);
-    const fastPace = `${Math.floor(fastest / 60)}:${String(Math.round(fastest % 60)).padStart(2, "0")}`;
-    const slowPace = `${Math.floor(slowest / 60)}:${String(Math.round(slowest % 60)).padStart(2, "0")}`;
-    const legendY = mapH - 50;
-    legend = `
-      <rect x="20" y="${legendY}" width="160" height="40" rx="10" fill="${C.bgCard}" opacity="0.92" stroke="${C.border}" stroke-width="1"/>
-      <text x="30" y="${legendY + 14}" font-family="${FONT}" font-size="10" font-weight="600" fill="${C.textMuted}" letter-spacing="1">PACE</text>
-      <rect x="30" y="${legendY + 20}" width="80" height="6" rx="3">
-        <animate attributeName="fill" values="${C.green};${C.yellow};${C.orange}" dur="0s" fill="freeze"/>
-      </rect>
-      <linearGradient id="paceGradLegend" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${C.green}"/><stop offset="50%" stop-color="${C.yellow}"/><stop offset="100%" stop-color="${C.orange}"/></linearGradient>
-      <rect x="30" y="${legendY + 20}" width="80" height="6" rx="3" fill="url(#paceGradLegend)"/>
-      <text x="30" y="${legendY + 36}" font-family="${FONT}" font-size="9" fill="${C.green}">${fastPace}</text>
-      <text x="110" y="${legendY + 36}" font-family="${FONT}" font-size="9" fill="${C.orange}" text-anchor="end">${slowPace}</text>
-    `;
+  {
+    // Use the same fine-grained pace series as the route colouring so the
+    // legend range always matches the drawn gradient.
+    let fastest: number | null = null;
+    let slowest: number | null = null;
+    if (run.gpsTrack && run.gpsTrack.length > 1) {
+      const pointPaces = computePointPaces(run.gpsTrack, run.paceSamples, run.paceData);
+      if (pointPaces) {
+        const range = paceColorRange(pointPaces);
+        fastest = range.fast;
+        slowest = range.slow;
+      }
+    }
+    if (fastest == null && run.paceData && run.paceData.length > 0) {
+      const paceSeconds = run.paceData.map(p => p.paceSeconds).filter(s => s > 0);
+      if (paceSeconds.length > 0) {
+        fastest = Math.min(...paceSeconds);
+        slowest = Math.max(...paceSeconds);
+      }
+    }
+    if (fastest != null && slowest != null) {
+      const fastPace = `${Math.floor(fastest / 60)}:${String(Math.round(fastest % 60)).padStart(2, "0")}`;
+      const slowPace = `${Math.floor(slowest / 60)}:${String(Math.round(slowest % 60)).padStart(2, "0")}`;
+      const legendY = mapH - 50;
+      const gradStops = PACE_GRADIENT.map((c, i) =>
+        `<stop offset="${Math.round((i / (PACE_GRADIENT.length - 1)) * 100)}%" stop-color="${c}"/>`
+      ).join("");
+      legend = `
+        <rect x="20" y="${legendY}" width="160" height="40" rx="10" fill="${C.bgCard}" opacity="0.92" stroke="${C.border}" stroke-width="1"/>
+        <text x="30" y="${legendY + 14}" font-family="${FONT}" font-size="10" font-weight="600" fill="${C.textMuted}" letter-spacing="1">PACE</text>
+        <linearGradient id="paceGradLegend" x1="0" y1="0" x2="1" y2="0">${gradStops}</linearGradient>
+        <rect x="30" y="${legendY + 20}" width="80" height="6" rx="3" fill="url(#paceGradLegend)"/>
+        <text x="30" y="${legendY + 36}" font-family="${FONT}" font-size="9" fill="${PACE_GRADIENT[0]}">${fastPace}</text>
+        <text x="110" y="${legendY + 36}" font-family="${FONT}" font-size="9" fill="${PACE_GRADIENT[PACE_GRADIENT.length - 1]}" text-anchor="end">${slowPace}</text>
+      `;
+    }
   }
 
   const footerY = statsY + statH + 28;
@@ -786,7 +931,7 @@ function buildRouteMapSvg(w: number, h: number, run: RunDataForImage, userName?:
   const routeSvg = hasMapTile
     ? ""
     : (run.gpsTrack && run.gpsTrack.length > 1
-      ? buildGpsRouteElite(0, 0, w, mapH, run.gpsTrack, run.paceData)
+      ? buildGpsRouteElite(0, 0, w, mapH, run.gpsTrack, run.paceData, run.paceSamples)
       : `<text x="${w / 2}" y="${mapH / 2}" font-family="${FONT}" font-size="22" fill="${C.textMuted}" text-anchor="middle">No GPS data available</text>`);
 
   const bgRect = hasMapTile
@@ -1422,7 +1567,8 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
         const routeSvgContent = buildMercatorRouteSvg(
           w, mapRegionH,
           req.runData.gpsTrack, req.runData.paceData,
-          centerLat, centerLng, zoom, reqW, reqH
+          centerLat, centerLng, zoom, reqW, reqH,
+          req.runData.paceSamples
         );
         const routeSvgFull = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${mapRegionH}" viewBox="0 0 ${w} ${mapRegionH}">${routeSvgContent}</svg>`;
         const routeBuffer = await sharp(Buffer.from(routeSvgFull)).png().toBuffer();

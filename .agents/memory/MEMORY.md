@@ -3,3 +3,4 @@
 - [Flyover video share format](flyover-video-format.md) — run flyover MUST be MP4/H.264 end-to-end (blob type + filename ext + Android share Intent/MediaScanner MIME); WebM is rejected by Instagram/WhatsApp.
 - [Web dev server serves prebuilt](web-dev-server-prebuilt.md) — dev has no Vite HMR; edits to client/ need `npx vite build` to appear. Trust vite build over `tsc` for `@/` imports.
 - [Run route point keys](run-routepoints-keys.md) — backend GET /api/runs/:id returns routePoints as {latitude,longitude}, NOT {lat,lng}; web/client code must normalize.
+- [Run paceData formats](run-pace-data-formats.md) — pace_data jsonb has 3 shapes (km splits / {time,value} samples / flat number[]); detect shape before use, prefer gpsTrack per-point speed for colouring.

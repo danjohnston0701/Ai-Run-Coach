@@ -15399,23 +15399,34 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       ...(p.elevation != null ? { elevation: p.elevation } : {}),
       ...(p.alt != null ? { alt: p.alt } : {}),
       ...(p.altitude != null ? { altitude: p.altitude } : {}),
+      // Per-point speed (m/s) + timestamp power the pace-coloured route,
+      // exactly like the app's run summary map
+      ...(typeof p.speed === 'number' && p.speed > 0 ? { speed: p.speed } : {}),
+      ...(typeof p.timestamp === 'number' ? { timestamp: p.timestamp } : {}),
     })).filter((p: any) => p.lat !== 0 && p.lng !== 0) : undefined;
     
     // Build paceData in km-split format ({km, pace, paceSeconds}) for the share image.
-    // Raw pace samples ({time, value}) must be discarded — they are not km splits and
-    // cause hundreds of km-marker circles to be drawn on the route map.
+    // Raw pace samples ({time, value}) must NOT be used as km splits (they would draw
+    // hundreds of km-marker circles) — instead they are passed separately as paceSamples
+    // for fine-grained route colouring.
     const rawKmSplits = Array.isArray(run.kmSplits) ? run.kmSplits as any[] : [];
     let paceDataRaw = run.paceData as any;
 
     // Detect raw sample format vs km-split format
     let paceData: any = null;
+    let paceSamples: Array<{ time: number; value: number }> | undefined = undefined;
     if (Array.isArray(paceDataRaw) && paceDataRaw.length > 0) {
       const first = paceDataRaw[0];
-      if (typeof first.paceSeconds === 'number' || typeof first.pace === 'string') {
+      if (first != null && typeof first === 'object' && (typeof first.paceSeconds === 'number' || typeof first.pace === 'string')) {
         // Already km-split format — use as-is
         paceData = paceDataRaw;
+      } else if (first != null && typeof first === 'object' && typeof first.time === 'number' && typeof first.value === 'number') {
+        // Raw {time, value} samples (sec/km) — fine-grained pace series
+        paceSamples = paceDataRaw;
+      } else if (typeof first === 'number') {
+        // Flat number[] series (1 sample/sec, sec/km) — convert to {time, value}
+        paceSamples = (paceDataRaw as number[]).map((v: number, i: number) => ({ time: i, value: v }));
       }
-      // else: raw {time, value} samples — discard, fall through to kmSplits
     }
 
     // Fall back to kmSplits if no valid km-split paceData
@@ -15455,6 +15466,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       gpsTrack,
       heartRateData: (run.heartRateData as any) || undefined,
       paceData,
+      paceSamples,
       completedAt: run.completedAt?.toISOString() || undefined,
       name: run.name || undefined,
       weatherData: (run.weatherData as any) || undefined,
