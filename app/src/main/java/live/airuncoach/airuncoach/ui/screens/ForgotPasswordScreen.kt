@@ -4,8 +4,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,33 +15,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
-import live.airuncoach.airuncoach.network.RetrofitClient
-import live.airuncoach.airuncoach.network.model.ForgotPasswordRequest
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
-import kotlinx.coroutines.launch
-
-private sealed class ForgotPasswordState {
-    object Idle : ForgotPasswordState()
-    object Loading : ForgotPasswordState()
-    data class Success(val email: String) : ForgotPasswordState()
-    data class Error(val message: String) : ForgotPasswordState()
-}
+import live.airuncoach.airuncoach.viewmodel.ForgotPasswordViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForgotPasswordScreen(
-    onNavigateBack: () -> Unit = {}
+    onNavigateBack: () -> Unit = {},
+    viewModel: ForgotPasswordViewModel = hiltViewModel()
 ) {
-    var email by remember { mutableStateOf("") }
-    var screenState by remember { mutableStateOf<ForgotPasswordState>(ForgotPasswordState.Idle) }
-    val coroutineScope = rememberCoroutineScope()
+    val state by viewModel.state.collectAsState()
 
     Box(
         modifier = Modifier
@@ -52,245 +46,261 @@ fun ForgotPasswordScreen(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.xxxl)
-                .padding(top = 80.dp)
+                .padding(top = 20.dp)
                 .padding(bottom = Spacing.xxxl),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
-            // Logo
-            Box(
+            // Back Button
+            Row(
                 modifier = Modifier
-                    .size(120.dp)
-                    .background(
-                        color = Color(0xFF1A2332),
-                        shape = RoundedCornerShape(BorderRadius.xl)
-                    ),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.icon),
-                    contentDescription = "AI Run Coach Logo",
-                    modifier = Modifier.size(80.dp)
-                )
+                IconButton(
+                    onClick = onNavigateBack,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(Spacing.xxxl))
+            Spacer(modifier = Modifier.height(Spacing.lg))
 
-            // Title
-            Text(
-                text = "Forgot Password?",
-                style = AppTextStyles.h1.copy(fontWeight = FontWeight.Bold),
-                color = Colors.textPrimary
-            )
-
-            Spacer(modifier = Modifier.height(Spacing.sm))
-
-            // Subtitle
-            Text(
-                text = "Enter your email and we'll send you\na link to reset your password.",
-                style = AppTextStyles.body,
-                color = Colors.textSecondary,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(Spacing.xxxxl))
-
-            if (screenState is ForgotPasswordState.Success) {
-                // ── Success state ────────────────────────────────────────────
-                val sentEmail = (screenState as ForgotPasswordState.Success).email
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            color = Color(0xFF0F3D2E),
-                            shape = RoundedCornerShape(BorderRadius.md)
-                        )
-                        .padding(Spacing.lg),
-                    contentAlignment = Alignment.Center
+            if (state.isEmailSent) {
+                // Success State
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "✓",
-                            fontSize = 32.sp,
-                            color = Color(0xFF34D399)
+                    // Success Icon
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(
+                                color = Colors.primary.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(BorderRadius.xl)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_email),
+                            contentDescription = "Email Sent",
+                            tint = Colors.primary,
+                            modifier = Modifier.size(40.dp)
                         )
-                        Spacer(modifier = Modifier.height(Spacing.sm))
+                    }
+
+                    Spacer(modifier = Modifier.height(Spacing.xxxl))
+
+                    // Title
+                    Text(
+                        text = "Check your email",
+                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(Spacing.md))
+
+                    // Description
+                    Text(
+                        text = "We've sent a password reset link to ${state.email}. The link expires in 1 hour.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+
+                    // Info Box
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = Colors.backgroundTertiary,
+                                shape = RoundedCornerShape(BorderRadius.md)
+                            )
+                            .padding(Spacing.md)
+                    ) {
                         Text(
-                            text = "Check your inbox",
-                            style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                            color = Colors.textPrimary,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(Spacing.xs))
-                        Text(
-                            text = "We've sent a reset link to\n$sentEmail",
-                            style = AppTextStyles.body,
+                            text = "💡 Check your spam folder if you don't see the email within a few minutes.",
+                            style = AppTextStyles.small,
                             color = Colors.textSecondary,
                             textAlign = TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(Spacing.xs))
-                        Text(
-                            text = "The link expires in 1 hour.",
-                            style = AppTextStyles.small,
-                            color = Colors.textMuted,
-                            textAlign = TextAlign.Center
-                        )
                     }
-                }
 
-                Spacer(modifier = Modifier.height(Spacing.xxxl))
+                    Spacer(modifier = Modifier.height(Spacing.xxxxl))
 
-                // Back to login button
-                Button(
-                    onClick = onNavigateBack,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Spacing.buttonHeight),
-                    shape = RoundedCornerShape(BorderRadius.full),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary,
-                        contentColor = Colors.buttonText
-                    )
-                ) {
-                    Text(
-                        text = "Back to Sign In",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
-
-            } else {
-                // ── Input state (Idle / Loading / Error) ─────────────────────
-
-                // Email label
-                Text(
-                    text = "Email",
-                    style = AppTextStyles.body,
-                    color = Colors.textPrimary,
-                    modifier = Modifier.align(Alignment.Start)
-                )
-                Spacer(modifier = Modifier.height(Spacing.sm))
-
-                // Email input
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = {
-                        email = it
-                        // Clear error when user starts typing
-                        if (screenState is ForgotPasswordState.Error) {
-                            screenState = ForgotPasswordState.Idle
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Spacing.inputHeight),
-                    placeholder = {
+                    // Back to Login Button
+                    Button(
+                        onClick = onNavigateBack,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(Spacing.buttonHeight),
+                        shape = RoundedCornerShape(BorderRadius.full),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.primary,
+                            contentColor = Colors.buttonText
+                        )
+                    ) {
                         Text(
-                            text = "you@example.com",
-                            color = Colors.textMuted,
-                            style = AppTextStyles.body
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            painter = painterResource(id = R.drawable.icon_email),
-                            contentDescription = "Email Icon",
-                            tint = Colors.textMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    },
-                    textStyle = AppTextStyles.body,
-                    shape = RoundedCornerShape(BorderRadius.md),
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        containerColor = Colors.backgroundTertiary,
-                        focusedBorderColor = if (screenState is ForgotPasswordState.Error)
-                            Colors.error else Colors.primary,
-                        unfocusedBorderColor = if (screenState is ForgotPasswordState.Error)
-                            Colors.error else Color.Transparent,
-                        cursorColor = Colors.primary,
-                        focusedTextColor = Colors.textPrimary,
-                        unfocusedTextColor = Colors.textPrimary
-                    ),
-                    singleLine = true,
-                    enabled = screenState !is ForgotPasswordState.Loading
-                )
-
-                Spacer(modifier = Modifier.height(Spacing.xxxl))
-
-                // Send button
-                Button(
-                    onClick = {
-                        val trimmedEmail = email.trim()
-                        if (trimmedEmail.isBlank()) return@Button
-                        coroutineScope.launch {
-                            screenState = ForgotPasswordState.Loading
-                            try {
-                                RetrofitClient.apiService.forgotPassword(
-                                    ForgotPasswordRequest(email = trimmedEmail)
-                                )
-                                // Always treat 200 as success regardless of whether
-                                // the email was registered — protects user privacy
-                                screenState = ForgotPasswordState.Success(trimmedEmail)
-                            } catch (e: retrofit2.HttpException) {
-                                if (e.code() == 500) {
-                                    screenState = ForgotPasswordState.Error(
-                                        "Couldn't send the email — please try again."
-                                    )
-                                } else {
-                                    // Any other HTTP code (404, 422, etc.) → still show success
-                                    screenState = ForgotPasswordState.Success(trimmedEmail)
-                                }
-                            } catch (_: Exception) {
-                                screenState = ForgotPasswordState.Error(
-                                    "No internet connection. Please check your network."
-                                )
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(Spacing.buttonHeight),
-                    shape = RoundedCornerShape(BorderRadius.full),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Colors.primary,
-                        contentColor = Colors.buttonText
-                    ),
-                    enabled = screenState !is ForgotPasswordState.Loading && email.isNotBlank()
-                ) {
-                    if (screenState is ForgotPasswordState.Loading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Colors.buttonText,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            text = "Send Reset Link",
+                            text = "Back to Login",
                             style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
                         )
                     }
                 }
+            } else {
+                // Form State
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Logo
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .background(
+                                color = Color(0xFF1A2332),
+                                shape = RoundedCornerShape(BorderRadius.xl)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.icon),
+                            contentDescription = "AI Run Coach Logo",
+                            modifier = Modifier.size(70.dp)
+                        )
+                    }
 
-                // Error message
-                if (screenState is ForgotPasswordState.Error) {
-                    Spacer(modifier = Modifier.height(Spacing.md))
+                    Spacer(modifier = Modifier.height(Spacing.xxxl))
+
+                    // Title
                     Text(
-                        text = (screenState as ForgotPasswordState.Error).message,
-                        style = AppTextStyles.small,
-                        color = Colors.error,
+                        text = "Forgot Password?",
+                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary,
                         textAlign = TextAlign.Center
                     )
-                }
 
-                Spacer(modifier = Modifier.height(Spacing.lg))
+                    Spacer(modifier = Modifier.height(Spacing.sm))
 
-                // Back to login
-                TextButton(onClick = onNavigateBack) {
+                    // Subtitle
                     Text(
-                        text = "Back to Sign In",
-                        style = AppTextStyles.small,
-                        color = Colors.textSecondary
+                        text = "Enter your email and we'll send you a reset link",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center
                     )
+
+                    Spacer(modifier = Modifier.height(Spacing.xxxxl))
+
+                    // Email Field
+                    Text(
+                        text = "Email",
+                        style = AppTextStyles.body,
+                        color = Colors.textPrimary,
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    OutlinedTextField(
+                        value = state.email,
+                        onValueChange = { viewModel.onEmailChange(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(Spacing.inputHeight),
+                        placeholder = {
+                            Text(
+                                text = "you@example.com",
+                                color = Colors.textMuted,
+                                style = AppTextStyles.body
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_email),
+                                contentDescription = "Email Icon",
+                                tint = Colors.textMuted,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Done
+                        ),
+                        textStyle = AppTextStyles.body,
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Colors.backgroundTertiary,
+                            unfocusedContainerColor = Colors.backgroundTertiary,
+                            focusedBorderColor = Colors.primary,
+                            unfocusedBorderColor = Color.Transparent,
+                            cursorColor = Colors.primary,
+                            focusedTextColor = Colors.textPrimary,
+                            unfocusedTextColor = Colors.textPrimary
+                        ),
+                        singleLine = true,
+                        enabled = !state.isLoading
+                    )
+
+                    Spacer(modifier = Modifier.height(Spacing.xxxl))
+
+                    // Error message
+                    if (state.error != null) {
+                        Text(
+                            text = state.error ?: "",
+                            style = AppTextStyles.small,
+                            color = Colors.error,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                    }
+
+                    // Send Reset Link Button
+                    Button(
+                        onClick = { viewModel.sendResetEmail() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(Spacing.buttonHeight),
+                        shape = RoundedCornerShape(BorderRadius.full),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.primary,
+                            contentColor = Colors.buttonText
+                        ),
+                        enabled = !state.isLoading && state.email.isNotBlank()
+                    ) {
+                        if (state.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = Colors.buttonText,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Send Reset Link",
+                                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+
+                    // Back to Login Link
+                    TextButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text(
+                            text = "Back to Login",
+                            style = AppTextStyles.body,
+                            color = Colors.primary
+                        )
+                    }
                 }
             }
         }
