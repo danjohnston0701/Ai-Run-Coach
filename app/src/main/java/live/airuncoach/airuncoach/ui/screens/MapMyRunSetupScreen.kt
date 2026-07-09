@@ -40,9 +40,9 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
-import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
-import live.airuncoach.airuncoach.viewmodel.FriendsUiState
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
+// import live.airuncoach.airuncoach.viewmodel.FriendsViewModel  // TODO: Uncomment when Live Share is enabled
+// import live.airuncoach.airuncoach.viewmodel.FriendsUiState  // TODO: Uncomment when Live Share is enabled
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
@@ -88,10 +88,13 @@ fun MapMyRunSetupScreen(
     var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
     
     // For friend picker in Live Tracking
+    // TODO: Uncomment when Live Share is enabled
+    /*
     val friendsViewModel: FriendsViewModel = remember { 
         FriendsViewModel(context)
     }
     val friendsState by friendsViewModel.friendsState.collectAsState()
+    */
 
     // Minor metadata
     var activityMode by remember { mutableStateOf(ActivityMode.RUN) }
@@ -280,25 +283,14 @@ fun MapMyRunSetupScreen(
 
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
-            // Social — redesigned into a single clean section
+            // Group Run only (Live Tracking hidden until iOS app launch)
             item {
-                val friends = when (friendsState) {
-                    is FriendsUiState.Success -> (friendsState as FriendsUiState.Success).friends
-                    else -> emptyList()
-                }
-                SocialSection(
-                    liveTrackingEnabled = isLiveTrackingEnabled,
-                    onToggleLiveTracking = { isLiveTrackingEnabled = it },
-                    liveTrackingObservers = liveTrackingObservers,
-                    onObserversChanged = { liveTrackingObservers = it },
-                    pendingEmail = liveTrackingPendingEmail,
-                    onPendingEmailChange = { liveTrackingPendingEmail = it },
-                    friends = friends,
-
+                GroupRunSection(
                     groupRunEnabled = isGroupRunEnabled,
                     onToggleGroupRun = { isGroupRunEnabled = it },
                     groupRunParticipants = groupRunParticipants,
-                    onParticipantsChanged = { groupRunParticipants = it }
+                    onParticipantsChanged = { groupRunParticipants = it },
+                    friends = emptyList() // Friends list not needed for now
                 )
             }
 /*Hide AI Pre-Summary text
@@ -1051,23 +1043,16 @@ private fun AiCoachToggleSection(
 }
 
 /* =====================================================================================
-   SOCIAL — redesigned (Live Tracking + Group Run)
+   GROUP RUN SECTION — standalone (Live Tracking hidden until iOS app launch)
 ===================================================================================== */
 
 @Composable
-private fun SocialSection(
-    liveTrackingEnabled: Boolean,
-    onToggleLiveTracking: (Boolean) -> Unit,
-    liveTrackingObservers: List<String>,
-    onObserversChanged: (List<String>) -> Unit,
-    pendingEmail: String,
-    onPendingEmailChange: (String) -> Unit,
-    friends: List<Friend>,
-
+private fun GroupRunSection(
     groupRunEnabled: Boolean,
     onToggleGroupRun: (Boolean) -> Unit,
     groupRunParticipants: List<String>,
-    onParticipantsChanged: (List<String>) -> Unit
+    onParticipantsChanged: (List<String>) -> Unit,
+    friends: List<Friend>
 ) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Text(
@@ -1083,31 +1068,6 @@ private fun SocialSection(
             colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.65f))
         ) {
             Column(modifier = Modifier.padding(vertical = 6.dp)) {
-
-                // Live Tracking toggle + expandable observer picker
-                Column {
-                    SocialRowToggle(
-                        title = "Live Tracking",
-                        subtitle = "Share your live location",
-                        enabled = liveTrackingEnabled,
-                        onToggle = { onToggleLiveTracking(it) }
-                    )
-
-                    // Expandable observer section (shown when Live Tracking is enabled)
-                    if (liveTrackingEnabled) {
-                        Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
-                        LiveTrackingObserverSection(
-                            observers = liveTrackingObservers,
-                            onObserversChanged = onObserversChanged,
-                            pendingEmail = pendingEmail,
-                            onPendingEmailChange = onPendingEmailChange,
-                            friends = friends
-                        )
-                    }
-                }
-
-                Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
-
                 // Group Run toggle + expandable participant picker
                 Column {
                     SocialRowToggle(
@@ -1119,7 +1079,7 @@ private fun SocialSection(
 
                     // Expandable participant section (shown when Group Run is enabled)
                     if (groupRunEnabled) {
-                        Divider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
+                        HorizontalDivider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
                         GroupRunParticipantSection(
                             participants = groupRunParticipants,
                             onParticipantsChanged = onParticipantsChanged,
@@ -1294,8 +1254,10 @@ private fun GroupRunParticipantSection(
 
 /* =====================================================================================
    LIVE TRACKING — Observer Picker (expanded when Live Tracking enabled)
+   TODO: Uncomment when iOS app is launched for Live Share compatibility
 ===================================================================================== */
 
+/*
 @Composable
 private fun LiveTrackingObserverSection(
     observers: List<String>,
@@ -1539,6 +1501,7 @@ private fun LiveTrackingObserverSection(
         }
     }
 }
+*/
 
 /* =====================================================================================
    OPTIONAL AI SUMMARY (no longer blocks Start Run)

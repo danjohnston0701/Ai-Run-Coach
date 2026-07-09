@@ -16,7 +16,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.BorderStroke
+// import androidx.compose.foundation.BorderStroke  // TODO: Uncomment when Live Share is enabled
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.focus.onFocusEvent
@@ -34,7 +34,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import live.airuncoach.airuncoach.AppRoutes
+// import live.airuncoach.airuncoach.AppRoutes  // TODO: Uncomment when Live Share is enabled
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
@@ -42,12 +42,12 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
-import live.airuncoach.airuncoach.viewmodel.ObserverLoginViewModel
+// import live.airuncoach.airuncoach.viewmodel.ObserverLoginViewModel  // TODO: Uncomment when Live Share is enabled
 import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import kotlinx.coroutines.delay
+// import kotlinx.coroutines.delay  // TODO: Uncomment when Live Share is enabled
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -56,14 +56,14 @@ fun LoginScreen(
     onNavigateToMain: () -> Unit = {},
     onNavigateToSignUp: () -> Unit = {},
     onNavigateToForgotPassword: () -> Unit = {},
-    onNavigateToObserverSession: (sessionId: String) -> Unit = {},
+    onNavigateToObserverSession: (sessionId: String) -> Unit = {}, // TODO: Remove when Live Share is enabled
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val loginState by viewModel.loginState.collectAsState()
     var passwordVisible by remember { mutableStateOf(false) }
     var isCheckingAuth by remember { mutableStateOf(true) }
-    var showObserverTokenInput by remember { mutableStateOf(false) }
+    // var showObserverTokenInput by remember { mutableStateOf(false) } // TODO: Uncomment when Live Share is enabled
     
     // Keyboard handling
     val emailBringIntoView = remember { BringIntoViewRequester() }
@@ -407,7 +407,9 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
+            /*
             // Observer token input — expands when user taps the button
+            // TODO: Uncomment when iOS app is launched for Live Share compatibility
             ObserverTokenInputSection(
                 isExpanded = showObserverTokenInput,
                 onExpandToggle = { showObserverTokenInput = it },
@@ -415,6 +417,7 @@ fun LoginScreen(
             )
 
             Spacer(modifier = Modifier.height(Spacing.xxxl))
+            */
 
             // Terms and Privacy
             Text(
@@ -427,9 +430,11 @@ fun LoginScreen(
     }
 }
 
+/*
 /**
  * Expandable observer token input section on the login screen.
  * User taps "Observe Live Run" button to expand, then enters invitation token and confirms.
+ * TODO: Uncomment when iOS app is launched for Live Share compatibility
  */
 @Composable
 private fun ObserverTokenInputSection(
@@ -555,3 +560,4 @@ private fun ObserverTokenInputSection(
         }
     }
 }
+*/

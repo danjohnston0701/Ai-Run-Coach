@@ -89,6 +89,7 @@ fun CreateGroupRunScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(Spacing.lg)
         ) {
