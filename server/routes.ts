@@ -1320,13 +1320,13 @@ function transformRunForAndroid(run: any) {
       routePoints: (() => {
         // Normalise gpsTrack to a routePoints array regardless of storage format.
         // Three formats can exist in the DB:
-        //   1. Array of {latitude,longitude,...} — phone-recorded (canonical)
-        //   2. Array of {lat,lng,...}            — Garmin sample points
+        //   1. Array of {latitude,longitude,...} — phone-recorded (canonical, epoch ms timestamps)
+        //   2. Array of {lat,lng,...}            — Garmin sample points (may have relative-second timestamps)
         //   3. { polyline: "encoded_string" }    — legacy corrupt format from Garmin
         //                                           enrichment bug; decode on read
         //                                           so existing runs render correctly.
         if (Array.isArray(run.gpsTrack)) {
-          return run.gpsTrack.map((pt: any) => ({
+          const points = run.gpsTrack.map((pt: any) => ({
             latitude:  pt.latitude  ?? pt.lat  ?? 0,
             longitude: pt.longitude ?? pt.lng  ?? 0,
             timestamp: pt.timestamp ?? pt.time ?? 0,
@@ -1336,6 +1336,28 @@ function transformRunForAndroid(run: any) {
             bearing:   pt.bearing   ?? null,
             cadence:   pt.cadence   ?? null,
           }));
+          // Detect and fix relative-second timestamps (Garmin companion runs stored before
+          // the timestamp fix).  If ALL timestamps are < 100000 (< ~27 hours in seconds,
+          // impossible as epoch ms) they are relative seconds from run start.  Convert to
+          // epoch ms using the run's startTime so that buildPaceSegments() on Android gets
+          // valid deltas (it divides by 1000 assuming ms).
+          if (points.length >= 2) {
+            const maxTs = Math.max(...points.map((p: any) => p.timestamp || 0));
+            if (maxTs > 0 && maxTs < 100_000) {
+              // Relative seconds → absolute epoch ms
+              for (const p of points) {
+                p.timestamp = startTime + (p.timestamp * 1000);
+              }
+            } else if (maxTs === 0 && points.length >= 3) {
+              // All timestamps are 0 — synthesize evenly-spaced timestamps so pace
+              // charts and map coloring have something to work with.
+              const interval = durationMs / points.length;
+              for (let i = 0; i < points.length; i++) {
+                points[i].timestamp = startTime + Math.round(i * interval);
+              }
+            }
+          }
+          return points;
         }
         // Recovery path: decode legacy { polyline: "..." } stored by old enrichment code
         if (run.gpsTrack && typeof run.gpsTrack === 'object' && (run.gpsTrack as any).polyline) {
@@ -1352,7 +1374,25 @@ function transformRunForAndroid(run: any) {
         }
         return [];
       })(),
-      kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits : [],
+      kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits.map((s: any) => {
+        // The Android KmSplit model expects `pace` as a "M:SS" string (e.g. "7:22")
+        // but the DB stores it as an integer (seconds per km, e.g. 442).
+        // Also ensure `time` is in milliseconds — the Android model uses Long (ms).
+        const paceVal = s.pace;
+        let paceStr: string;
+        if (typeof paceVal === 'number') {
+          const totalSec = Math.round(paceVal);
+          const mins = Math.floor(totalSec / 60);
+          const secs = totalSec % 60;
+          paceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+        } else {
+          paceStr = paceVal || '0:00';
+        }
+        // `time` in the DB is duration in seconds for this split; Android expects milliseconds
+        const timeMs = typeof s.duration === 'number' ? s.duration * 1000
+                     : (typeof s.time === 'number' ? (s.time > 86400 ? s.time : s.time * 1000) : 0);
+        return { ...s, pace: paceStr, time: timeMs };
+      }) : [],
       // heartRateData: prefer dedicated column; vívoactive 4 embeds HR per GPS point
       heartRateData: normalizeNumericSeries(run.heartRateData).filter(v => v > 0).length > 0
         ? normalizeNumericSeries(run.heartRateData)
@@ -2181,7 +2221,58 @@ function transformRunForAndroid(run: any) {
           Math.abs((r as any).distance - distanceRounded) < 0.05
         );
         if (rapidDup) {
-          console.log(`[POST /api/runs] Rapid-retry duplicate detected — returning existing run ${rapidDup.id}`);
+          console.log(`[POST /api/runs] Case 1 — rapid-retry duplicate detected (run ${rapidDup.id}) — merging phone data`);
+
+          // Merge phone's richer data into the existing record (same strategy as Case 0/2).
+          // Previously this returned immediately, silently discarding coaching notes,
+          // weatherData, linkedWorkoutId, and GPS track from the phone's upload.
+          const c1Merge: Record<string, any> = {};
+
+          // Coaching notes
+          const c1IncomingNotes = runData.aiCoachingNotes;
+          if (Array.isArray(c1IncomingNotes) && c1IncomingNotes.length > 0 &&
+              (!(rapidDup as any).aiCoachingNotes || (rapidDup as any).aiCoachingNotes?.length === 0)) {
+            c1Merge.aiCoachingNotes = c1IncomingNotes;
+          }
+          // Weather data
+          if (runData.weatherData != null && (rapidDup as any).weatherData == null) {
+            c1Merge.weatherData = runData.weatherData;
+          }
+          // Workout/plan linking
+          if (runData.linkedWorkoutId && !(rapidDup as any).linkedWorkoutId) {
+            c1Merge.linkedWorkoutId = runData.linkedWorkoutId;
+          }
+          if (runData.linkedPlanId && !(rapidDup as any).linkedPlanId) {
+            c1Merge.linkedPlanId = runData.linkedPlanId;
+          }
+          if (runData.workoutType && !(rapidDup as any).workoutType)             c1Merge.workoutType = runData.workoutType;
+          if (runData.workoutIntensity && !(rapidDup as any).workoutIntensity)   c1Merge.workoutIntensity = runData.workoutIntensity;
+          if (runData.workoutDescription && !(rapidDup as any).workoutDescription) c1Merge.workoutDescription = runData.workoutDescription;
+          if (runData.planProgressWeek && !(rapidDup as any).planProgressWeek)   c1Merge.planProgressWeek = runData.planProgressWeek;
+          if (runData.planProgressWeeks && !(rapidDup as any).planProgressWeeks) c1Merge.planProgressWeeks = runData.planProgressWeeks;
+          // GPS track — phone's array has timestamps needed for pace coloring
+          if (Array.isArray(runData.gpsTrack) && runData.gpsTrack.length > 0 && !Array.isArray((rapidDup as any).gpsTrack)) {
+            c1Merge.gpsTrack = runData.gpsTrack;
+          }
+          // Heart-rate time-series
+          const c1IncomingHR = Array.isArray(runData.heartRateData) && (runData.heartRateData as any[]).length > 0;
+          const c1ExistingHR = Array.isArray((rapidDup as any).heartRateData) && ((rapidDup as any).heartRateData as any[]).length > 0;
+          if (c1IncomingHR && !c1ExistingHR) c1Merge.heartRateData = runData.heartRateData;
+          // Pace data
+          if (runData.paceData != null && (rapidDup as any).paceData == null) c1Merge.paceData = runData.paceData;
+          // Struggle points
+          if (runData.strugglePoints != null && (rapidDup as any).strugglePoints == null) c1Merge.strugglePoints = runData.strugglePoints;
+
+          if (Object.keys(c1Merge).length > 0) {
+            await db.update(runs).set(c1Merge).where(eq(runs.id, rapidDup.id));
+            console.log(`[POST /api/runs] Case 1 merge applied to run ${rapidDup.id}:`, Object.keys(c1Merge).join(', '));
+            const [updated1] = await db.select().from(runs).where(eq(runs.id, rapidDup.id)).limit(1);
+            autoCompleteLinkedWorkout(rapidDup.id).catch(err =>
+              console.error('[POST /api/runs] Case 1: workout auto-complete failed (non-fatal):', err)
+            );
+            return res.status(200).json(transformRunForAndroid(updated1 ?? rapidDup));
+          }
+
           return res.status(200).json(transformRunForAndroid(rapidDup));
         }
 
@@ -2290,6 +2381,12 @@ function transformRunForAndroid(run: any) {
             console.log(`[POST /api/runs] Case 2: upgrading altitudeData from ${c2ExistingAltIsKmFormat ? '{km,value} kmSplits stub' : 'null'} to phone series`);
           } else if (c2ExistingAlt && !c2ExistingAltIsKmFormat) {
             console.log(`[POST /api/runs] Case 2: preserved existing GPS altitude data (${c2ExistingAlt.length} pts) — phone barometric series skipped`);
+          }
+
+          // Weather data — phone captures weather at run start; watch record never has it
+          if (runData.weatherData != null && (garminDup as any).weatherData == null) {
+            c2Merge.weatherData = runData.weatherData;
+            console.log(`[POST /api/runs] Case 2: merging weatherData from phone upload`);
           }
 
           // Target / achievement
@@ -11331,12 +11428,17 @@ function transformRunForAndroid(run: any) {
             if (paceSamples.length >= 5) paceData = paceSamples;
 
             // Build GPS track — same format as phone uploads:
-            // array of {latitude, longitude, heartRate?, cadence?, altitude?, speed?}
+            // array of {latitude, longitude, timestamp, heartRate?, cadence?, altitude?, speed?}
+            // CRITICAL: timestamp MUST be included as epoch milliseconds — the Android app's
+            // buildPaceSegments() and map pace-coloring both compute pace from consecutive
+            // timestamp deltas.  Without it every point gets timestamp=0, dtSec=0, and pace
+            // calculation divides by zero → flat-line pace chart + monochrome map.
             const gpsSamples = allDataPoints.filter(d => d.latitude != null && d.longitude != null);
             if (gpsSamples.length >= 3) {
               gpsTrackFromData = gpsSamples.map(d => ({
                 latitude:  d.latitude,
                 longitude: d.longitude,
+                timestamp: d.timestamp ? new Date(d.timestamp).getTime() : 0,
                 altitude:  d.altitude   ?? null,
                 speed:     d.speed      ?? null,
                 heartRate: d.heartRate  ?? null,

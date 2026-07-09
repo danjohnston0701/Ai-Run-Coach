@@ -3084,6 +3084,16 @@ private fun buildPaceSegments(
 ): Triple<List<PaceSegment>, Double, Double> {
     if (points.size < 2) return Triple(emptyList(), 0.0, 0.0)
 
+    // Detect if timestamps are valid (span at least 1 second in ms)
+    val minTs = points.minOf { it.timestamp }
+    val maxTs = points.maxOf { it.timestamp }
+    val hasValidTimestamps = (maxTs - minTs) >= 1000L
+
+    // If timestamps are missing/invalid, fall back to speed-based coloring
+    if (!hasValidTimestamps) {
+        return buildPaceSegmentsFromSpeed(points)
+    }
+
     // First pass: compute raw pace for each consecutive pair, accumulate into ~50m buckets
     data class Bucket(
         val startIdx: Int,
@@ -3157,6 +3167,85 @@ private fun buildPaceSegments(
         }
     }
 
+    return Triple(segments, fastPace, slowPace)
+}
+
+/**
+ * Fallback pace segment builder using the per-point `speed` field (m/s) when
+ * timestamps are missing or invalid.  Groups points into ~50m distance buckets
+ * and averages their speed to determine pace and color.
+ */
+private fun buildPaceSegmentsFromSpeed(
+    points: List<LocationPoint>
+): Triple<List<PaceSegment>, Double, Double> {
+    // Filter to points that have a valid speed reading
+    val validIndices = points.indices.filter { i ->
+        val p = points[i]
+        p.latitude != 0.0 && p.longitude != 0.0 && (p.speed ?: 0f) > 0.3f
+    }
+    if (validIndices.size < 2) return Triple(emptyList(), 0.0, 0.0)
+
+    // Calculate per-point pace from speed
+    val pointPaces = DoubleArray(points.size) { 1200.0 }
+    for (i in validIndices) {
+        val speed = points[i].speed ?: continue
+        if (speed > 0.3f) {
+            pointPaces[i] = (1000.0 / speed.toDouble()).coerceIn(120.0, 1200.0)
+        }
+    }
+
+    // Build 50m distance buckets
+    data class SpeedBucket(val startIdx: Int, val endIdx: Int, val avgPace: Double)
+
+    val buckets = mutableListOf<SpeedBucket>()
+    var bucketStartIdx = 0
+    var bucketDist = 0.0
+    var paceSum = 0.0
+    var paceCount = 0
+
+    for (i in 1 until points.size) {
+        val d = haversineMeters(points[i - 1].latitude, points[i - 1].longitude,
+            points[i].latitude, points[i].longitude)
+        if (d < 0.5) continue
+        bucketDist += d
+        val sp = points[i].speed
+        if (sp != null && sp > 0.3f) {
+            paceSum += pointPaces[i]
+            paceCount++
+        }
+        if (bucketDist >= 50.0 && paceCount > 0) {
+            buckets.add(SpeedBucket(bucketStartIdx, i, paceSum / paceCount))
+            bucketStartIdx = i
+            bucketDist = 0.0
+            paceSum = 0.0
+            paceCount = 0
+        }
+    }
+    if (paceCount > 0 && bucketDist > 5.0) {
+        buckets.add(SpeedBucket(bucketStartIdx, points.lastIndex, paceSum / paceCount))
+    }
+    if (buckets.isEmpty()) return Triple(emptyList(), 0.0, 0.0)
+
+    val allPaces = buckets.map { it.avgPace }.sorted()
+    val p5 = allPaces[(allPaces.size * 0.05).toInt().coerceIn(0, allPaces.lastIndex)]
+    val p95 = allPaces[(allPaces.size * 0.95).toInt().coerceIn(0, allPaces.lastIndex)]
+    val fastPace = p5.coerceAtLeast(120.0)
+    val slowPace = p95.coerceAtMost(1200.0)
+
+    val segments = mutableListOf<PaceSegment>()
+    for (bucket in buckets) {
+        val color = paceToColor(bucket.avgPace, fastPace, slowPace)
+        for (j in bucket.startIdx until bucket.endIdx) {
+            if (j + 1 < points.size) {
+                segments.add(PaceSegment(
+                    start = LatLng(points[j].latitude, points[j].longitude),
+                    end = LatLng(points[j + 1].latitude, points[j + 1].longitude),
+                    color = color,
+                    paceSecPerKm = bucket.avgPace
+                ))
+            }
+        }
+    }
     return Triple(segments, fastPace, slowPace)
 }
 
@@ -4113,6 +4202,9 @@ private fun buildPaceSeries(
 ): LabeledSeries {
     val fromRoute = paceFromRoute(routePoints, mode)
     if (fromRoute.y.size >= 2) return fromRoute
+    // Fallback: use per-point speed field (works even without valid timestamps)
+    val fromSpeed = paceFromSpeed(routePoints, mode)
+    if (fromSpeed.y.size >= 2) return fromSpeed
     return paceFromSplits(kmSplits, mode)
 }
 
@@ -4120,6 +4212,12 @@ private fun paceFromRoute(points: List<LocationPoint>, mode: ChartMode): Labeled
     if (points.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
     val valid = points.filter { it.latitude != 0.0 && it.longitude != 0.0 }
     if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    // Quick check: if ALL timestamps are 0 (or effectively the same), skip this path
+    // entirely — timestamps are missing (e.g. older Garmin companion GPS tracks).
+    val minTs = valid.minOf { it.timestamp }
+    val maxTs = valid.maxOf { it.timestamp }
+    if (maxTs - minTs < 1000L) return LabeledSeries(emptyList(), emptyList(), emptyList())
 
     // Pre-compute cumulative distance for ALL points so stepping doesn't lose distance
     val cumulativeDist = DoubleArray(valid.size)
@@ -4173,6 +4271,71 @@ private fun paceFromRoute(points: List<LocationPoint>, mode: ChartMode): Labeled
     }
 
     // Median-filter to remove remaining GPS spikes, then smooth with a wider window
+    val medianFiltered = medianFilter(yOut, window = 5)
+    val smoothedY = smoothY(medianFiltered, window = 15)
+    return LabeledSeries(
+        x = xOut,
+        y = smoothedY,
+        labels = labels.ifEmpty { List(smoothedY.size) { it.toString() } }
+    )
+}
+
+/**
+ * Fallback pace series built from the per-point `speed` field (m/s) embedded in each
+ * GPS route point.  Works even when timestamps are missing/invalid (e.g., older Garmin
+ * companion runs before the timestamp fix).  This produces the same curve as the
+ * Pace vs Elevation overlay which was already correct.
+ */
+private fun paceFromSpeed(points: List<LocationPoint>, mode: ChartMode): LabeledSeries {
+    val valid = points.filter {
+        it.latitude != 0.0 && it.longitude != 0.0 && it.speed != null && it.speed > 0.3f
+    }
+    if (valid.size < 4) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
+    val cumulativeDist = DoubleArray(valid.size)
+    for (j in 1 until valid.size) {
+        cumulativeDist[j] = cumulativeDist[j - 1] +
+                haversineMeters(valid[j - 1].latitude, valid[j - 1].longitude,
+                    valid[j].latitude, valid[j].longitude)
+    }
+
+    val xOut = mutableListOf<Double>()
+    val yOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+
+    val startTs = valid.first().timestamp
+    val step = (valid.size / 200f).coerceAtLeast(1f).toInt()
+
+    var i = 0
+    while (i < valid.size) {
+        val curr = valid[i]
+        val speed = curr.speed ?: run { i += step; continue }
+        if (speed < 0.3f) { i += step; continue }
+
+        val paceSecPerKm = (1000.0 / speed.toDouble()).coerceIn(120.0, 900.0)
+
+        val xLabel = if (mode == ChartMode.Time) {
+            // If timestamps are valid, use them for x-axis; otherwise use point index
+            if (startTs > 0 && curr.timestamp > startTs) {
+                val minutes = ((curr.timestamp - startTs) / 1000.0 / 60.0)
+                String.format(java.util.Locale.US, "%.0f", minutes)
+            } else {
+                String.format(java.util.Locale.US, "%.0f", (i.toDouble() / valid.size * 30))
+            }
+        } else {
+            val km = cumulativeDist[i] / 1000.0
+            String.format(java.util.Locale.US, "%.1f", km)
+        }
+
+        xOut.add(xOut.size.toDouble())
+        yOut.add(paceSecPerKm)
+        labels.add(xLabel)
+
+        i += step
+    }
+
+    if (yOut.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+
     val medianFiltered = medianFilter(yOut, window = 5)
     val smoothedY = smoothY(medianFiltered, window = 15)
     return LabeledSeries(
@@ -5038,10 +5201,13 @@ private fun parsePaceToSeconds(pace: String): Int {
     // Parse "M:SS" or "M:SS/km" to total seconds
     val cleaned = pace.replace("/km", "").trim()
     val parts = cleaned.split(":")
-    if (parts.size != 2) return 0
-    val min = parts[0].toIntOrNull() ?: return 0
-    val sec = parts[1].toIntOrNull() ?: return 0
-    return min * 60 + sec
+    if (parts.size == 2) {
+        val min = parts[0].toIntOrNull() ?: return 0
+        val sec = parts[1].toIntOrNull() ?: return 0
+        return min * 60 + sec
+    }
+    // Handle raw seconds (e.g., "442" from legacy/unformatted server data)
+    return cleaned.toIntOrNull() ?: 0
 }
 
 /* --------------------------------- dp/sp helpers -------------------------------- */
@@ -5090,7 +5256,7 @@ private fun KmSplitsCardFlagship(kmSplits: List<KmSplit>) {
                             color = Colors.textPrimary
                         )
                         Text(
-                            text = if (split.pace.contains("/km")) split.pace else "${split.pace} /km",
+                            text = formatKmSplitPace(split.pace),
                             style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                             color = Colors.primary
                         )
@@ -8634,8 +8800,37 @@ private fun formatPaceSeconds(secondsPerKm: Long): String {
 private fun getBestPace(splits: List<KmSplit>): String {
     return if (splits.isNotEmpty()) {
         val best = splits.minByOrNull { it.time }
-        best?.pace?.let { if (it.contains("/km")) it else "$it/km" } ?: "—"
+        best?.pace?.let { raw ->
+            // Handle both "M:SS" format and raw seconds (e.g., "442")
+            val display = if (raw.contains(":")) {
+                raw.replace("/km", "")
+            } else {
+                // Raw seconds string — convert to M:SS
+                val totalSec = raw.toIntOrNull()
+                if (totalSec != null && totalSec > 0) {
+                    "${totalSec / 60}:${(totalSec % 60).toString().padStart(2, '0')}"
+                } else raw
+            }
+            "$display/km"
+        } ?: "—"
     } else "—"
+}
+
+/**
+ * Formats a KmSplit pace value for display. Handles both:
+ * - "M:SS" format (from server transform): "7:22" → "7:22 /km"
+ * - Raw seconds string (legacy/cached): "442" → "7:22 /km"
+ */
+private fun formatKmSplitPace(pace: String): String {
+    if (pace.contains("/km")) return pace
+    if (pace.contains(":")) return "$pace /km"
+    // Raw seconds — convert to M:SS
+    val totalSec = pace.toIntOrNull()
+    return if (totalSec != null && totalSec > 0) {
+        "${totalSec / 60}:${(totalSec % 60).toString().padStart(2, '0')} /km"
+    } else {
+        "$pace /km"
+    }
 }
 
 private fun effortLabelFromScore(score: Int): String {
