@@ -3501,10 +3501,14 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         if (paceSeries.y.size >= 2) {
+            // Best pace = fastest instantaneous pace from the chart data (not km split average)
+            val bestPaceDisplay = remember(paceSeries, run.routePoints, run.kmSplits) {
+                getBestInstantPace(paceSeries, run.routePoints, run.kmSplits)
+            }
             LineChartCardFlagship(
                 title = "Pace",
                 subtitleLeft = "Avg: ${run.averagePace ?: "—"}",
-                subtitleRight = "Best: ${getBestPace(run.kmSplits)}",
+                subtitleRight = "Best: $bestPaceDisplay",
                 accent = Colors.primary
             ) {
                 RunLineChartCanvas(
@@ -8797,7 +8801,39 @@ private fun formatPaceSeconds(secondsPerKm: Long): String {
     return String.format(Locale.US, "%d:%02d", m, sec)
 }
 
-private fun getBestPace(splits: List<KmSplit>): String {
+/**
+ * Best instantaneous pace from the smoothed pace chart series, GPS speed data,
+ * or km splits (in that priority order).
+ *
+ * "Best" means the fastest pace the runner hit during the run — NOT the best
+ * km-average.  A runner doing 7:22/km average may have hit 5:50/km for a burst.
+ * The pace chart series is already smoothed/filtered so this won't pick up GPS spikes.
+ */
+private fun getBestInstantPace(
+    paceSeries: LabeledSeries,
+    routePoints: List<LocationPoint>,
+    kmSplits: List<KmSplit>
+): String {
+    // Priority 1: fastest point on the smoothed pace chart (already spike-filtered)
+    val bestFromChart = paceSeries.y.filter { it > 0 }.minOrNull()
+    if (bestFromChart != null && bestFromChart >= 120.0) {
+        return "${formatPaceSeconds(bestFromChart.toLong())}/km"
+    }
+
+    // Priority 2: fastest speed reading from GPS route points (with 5th percentile to avoid spikes)
+    val speeds = routePoints.mapNotNull { it.speed }.filter { it > 0.5f }
+    if (speeds.size >= 10) {
+        val sorted = speeds.sortedDescending()
+        val p95Speed = sorted[(sorted.size * 0.05).toInt().coerceIn(0, sorted.lastIndex)]
+        val bestPaceSec = (1000.0 / p95Speed).toLong().coerceIn(120, 900)
+        return "${formatPaceSeconds(bestPaceSec)}/km"
+    }
+
+    // Priority 3: fallback to best km split
+    return getBestKmSplitPace(kmSplits)
+}
+
+private fun getBestKmSplitPace(splits: List<KmSplit>): String {
     return if (splits.isNotEmpty()) {
         val best = splits.minByOrNull { it.time }
         best?.pace?.let { raw ->
