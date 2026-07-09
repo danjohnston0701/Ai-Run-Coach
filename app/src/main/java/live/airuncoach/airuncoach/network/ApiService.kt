@@ -596,7 +596,8 @@ interface ApiService {
     @POST("/api/workouts/{workoutId}/prepare-coaching")
     suspend fun prepareSessionCoaching(
         @Path("workoutId") workoutId: String,
-        @Query("force") forceRegenerate: Boolean = false
+        @Query("force") forceRegenerate: Boolean = false,
+        @Body body: Map<String, Any?> = emptyMap()
     ): Response<PrepareCoachingResponse>
 
     /**

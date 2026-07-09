@@ -389,7 +389,11 @@ class RunSessionViewModel @Inject constructor(
             Log.d("RunSessionViewModel", "${if (force) "Force-generating" else "Generating"} AI coaching for workout $workoutId...")
 
             try {
-                val response = apiService.prepareSessionCoaching(workoutId, forceRegenerate = force)
+                // Pass watch connectivity so OpenAI knows for certain whether HR data will be
+                // available during the run, overriding the history-based inference.
+                val isWatchConnected = garminWatchManager.isWatchConnected.value == true
+                val body = mapOf<String, Any?>("hasWatchConnected" to isWatchConnected)
+                val response = apiService.prepareSessionCoaching(workoutId, forceRegenerate = force, body = body)
                 if (response.isSuccessful) {
                     val body = response.body()
                     activeSessionCoachingPlan = body?.plan

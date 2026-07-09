@@ -556,13 +556,17 @@ function buildFallbackStructure(workout: SessionToneRequest, recentPaceSecPerKm?
 export interface SessionCoachingRequest {
   userId: string;
   plannedWorkoutId: string;
-  forceRegenerate?: boolean;  // bypass cache and generate fresh
+  forceRegenerate?: boolean;   // bypass cache and generate fresh
+  // When the Android app knows for certain whether a Garmin watch is connected,
+  // pass it here so OpenAI receives a definitive HR-monitor availability signal
+  // rather than falling back to historical run inference.
+  hasWatchConnected?: boolean;
 }
 
 export async function getOrGenerateSessionCoaching(
   request: SessionCoachingRequest
 ): Promise<SessionCoachingPlan> {
-  const { userId, plannedWorkoutId, forceRegenerate = false } = request;
+  const { userId, plannedWorkoutId, forceRegenerate = false, hasWatchConnected } = request;
 
   // Current plan schema version — bump this whenever the plan format changes in a way that
   // requires existing cached plans to be regenerated (e.g. new fields, prompt improvements).
@@ -764,7 +768,22 @@ export async function getOrGenerateSessionCoaching(
     aiRunnerProfile,       // "What I know about you" personalisation block
     // HR monitor availability — inferred from recent runs. If none of the last 5 runs have avgHR,
     // the athlete likely doesn't have an HR monitor and OpenAI should design pace/effort triggers instead.
-    hasHeartRateMonitor: recentRuns.some(r => r.avgHR && r.avgHR > 0),
+    // HR monitor availability:
+    //   • If Android passed hasWatchConnected explicitly → use that (most accurate signal).
+    //   • Otherwise fall back to historical inference: did any of the last 5 runs have avgHR?
+    hasHeartRateMonitor: hasWatchConnected !== undefined
+      ? hasWatchConnected
+      : recentRuns.some(r => r.avgHR && r.avgHR > 0),
+    // Primary session constraint — determines what the coaching plan is organised around.
+    // Rule:
+    //   • interval/walk_run with reps → "intervals" (rep-centric coaching)
+    //   • explicit target distance set → "distance" (km-split / distance-milestone coaching)
+    //   • no target distance but duration set → "duration" (time-milestone coaching)
+    primaryConstraint: (workout.intervalCount && workout.intervalCount > 0)
+      ? "intervals"
+      : (workout.distance && workout.distance > 0)
+        ? "distance"
+        : "duration",
     sessionIntent:    workout.sessionIntent ?? undefined,  // What this session is designed to achieve
     trainingWeekNumber,    // Current week in plan (e.g. 3) — sets tone and progression expectations
     trainingTotalWeeks,    // Total weeks in plan (e.g. 16)

@@ -345,10 +345,20 @@ export function registerSessionCoachingRoutes(app: Express) {
           return res.status(401).json({ error: "Unauthorized" });
         }
 
+        // hasWatchConnected — passed by Android when the user has a Garmin watch paired.
+        // Overrides the history-based HR-monitor inference so OpenAI knows for certain
+        // whether HR data will be available during this specific run.
+        // null/undefined → fall back to history inference (recentRuns.some(r => r.avgHR > 0))
+        const hasWatchConnected: boolean | undefined =
+          req.body?.hasWatchConnected === true ? true
+          : req.body?.hasWatchConnected === false ? false
+          : undefined;
+
         const plan = await getOrGenerateSessionCoaching({
           userId,
           plannedWorkoutId: workoutId,
           forceRegenerate,
+          hasWatchConnected,
         });
 
         return res.json({

@@ -5243,6 +5243,14 @@ export interface GenerateSessionCoachingParams {
   // HR monitor availability — inferred from whether recent runs have HR data.
   // When false, OpenAI should not design HR-based triggers (they will never fire).
   hasHeartRateMonitor?: boolean;
+  // Primary session constraint — tells OpenAI what the session is organised around.
+  //   "distance"  — target distance is the primary goal (e.g. "run 3.5 km"). Duration is an estimate.
+  //                 Coaching and triggers should be distance-centric: km splits, km milestones, end at target km.
+  //   "duration"  — target time is the primary goal (e.g. "run for 45 minutes"). No fixed distance end point.
+  //                 Coaching and triggers should be time-centric: time milestones, remaining time, end at elapsed_min.
+  //   "intervals" — session is structured around rep count (e.g. "6 × 3-min run, 1-min walk").
+  //                 Coaching and triggers should be rep-centric: rep counting, phase transitions, session end after last rep.
+  primaryConstraint: "distance" | "duration" | "intervals";
 }
 
 export interface SessionCoachingPlan {
@@ -5667,23 +5675,72 @@ Runner Profile:
     return lines.length > 0 ? `\nPer-Phase Targets:\n${lines.join("\n")}` : "";
   })();
 
+  // ── Primary constraint block ─────────────────────────────────────────────
+  // Tells OpenAI unambiguously what the session is organised around so it builds
+  // the right triggers, milestones, and pre-run brief framing.
+  const primaryConstraint = params.primaryConstraint ?? "duration";
+
+  const primaryConstraintBlock = (() => {
+    if (primaryConstraint === "intervals") {
+      return `
+PRIMARY SESSION STRUCTURE: INTERVAL / REPS
+The session is organised around rep count — NOT total distance or total time.
+- Design triggers and phases around rep progression (repNum, repsLeft, totalReps).
+- Phase transitions fire when each work/recovery rep completes.
+- The session ends after the final rep, not at a distance or elapsed-time threshold.
+- preRunBrief MUST state: number of reps, work duration/distance, recovery duration, and the target effort for the work phase.
+  Example: "Six 3-minute runs with a 1-minute walk in between. Keep the runs at a comfortable jog pace and use the walks to bring your heart rate back down."`;
+    }
+    if (primaryConstraint === "distance") {
+      const halfKm = (targetDistanceKm / 2).toFixed(1);
+      const paceHint = targetPaceMin
+        ? ` around ${formatPaceForPrompt(targetPaceMin)}–${formatPaceForPrompt(targetPaceMax)}/km`
+        : "";
+      return `
+PRIMARY SESSION STRUCTURE: DISTANCE-BASED
+The session is organised around reaching ${targetDistanceKm} km — this is the end point.
+- Design km-split feedback triggers that fire every 1 km with a short pace or effort summary (e.g. "1 km done, feeling good — keep that rhythm going").
+- Design distance milestone triggers: the 50% point (${halfKm} km) and the last 500 m.
+- The session ends when the athlete reaches ${targetDistanceKm} km. Use condition: "distance >= ${targetDistanceKm}".
+- Duration (${targetDurationMinutes} min) is an ESTIMATE only. Mention it in the preRunBrief as "should take around ${targetDurationMinutes} minutes" but DO NOT build time-based end triggers.
+- preRunBrief MUST lead with the target distance (${targetDistanceKm} km) as the primary goal, then mention the estimated time, the target pace or effort${targetHRMin ? `, and HR zone (${targetHRMin}–${targetHRMax} bpm)` : ""}.
+  Example framing: "We're heading out for a ${targetDistanceKm} km easy run — should take around ${targetDurationMinutes} minutes at a relaxed jog${paceHint}. Keep it comfortable the whole way."`;
+    }
+    // duration-primary
+    const halfMin = Math.round(targetDurationMinutes / 2);
+    return `
+PRIMARY SESSION STRUCTURE: TIME-BASED
+The session is organised around running for ${targetDurationMinutes} minutes — there is no fixed distance end point.
+- Design time milestone triggers every 10 minutes, at the halfway point (${halfMin} min), and with 5 minutes remaining.
+- The session ends when elapsed_min >= ${targetDurationMinutes}. Use condition: "elapsed_min >= ${targetDurationMinutes}".
+- Do NOT build distance-based end triggers.
+- preRunBrief MUST lead with the target duration (${targetDurationMinutes} minutes) as the primary goal, then mention the target effort/pace${targetHRMin ? ` and HR zone (${targetHRMin}–${targetHRMax} bpm)` : ""}.
+  Example framing: "Today is a ${targetDurationMinutes}-minute easy run — no fixed distance, just keep moving at a comfortable pace the whole time."`;
+  })();
+
   // Build session context — includes intent, training week, and last-session recovery awareness
   const sessionContext = `
 Session Details:
 - Type: ${sessionType}
 - Goal: ${sessionGoal}${sessionIntent ? `\n- Intent: ${sessionIntent}` : ""}
-- Target Duration: ${targetDurationMinutes} minutes
-- Target Distance: ${targetDistanceKm} km
+- Primary Metric: ${primaryConstraint === "intervals" ? "reps" : primaryConstraint} ← organise the plan, triggers, and preRunBrief around this
+- Target Distance: ${targetDistanceKm} km${primaryConstraint === "distance" ? " ← PRIMARY END POINT" : primaryConstraint === "intervals" ? "" : " (informational — no distance end trigger)"}
+- Target Duration: ${targetDurationMinutes} minutes${primaryConstraint === "duration" ? " ← PRIMARY END POINT" : " (estimate only — do not end session on elapsed time)"}
 - Overall Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
 - Overall HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm
 - Heart Rate Monitor: ${params.hasHeartRateMonitor === false ? "NOT AVAILABLE — do NOT design any hr-based trigger conditions, they will never fire. Use pace, cadence, elapsed time, and distance instead." : params.hasHeartRateMonitor === true ? "Available — HR data will be live during the run" : "Unknown"}${intervalContext}${perPhaseTargets}${trainingWeekContext}${recoveryContextNote}
+${primaryConstraintBlock}
 ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
 
   const systemPrompt = `You are ${coachName}, an AI running coach. You design live coaching plans that execute during a GPS training session.
 
 The plan runs in real time: a live engine evaluates your trigger conditions against the athlete's sensor data every second and fires your messages through text-to-speech the instant conditions are met.
 
-ONE REQUIRED OUTPUT: preRunBrief — a spoken summary the athlete hears before they start. Cover what they're about to do, their specific targets (pace, heart rate, distance/duration), and what to expect. This is the most important message in the plan. Make it feel like a personal coach talking directly to them.
+ONE REQUIRED OUTPUT: preRunBrief — a spoken summary the athlete hears before they start. It must reflect the PRIMARY SESSION STRUCTURE exactly:
+- Distance-based: lead with the target distance, mention the estimated time as a rough guide, name the target pace and/or HR zone. E.g. "We're off on a 3.5 km easy run — should take around 45 minutes at a light jog. Keep your heart rate between 110 and 130."
+- Time-based: lead with the duration, describe the effort level and any HR targets. E.g. "Today is a 45-minute easy jog — no fixed finish line, just keep it comfortable the whole way."
+- Interval/reps: lead with the rep structure, name work and recovery durations, describe target effort for each phase. E.g. "Six 3-minute runs with a 1-minute walk between each. Run easy, walk to recover."
+Make it feel like a personal coach talking directly to the athlete in the first person. 2–4 sentences max.
 
 Everything else — phases, triggers, conditions, messages — you design freely based on your coaching expertise.
 
@@ -5758,7 +5815,7 @@ Return ONLY valid JSON matching this schema exactly:
   "sessionGoal": "${sessionGoal}",
   "coachingTone": "calm|motivational|energetic|technical|supportive",
   "cueingStrategy": "interval|threshold|paced|freerun",
-  "preRunBrief": "2-4 sentence brief — name the specific structure, HR targets, what it should feel like. Speak directly to the athlete as 'you'.",
+  "preRunBrief": "2-4 sentences. For distance-based: lead with distance (${targetDistanceKm} km), mention estimated time (${targetDurationMinutes} min) as a rough guide, state pace and HR targets. For time-based: lead with duration (${targetDurationMinutes} min), state effort and HR targets. For intervals: lead with rep structure. Speak directly to the athlete.",
   "whyThisSession": "1-2 sentences — why this session matters for their specific goal",
   "phases": [
     {
