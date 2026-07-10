@@ -12737,7 +12737,7 @@ function transformRunForAndroid(run: any) {
         .where(eq(groupRuns.id, groupRunId));
 
       const updated = await storage.getGroupRun(groupRunId);
-      res.json(await buildGroupRunResponse(updated!, userId));
+      res.json(await buildGroupRunResponse(updated!.id, userId));
     } catch (error: any) {
       console.error("Start group run error:", error);
       res.status(500).json({ error: "Failed to start group run" });
