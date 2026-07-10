@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Running figure in grayscale - single color silhouette -->
+    <!-- This will be colored by the system based on the current theme -->
+
+    <!-- Head -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M 68,18 A 12,12 0 0,1 80,30 A 12,12 0 0,1 68,42 A 12,12 0 0,1 56,30 A 12,12 0 0,1 68,18 Z" />
+
+    <!-- Left arm (flowing) -->
+    <path
+        android:fillColor="#000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 58,42 Q 30,50 20,70" />
+
+    <!-- Right arm (flowing back) -->
+    <path
+        android:fillColor="#000000"
+        android:strokeColor="#000000"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 78,42 Q 75,48 80,65" />
+
+    <!-- Main body/torso - flowing curves -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M 62,45 Q 55,55 50,70 Q 48,80 52,95 L 64,95 Q 60,80 65,65 Q 70,52 75,45 Z" />
+
+    <!-- Left leg (flowing) -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M 52,95 Q 45,105 40,108 L 55,108 Q 58,102 60,95 Z" />
+
+    <!-- Right leg (flowing) -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M 64,95 Q 68,102 75,108 L 85,108 Q 78,102 72,95 Z" />
+
+    <!-- Motion lines on left side -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 35,60 Q 28,65 22,68" />
+
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 30,75 Q 22,80 15,85" />
+
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 40,85 Q 30,92 22,98" />
+
+</vector>

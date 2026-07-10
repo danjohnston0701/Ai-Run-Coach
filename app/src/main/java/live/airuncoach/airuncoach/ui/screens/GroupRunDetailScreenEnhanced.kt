@@ -35,6 +35,7 @@ fun GroupRunDetailScreenEnhanced(
     groupRunId: String,
     onNavigateBack: () -> Unit,
     onStartRun: (String) -> Unit,
+    onMarkReadyAndNavigate: (String) -> Unit = {},
     onViewResults: (String) -> Unit
 ) {
     val viewModel: GroupRunDetailViewModel = hiltViewModel()
@@ -126,7 +127,11 @@ fun GroupRunDetailScreenEnhanced(
                     actionError = actionError,
                     onAccept = { viewModel.respond(groupRunId, true) },
                     onDecline = { viewModel.respond(groupRunId, false) },
-                    onMarkReady = { viewModel.markReady(groupRunId) },
+                    onMarkReady = { 
+                        // Mark ready AND navigate to setup screen
+                        viewModel.markReady(groupRunId)
+                        onMarkReadyAndNavigate(groupRunId)
+                    },
                     onStartRun = { viewModel.startRun(groupRunId) },
                     onViewResults = { onViewResults(groupRunId) },
                     onInviteMore = { showInviteDialog = true },

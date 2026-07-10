@@ -2025,6 +2025,16 @@ function transformRunForAndroid(run: any) {
       const targetTime        = typeof runData.targetTime        === 'number'  ? runData.targetTime        : null;
       const wasTargetAchieved = typeof runData.wasTargetAchieved === 'boolean' ? runData.wasTargetAchieved : null;
 
+      // GROUP RUN LINK — explicitly extract so it is guaranteed to reach the INSERT even if
+      // Drizzle silently drops unknown keys from the spread.  This is the only reliable way
+      // to tie an individual run record to its parent group run in the database.
+      const groupRunId = typeof runData.groupRunId === 'string' && runData.groupRunId.length > 0
+        ? runData.groupRunId
+        : null;
+      if (groupRunId) {
+        console.log(`[POST /api/runs] Group run link — groupRunId: ${groupRunId}`);
+      }
+
       // NAMING MISMATCH FIX: Android sends maxInclinePercent/maxDeclinePercent but the
       // DB schema columns are named steepestIncline/steepestDecline.  The spread passes
       // the Android names, which Drizzle silently ignores.  Map explicitly here.
@@ -2179,6 +2189,12 @@ function transformRunForAndroid(run: any) {
             if (runData.linkedPlanId && !(existingByExternalId as any).linkedPlanId) {
               mergeFields.linkedPlanId = runData.linkedPlanId;
             }
+            // Group run link — always merge if incoming has it and existing doesn't.
+            // Critical: without this, a watch-run duplicate merge would lose the group run association.
+            if (groupRunId && !(existingByExternalId as any).groupRunId) {
+              mergeFields.groupRunId = groupRunId;
+              console.log(`[POST /api/runs] Case 0: merging groupRunId=${groupRunId} into run ${existingByExternalId.id}`);
+            }
 
             if (Object.keys(mergeFields).length > 0) {
               console.log(`[POST /api/runs] Merging ${Object.keys(mergeFields).join(', ')} into run ${existingByExternalId.id}`);
@@ -2262,6 +2278,11 @@ function transformRunForAndroid(run: any) {
           if (runData.paceData != null && (rapidDup as any).paceData == null) c1Merge.paceData = runData.paceData;
           // Struggle points
           if (runData.strugglePoints != null && (rapidDup as any).strugglePoints == null) c1Merge.strugglePoints = runData.strugglePoints;
+          // Group run link
+          if (groupRunId && !(rapidDup as any).groupRunId) {
+            c1Merge.groupRunId = groupRunId;
+            console.log(`[POST /api/runs] Case 1: merging groupRunId=${groupRunId} into run ${rapidDup.id}`);
+          }
 
           if (Object.keys(c1Merge).length > 0) {
             await db.update(runs).set(c1Merge).where(eq(runs.id, rapidDup.id));
@@ -2405,6 +2426,11 @@ function transformRunForAndroid(run: any) {
           if (runData.workoutDescription && !(garminDup as any).workoutDescription) c2Merge.workoutDescription = runData.workoutDescription;
           if (runData.planProgressWeek  && !(garminDup as any).planProgressWeek)  c2Merge.planProgressWeek  = runData.planProgressWeek;
           if (runData.planProgressWeeks && !(garminDup as any).planProgressWeeks) c2Merge.planProgressWeeks = runData.planProgressWeeks;
+          // Group run link — Garmin-created run won't have this; phone knows it
+          if (groupRunId && !(garminDup as any).groupRunId) {
+            c2Merge.groupRunId = groupRunId;
+            console.log(`[POST /api/runs] Case 2: merging groupRunId=${groupRunId} into run ${garminDup.id}`);
+          }
 
           if (Object.keys(c2Merge).length > 0) {
             await db.update(runs).set(c2Merge).where(eq(runs.id, garminDup.id));
@@ -2462,6 +2488,8 @@ function transformRunForAndroid(run: any) {
         startedAt,
         maxSpeed,
         totalSteps: totalSteps2,
+        // Group run link — must be explicit to survive the Drizzle type boundary
+        groupRunId,
         // Time-series arrays (graphs)
         heartRateData:            heartRateDataArr,
         cadenceData:              cadenceDataArr,
@@ -16033,20 +16061,12 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       const results = await Promise.all(
         participants.map(async p => {
-          let stats = null;
+          let runSession = null;
           if (p.runId) {
-            const [run] = await db.select({
-              distance: runs.distance, duration: runs.duration,
-              avgPace: runs.avgPace, avgHeartRate: runs.avgHeartRate, calories: runs.calories,
-              cadence: runs.cadence, elevationGain: runs.elevationGain,
-              completedAt: runs.completedAt,
-            }).from(runs).where(eq(runs.id, p.runId));
+            const [run] = await db.select().from(runs).where(eq(runs.id, p.runId));
             if (run) {
-              stats = {
-                distance: run.distance, duration: run.duration,
-                avgPace: run.avgPace, avgHeartRate: run.avgHeartRate, calories: run.calories,
-                avgCadence: run.cadence, totalElevationGain: run.elevationGain,
-              };
+              // Return the full run record so the client can display any stat it needs
+              runSession = run;
             }
           }
           return {
@@ -16054,9 +16074,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
             userName: p.name,
             profilePic: p.profilePic,
             runId: p.runId,
-            completedAt: null,
+            completedAt: runSession ? (runSession as any).completedAt ?? null : null,
             isCurrentUser: p.userId === userId,
-            stats,
+            runSession,
           };
         })
       );

@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,14 +36,14 @@ import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WatchSendState
-import live.airuncoach.airuncoach.ui.dialogs.FriendPickerDialog
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
-// import live.airuncoach.airuncoach.viewmodel.FriendsViewModel  // TODO: Uncomment when Live Share is enabled
-// import live.airuncoach.airuncoach.viewmodel.FriendsUiState  // TODO: Uncomment when Live Share is enabled
+import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
+import live.airuncoach.airuncoach.viewmodel.FriendsUiState
+import live.airuncoach.airuncoach.viewmodel.FriendsViewModelFactory
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
@@ -87,14 +88,11 @@ fun MapMyRunSetupScreen(
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
     var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
     
-    // For friend picker in Live Tracking
-    // TODO: Uncomment when Live Share is enabled
-    /*
+    // Load friends for group run invitations
     val friendsViewModel: FriendsViewModel = remember { 
-        FriendsViewModel(context)
+        FriendsViewModelFactory(context).create(FriendsViewModel::class.java)
     }
     val friendsState by friendsViewModel.friendsState.collectAsState()
-    */
 
     // Minor metadata
     var activityMode by remember { mutableStateOf(ActivityMode.RUN) }
@@ -285,12 +283,17 @@ fun MapMyRunSetupScreen(
 
             // Group Run only (Live Tracking hidden until iOS app launch)
             item {
+                val friendsList = when (friendsState) {
+                    is FriendsUiState.Success -> (friendsState as FriendsUiState.Success).friends
+                    else -> emptyList()
+                }
                 GroupRunSection(
                     groupRunEnabled = isGroupRunEnabled,
                     onToggleGroupRun = { isGroupRunEnabled = it },
                     groupRunParticipants = groupRunParticipants,
                     onParticipantsChanged = { groupRunParticipants = it },
-                    friends = emptyList() // Friends list not needed for now
+                    friends = friendsList,
+                    isLoadingFriends = friendsState is FriendsUiState.Loading
                 )
             }
 /*Hide AI Pre-Summary text
@@ -427,7 +430,7 @@ fun MapMyRunSetupScreen(
                                         !hasLocationPermission -> "GRANT"
                                         isGettingLocation -> "GPS…"
                                         currentLocation == null -> "WAITING"
-                                        else -> "PREPARE FOR\nPHONE"
+                                        else -> "PREPARE FOR PHONE"
                                     },
                                     leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                                         R.drawable.icon_navigation_vector else null,
@@ -1052,7 +1055,8 @@ private fun GroupRunSection(
     onToggleGroupRun: (Boolean) -> Unit,
     groupRunParticipants: List<String>,
     onParticipantsChanged: (List<String>) -> Unit,
-    friends: List<Friend>
+    friends: List<Friend>,
+    isLoadingFriends: Boolean = false
 ) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Text(
@@ -1083,7 +1087,8 @@ private fun GroupRunSection(
                         GroupRunParticipantSection(
                             participants = groupRunParticipants,
                             onParticipantsChanged = onParticipantsChanged,
-                            friends = friends
+                            friends = friends,
+                            isLoadingFriends = isLoadingFriends
                         )
                     }
                 }
@@ -1151,23 +1156,9 @@ private fun SocialRowToggle(
 private fun GroupRunParticipantSection(
     participants: List<String>,
     onParticipantsChanged: (List<String>) -> Unit,
-    friends: List<Friend>
+    friends: List<Friend>,
+    isLoadingFriends: Boolean = false
 ) {
-    var showFriendPicker by remember { mutableStateOf(false) }
-
-    // Friend picker dialog
-    if (showFriendPicker) {
-        FriendPickerDialog(
-            friends = friends,
-            onFriendsSelected = { selectedFriendIds ->
-                // Replace with the full selection from the dialog (already de-duped by Set)
-                onParticipantsChanged(selectedFriendIds)
-            },
-            onDismiss = { showFriendPicker = false },
-            initialSelected = participants  // Pre-check already-selected participants
-        )
-    }
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1181,72 +1172,120 @@ private fun GroupRunParticipantSection(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        // Add friends button
-        Button(
-            onClick = { showFriendPicker = !showFriendPicker },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(44.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Colors.backgroundTertiary.copy(alpha = 0.7f)
-            )
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.icon_people_vector),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = Colors.primary
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                "Add Friends",
-                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-                color = Colors.textPrimary
-            )
-        }
-
-        if (participants.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Display added participants
-            Column(
+        // Loading state
+        if (isLoadingFriends) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Colors.backgroundTertiary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .padding(Spacing.lg),
+                contentAlignment = Alignment.Center
             ) {
-                participants.forEach { participantId ->
-                    val participantName = friends.find { it.id == participantId }?.name ?: participantId
-                    
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = participantName,
-                            style = AppTextStyles.small,
-                            color = Colors.textPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = {
-                                onParticipantsChanged(participants.filter { it != participantId })
-                            },
-                            modifier = Modifier.size(24.dp)
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Colors.primary)
+            }
+        } else if (friends.isEmpty()) {
+            // No friends message
+            Text(
+                text = "No friends yet — add friends from the Profile page!",
+                style = AppTextStyles.small,
+                color = Colors.textMuted,
+                modifier = Modifier.padding(vertical = Spacing.md)
+            )
+        } else {
+            // Scrollable friends list with checkboxes (similar to CreateGroupRunScreen)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 300.dp)
+                    .background(Colors.backgroundTertiary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(friends.size) { index ->
+                        val friend = friends[index]
+                        val isSelected = friend.id in participants
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onParticipantsChanged(
+                                        if (isSelected) {
+                                            participants.filter { it != friend.id }
+                                        } else {
+                                            participants + friend.id
+                                        }
+                                    )
+                                }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.icon_close_vector),
-                                contentDescription = "Remove",
-                                tint = Colors.textMuted,
-                                modifier = Modifier.size(16.dp)
+                            // Checkbox
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    onParticipantsChanged(
+                                        if (checked) {
+                                            participants + friend.id
+                                        } else {
+                                            participants.filter { it != friend.id }
+                                        }
+                                    )
+                                },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Colors.primary,
+                                    uncheckedColor = Colors.primary.copy(alpha = 0.5f)
+                                )
                             )
+
+                            // Avatar placeholder
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Colors.primary.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    friend.name.firstOrNull()?.uppercaseChar().toString(),
+                                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                    color = Colors.primary
+                                )
+                            }
+
+                            // Friend name and fitness level
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    friend.name,
+                                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Colors.textPrimary
+                                )
+                                friend.fitnessLevel?.let { level ->
+                                    Text(
+                                        level,
+                                        style = AppTextStyles.small,
+                                        color = Colors.textMuted
+                                    )
+                                }
+                            }
                         }
                     }
                 }
+            }
+
+            // Selected count summary
+            if (participants.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "${participants.size} friend${if (participants.size != 1) "s" else ""} selected",
+                    style = AppTextStyles.small,
+                    color = Colors.primary,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }

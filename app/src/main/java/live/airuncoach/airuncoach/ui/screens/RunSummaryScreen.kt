@@ -742,22 +742,8 @@ private fun GroupRunLeaderboardTab(
     onRequestDebrief: () -> Unit = {},
     hasDynamicsTab: Boolean = false,
 ) {
-    // Track which stat the user wants to sort by
-    var activeFilter by remember { mutableStateOf("Pace") }
-    val filters = listOf("Pace", "Time", "Cadence", "HR", "Elevation")
-
-    // Sort results based on the active filter
-    val sortedResults = remember(results, activeFilter) {
-        val list = results?.results ?: emptyList()
-        when (activeFilter) {
-            "Pace"      -> list.sortedWith(compareBy(nullsLast()) { it.stats?.avgPace })
-            "Time"      -> list.sortedWith(compareBy(nullsLast()) { it.stats?.duration })
-            "Cadence"   -> list.sortedWith(compareByDescending(nullsFirst()) { it.stats?.avgCadence })
-            "HR"        -> list.sortedWith(compareBy(nullsLast()) { it.stats?.avgHeartRate })
-            "Elevation" -> list.sortedWith(compareByDescending(nullsFirst()) { it.stats?.totalElevationGain })
-            else        -> list
-        }
-    }
+    var activeMetricTab by remember { mutableStateOf(0) }
+    val metricTabs = listOf("Summary", "Pace", "SPM", "Elevation", "HR")
 
     LazyColumn(
         modifier = Modifier
@@ -785,7 +771,7 @@ private fun GroupRunLeaderboardTab(
                         color = Colors.textPrimary
                     )
                     Text(
-                        text = "Leaderboard",
+                        text = "Results",
                         style = AppTextStyles.small,
                         color = Colors.textMuted
                     )
@@ -793,7 +779,7 @@ private fun GroupRunLeaderboardTab(
                 IconButton(onClick = onRefresh) {
                     Icon(
                         Icons.Default.Refresh,
-                        contentDescription = "Refresh leaderboard",
+                        contentDescription = "Refresh results",
                         tint = Colors.primary
                     )
                 }
@@ -804,7 +790,6 @@ private fun GroupRunLeaderboardTab(
         item {
             when {
                 debrief != null -> {
-                    // Show the debrief text
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -857,7 +842,6 @@ private fun GroupRunLeaderboardTab(
                     }
                 }
                 else -> {
-                    // Show "Get AI Debrief" button
                     OutlinedButton(
                         onClick = onRequestDebrief,
                         modifier = Modifier.fillMaxWidth(),
@@ -877,7 +861,7 @@ private fun GroupRunLeaderboardTab(
             }
         }
 
-        // ── Stat filter chips ──────────────────────────────────────────────────
+        // ── Metric tabs ────────────────────────────────────────────────────────
         item {
             Row(
                 modifier = Modifier
@@ -885,20 +869,20 @@ private fun GroupRunLeaderboardTab(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                filters.forEach { filter ->
-                    val isActive = filter == activeFilter
+                metricTabs.forEachIndexed { index, tab ->
+                    val isActive = index == activeMetricTab
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(
                                 if (isActive) Colors.primary else Colors.backgroundSecondary
                             )
-                            .clickable { activeFilter = filter }
+                            .clickable { activeMetricTab = index }
                             .padding(horizontal = Spacing.md, vertical = 6.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = filter,
+                            text = tab,
                             style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
                             color = if (isActive) Color.White else Colors.textSecondary
                         )
@@ -917,7 +901,7 @@ private fun GroupRunLeaderboardTab(
                     CircularProgressIndicator(color = Colors.primary)
                 }
             }
-        } else if (sortedResults.isEmpty()) {
+        } else if (results?.results.isNullOrEmpty()) {
             item {
                 Box(
                     modifier = Modifier
@@ -935,133 +919,205 @@ private fun GroupRunLeaderboardTab(
                 }
             }
         } else {
-            // ── Leaderboard rows ───────────────────────────────────────────────
-            itemsIndexed(sortedResults) { index, participant ->
-                GroupRunLeaderboardRow(
-                    rank = index + 1,
-                    participant = participant,
-                    activeFilter = activeFilter
-                )
+            // ── Results table based on active metric tab ────────────────────────
+            item {
+                when (activeMetricTab) {
+                    0 -> GroupRunSummaryTable(results?.results ?: emptyList())
+                    1 -> GroupRunPaceTable(results?.results ?: emptyList())
+                    2 -> GroupRunSpmTable(results?.results ?: emptyList())
+                    3 -> GroupRunElevationTable(results?.results ?: emptyList())
+                    4 -> GroupRunHrTable(results?.results ?: emptyList())
+                }
+            }
+        }
+    }
+}
+
+// ── Group Run Results Tables ────────────────────────────────────────────────
+
+@Composable
+private fun GroupRunSummaryTable(participants: List<GroupRunParticipantResult>) {
+    // Sort by fastest time (shortest duration)
+    val sortedParticipants = participants.sortedBy { it.runSession?.duration ?: Long.MAX_VALUE }
+    GroupRunResultsTable(
+        participants = sortedParticipants,
+        columns = listOf(
+            GroupRunColumn("Name\nTime", 110.dp) { p -> GroupRunNameTimeCell(p) },
+            GroupRunColumn("Avg Pace", 90.dp) { p -> TextCell(p.runSession?.averagePace?.let { "$it/km" } ?: "—") },
+            GroupRunColumn("Avg HR", 80.dp)    { p -> TextCell(p.runSession?.heartRate?.takeIf { it > 0 }?.let { "$it bpm" } ?: "—") },
+            GroupRunColumn("Cadence", 80.dp)   { p -> TextCell(p.runSession?.cadence?.takeIf { it > 0 }?.let { "$it spm" } ?: "—") },
+            GroupRunColumn("Elev Gain", 90.dp) { p -> TextCell(p.runSession?.totalElevationGain?.takeIf { it > 0 }?.let { String.format(Locale.US, "+%.0f m", it) } ?: "—") }
+        )
+    )
+}
+
+@Composable
+private fun GroupRunPaceTable(participants: List<GroupRunParticipantResult>) {
+    val sortedParticipants = participants.sortedBy { it.runSession?.averagePace }
+    GroupRunResultsTable(
+        participants = sortedParticipants,
+        columns = listOf(
+            GroupRunColumn("Name\nTime", 110.dp) { p -> GroupRunNameTimeCell(p) },
+            GroupRunColumn("Avg Pace", 90.dp)    { p -> TextCell(p.runSession?.averagePace?.let { "$it/km" } ?: "—") },
+            GroupRunColumn("Distance", 90.dp)    { p -> TextCell(p.runSession?.distance?.let { String.format(Locale.US, "%.2f km", it / 1000.0) } ?: "—") },
+            GroupRunColumn("Calories", 80.dp)    { p -> TextCell(p.runSession?.calories?.takeIf { it > 0 }?.let { "$it kcal" } ?: "—") }
+        )
+    )
+}
+
+@Composable
+private fun GroupRunSpmTable(participants: List<GroupRunParticipantResult>) {
+    val sortedParticipants = participants.sortedByDescending { it.runSession?.cadence }
+    GroupRunResultsTable(
+        participants = sortedParticipants,
+        columns = listOf(
+            GroupRunColumn("Name\nTime", 110.dp) { p -> GroupRunNameTimeCell(p) },
+            GroupRunColumn("Avg SPM", 90.dp)     { p -> TextCell(p.runSession?.cadence?.takeIf { it > 0 }?.let { "$it spm" } ?: "—") },
+            GroupRunColumn("Max SPM", 90.dp)     { p -> TextCell(p.runSession?.maxCadence?.let { "$it spm" } ?: "—") },
+            GroupRunColumn("Avg Pace", 80.dp)    { p -> TextCell(p.runSession?.averagePace?.let { "$it/km" } ?: "—") }
+        )
+    )
+}
+
+@Composable
+private fun GroupRunElevationTable(participants: List<GroupRunParticipantResult>) {
+    val sortedParticipants = participants.sortedByDescending { it.runSession?.totalElevationGain }
+    GroupRunResultsTable(
+        participants = sortedParticipants,
+        columns = listOf(
+            GroupRunColumn("Name\nTime", 110.dp) { p -> GroupRunNameTimeCell(p) },
+            GroupRunColumn("Elev Gain", 90.dp)   { p -> TextCell(p.runSession?.totalElevationGain?.takeIf { it > 0 }?.let { String.format(Locale.US, "+%.0f m", it) } ?: "—") },
+            GroupRunColumn("Elev Loss", 90.dp)   { p -> TextCell(p.runSession?.totalElevationLoss?.takeIf { it > 0 }?.let { String.format(Locale.US, "−%.0f m", it) } ?: "—") },
+            GroupRunColumn("Avg Pace", 80.dp)    { p -> TextCell(p.runSession?.averagePace?.let { "$it/km" } ?: "—") }
+        )
+    )
+}
+
+@Composable
+private fun GroupRunHrTable(participants: List<GroupRunParticipantResult>) {
+    val sortedParticipants = participants.sortedBy { it.runSession?.heartRate?.takeIf { hr -> hr > 0 } ?: Int.MAX_VALUE }
+    GroupRunResultsTable(
+        participants = sortedParticipants,
+        columns = listOf(
+            GroupRunColumn("Name\nTime", 110.dp) { p -> GroupRunNameTimeCell(p) },
+            GroupRunColumn("Avg HR", 80.dp)      { p -> TextCell(p.runSession?.heartRate?.takeIf { it > 0 }?.let { "$it bpm" } ?: "—") },
+            GroupRunColumn("Min HR", 80.dp)      { p -> TextCell(p.runSession?.minHeartRate?.let { "$it bpm" } ?: "—") },
+            GroupRunColumn("Avg Pace", 80.dp)    { p -> TextCell(p.runSession?.averagePace?.let { "$it/km" } ?: "—") }
+        )
+    )
+}
+
+data class GroupRunColumn(
+    val title: String,
+    val width: Dp,
+    val content: @Composable (GroupRunParticipantResult) -> Unit
+)
+
+@Composable
+private fun GroupRunResultsTable(
+    participants: List<GroupRunParticipantResult>,
+    columns: List<GroupRunColumn>
+) {
+    // Single shared scroll state so header + all rows scroll in sync
+    val sharedScrollState = rememberScrollState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundSecondary, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+    ) {
+        // Header row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(sharedScrollState)
+                .padding(Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            columns.forEach { column ->
+                Box(modifier = Modifier.width(column.width)) {
+                    Text(
+                        text = column.title,
+                        style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = Colors.border.copy(alpha = 0.2f), thickness = 1.dp)
+
+        // Data rows
+        participants.forEachIndexed { index, participant ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(sharedScrollState)
+                    .background(
+                        if (participant.isCurrentUser)
+                            Colors.primary.copy(alpha = 0.12f)
+                        else if (index % 2 == 0)
+                            Colors.backgroundRoot
+                        else
+                            Colors.backgroundSecondary
+                    )
+                    .padding(Spacing.md),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                columns.forEach { column ->
+                    Box(modifier = Modifier.width(column.width)) {
+                        column.content(participant)
+                    }
+                }
+            }
+            if (index < participants.size - 1) {
+                HorizontalDivider(color = Colors.border.copy(alpha = 0.1f), thickness = 0.5.dp)
             }
         }
     }
 }
 
 @Composable
-private fun GroupRunLeaderboardRow(
-    rank: Int,
-    participant: GroupRunParticipantResult,
-    activeFilter: String,
-) {
-    val rankEmoji = when (rank) {
-        1 -> "🥇"
-        2 -> "🥈"
-        3 -> "🥉"
-        else -> "#$rank"
-    }
-    val isCurrentUser = participant.isCurrentUser
-    val statValue: String = when (activeFilter) {
-        "Pace"      -> participant.stats?.avgPace?.let { "$it/km" } ?: "—"
-        "Time"      -> participant.stats?.duration?.let { ms ->
-            val totalSec = ms / 1000
-            val h = totalSec / 3600
-            val m = (totalSec % 3600) / 60
-            val s = totalSec % 60
-            if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
-            else String.format(Locale.US, "%d:%02d", m, s)
-        } ?: "—"
-        "Cadence"   -> participant.stats?.avgCadence?.let { "$it spm" } ?: "—"
-        "HR"        -> participant.stats?.avgHeartRate?.let { "$it bpm" } ?: "—"
-        "Elevation" -> participant.stats?.totalElevationGain?.let {
-            String.format(Locale.US, "+%.0f m", it)
-        } ?: "—"
-        else -> "—"
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isCurrentUser)
-                Colors.primary.copy(alpha = 0.12f)
-            else
-                Colors.backgroundSecondary
-        ),
-        border = if (isCurrentUser) BorderStroke(1.5.dp, Colors.primary.copy(alpha = 0.4f)) else null
+private fun GroupRunNameTimeCell(participant: GroupRunParticipantResult) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-        ) {
-            // Rank badge
-            Text(
-                text = rankEmoji,
-                style = AppTextStyles.h3,
-                modifier = Modifier.widthIn(min = 40.dp)
-            )
-
-            // Avatar / initials
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Colors.primary.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = participant.userName.take(1).uppercase(),
-                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.primary
-                )
-            }
-
-            // Name + YOU label
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = participant.userName,
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-                        color = Colors.textPrimary,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                    if (isCurrentUser) {
-                        Box(
-                            modifier = Modifier
-                                .background(Colors.primary, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 5.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "YOU",
-                                style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
-                if (participant.stats == null) {
-                    Text(
-                        text = "Still running…",
-                        style = AppTextStyles.small,
-                        color = Colors.textMuted
-                    )
-                }
-            }
-
-            // Active stat value
-            Text(
-                text = statValue,
-                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                color = if (isCurrentUser) Colors.primary else Colors.textPrimary
-            )
-        }
+        Text(
+            text = participant.userName,
+            style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+            color = if (participant.isCurrentUser) Colors.primary else Colors.textPrimary,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+        Text(
+            text = participant.runSession?.duration?.let { ms ->
+                val totalSec = ms / 1000
+                val h = totalSec / 3600
+                val m = (totalSec % 3600) / 60
+                val s = totalSec % 60
+                if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
+                else String.format(Locale.US, "%d:%02d", m, s)
+            } ?: "Running…",
+            style = AppTextStyles.small,
+            color = Colors.textSecondary
+        )
     }
+}
+
+@Composable
+private fun TextCell(value: String) {
+    Text(
+        text = value,
+        style = AppTextStyles.small,
+        color = Colors.textPrimary,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 /* ------------------------------- TAB: AI INSIGHTS ------------------------------ */

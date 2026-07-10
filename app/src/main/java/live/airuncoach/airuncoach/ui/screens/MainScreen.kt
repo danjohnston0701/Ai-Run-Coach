@@ -1266,11 +1266,47 @@ fun MainScreen(
                     groupRunId = groupRunId,
                     onNavigateBack = { navController.popBackStack() },
                     onStartRun = { grId ->
-                        // Navigate to run session with group run context
-                        navController.navigate("run_session/group/$grId")
+                        // Organizer: Navigate to group run setup screen first (not directly to session)
+                        navController.navigate("group_run_setup/$grId")
+                    },
+                    onMarkReadyAndNavigate = { grId ->
+                        // Participant: Navigate to group run setup screen after marking ready
+                        navController.navigate("group_run_setup/$grId")
                     },
                     onViewResults = { grId ->
                         navController.navigate("group_run_results/$grId")
+                    }
+                )
+            }
+            
+            // ── Group Run Setup Screen ──────────────────────────────────────
+            // Allow users to configure run settings before starting group run
+            composable("group_run_setup/{groupRunId}") { backStackEntry ->
+                val groupRunId = backStackEntry.arguments?.getString("groupRunId") ?: return@composable
+                MapMyRunSetupScreen(
+                    mode = "no_route",
+                    onNavigateBack = { navController.popBackStack() },
+                    onGenerateRoute = { _, _, _, _, _, _, _, _, _, _ ->
+                        // Group runs don't support route generation - ignore this callback
+                    },
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _ ->
+                        // Create RunSetupConfig with group run context
+                        val config = RunSetupConfig(
+                            activityType = PhysicalActivityType.RUN,
+                            targetDistance = distance,
+                            hasTargetTime = hasTime,
+                            targetHours = hours,
+                            targetMinutes = minutes,
+                            targetSeconds = seconds,
+                            liveTrackingEnabled = liveTrackingEnabled,
+                            liveTrackingObservers = liveTrackingObservers,
+                            isGroupRun = true,
+                            groupRunParticipants = emptyList() // Filled by run session
+                        )
+                        RunConfigHolder.setConfig(config)
+                        navController.navigate("run_session/group/$groupRunId") {
+                            popUpTo("group_run_setup/{groupRunId}") { inclusive = true }
+                        }
                     }
                 )
             }
@@ -1288,6 +1324,12 @@ fun MainScreen(
             composable("personal_details") {
                 PersonalDetailsScreen(
                     onNavigateBack = { navController.popBackStack() },
+                    onNavigateToInjuries = {
+                        // User has injuries - navigate to injury onboarding
+                        navController.navigate("injury_onboarding") {
+                            popUpTo("personal_details") { inclusive = true }
+                        }
+                    },
                     onNavigateToCoachSettings = {
                         // During onboarding, insert fitness level step before coach settings
                         navController.navigate("fitness_level_onboarding") {
@@ -1296,6 +1338,21 @@ fun MainScreen(
                     }
                 )
             }
+            
+            // ── Injury Onboarding Screen ────────────────────────────────────────
+            // Shown during onboarding if user indicates they have injuries
+            composable("injury_onboarding") {
+                InjuryOnboardingScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToFitnessLevel = {
+                        // After injuries, proceed to fitness level
+                        navController.navigate("fitness_level_onboarding") {
+                            popUpTo("injury_onboarding") { inclusive = true }
+                        }
+                    }
+                )
+            }
+            
             // Onboarding-specific fitness level screen — continues to coach settings on save
             composable("fitness_level_onboarding") {
                 FitnessLevelScreen(

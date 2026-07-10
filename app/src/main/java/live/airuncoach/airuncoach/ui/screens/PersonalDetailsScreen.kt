@@ -61,27 +61,21 @@ class DateOfBirthTransformation : VisualTransformation {
 private class DateOffsetMapping(private val digitsOnly: String) : OffsetMapping {
     override fun originalToTransformed(offset: Int): Int {
         // Map cursor position from digits-only to formatted
-        var digitCount = 0
-        var formattedPosition = 0
-        val maxOffset = minOf(offset, digitsOnly.length)
-
-        for (i in 0 until maxOffset) {
-            digitCount++
-            formattedPosition = when (digitCount) {
-                2 -> 3 // Position after "dd/"
-                4 -> 6 // Position after "dd/mm/"
-                else -> i + (digitCount / 2)
-            }
+        // offset is the position in the digits-only string
+        val clampedOffset = minOf(offset, digitsOnly.length)
+        
+        return when {
+            clampedOffset <= 2 -> clampedOffset
+            clampedOffset <= 4 -> clampedOffset + 1 // Add 1 for the first "/"
+            else -> clampedOffset + 2 // Add 2 for both "/" characters
         }
-
-        return formattedPosition
     }
 
     override fun transformedToOriginal(offset: Int): Int {
         // Map cursor position from formatted to digits-only
-        // This counts how many digits appear before this position in the formatted string
+        // offset is the position in the formatted string (with slashes)
         var digitCount = 0
-        for (i in 0 until minOf(offset, offset)) {
+        for (i in 0 until minOf(offset, 10)) { // Max length of "dd/mm/yyyy" is 10
             when (i) {
                 2, 5 -> {} // Skip slashes
                 else -> digitCount++
@@ -95,6 +89,7 @@ private class DateOffsetMapping(private val digitsOnly: String) : OffsetMapping 
 @Composable
 fun PersonalDetailsScreen(
     onNavigateBack: () -> Unit = {},
+    onNavigateToInjuries: () -> Unit = {},
     onNavigateToCoachSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -108,6 +103,7 @@ fun PersonalDetailsScreen(
     val height by viewModel.height.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     var showGenderMenu by remember { mutableStateOf(false) }
+    var hasInjuries by remember { mutableStateOf<Boolean?>(null) }
     
     val genderOptions = listOf("Male", "Female", "Non-binary", "Prefer not to say")
 
@@ -128,7 +124,9 @@ fun PersonalDetailsScreen(
         bottomBar = {
             // Sticky save button at the bottom
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
                 color = Colors.backgroundRoot,
                 shadowElevation = 8.dp
             ) {
@@ -136,12 +134,17 @@ fun PersonalDetailsScreen(
                     onClick = {
                         coroutineScope.launch {
                             viewModel.saveDetails()
-                            // Clear profile setup flag and navigate accordingly
-                            sessionManager.setNeedsProfileSetup(false)
-                            if (sessionManager.needsCoachSetup()) {
-                                onNavigateToCoachSettings()
+                            // If user has injuries, go to injury logging
+                            if (hasInjuries == true) {
+                                onNavigateToInjuries()
                             } else {
-                                onNavigateBack()
+                                // Clear profile setup flag and navigate accordingly
+                                sessionManager.setNeedsProfileSetup(false)
+                                if (sessionManager.needsCoachSetup()) {
+                                    onNavigateToCoachSettings()
+                                } else {
+                                    onNavigateBack()
+                                }
                             }
                         }
                     },
@@ -150,7 +153,9 @@ fun PersonalDetailsScreen(
                         .padding(horizontal = Spacing.lg, vertical = Spacing.md)
                         .height(50.dp),
                     shape = RoundedCornerShape(BorderRadius.lg),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                    // Require the user to explicitly choose Yes or No before saving
+                    enabled = hasInjuries != null
                 ) {
                     Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
                 }
@@ -162,6 +167,7 @@ fun PersonalDetailsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
+                .imePadding() // Add padding when keyboard appears
                 .padding(bottom = Spacing.lg) // Add bottom padding so content doesn't hide behind button
         ) {
             item {
@@ -306,6 +312,49 @@ fun PersonalDetailsScreen(
                         unfocusedBorderColor = Colors.textMuted
                     )
                 )
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+            item {
+                SectionTitle(title = "Health & Injuries")
+                Text(
+                    "Do you have any injuries or medical conditions your AI Coach needs to be aware of?",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    Button(
+                        onClick = { hasInjuries = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (hasInjuries == true) Colors.primary else Colors.backgroundSecondary,
+                            contentColor = if (hasInjuries == true) Colors.buttonText else Colors.textPrimary
+                        ),
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        border = if (hasInjuries != true) androidx.compose.foundation.BorderStroke(1.dp, Colors.border) else null
+                    ) {
+                        Text("Yes", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold))
+                    }
+                    Button(
+                        onClick = { hasInjuries = false },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (hasInjuries == false) Colors.primary else Colors.backgroundSecondary,
+                            contentColor = if (hasInjuries == false) Colors.buttonText else Colors.textPrimary
+                        ),
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        border = if (hasInjuries != false) androidx.compose.foundation.BorderStroke(1.dp, Colors.border) else null
+                    ) {
+                        Text("No", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold))
+                    }
+                }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
         }

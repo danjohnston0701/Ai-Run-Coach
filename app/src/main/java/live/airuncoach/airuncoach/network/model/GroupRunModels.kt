@@ -2,6 +2,7 @@ package live.airuncoach.airuncoach.network.model
 
 import com.google.gson.annotations.SerializedName
 import live.airuncoach.airuncoach.domain.model.GroupRun
+import live.airuncoach.airuncoach.domain.model.RunSession
 
 /** Wrapper returned by GET /api/group-runs */
 data class GroupRunsResponse(
@@ -45,6 +46,15 @@ data class GroupRunResultsResponse(
     @SerializedName("results") val results: List<GroupRunParticipantResult>
 )
 
+/**
+ * A single participant's result in a group run.
+ *
+ * [runSession] is the participant's full RunSession record, populated by the backend by
+ * joining the group run participant list with the individual run documents.
+ * This replaces the old [stats] summary object — we use the real run record so the table
+ * can display all the same rich metrics as the individual run history (pace, HR, cadence,
+ * elevation gain/loss, calories, etc.) without duplicating any fields.
+ */
 data class GroupRunParticipantResult(
     @SerializedName("userId") val userId: String,
     @SerializedName("userName") val userName: String,
@@ -52,17 +62,8 @@ data class GroupRunParticipantResult(
     @SerializedName("runId") val runId: String?,
     @SerializedName("completedAt") val completedAt: String?,
     @SerializedName("isCurrentUser") val isCurrentUser: Boolean,
-    @SerializedName("stats") val stats: GroupRunStats?
-)
-
-data class GroupRunStats(
-    @SerializedName("distance") val distance: Double,
-    @SerializedName("duration") val duration: Int,
-    @SerializedName("avgPace") val avgPace: String?,
-    @SerializedName("avgHeartRate") val avgHeartRate: Int?,
-    @SerializedName("calories") val calories: Int?,
-    @SerializedName("avgCadence") val avgCadence: Int? = null,
-    @SerializedName("totalElevationGain") val totalElevationGain: Double? = null
+    /** Full run record — backend should populate by looking up the run by [runId]. */
+    @SerializedName("runSession") val runSession: RunSession?
 )
 
 /** GET /api/group-runs/by-run/:runId — look up which group run a specific run belongs to */

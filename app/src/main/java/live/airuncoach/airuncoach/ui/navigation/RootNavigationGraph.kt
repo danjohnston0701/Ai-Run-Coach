@@ -12,11 +12,14 @@ import live.airuncoach.airuncoach.data.SessionManager
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import live.airuncoach.airuncoach.ui.screens.AiConsentScreen
+import live.airuncoach.airuncoach.ui.screens.FitnessLevelScreen
 import live.airuncoach.airuncoach.ui.screens.ForgotPasswordScreen
 import live.airuncoach.airuncoach.ui.screens.GarminWatchUpdateScreen
+import live.airuncoach.airuncoach.ui.screens.InjuryOnboardingScreen
 import live.airuncoach.airuncoach.ui.screens.LoginScreen
 import live.airuncoach.airuncoach.ui.screens.SignUpScreen
 import live.airuncoach.airuncoach.ui.screens.LocationPermissionScreen
+import live.airuncoach.airuncoach.ui.screens.PermissionsAndConsentsScreen
 import live.airuncoach.airuncoach.ui.screens.MainScreen
 import live.airuncoach.airuncoach.ui.screens.PersonalDetailsScreen
 import live.airuncoach.airuncoach.ui.screens.CoachSettingsScreen
@@ -81,15 +84,26 @@ fun RootNavigationGraph(navController: NavHostController) {
                     navController.popBackStack()
                 },
                 onNavigateToProfile = {
-                    // New user: must do permissions FIRST before profile setup
-                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                    // New user: must do permissions & consents FIRST before profile setup
+                    navController.navigate("permissions_and_consents") {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 },
                 onNavigateToCoachSettings = {
-                    // User completed profile: must do permissions FIRST if not already done
-                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                    // User completed profile: must do permissions & consents FIRST if not already done
+                    navController.navigate("permissions_and_consents") {
                         popUpTo("sign_up") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("permissions_and_consents") {
+            PermissionsAndConsentsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToPersonalDetails = {
+                    navController.navigate("personal_details") {
+                        popUpTo("permissions_and_consents") { inclusive = true }
                     }
                 }
             )
@@ -158,11 +172,40 @@ fun RootNavigationGraph(navController: NavHostController) {
         composable("personal_details") {
             PersonalDetailsScreen(
                 onNavigateBack = { navController.popBackStack() },
+                onNavigateToInjuries = {
+                    navController.navigate("injury_onboarding") {
+                        popUpTo("personal_details") { inclusive = true }
+                    }
+                },
                 onNavigateToCoachSettings = {
-                    navController.navigate("coach_settings") {
+                    // No injuries — proceed to fitness level first
+                    navController.navigate("fitness_level_onboarding") {
                         popUpTo("personal_details") { inclusive = true }
                     }
                 }
+            )
+        }
+
+        composable("injury_onboarding") {
+            InjuryOnboardingScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToFitnessLevel = {
+                    navController.navigate("fitness_level_onboarding") {
+                        popUpTo("injury_onboarding") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("fitness_level_onboarding") {
+            FitnessLevelScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateNext = {
+                    navController.navigate("coach_settings") {
+                        popUpTo("fitness_level_onboarding") { inclusive = true }
+                    }
+                },
+                isOnboarding = true
             )
         }
 
