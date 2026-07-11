@@ -60,7 +60,7 @@ fun EmailVerificationScreen(
     // Auto-submit when 6 digits entered
     LaunchedEffect(otp) {
         if (otp.length == 6) {
-            viewModel.verifyEmail(otp)
+            viewModel.verifyEmail(otp, displayEmail)
         }
     }
 
@@ -257,7 +257,7 @@ fun EmailVerificationScreen(
 
             // Verify button
             Button(
-                onClick = { viewModel.verifyEmail(otp) },
+                onClick = { viewModel.verifyEmail(otp, displayEmail) },
                 enabled = otp.length == 6 && !loginState.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -300,7 +300,7 @@ fun EmailVerificationScreen(
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.primary,
                         modifier = Modifier.clickable {
-                            viewModel.resendVerificationEmail()
+                            viewModel.resendVerificationEmail(displayEmail)
                             otp = ""
                             resendCooldown = 60
                         }

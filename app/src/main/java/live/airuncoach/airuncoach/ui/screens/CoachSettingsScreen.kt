@@ -100,11 +100,13 @@ fun CoachSettingsScreen(
             )
         },
         containerColor = Colors.backgroundRoot,
-        contentWindowInsets = WindowInsets(0), // outer Scaffold already applies nav bar insets
         bottomBar = {
-            // Sticky save button at the bottom
+            // Sticky save button at the bottom — navigationBarsPadding() ensures it
+            // sits above the gesture/button nav bar on all devices
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
                 color = Colors.backgroundRoot,
                 shadowElevation = 8.dp
             ) {

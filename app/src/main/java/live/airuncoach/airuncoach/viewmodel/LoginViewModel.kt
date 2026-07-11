@@ -395,11 +395,12 @@ class LoginViewModel @Inject constructor(
      * Verify the 6-digit OTP entered by the user after registration.
      * On success, saves the session and marks login as successful.
      */
-    fun verifyEmail(otp: String) {
+    fun verifyEmail(otp: String, emailOverride: String? = null) {
         viewModelScope.launch {
             _loginState.update { it.copy(isLoading = true, error = null) }
             try {
-                val email = _loginState.value.pendingVerificationEmail
+                val email = emailOverride?.takeIf { it.isNotBlank() }
+                    ?: _loginState.value.pendingVerificationEmail
                 val response = apiService.verifyEmail(
                     live.airuncoach.airuncoach.network.model.VerifyEmailRequest(email = email, otp = otp.trim())
                 )
@@ -445,11 +446,12 @@ class LoginViewModel @Inject constructor(
     /**
      * Resend a fresh OTP to the user's email (called from the verification screen).
      */
-    fun resendVerificationEmail() {
+    fun resendVerificationEmail(emailOverride: String? = null) {
         viewModelScope.launch {
             _loginState.update { it.copy(isLoading = true, error = null) }
             try {
-                val email = _loginState.value.pendingVerificationEmail
+                val email = emailOverride?.takeIf { it.isNotBlank() }
+                    ?: _loginState.value.pendingVerificationEmail
                 apiService.resendVerification(
                     live.airuncoach.airuncoach.network.model.ResendVerificationRequest(email = email)
                 )
