@@ -20,3 +20,12 @@ data class ForgotPasswordResponse(
     val ok: Boolean? = null,
     val error: String? = null
 )
+
+data class VerifyEmailRequest(
+    val email: String,
+    val otp: String
+)
+
+data class ResendVerificationRequest(
+    val email: String
+)

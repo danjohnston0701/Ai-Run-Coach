@@ -130,7 +130,11 @@ data class AuthResponse(
 
     // ISO-8601 trial expiry date (e.g. "2025-01-10") — account creation date + 14 days, set by server
     @SerializedName("trialExpiresAt")
-    val trialExpiresAt: String? = null
+    val trialExpiresAt: String? = null,
+
+    // Email verification — set to true when registration requires OTP confirmation
+    @SerializedName("requiresVerification")
+    val requiresVerification: Boolean? = null,
 ) {
     /**
      * Extract the actual User object, whether it's wrapped or flattened

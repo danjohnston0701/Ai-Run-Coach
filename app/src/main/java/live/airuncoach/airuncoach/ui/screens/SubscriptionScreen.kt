@@ -2,7 +2,6 @@ package live.airuncoach.airuncoach.ui.screens
 
 import android.app.Activity
 import android.content.Intent
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -110,7 +109,10 @@ fun SubscriptionScreen(
                     isTrialExpired = isTrialExpired,
                     trialDaysRemaining = trialDaysRemaining,
                     trialExpiresAt = trialExpiresAt,
-                    currentTier = currentTier
+                    currentTier = currentTier,
+                    onNavigateToChangePassword = onNavigateToChangePassword,
+                    onNavigateToGetSupport = onNavigateToGetSupport,
+                    onNavigateToDeleteAccount = onNavigateToDeleteAccount
                 )
                 1 -> UsageTabContent(
                     viewModel = viewModel,
@@ -195,7 +197,10 @@ private fun PlansTabContent(
     isTrialExpired: Boolean = false,
     trialDaysRemaining: Int = 0,
     trialExpiresAt: LocalDate? = null,
-    currentTier: String = "free"
+    currentTier: String = "free",
+    onNavigateToChangePassword: () -> Unit = {},
+    onNavigateToGetSupport: () -> Unit = {},
+    onNavigateToDeleteAccount: () -> Unit = {}
 ) {
     val context = LocalContext.current
     // Hoisted OUTSIDE LazyColumn so scrolling can never reset it

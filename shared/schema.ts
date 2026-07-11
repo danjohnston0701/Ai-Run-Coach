@@ -69,6 +69,14 @@ export const users = pgTable("users", {
   // Null-safe: if missing (legacy accounts before this migration), the server
   // computes it on-the-fly from created_at.
   trialExpiresAt: timestamp("trial_expires_at"),
+
+  // ── Email verification ────────────────────────────────────────────────────
+  // New accounts are created unverified. A 6-digit OTP is emailed; the user
+  // must enter it in-app before they can log in. Existing/legacy accounts
+  // have this defaulted to true so they are not affected.
+  emailVerified: boolean("email_verified").default(false),
+  emailVerificationToken: text("email_verification_token"),     // Hashed OTP
+  emailVerificationExpiry: timestamp("email_verification_expiry"), // OTP expiry (24h)
 });
 
 // Friends table

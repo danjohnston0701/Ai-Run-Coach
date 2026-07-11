@@ -12,6 +12,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import live.airuncoach.airuncoach.ui.screens.AiConsentScreen
+import live.airuncoach.airuncoach.ui.screens.EmailVerificationScreen
 import live.airuncoach.airuncoach.ui.screens.FitnessLevelScreen
 import live.airuncoach.airuncoach.ui.screens.ForgotPasswordScreen
 import live.airuncoach.airuncoach.ui.screens.GarminWatchUpdateScreen
@@ -85,14 +86,32 @@ fun RootNavigationGraph(navController: NavHostController) {
                     navController.popBackStack()
                 },
                 onNavigateToProfile = {
-                    // After sign-up, ALWAYS go to location permissions first
-                    // Then: location permissions → personal details → injuries/fitness → coach settings → subscription → main
                     navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 },
                 onNavigateToCoachSettings = {
-                    // After sign-up, ALWAYS go to location permissions first
+                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                        popUpTo("sign_up") { inclusive = true }
+                    }
+                },
+                onNavigateToEmailVerification = { email ->
+                    navController.navigate("email_verification/${java.net.URLEncoder.encode(email, "UTF-8")}")
+                }
+            )
+        }
+
+        composable(
+            route = "email_verification/{email}",
+            arguments = listOf(navArgument("email") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val email = java.net.URLDecoder.decode(
+                backStackEntry.arguments?.getString("email") ?: "", "UTF-8"
+            )
+            EmailVerificationScreen(
+                email = email,
+                onNavigateBack = { navController.popBackStack() },
+                onVerificationSuccess = {
                     navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("sign_up") { inclusive = true }
                     }

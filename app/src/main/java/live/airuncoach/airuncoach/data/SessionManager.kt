@@ -243,4 +243,19 @@ class SessionManager(context: Context) {
      * Use this on app startup to decide whether to skip the login screen.
      */
     fun isSessionValid(): Boolean = !isTokenExpired()
+
+    /**
+     * Clears the entire session when user logs out or deletes their account.
+     * Removes all auth tokens, user IDs, and onboarding flags.
+     */
+    fun clearSession() {
+        sharedPreferences.edit {
+            remove("auth_token")
+            remove("user_id")
+            remove("short_user_id")
+            remove("user_name")
+            remove("needs_profile_setup")
+            remove("needs_coach_setup")
+        }
+    }
 }

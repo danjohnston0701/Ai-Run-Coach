@@ -7,5 +7,8 @@ data class LoginState(
     val confirmPassword: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
-    val isLoginSuccessful: Boolean = false
+    val isLoginSuccessful: Boolean = false,
+    // Email verification flow
+    val requiresEmailVerification: Boolean = false,
+    val pendingVerificationEmail: String = "",
 )

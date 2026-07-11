@@ -43,6 +43,7 @@ fun SignUpScreen(
     onNavigateToSignIn: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
     onNavigateToCoachSettings: () -> Unit = {},
+    onNavigateToEmailVerification: (email: String) -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val loginState by viewModel.loginState.collectAsState()
@@ -56,7 +57,14 @@ fun SignUpScreen(
     val confirmPasswordBringIntoView = remember { BringIntoViewRequester() }
     val coroutineScope = rememberCoroutineScope()
 
-    // Navigate on successful registration
+    // Navigate to email verification when server requires it
+    LaunchedEffect(loginState.requiresEmailVerification) {
+        if (loginState.requiresEmailVerification && loginState.pendingVerificationEmail.isNotBlank()) {
+            onNavigateToEmailVerification(loginState.pendingVerificationEmail)
+        }
+    }
+
+    // Navigate on successful registration (fallback — e.g. if server skips verification for some reason)
     LaunchedEffect(loginState.isLoginSuccessful) {
         if (loginState.isLoginSuccessful) {
             // Check onboarding flags for new user flow

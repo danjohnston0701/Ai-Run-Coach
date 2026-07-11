@@ -182,6 +182,23 @@ class LoginViewModel @Inject constructor(
                 
                 android.util.Log.e("LoginViewModel", "❌ Parsed error message: $errorMessage")
                 
+                // 403 = email not yet verified — redirect to OTP screen
+                if (e.code() == 403) {
+                    val json = try { com.google.gson.JsonParser.parseString(errorBody).asJsonObject } catch (_: Exception) { null }
+                    val requiresVerif = json?.get("requiresVerification")?.asBoolean ?: false
+                    if (requiresVerif) {
+                        _loginState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = null,
+                                requiresEmailVerification = true,
+                                pendingVerificationEmail = _loginState.value.email.trim().lowercase()
+                            )
+                        }
+                        return@launch
+                    }
+                }
+
                 val userFriendlyError = when (e.code()) {
                     401 -> "Invalid email or password. Backend says: $errorMessage"
                     404 -> "Account not found. Please register first."
@@ -246,8 +263,23 @@ class LoginViewModel @Inject constructor(
                         password = _loginState.value.password
                     )
                 )
-                
+
                 android.util.Log.d("LoginViewModel", "✅ Registration API call successful!")
+
+                // New flow: server requires email verification before issuing a token
+                if (response.requiresVerification == true) {
+                    android.util.Log.d("LoginViewModel", "📧 Email verification required for ${_loginState.value.email}")
+                    _loginState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = null,
+                            requiresEmailVerification = true,
+                            pendingVerificationEmail = _loginState.value.email
+                        )
+                    }
+                    return@launch
+                }
+
                 android.util.Log.d("LoginViewModel", "🔍 RAW RESPONSE: ${gson.toJson(response)}")
                 android.util.Log.d("LoginViewModel", "Token in body: ${response.token != null} (${response.token?.take(20) ?: "null"}...)")
                 
@@ -354,6 +386,83 @@ class LoginViewModel @Inject constructor(
                 _loginState.update { it.copy(isLoading = false, error = e.message ?: "Registration failed") }
             }
         }
+    }
+
+    /**
+     * Verify the 6-digit OTP entered by the user after registration.
+     * On success, saves the session and marks login as successful.
+     */
+    fun verifyEmail(otp: String) {
+        viewModelScope.launch {
+            _loginState.update { it.copy(isLoading = true, error = null) }
+            try {
+                val email = _loginState.value.pendingVerificationEmail
+                val response = apiService.verifyEmail(
+                    live.airuncoach.airuncoach.network.model.VerifyEmailRequest(email = email, otp = otp.trim())
+                )
+
+                val user = response.extractUser()
+                if (user == null || response.token == null) {
+                    _loginState.update { it.copy(isLoading = false, error = "Verification failed — please try again") }
+                    return@launch
+                }
+
+                sessionManager.saveAuthToken(response.token)
+                sessionManager.saveUserId(user.id)
+                sessionManager.saveUserName(user.name)
+                sharedPrefs.edit().putString("user", gson.toJson(user)).commit()
+                CoachingFeaturePreferences(context).loadFromUser(user)
+
+                // Set onboarding flags for new user
+                sessionManager.setNeedsProfileSetup(true)
+                sessionManager.setNeedsCoachSetup(true)
+
+                _loginState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = null,
+                        requiresEmailVerification = false,
+                        isLoginSuccessful = true
+                    )
+                }
+                android.util.Log.d("LoginViewModel", "🎉 Email verified — registration complete!")
+                uploadFcmToken()
+            } catch (e: retrofit2.HttpException) {
+                val errorBody = e.response()?.errorBody()?.string()
+                val errorMessage = try {
+                    com.google.gson.JsonParser.parseString(errorBody).asJsonObject.get("error")?.asString ?: "Invalid code"
+                } catch (_: Exception) { "Invalid code" }
+                _loginState.update { it.copy(isLoading = false, error = errorMessage) }
+            } catch (e: Exception) {
+                _loginState.update { it.copy(isLoading = false, error = e.message ?: "Verification failed") }
+            }
+        }
+    }
+
+    /**
+     * Resend a fresh OTP to the user's email (called from the verification screen).
+     */
+    fun resendVerificationEmail() {
+        viewModelScope.launch {
+            _loginState.update { it.copy(isLoading = true, error = null) }
+            try {
+                val email = _loginState.value.pendingVerificationEmail
+                apiService.resendVerification(
+                    live.airuncoach.airuncoach.network.model.ResendVerificationRequest(email = email)
+                )
+                _loginState.update { it.copy(isLoading = false, error = null) }
+                android.util.Log.d("LoginViewModel", "📧 Verification email resent to $email")
+            } catch (e: Exception) {
+                _loginState.update { it.copy(isLoading = false, error = "Failed to resend code. Please try again.") }
+            }
+        }
+    }
+
+    /**
+     * Called when user returns from email verification screen back to sign-up.
+     */
+    fun resetVerificationState() {
+        _loginState.update { it.copy(requiresEmailVerification = false, pendingVerificationEmail = "") }
     }
 
     /**

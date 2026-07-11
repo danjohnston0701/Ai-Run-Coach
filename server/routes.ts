@@ -206,8 +206,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Generate a short 6-character user ID for friend sharing
       const generateShortUserId = () => {
-        // Generate a unique 8-digit numerical ID (10,000,000 to 99,999,999)
-        // ensures max 8 digits and numeric-only
         const min = 10000000;
         const max = 99999999;
         return Math.floor(Math.random() * (max - min + 1) + min).toString();
@@ -218,6 +216,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trialExpiresAt = new Date();
       trialExpiresAt.setDate(trialExpiresAt.getDate() + 14);
 
+      // Generate 6-digit OTP and hash it for safe storage
+      const cryptoMod = await import("crypto");
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpHash = cryptoMod.createHash("sha256").update(otp).digest("hex");
+      const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
       const user = await storage.createUser({
         email,
         password: hashedPassword,
@@ -225,15 +229,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userCode,
         shortUserId,
         trialExpiresAt,
+        emailVerified: false,
+        emailVerificationToken: otpHash,
+        emailVerificationExpiry: otpExpiry,
       });
-      
-      const token = generateToken({ userId: user.id, email: user.email });
-      
+
+      // Send verification email (non-blocking — don't fail registration if email fails)
+      try {
+        const { sendEmailVerificationEmail } = await import("./email-service");
+        await sendEmailVerificationEmail({ email, name, otp });
+        console.log(`[Register] Verification OTP sent to ${email}`);
+      } catch (emailErr) {
+        console.error(`[Register] Failed to send verification email to ${email}:`, emailErr);
+      }
+
+      // Return requiresVerification flag instead of a login token
       const { password: _, ...userWithoutPassword } = user;
-      res.status(201).json({ user: userWithoutPassword, token });
+      res.status(201).json({
+        requiresVerification: true,
+        email: user.email,
+        message: "Account created. Please check your email for a 6-digit verification code.",
+      });
     } catch (error: any) {
       console.error("Register error:", error);
       res.status(500).json({ error: "Failed to register user" });
+    }
+  });
+
+  // POST /api/auth/verify-email
+  app.post("/api/auth/verify-email", async (req: Request, res: Response) => {
+    try {
+      const { email, otp } = req.body;
+      if (!email || !otp) {
+        return res.status(400).json({ error: "Email and OTP are required" });
+      }
+
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(400).json({ error: "Invalid verification request" });
+      }
+
+      if (user.emailVerified) {
+        // Already verified — just return a token so the app can continue
+        const token = generateToken({ userId: user.id, email: user.email });
+        const { password: _, ...userWithoutPassword } = user;
+        return res.json({ user: userWithoutPassword, token });
+      }
+
+      if (!user.emailVerificationToken || !user.emailVerificationExpiry) {
+        return res.status(400).json({ error: "No pending verification found" });
+      }
+
+      if (new Date() > user.emailVerificationExpiry) {
+        return res.status(400).json({ error: "Verification code has expired. Please request a new one." });
+      }
+
+      const cryptoMod = await import("crypto");
+      const otpHash = cryptoMod.createHash("sha256").update(otp.trim()).digest("hex");
+      if (otpHash !== user.emailVerificationToken) {
+        return res.status(400).json({ error: "Invalid verification code" });
+      }
+
+      // Mark as verified and clear the token
+      await storage.updateUser(user.id, {
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpiry: null,
+      });
+
+      const token = generateToken({ userId: user.id, email: user.email });
+      const { password: _, ...userWithoutPassword } = user;
+      res.json({ user: { ...userWithoutPassword, emailVerified: true }, token });
+    } catch (error: any) {
+      console.error("Verify email error:", error);
+      res.status(500).json({ error: "Failed to verify email" });
+    }
+  });
+
+  // POST /api/auth/resend-verification
+  app.post("/api/auth/resend-verification", async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+      if (!email) return res.status(400).json({ error: "Email is required" });
+
+      const user = await storage.getUserByEmail(email);
+      if (!user) return res.status(400).json({ error: "No account found with this email" });
+      if (user.emailVerified) return res.json({ ok: true, message: "Email is already verified" });
+
+      const cryptoMod = await import("crypto");
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpHash = cryptoMod.createHash("sha256").update(otp).digest("hex");
+      const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await storage.updateUser(user.id, {
+        emailVerificationToken: otpHash,
+        emailVerificationExpiry: otpExpiry,
+      });
+
+      const { sendEmailVerificationEmail } = await import("./email-service");
+      await sendEmailVerificationEmail({ email, name: user.name, otp });
+
+      console.log(`[ResendVerification] New OTP sent to ${email}`);
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Resend verification error:", error);
+      res.status(500).json({ error: "Failed to resend verification email" });
     }
   });
 
@@ -253,6 +353,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isValid = await comparePassword(password, user.password);
       if (!isValid) {
         return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      // Block unverified accounts — silently resend OTP and inform the app
+      if (user.emailVerified === false) {
+        try {
+          const cryptoMod = await import("crypto");
+          const otp = Math.floor(100000 + Math.random() * 900000).toString();
+          const otpHash = cryptoMod.createHash("sha256").update(otp).digest("hex");
+          const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          await storage.updateUser(user.id, {
+            emailVerificationToken: otpHash,
+            emailVerificationExpiry: otpExpiry,
+          });
+          const { sendEmailVerificationEmail } = await import("./email-service");
+          await sendEmailVerificationEmail({ email, name: user.name, otp });
+          console.log(`[Login] Unverified account — resent OTP to ${email}`);
+        } catch (emailErr) {
+          console.error(`[Login] Failed to resend OTP to ${email}:`, emailErr);
+        }
+        return res.status(403).json({
+          requiresVerification: true,
+          email,
+          error: "Please verify your email address. A new code has been sent to your inbox.",
+        });
       }
 
       // Update user's timezone preference if provided (from device)

@@ -1,6 +1,5 @@
 package live.airuncoach.airuncoach.viewmodel
 
-import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -8,12 +7,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.data.SessionManager
 import javax.inject.Inject
 
 @HiltViewModel
 class DeleteAccountViewModel @Inject constructor(
     private val apiService: ApiService,
-    private val preferences: SharedPreferences
+    private val sessionManager: SessionManager
 ) : ViewModel() {
 
     sealed class DeleteAccountState {
@@ -33,12 +33,7 @@ class DeleteAccountViewModel @Inject constructor(
                 val response = apiService.deleteUser(userId)
                 if (response.isSuccessful) {
                     // Clear user authentication data
-                    preferences.edit().apply {
-                        remove("auth_token")
-                        remove("user_id")
-                        remove("user_email")
-                        apply()
-                    }
+                    sessionManager.clearSession()
                     _state.value = DeleteAccountState.Success
                 } else {
                     _state.value = DeleteAccountState.Error(

@@ -338,3 +338,38 @@ export async function sendAccountDeletionNotification(opts: {
 
   console.log(`[Email] Account deletion notification sent to support for user ${opts.userId}`);
 }
+
+export async function sendEmailVerificationEmail(opts: {
+  email: string;
+  name: string;
+  otp: string;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: opts.email,
+    subject: "Verify your AI Run Coach account",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #00D4FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">AI Run Coach</h1>
+        </div>
+        <div style="padding: 40px 32px;">
+          <h2 style="margin: 0 0 16px; font-size: 20px; color: #ffffff;">Verify your email, ${opts.name} 🏃</h2>
+          <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">Welcome to AI Run Coach! Enter the 6-digit code below in the app to verify your email address. This code expires in <strong style="color: #ffffff;">24 hours</strong>.</p>
+          <div style="text-align: center; margin: 32px 0;">
+            <div style="display: inline-block; background: #111827; border: 2px solid #00D4FF; border-radius: 12px; padding: 20px 40px;">
+              <span style="font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #00D4FF; font-family: monospace;">${opts.otp}</span>
+            </div>
+          </div>
+          <p style="margin: 0 0 8px; color: #64748b; font-size: 13px; text-align: center;">If you didn't create an account, you can safely ignore this email.</p>
+          <p style="margin: 0; color: #64748b; font-size: 13px; text-align: center;">The AI Run Coach Team</p>
+        </div>
+      </div>
+    `,
+    text: `Welcome to AI Run Coach, ${opts.name}!\n\nYour email verification code is: ${opts.otp}\n\nThis code expires in 24 hours.\n\nIf you didn't create an account, you can safely ignore this email.\n\nThe AI Run Coach Team`,
+  });
+
+  console.log(`[Email] Email verification OTP sent to ${opts.email}`);
+}
