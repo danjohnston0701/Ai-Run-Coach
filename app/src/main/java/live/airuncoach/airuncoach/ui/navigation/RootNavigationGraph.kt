@@ -71,6 +71,7 @@ fun RootNavigationGraph(navController: NavHostController) {
         composable("sign_up") {
             SignUpScreen(
                 onNavigateToLocationPermission = {
+                    // After sign-up, user MUST go through location permissions FIRST
                     navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("sign_up") { inclusive = true }
                     }
@@ -84,14 +85,15 @@ fun RootNavigationGraph(navController: NavHostController) {
                     navController.popBackStack()
                 },
                 onNavigateToProfile = {
-                    // New user: must do permissions & consents FIRST before profile setup
-                    navController.navigate("permissions_and_consents") {
+                    // After sign-up, ALWAYS go to location permissions first
+                    // Then: location permissions → personal details → injuries/fitness → coach settings → subscription → main
+                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 },
                 onNavigateToCoachSettings = {
-                    // User completed profile: must do permissions & consents FIRST if not already done
-                    navController.navigate("permissions_and_consents") {
+                    // After sign-up, ALWAYS go to location permissions first
+                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 }
@@ -116,19 +118,20 @@ fun RootNavigationGraph(navController: NavHostController) {
                     // After permissions, check if user is in onboarding flow
                     when {
                         sessionManager.needsProfileSetup() -> {
-                            // New user: proceed to personal details
+                            // New user: proceed to personal details (next step in onboarding)
+                            // Full onboarding flow: location perms → personal details → injuries/fitness → coach settings → subscription → main
                             navController.navigate("personal_details") {
                                 popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
                             }
                         }
                         sessionManager.needsCoachSetup() -> {
-                            // User completed profile: proceed to coach settings
+                            // User completed profile but hasn't finished coach settings
                             navController.navigate("coach_settings") {
                                 popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
                             }
                         }
                         else -> {
-                            // Existing user: check if they've seen the AI consent screen
+                            // Existing user (already completed onboarding): check if they've seen the AI consent screen
                             if (consentManager.hasSeenConsent()) {
                                 navController.navigate(AppRoutes.MAIN) {
                                     popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
