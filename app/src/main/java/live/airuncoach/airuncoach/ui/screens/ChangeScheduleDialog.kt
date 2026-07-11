@@ -1,7 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,7 +13,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.network.model.WeekDetails
 import live.airuncoach.airuncoach.network.model.WorkoutDetails
 import live.airuncoach.airuncoach.network.model.WorkoutScheduleUpdate
@@ -251,44 +249,31 @@ private fun DayPickerGrid(
     weekStartDate: Calendar?,
     onDaySelected: (day: Int, date: String) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (row in 0 until 2) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                for (col in 0 until 4) {
-                    val dayOfWeek = row * 4 + col
-                    if (dayOfWeek < 7) {
-                        DayButton(
-                            dayOfWeek = dayOfWeek,
-                            dayName = dayNames[dayOfWeek],
-                            isSelected = selectedDay == dayOfWeek,
-                            isCurrent = currentDay == dayOfWeek,
-                            weekStartDate = weekStartDate,
-                            onClick = { date ->
-                                onDaySelected(dayOfWeek, date)
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 7 rows, one for each day of the week (Sunday through Saturday)
+        for (dayOfWeek in 0 until 7) {
+            DayButtonRow(
+                dayOfWeek = dayOfWeek,
+                dayName = dayNames[dayOfWeek],
+                isSelected = selectedDay == dayOfWeek,
+                isCurrent = currentDay == dayOfWeek,
+                weekStartDate = weekStartDate,
+                onClick = { date ->
+                    onDaySelected(dayOfWeek, date)
                 }
-            }
+            )
         }
     }
 }
 
 @Composable
-private fun DayButton(
+private fun DayButtonRow(
     dayOfWeek: Int,
     dayName: String,
     isSelected: Boolean,
     isCurrent: Boolean,
     weekStartDate: Calendar?,
-    onClick: (date: String) -> Unit,
-    modifier: Modifier = Modifier
+    onClick: (date: String) -> Unit
 ) {
     val dateString = remember(weekStartDate, dayOfWeek) {
         if (weekStartDate != null) {
@@ -312,8 +297,9 @@ private fun DayButton(
 
     Button(
         onClick = { onClick(dateString) },
-        modifier = modifier
-            .height(56.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
             .border(
                 width = 1.dp,
                 color = if (isCurrent) Colors.primary else Colors.backgroundTertiary,
@@ -322,19 +308,27 @@ private fun DayButton(
         colors = ButtonDefaults.buttonColors(containerColor = backgroundColor),
         shape = RoundedCornerShape(10.dp)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Text(
                 dayName,
-                style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                 color = textColor,
-                fontSize = 12.sp
+                modifier = Modifier.width(60.dp)
+            )
+            Text(
+                dateString,
+                style = AppTextStyles.small,
+                color = if (isSelected) Colors.buttonText else Colors.textMuted
             )
         }
     }
 }
+
+
 
 /**
  * Calculate the Monday of the week given plan creation date and week number

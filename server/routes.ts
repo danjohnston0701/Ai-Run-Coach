@@ -15033,6 +15033,45 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     }
   });
 
+  // PUT /api/training-plans/:planId/reschedule-sessions — reschedule workouts in a week
+  app.put("/api/training-plans/:planId/reschedule-sessions", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const { weekNumber, updates } = req.body as { weekNumber: number; updates: Array<{ workoutId: string; dayOfWeek: number; scheduledDate: string }> };
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      // Verify plan ownership
+      const plan = await db
+        .select()
+        .from(trainingPlans)
+        .where(and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId)))
+        .limit(1);
+
+      if (plan.length === 0) {
+        return res.status(404).json({ error: "Plan not found or not authorized" });
+      }
+
+      // Update each workout with new day of week and scheduled date
+      for (const update of updates) {
+        await db.update(plannedWorkouts)
+          .set({
+            dayOfWeek: update.dayOfWeek,
+            scheduledDate: update.scheduledDate
+          })
+          .where(eq(plannedWorkouts.id, update.workoutId));
+      }
+
+      res.json({ success: true, message: "Workouts rescheduled successfully" });
+    } catch (error: any) {
+      console.error("Reschedule sessions error:", error);
+      res.status(500).json({ error: "Failed to reschedule sessions" });
+    }
+  });
+
   // Pause or cancel a plan
   // iOS uses PATCH, Android uses PUT — both are supported
   app.patch("/api/training-plans/:planId/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
