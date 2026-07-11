@@ -2,6 +2,7 @@ package live.airuncoach.airuncoach.ui.screens
 
 import android.app.Activity
 import android.content.Intent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,6 +46,9 @@ import java.time.format.DateTimeFormatter
 fun SubscriptionScreen(
     viewModel: SubscriptionViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit = {},
+    onNavigateToChangePassword: () -> Unit = {},
+    onNavigateToGetSupport: () -> Unit = {},
+    onNavigateToDeleteAccount: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") onNavigateToLogin: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") onBackClick: () -> Unit = {}
 ) {
@@ -376,13 +380,18 @@ private fun PlansTabContent(
         // Links Section
         item {
             Spacer(modifier = Modifier.height(Spacing.xxl))
-            LinksSection()
+            LinksSection(
+                onChangePassword = onNavigateToChangePassword,
+                onGetSupport = onNavigateToGetSupport
+            )
             Spacer(modifier = Modifier.height(Spacing.xxl))
         }
 
         // Danger Zone
         item {
-            DeleteAccountSection()
+            DeleteAccountSection(
+                onDeleteClick = onNavigateToDeleteAccount
+            )
             Spacer(modifier = Modifier.height(Spacing.xxxl))
         }
     }
@@ -769,7 +778,12 @@ private fun FeatureRow(
 }
 
 @Composable
-private fun LinksSection() {
+private fun LinksSection(
+    onChangePassword: () -> Unit = {},
+    onGetSupport: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -778,23 +792,55 @@ private fun LinksSection() {
         shape = RoundedCornerShape(20.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            LinkRow("Change Password", Icons.Default.Lock)
+            LinkRow(
+                label = "Change Password",
+                icon = Icons.Default.Lock,
+                onClick = onChangePassword
+            )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
-            LinkRow("Privacy Policy", Icons.Default.Security)
+            LinkRow(
+                label = "Privacy Policy",
+                icon = Icons.Default.Security,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = "https://airuncoach.live/privacy".toUri()
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                }
+            )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
-            LinkRow("Terms of Use", Icons.Default.Description)
+            LinkRow(
+                label = "Terms of Use",
+                icon = Icons.Default.Description,
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = "https://airuncoach.live/terms".toUri()
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                }
+            )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
-            LinkRow("Get Support", Icons.AutoMirrored.Filled.Help)
+            LinkRow(
+                label = "Get Support",
+                icon = Icons.AutoMirrored.Filled.Help,
+                onClick = onGetSupport
+            )
         }
     }
 }
 
 @Composable
-private fun LinkRow(label: String, icon: ImageVector) {
+private fun LinkRow(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit = {}
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { /* Handle navigation */ }
+            .clickable { onClick() }
             .padding(Spacing.lg),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -826,7 +872,7 @@ private fun LinkRow(label: String, icon: ImageVector) {
 }
 
 @Composable
-private fun DeleteAccountSection() {
+private fun DeleteAccountSection(onDeleteClick: () -> Unit = {}) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -834,7 +880,7 @@ private fun DeleteAccountSection() {
             .padding(horizontal = Spacing.lg)
     ) {
         Button(
-            onClick = { /* Show delete account bottom sheet */ },
+            onClick = onDeleteClick,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(44.dp),

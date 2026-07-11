@@ -34,6 +34,9 @@ interface ApiService {
     @POST("/api/auth/forgot-password")
     suspend fun forgotPassword(@Body request: ForgotPasswordRequest): ForgotPasswordResponse
 
+    @POST("/api/auth/change-password")
+    suspend fun changePassword(@Body request: ChangePasswordRequest): retrofit2.Response<Unit>
+
     @GET("/api/users/{id}")
     suspend fun getUser(@Path("id") userId: String): User
 

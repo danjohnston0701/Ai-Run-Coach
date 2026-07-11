@@ -297,3 +297,44 @@ export async function sendFriendLiveRunInvitationEmail(
     return false;
   }
 }
+
+export async function sendAccountDeletionNotification(opts: {
+  userId: string;
+  email: string;
+  name: string;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || fromEmail;
+  const deletionTime = new Date().toISOString();
+
+  // Notify the support team about the deletion
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: notifyEmail,
+    subject: `[Account Deletion] User requested account removal`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #0A0A1A;">Account Deletion Notice</h1>
+        </div>
+        <div style="padding: 40px 32px;">
+          <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">A user has requested account deletion:</p>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px; width: 100px;">User ID</td><td style="padding: 8px 0; color: #ffffff; font-family: monospace;">${opts.userId}</td></tr>
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Email</td><td style="padding: 8px 0; color: #ffffff;">${opts.email}</td></tr>
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Name</td><td style="padding: 8px 0; color: #ffffff;">${opts.name}</td></tr>
+            <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Deleted At</td><td style="padding: 8px 0; color: #ffffff;">${deletionTime}</td></tr>
+          </table>
+          <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #EF4444;">
+            <p style="margin: 0; color: #e2e8f0; font-size: 14px;">✓ User account and all associated data have been permanently deleted from the database.</p>
+            <p style="margin: 8px 0 0; color: #e2e8f0; font-size: 14px;">✓ The user will not be able to log in with this email address again.</p>
+          </div>
+          <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">This is an automated notification. Please verify the deletion was processed successfully in the database.</p>
+        </div>
+      </div>
+    `,
+    text: `Account Deletion Notice\n\nA user has requested account deletion:\nUser ID: ${opts.userId}\nEmail: ${opts.email}\nName: ${opts.name}\nDeleted At: ${deletionTime}\n\nUser account and all associated data have been permanently deleted.\nThe user will not be able to log in with this email again.`,
+  });
+
+  console.log(`[Email] Account deletion notification sent to support for user ${opts.userId}`);
+}

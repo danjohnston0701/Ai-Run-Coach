@@ -433,6 +433,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/auth/change-password
+  app.post("/api/auth/change-password", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { currentPassword, newPassword, confirmPassword } = req.body;
+      const userId = req.user?.userId;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      if (!currentPassword || !newPassword || !confirmPassword) {
+        return res.status(400).json({ error: "All fields are required" });
+      }
+
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+
+      if (newPassword !== confirmPassword) {
+        return res.status(400).json({ error: "New passwords do not match" });
+      }
+
+      // Fetch the user
+      const user = await storage.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Verify current password
+      const isPasswordValid = await comparePassword(currentPassword, user.password);
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      // Hash and update the new password
+      const hashed = await hashPassword(newPassword);
+      await storage.updateUser(userId, { password: hashed });
+
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Change password error:", error);
+      res.status(500).json({ error: "Failed to change password" });
+    }
+  });
+
   // ==================== TEST ENDPOINTS ====================
 
   /**
@@ -783,7 +828,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[DeleteUser] No active Garmin connection for user ${userId} — skipping deregistration`);
       }
 
-      // ── Step 3: Cascade delete all user data ─────────────────────────────
+      // ── Step 3: Send deletion notification email to support ─────────────
+      try {
+        const user = await storage.getUserById(userId);
+        if (user) {
+          const { sendAccountDeletionNotification } = await import("./email-service");
+          await sendAccountDeletionNotification({
+            userId: user.id,
+            email: user.email,
+            name: user.firstname && user.lastname 
+              ? `${user.firstname} ${user.lastname}`
+              : user.firstname || user.email
+          });
+        }
+      } catch (e) {
+        console.warn("[DeleteUser] Failed to send deletion notification email (non-fatal):", e);
+        // Non-fatal: continue with deletion even if email fails
+      }
+
+      // ── Step 4: Cascade delete all user data ─────────────────────────────
       await storage.deleteUser(userId);
 
       console.log(`[DeleteUser] Account deletion complete for user ${userId}`);
