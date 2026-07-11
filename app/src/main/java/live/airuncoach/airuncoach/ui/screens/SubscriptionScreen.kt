@@ -269,7 +269,7 @@ private fun PlansTabContent(
         item {
             PlanCard(
                 plan = liteTier,
-                isCurrent = isPremium && currentTier == "lite",
+                isCurrent = isPremium && currentTier.lowercase() == "lite",
                 isAnnual = isAnnual,
                 onUpgradeClick = {
                     val packageName = context.packageName
@@ -306,7 +306,7 @@ private fun PlansTabContent(
         item {
             PlanCard(
                 plan = standardTier,
-                isCurrent = isPremium && currentTier == "standard",
+                isCurrent = isPremium && currentTier.lowercase() == "standard",
                 isPopular = true,
                 isAnnual = isAnnual,
                 onUpgradeClick = {
@@ -696,50 +696,45 @@ private fun PlanCard(
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
-            // Upgrade Button (shown for all non-current plans, or for managing current plan)
-            if (!isCurrent) {
-                Button(
-                    onClick = onUpgradeClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = plan.accentColor
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text(
-                        text = "Upgrade to ${plan.name}",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Colors.buttonText
-                    )
-                }
-            } else {
-                // Button to manage current plan in Google Play Store
-                Button(
-                    onClick = onUpgradeClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = plan.accentColor.copy(alpha = 0.2f),
-                        contentColor = plan.accentColor
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
+            // Upgrade Button — always visible for all plans
+            // For current plan: show "Manage in Play Store" (lighter style)
+            // For other plans: show "Upgrade to [Plan Name]" (bold style)
+            val isManagingPlan = isCurrent
+            Button(
+                onClick = onUpgradeClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isManagingPlan) 
+                        plan.accentColor.copy(alpha = 0.2f) 
+                    else 
+                        plan.accentColor
+                ),
+                shape = RoundedCornerShape(16.dp),
+                enabled = true  // Always enabled
+            ) {
+                if (isManagingPlan) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = null,
                         modifier = Modifier
                             .size(18.dp)
-                            .padding(end = 8.dp)
+                            .padding(end = 8.dp),
+                        tint = plan.accentColor
                     )
                     Text(
                         text = "Manage in Play Store",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = plan.accentColor
+                    )
+                } else {
+                    Text(
+                        text = "Upgrade to ${plan.name}",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Colors.buttonText
                     )
                 }
             }
