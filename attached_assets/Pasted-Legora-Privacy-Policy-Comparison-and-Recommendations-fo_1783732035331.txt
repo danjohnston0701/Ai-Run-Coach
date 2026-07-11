@@ -1,0 +1,214 @@
+Legora - Privacy Policy Comparison and Recommendations for AI Run Coach
+June 23, 2026
+Let me read both documents before comparing them.
+Here is a detailed comparison of the two privacy policies, followed by specific recommendations for the AI Run Coach Privacy Policy.
+Privacy Policy Comparison: Strava vs. AI Run Coach
+Overview
+The Strava Privacy Policy is effective as of 1 January 2026 , while the AI Run Coach Privacy Policy was last updated on 24 April 2026. Both policies govern fitness and activity tracking applications that
+process health and location data, but they differ significantly in scope, depth, and comprehensiveness.
+Side-by-Side Comparison
+Topic Strava Privacy Policy AI Run Coach Privacy Policy
+Scope Covers platform, mobile applications, products, websites, technology,
+
+software, and services collectively
+
+Covers the app, website, and associated services including the Garmin
+companion app
+
+Data Controller Strava acts as data controller or &quot;business&quot; for personal information AI Run Coach acts as data controller; third-party services such as
+Garmin, Apple Health, and Strava act as independent controllers
+
+Data Collected Account info, profile info, activity data, location, performance metrics,
+
+device info, payment info, cookies
+
+Account info, health and fitness data (special category), technical data,
+connected services data, and Garmin device data
+
+Legal Bases (GDPR) Contract, consent, legitimate interests, legal obligation, and vital
+
+interests
+
+Contract performance, consent, and legitimate interests only — legal
+obligation and vital interests not explicitly listed
+
+Health Data (Article 9) Health data from integrations is not sold, not used for advertising, not
+
+disclosed without prior consent
+
+Health and fitness data processed only with explicit consent obtained
+through a clear affirmative action; consent may be withdrawn at any time
+
+AI / Automated Processing Uses ML and AI including large language models; AI Features include
+anomaly detection, route recommendations, and personalised training
+guidance
+
+Uses OpenAI under a zero data retention policy; data is not used to train
+OpenAI models; no personal identifiers sent in AI payloads
+
+Automated Decision-Making AI and automated decision-making used to analyse personal information
+but not for decisions with legal or similarly significant effects
+
+Automated processing constitutes profiling under GDPR; does not
+produce legal or similarly significant effects; users may opt out by
+disabling AI features
+
+Data Sharing Shared with service providers, third-party services, partners, and
+marketing/advertising networks (with consent where required)
+
+Shared only with named service providers: Neon, OpenAI, Google Maps
+Platform, GraphHopper, and Replit; no advertising sharing
+Advertising Uses cookies and tracking technologies to support targeted advertising Does not sell data, use data for advertising or marketing profiling, or
+
+share data with advertisers
+
+Data Retention Retained as long as needed to provide Services; up to 45 days to delete
+
+personal information after account deletion
+
+Account/activity data retained while active; deleted within 30 days of
+account deletion; technical logs up to 90 days; aggregated data retained
+indefinitely in anonymised form
+
+International Transfers Uses Standard Contractual Clauses; data transferred to the United
+
+States
+
+Uses SCCs, Data Processing Agreements, encryption, and secure
+transmission; data may be processed in the US
+
+User Rights Access, portability, rectification, restriction, deletion, and consent
+withdrawal — with specific instructions for each
+
+Access, correction, deletion, export, objection, restriction, and consent
+withdrawal — listed but without detailed instructions
+
+Children&#39;s Privacy Not intended for children under 13; does not knowingly collect data from
+
+under-13s
+
+Not intended for users under 16 years of age
+
+Cookies Uses cookies, tracking pixels, SDKs, Google Analytics, and third-party
+
+technologies; links to a separate Cookie Policy
+
+Minimal tracking for authentication, preferences, and anonymised
+performance analytics; no advertising cookies or cross-site tracking
+
+Security Administrative, technical, and physical safeguards in accordance with
+
+industry standards
+
+Encryption (in transit and at rest), secure password hashing, access
+controls, and system monitoring
+
+Data Breach Notification Not separately addressed Will notify authorities and affected users where required by law
+Policy Update Notice Prominent, advance notice of material changes; no specific timeframe
+
+stated
+
+Will notify users of material changes at least 30 days before they take
+effect
+
+DPO Contact Data Protection Officer contactable at
+DPO@strava.com
+; EEA/UK DPO information provided
+
+Not mentioned
+
+Supervisory Authority Lead supervisory authority in the EEA is the Data Protection
+
+Commission of Ireland
+
+Users may lodge a complaint with their local supervisory authority — no
+specific authority identified
+
+Non-Discrimination Will not discriminate against users for exercising US State Privacy Law
+
+rights
+
+Not included
+Authorised Agents Users may appoint an authorised agent to exercise privacy rights on
+
+their behalf
+
+Not mentioned
+
+Business Acquisition Data may be shared or transferred in connection with a business
+combination, acquisition, bankruptcy, or similar transaction
+
+Not addressed
+Contact Information Full postal addresses in San Francisco, Dublin, and London provided,
+
+along with DPO email
+
+Email address only (
+support@airuncoach.live
+)
+
+Recommendations for the AI Run Coach Privacy Policy
+The AI Run Coach Privacy Policy is well-structured for a smaller application and demonstrates commendable transparency — particularly around AI processing. However, the following improvements are
+recommended:
+
+1. Add &quot;Legal Obligation&quot; and &quot;Vital Interests&quot; as Legal Bases
+The policy currently identifies contract performance, consent, and legitimate interests as legal bases under Article 6 GDPR but omits legal obligation and vital interests. Strava includes both legal
+obligation (when required to process information by law) and vital interests (when processing is needed to protect someone&#39;s life or safety) as additional legal bases. Given that the app processes
+sensitive health data in real-time during physical activity, the vital interests basis in particular is relevant and should be added.
+2. Appoint and Disclose a Data Protection Officer (DPO)
+The AI Run Coach policy makes no mention of a DPO. Health and fitness data is expressly classified as special category data under Article 9 and processed on the basis of explicit consent . Depending on
+the scale of processing, this may trigger a mandatory DPO appointment under GDPR Article 37. Even where not strictly mandatory, disclosing a DPO contact (or a privacy-dedicated contact) as Strava
+does at DPO@strava.com significantly enhances user trust and regulatory credibility. At a minimum, a dedicated privacy contact should be named separately from general support.
+3. Identify the Lead Supervisory Authority
+Strava identifies the Data Protection Commission of Ireland as its lead supervisory authority in the EEA . The AI Run Coach policy states only that users may lodge a complaint with their local supervisory
+authority , without identifying the supervisory authority with oversight of the company itself. The policy should specify which data protection authority has primary jurisdiction (e.g., the ICO in the UK, or the
+relevant EEA authority), and provide a link to that authority&#39;s website.
+4. Consider Appointing an Article 27 GDPR Representative
+The policy acknowledges that data may be processed outside the UK/EEA, including in the United States . If AI Run Coach is not established in the UK or EEA but processes data of UK/EEA residents, it
+is required under Article 27 UK GDPR / EU GDPR to designate a local representative. The policy should either confirm that such a representative has been appointed and provide their contact details, or
+confirm that an exemption applies.
+5. Add a Physical/Postal Address
+The policy provides only an email address (support@airuncoach.live) as contact information. Strava provides full postal addresses in multiple jurisdictions . Under GDPR, data subjects are entitled to know
+the identity and contact details of the data controller. A physical or registered address should be added to improve legal compliance and user trust.
+6. Provide More Detailed User Rights Instructions
+The policy lists rights (access, correction, deletion, export, objection, restriction, and consent withdrawal) but provides little practical guidance on how to exercise each one . Strava, by contrast, explains
+specifically how to exercise each right — for example, how to download data, how to amend account settings, and what happens after account deletion . The AI Run Coach policy would benefit from similar
+specificity, including information about response timeframes (GDPR requires responses within one month).
+7. Address Business Acquisitions and Corporate Transfers
+The AI Run Coach policy does not address what would happen to user data in the event of a sale, merger, insolvency, or acquisition. Strava expressly addresses this, noting that data may be shared or
+transferred in connection with a business combination, acquisition, securities offering, bankruptcy, reorganisation, dissolution, or other similar transaction . This is a commercially and legally important
+disclosure that should be added, particularly given user sensitivity around health data.
+8. Add a Non-Discrimination Clause for US Users
+The policy has a section on US State Privacy Rights covering California, Virginia, Colorado, Connecticut, and Utah , but unlike Strava, which explicitly states it will not discriminate against users for
+exercising any US State Privacy Law rights , AI Run Coach makes no such commitment. This non-discrimination statement is required under the California Consumer Privacy Act (CCPA) and aligned state
+laws, and should be added.
+9. Address Authorised Agents
+Strava allows users to appoint an authorised agent to exercise privacy rights on their behalf, and requires proof of agency to prevent abuse . This is a requirement under CCPA for US users and is good
+practice globally. The AI Run Coach policy should include a provision addressing how authorised agents may act on behalf of users, including the verification process.
+10. Expand the Cookie and Tracking Section
+The policy describes only minimal tracking for authentication, preferences, and anonymised performance analytics, and confirms no advertising cookies are used . However, it gives no detail on how users
+can manage cookie preferences, what types of cookies are used, or their duration. Strava links to a separate Cookie Policy and lists specific technologies including tracking pixels, SDKs, and Google
+Analytics . Consideration should be given to either expanding this section or publishing a standalone Cookie Policy, which is advisable particularly for UK/EEA compliance.
+11. Strengthen the Data Breach Notification Section
+The policy states only that &quot;we will notify authorities and affected users where required by law&quot;, which is a bare minimum commitment. The policy would benefit from specifying the applicable timeframes
+(e.g., 72 hours to the relevant supervisory authority under GDPR/UK GDPR) and what information would be provided to affected users. This would materially enhance user confidence given the sensitivity
+of the health data processed.
+12. Expand the US State Privacy Rights Section
+The policy covers California, Virginia, Colorado, Connecticut, and Utah , whereas Strava&#39;s policy covers a significantly broader list of US states including California, Colorado, Connecticut, Delaware, Iowa,
+Maryland, Minnesota, Montana, Nebraska, New Hampshire, New Jersey, Oregon, Tennessee, Texas, Utah, Virginia, and others . Given the rapidly expanding US state privacy law landscape, the AI Run
+Coach policy should either expand this list or adopt broader language that captures all states with similar privacy laws.
+Summary of Priority Recommendations
+Priority Recommendation
+High Add physical/postal address and DPO contact
+High Identify lead supervisory authority
+High Add non-discrimination clause for US users
+High Assess DPO appointment obligation given health data processing
+
+High Address business acquisition/transfer of data
+Medium Appoint or confirm Article 27 GDPR representative
+Medium Add authorised agents provision
+Medium Provide more detailed user rights exercise instructions
+Medium Expand US State Privacy Rights to cover more states
+Lower Expand cookie and tracking disclosures
+Lower Strengthen data breach notification section
+Lower Add legal obligation and vital interests as legal bases

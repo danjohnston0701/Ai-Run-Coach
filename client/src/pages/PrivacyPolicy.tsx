@@ -24,8 +24,8 @@ export default function PrivacyPolicy() {
 
         <section className="space-y-6 text-muted-foreground leading-relaxed">
           <div className="p-6 bg-card/50 border border-white/10 rounded-2xl">
-            <h2 className="text-foreground font-bold uppercase tracking-wider mb-2">Privacy Policy for Ai Run Coach</h2>
-            <p className="text-sm italic">Last updated:24 April 2026</p>
+            <h2 className="text-foreground font-bold uppercase tracking-wider mb-2">Privacy Policy for AI Run Coach</h2>
+            <p className="text-sm italic">Last updated: 11 July 2026</p>
           </div>
 
           {/* 1. Who We Are */}
@@ -36,11 +36,20 @@ export default function PrivacyPolicy() {
             </p>
             <p>We act as the <strong>data controller</strong> for the personal data processed through AI Run Coach.</p>
             <p>Third-party services (such as Garmin Connect, Apple Health, Strava, and similar providers) act as <strong>independent data controllers</strong> for the data they collect and share with us.</p>
-            <p>If you have questions or wish to exercise your rights, contact us at:</p>
+
+            <h4 className="font-bold text-foreground mt-4">Contact Details</h4>
+            <p>If you have questions or wish to exercise your rights, please contact us at:</p>
             <ul className="list-none pl-0 space-y-1">
               <li><strong>Email:</strong> <span className="text-primary font-medium">support@airuncoach.live</span></li>
+              <li><strong>Privacy / Data Protection enquiries:</strong> <span className="text-primary font-medium">privacy@airuncoach.live</span></li>
               <li><strong>Website:</strong> <span className="text-primary font-medium">https://airuncoach.live</span></li>
             </ul>
+            <p className="text-sm mt-2">
+              We have designated a <strong>Data Protection Contact</strong> who is responsible for overseeing questions relating to this Privacy Policy. If you wish to raise a privacy concern or exercise your data subject rights, please contact us at the privacy email address above.
+            </p>
+            <p className="text-sm italic">
+              Note: We are a small independent developer. Depending on the scale of our health data processing, we will keep our obligation to appoint a formal Data Protection Officer (DPO) under GDPR Article 37 under review and will update this section accordingly.
+            </p>
           </div>
 
           {/* 2. What Data We Collect */}
@@ -108,13 +117,14 @@ export default function PrivacyPolicy() {
             <ul className="list-disc pl-5 space-y-2">
               <li><strong>Contract performance:</strong> To deliver the services you have requested</li>
               <li><strong>Consent:</strong> For optional features such as connected services, notifications, and AI coaching</li>
-              <li><strong>Legitimate interests:</strong> To improve coaching accuracy, maintain system security, and prevent misuse</li>
+              <li><strong>Legitimate interests:</strong> To improve coaching accuracy, maintain system security, and prevent misuse — balanced against your fundamental rights and freedoms</li>
+              <li><strong>Legal obligation:</strong> Where processing is required to comply with a legal obligation to which we are subject</li>
+              <li><strong>Vital interests:</strong> Where processing is necessary to protect your vital interests or those of another person — for example, during a health emergency detected during active physical activity</li>
             </ul>
-            <p>We ensure these interests do not override your fundamental rights and freedoms.</p>
 
             <h4 className="font-bold text-foreground mt-4">Health and Fitness Data (Article 9)</h4>
-            <p>Health and fitness data is processed only with <strong>explicit consent</strong>, obtained through a clear affirmative action (such as selecting a checkbox or enabling features within the app).</p>
-            <p>You may withdraw your consent at any time.</p>
+            <p>Health and fitness data is classified as <strong>special category data</strong> under GDPR Article 9 and is processed only with <strong>explicit consent</strong>, obtained through a clear affirmative action (such as selecting a checkbox or enabling features within the app).</p>
+            <p>You may withdraw your consent at any time. Withdrawal will not affect the lawfulness of any processing that took place prior to withdrawal.</p>
           </div>
 
           {/* 4. How We Use Your Data */}
@@ -187,14 +197,14 @@ export default function PrivacyPolicy() {
             <h4 className="font-bold text-foreground mt-4">User Consent for AI Processing</h4>
             <p>We will only send your data to OpenAI after obtaining your <strong>explicit consent</strong>.</p>
             <p>This consent is requested within the app before AI-powered features (such as real-time coaching, personalised training plans, or AI-generated insights) are activated.</p>
-            <p>You may withdraw your consent at any time by disabling AI features or discontinuing use of the Service.</p>
+            <p>You may withdraw your consent at any time by disabling AI features within the app settings or by discontinuing use of the Service.</p>
 
             <h4 className="font-bold text-foreground mt-4">Automated Processing and Profiling</h4>
             <p>We use automated processing to analyse your fitness data and generate personalised coaching insights.</p>
             <ul className="list-disc pl-5 space-y-1">
               <li>This constitutes <strong>profiling</strong> under GDPR</li>
               <li>It does <strong>not produce legal or similarly significant effects</strong></li>
-              <li>You may opt out by disabling AI features</li>
+              <li>You may opt out by disabling AI features within the app at any time</li>
             </ul>
 
             <h4 className="font-bold text-foreground mt-4">Real-Time Processing</h4>
@@ -247,19 +257,25 @@ export default function PrivacyPolicy() {
             </ul>
 
             <h4 className="font-bold text-foreground mt-4">Legal Obligations</h4>
-            <p>We may disclose data when required by law or to protect rights, safety, or security.</p>
+            <p>We may disclose data when required by law, court order, or regulatory requirement, or where necessary to protect the rights, safety, or property of AI Run Coach, its users, or the public.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Business Acquisitions and Corporate Transfers</h4>
+            <p>In the event of a merger, acquisition, sale of assets, reorganisation, insolvency, or similar transaction, your personal data may be transferred to the relevant third party as part of that transaction. Where required by law, we will notify you before your data is transferred and becomes subject to a different privacy policy. In all such cases, we will take reasonable steps to ensure your data continues to receive adequate protection.</p>
           </div>
 
           {/* 6. International Transfers */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">6. International Data Transfers</h3>
-            <p>Your data may be processed outside the UK/EEA, including in the United States.</p>
+            <p>Your data may be processed outside the UK/EEA, including in the United States, by some of our service providers (such as OpenAI and Replit).</p>
             <p>We ensure appropriate safeguards including:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li>Standard Contractual Clauses (SCCs)</li>
-              <li>Data Processing Agreements</li>
+              <li>Standard Contractual Clauses (SCCs) approved by the European Commission and/or UK ICO</li>
+              <li>Data Processing Agreements with all third-party processors</li>
               <li>Encryption and secure transmission</li>
             </ul>
+
+            <h4 className="font-bold text-foreground mt-4">Article 27 GDPR / UK GDPR Representative</h4>
+            <p>If AI Run Coach is not established in the UK or EEA, we are required under Article 27 of the UK GDPR and EU GDPR to designate a local representative for users in those jurisdictions. We are currently assessing this obligation as our user base grows and will update this section with representative contact details when applicable. In the meantime, you may contact us directly at <span className="text-primary font-medium">privacy@airuncoach.live</span> for any data protection matters.</p>
           </div>
 
           {/* 7. Data Retention */}
@@ -278,89 +294,138 @@ export default function PrivacyPolicy() {
           {/* 8. Your Rights */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">8. Your Rights</h3>
-            <p>You have the right to:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Access your personal data</li>
-              <li>Correct inaccuracies</li>
-              <li>Delete your data</li>
-              <li>Export your data</li>
-              <li>Object to processing</li>
-              <li>Restrict processing</li>
-              <li>Withdraw consent</li>
+            <p>Under the GDPR, UK GDPR, and applicable privacy laws, you have the following rights. We will respond to all requests within <strong>one month</strong> of receipt, as required by law (extendable by a further two months in complex cases, with notice).</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right of Access</h4>
+            <p>You have the right to obtain a copy of the personal data we hold about you. To request access, email us at <span className="text-primary font-medium">privacy@airuncoach.live</span> with the subject line "Data Access Request". We will provide your data in a structured, commonly used format.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right to Correction</h4>
+            <p>You can correct inaccurate personal data at any time through your in-app profile settings. For corrections that cannot be made in-app, contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span>.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right to Deletion ("Right to be Forgotten")</h4>
+            <p>You may request deletion of your account and personal data via the in-app account settings or by emailing <span className="text-primary font-medium">privacy@airuncoach.live</span>. We will delete your data within 30 days of your request. Note that some data may be retained for a limited period where required by law or to resolve disputes.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right to Data Portability</h4>
+            <p>You may request an export of your personal data in a machine-readable format (such as JSON or CSV). Contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span> to request a data export.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right to Object</h4>
+            <p>You may object to processing based on legitimate interests at any time. You may also opt out of automated profiling by disabling AI features in the app settings.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right to Restrict Processing</h4>
+            <p>You have the right to request that we restrict processing of your data in certain circumstances, for example while we investigate an accuracy dispute. Contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span> to make a restriction request.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right to Withdraw Consent</h4>
+            <p>Where processing is based on your consent (including for health data and AI features), you may withdraw that consent at any time through the app settings or by contacting us. Withdrawal does not affect the lawfulness of processing prior to withdrawal.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Right to Lodge a Complaint</h4>
+            <p>You have the right to lodge a complaint with your local data protection supervisory authority at any time. We encourage you to contact us first so we can try to resolve your concern directly.</p>
+            <ul className="list-disc pl-5 space-y-1">
+              <li><strong>UK residents:</strong> Information Commissioner's Office (ICO) — <span className="text-primary font-medium">ico.org.uk</span></li>
+              <li><strong>EEA residents:</strong> Contact your national data protection authority (a full list is available at <span className="text-primary font-medium">edpb.europa.eu</span>)</li>
+              <li><strong>All users:</strong> You may also contact us directly at <span className="text-primary font-medium">privacy@airuncoach.live</span></li>
             </ul>
-            <p className="mt-2">To exercise your rights:</p>
-            <ul className="list-none pl-0 space-y-1">
-              <li><strong>Email:</strong> <span className="text-primary font-medium">support@airuncoach.live</span></li>
-              <li>Use in-app controls</li>
-            </ul>
-            <p className="mt-2">You may also lodge a complaint with your local supervisory authority.</p>
+
+            <h4 className="font-bold text-foreground mt-4">How to Exercise Your Rights</h4>
+            <p>To exercise any of the above rights, please contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span> with a clear description of your request. We may ask you to verify your identity before processing the request. We will not charge a fee for reasonable requests.</p>
           </div>
 
           {/* 9. US State Privacy */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">9. US State Privacy Rights</h3>
-            <p>If you are a resident of certain U.S. states (including California, Virginia, Colorado, Connecticut, and Utah), you may have rights to:</p>
+            <p>If you are a resident of a US state with applicable privacy legislation, including but not limited to California, Virginia, Colorado, Connecticut, Utah, Delaware, Iowa, Maryland, Minnesota, Montana, Nebraska, New Hampshire, New Jersey, Oregon, Tennessee, and Texas, you may have additional rights under applicable state law.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Your Rights Under US State Laws</h4>
             <ul className="list-disc pl-5 space-y-2">
-              <li>Access, correct, or delete your data</li>
-              <li>Obtain a copy of your data</li>
-              <li>Opt out of certain processing</li>
+              <li>Know what personal data we collect and how it is used</li>
+              <li>Access, correct, or delete your personal data</li>
+              <li>Obtain a portable copy of your data</li>
+              <li>Opt out of the sale of personal data (we do not sell personal data)</li>
+              <li>Opt out of targeted advertising (we do not use data for targeted advertising)</li>
+              <li>Non-discrimination for exercising your privacy rights (see below)</li>
             </ul>
-            <p>Health and fitness data may be considered <strong>sensitive personal data</strong>, and we process it only with your consent.</p>
-            <p className="font-bold mt-2">We do not:</p>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>Sell personal data</li>
-              <li>Share data for targeted advertising</li>
-            </ul>
-            <p className="mt-2">You may appeal decisions regarding your privacy requests by contacting us.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Health Data</h4>
+            <p>Health and fitness data may be considered <strong>sensitive personal data</strong> under applicable state laws. We process it only with your consent and do not sell or share it for advertising purposes.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Non-Discrimination</h4>
+            <p>We will <strong>not discriminate against you</strong> for exercising any of your privacy rights under applicable US state laws, including the California Consumer Privacy Act (CCPA) and similar state laws. This means we will not deny you access to our services, charge you different prices, provide a different level of service, or suggest that you will receive a different level of service as a result of exercising your privacy rights.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Authorised Agents</h4>
+            <p>You may appoint an <strong>authorised agent</strong> to submit privacy requests on your behalf. To do so, please provide us with written proof of the agent's authorisation (such as a signed permission letter or power of attorney). We may verify your identity and the agent's authority before processing such a request. Contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span> for authorised agent requests.</p>
+
+            <h4 className="font-bold text-foreground mt-4">How to Submit a Request</h4>
+            <p>To submit a US state privacy request or appeal a decision regarding a privacy request, contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span>. We will respond within the timeframe required by applicable state law.</p>
           </div>
 
           {/* 10. Security */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">10. Security</h3>
-            <p>We implement:</p>
+            <p>We implement technical and organisational measures to protect your data, including:</p>
             <ul className="list-disc pl-5 space-y-2">
-              <li>Encryption (in transit and at rest)</li>
+              <li>Encryption in transit (TLS) and at rest</li>
               <li>Secure password hashing</li>
-              <li>Access controls</li>
+              <li>Access controls and authentication</li>
               <li>System monitoring and updates</li>
             </ul>
+            <p className="text-sm">No method of transmission or storage is 100% secure. If you have concerns about the security of your data, please contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span>.</p>
           </div>
 
           {/* 11. Data Breach */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">11. Data Breach Notification</h3>
-            <p>We will notify authorities and affected users where required by law.</p>
+            <p>In the event of a personal data breach that is likely to result in a risk to your rights and freedoms:</p>
+            <ul className="list-disc pl-5 space-y-2">
+              <li>We will notify the relevant supervisory authority (such as the ICO in the UK, or the competent EEA authority) <strong>within 72 hours</strong> of becoming aware of the breach, where required by law</li>
+              <li>Where the breach is likely to result in a <strong>high risk</strong> to your rights and freedoms, we will notify affected users without undue delay</li>
+              <li>Notification to users will include: a description of the nature of the breach, the likely consequences, and the measures we have taken or propose to take to address the breach</li>
+            </ul>
           </div>
 
           {/* 12. Children */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">12. Children's Privacy</h3>
-            <p>AI Run Coach is not intended for users under 16 years of age.</p>
+            <p>AI Run Coach is not intended for users under 16 years of age. We do not knowingly collect personal data from anyone under the age of 16. If we become aware that we have collected data from a user under 16, we will delete it promptly. If you believe a child under 16 has provided us with personal data, please contact us at <span className="text-primary font-medium">privacy@airuncoach.live</span>.</p>
           </div>
 
           {/* 13. Cookies */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">13. Cookies and Tracking</h3>
-            <p>We use minimal tracking for:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Authentication</li>
-              <li>Preferences</li>
-              <li>Performance analytics (anonymised)</li>
+            <p>We use minimal tracking technologies. The cookies and similar technologies we use fall into the following categories:</p>
+
+            <h4 className="font-bold text-foreground mt-4">Strictly Necessary</h4>
+            <p>Session cookies required for authentication and to keep you logged in. These cannot be disabled without affecting core functionality.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Preferences</h4>
+            <p>Cookies that remember your settings and preferences (such as language and display preferences). These are set only with your consent.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Analytics</h4>
+            <p>Anonymised, aggregated performance data used to understand how users interact with the app and improve reliability. No personally identifiable information is collected for analytics purposes.</p>
+
+            <h4 className="font-bold text-foreground mt-4">What We Do Not Use</h4>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>Advertising or marketing cookies</li>
+              <li>Cross-site tracking technologies</li>
+              <li>Third-party analytics with personal identifiers (e.g. Google Analytics linked to user identity)</li>
             </ul>
-            <p>We do not use advertising cookies or cross-site tracking.</p>
+
+            <h4 className="font-bold text-foreground mt-4">Managing Cookies</h4>
+            <p>You can manage or delete cookies through your browser or device settings at any time. Disabling strictly necessary cookies may affect your ability to use parts of the service.</p>
           </div>
 
           {/* 14. Changes */}
           <div className="space-y-4">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">14. Changes to This Policy</h3>
-            <p>We will notify users of material changes at least 30 days before they take effect.</p>
+            <p>We will notify users of material changes to this Privacy Policy at least <strong>30 days before</strong> they take effect, via in-app notification or email. The "Last updated" date at the top of this page will always reflect the most recent version. Continued use of the App after the effective date constitutes acceptance of the updated policy.</p>
           </div>
 
           {/* 15. Contact */}
           <div className="space-y-4 pb-0">
             <h3 className="text-xl font-display font-bold text-foreground uppercase tracking-wide">15. Contact Us</h3>
-            <ul className="list-none pl-0 space-y-1">
-              <li><span className="text-primary font-medium">support@airuncoach.live</span></li>
+            <p>For any questions, concerns, or requests relating to this Privacy Policy or the processing of your personal data:</p>
+            <ul className="list-none pl-0 space-y-2">
+              <li><strong>General support:</strong> <span className="text-primary font-medium">support@airuncoach.live</span></li>
+              <li><strong>Privacy and data protection:</strong> <span className="text-primary font-medium">privacy@airuncoach.live</span></li>
+              <li><strong>Website:</strong> <span className="text-primary font-medium">https://airuncoach.live</span></li>
             </ul>
             <p className="mt-4 text-sm italic">
               This Privacy Policy is provided in English and prevails over any translated versions.
