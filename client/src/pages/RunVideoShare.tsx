@@ -152,6 +152,7 @@ export default function RunVideoShare() {
   const mapRef          = useRef<maplibregl.Map | null>(null);
   const canvasRef       = useRef<HTMLCanvasElement>(null); // compositor (map + overlays), this is what we record
   const animRef         = useRef<number>(0);
+  const logoImgRef      = useRef<HTMLImageElement | null>(null);
   const recorderRef     = useRef<MediaRecorder | null>(null);
   const chunksRef       = useRef<Blob[]>([]);
   const startTsRef      = useRef<number>(0);
@@ -204,6 +205,13 @@ export default function RunVideoShare() {
   });
 
   // ── Fetch run ───────────────────────────────────────────────────────────────
+  // ── Preload brand logo for canvas overlay ────────────────────────────────────
+  useEffect(() => {
+    const img = new Image();
+    img.src = "/logo-with-text.png";
+    img.onload = () => { logoImgRef.current = img; };
+  }, []);
+
   useEffect(() => {
     if (!runId) return;
     const token = (() => { try { return JSON.parse(localStorage.getItem("userProfile") || "{}").token; } catch { return null; } })();
@@ -502,8 +510,13 @@ export default function RunVideoShare() {
       ctx.fillStyle = scrim; ctx.fillRect(0, 0, CW, CH);
 
       ctx.textAlign = "center";
-      ctx.fillStyle = TEAL; ctx.font = "bold 42px 'Inter', sans-serif"; ctx.letterSpacing = "8px";
-      ctx.fillText("AI RUN COACH", CW / 2, CH * 0.38); ctx.letterSpacing = "0px";
+      // Brand logo (runner + "Ai Run Coach" text) — replaces plain text header
+      const introLogo = logoImgRef.current;
+      if (introLogo) {
+        const logoW = 520;
+        const logoH = Math.round(logoW * (introLogo.naturalHeight / introLogo.naturalWidth));
+        ctx.drawImage(introLogo, (CW - logoW) / 2, CH * 0.27, logoW, logoH);
+      }
 
       ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.font = "500 46px 'Inter', sans-serif";
       ctx.fillText(runName, CW / 2, CH * 0.45);
@@ -541,17 +554,19 @@ export default function RunVideoShare() {
       ctx.save();
       ctx.globalAlpha = hudFade;
 
-      // Top-left brand lockup
-      ctx.save();
-      ctx.shadowColor = TEAL_GLOW; ctx.shadowBlur = 18;
-      ctx.fillStyle = TEAL;
-      ctx.beginPath(); ctx.arc(56, 58, 10, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
+      // Top-left brand lockup — logo image replaces teal dot + text
+      const hudLogo = logoImgRef.current;
+      if (hudLogo) {
+        const hudLogoW = 210;
+        const hudLogoH = Math.round(hudLogoW * (hudLogo.naturalHeight / hudLogo.naturalWidth));
+        ctx.save();
+        ctx.globalAlpha = 0.92;
+        ctx.drawImage(hudLogo, 22, 16, hudLogoW, hudLogoH);
+        ctx.restore();
+      }
       ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.font = "bold 30px 'Inter', sans-serif"; ctx.letterSpacing = "3px";
-      ctx.fillText("AI RUN COACH", 82, 68); ctx.letterSpacing = "0px";
       ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "30px 'Inter', sans-serif";
-      ctx.fillText(runName, 56, 116);
+      ctx.fillText(runName, 28, 130);
 
       // Bottom glass stat panel
       const pad = 40, panelH = 250, panelY = CH - panelH - 56, panelW = CW - pad * 2;
