@@ -273,9 +273,6 @@ export default function PrivacyPolicy() {
               <li>Data Processing Agreements with all third-party processors</li>
               <li>Encryption and secure transmission</li>
             </ul>
-
-            <h4 className="font-bold text-foreground mt-4">Article 27 GDPR / UK GDPR Representative</h4>
-            <p>If AI Run Coach is not established in the UK or EEA, we are required under Article 27 of the UK GDPR and EU GDPR to designate a local representative for users in those jurisdictions. We are currently assessing this obligation as our user base grows and will update this section with representative contact details when applicable. In the meantime, you may contact us directly at <span className="text-primary font-medium">privacy@airuncoach.live</span> for any data protection matters.</p>
           </div>
 
           {/* 7. Data Retention */}
