@@ -243,10 +243,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error(`[Register] Failed to send verification email to ${email}:`, emailErr);
       }
 
-      // Return requiresVerification flag instead of a login token
+      // Return requiresVerification flag with user data (but no auth token yet)
       const { password: _, ...userWithoutPassword } = user;
       res.status(201).json({
         requiresVerification: true,
+        user: userWithoutPassword,
         email: user.email,
         message: "Account created. Please check your email for a 6-digit verification code.",
       });
