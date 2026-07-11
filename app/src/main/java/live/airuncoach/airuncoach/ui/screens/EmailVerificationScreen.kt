@@ -23,8 +23,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
+import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
@@ -41,7 +43,11 @@ fun EmailVerificationScreen(
     val loginState by viewModel.loginState.collectAsState()
     var otp by remember { mutableStateOf("") }
     var resendCooldown by remember { mutableIntStateOf(0) }
+    var showChangeEmailDialog by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+
+    // The displayed email — updates if user changes it
+    val displayEmail = loginState.pendingVerificationEmail.ifBlank { email }
 
     // Countdown timer for resend cooldown
     LaunchedEffect(resendCooldown) {
@@ -62,6 +68,16 @@ fun EmailVerificationScreen(
     LaunchedEffect(loginState.isLoginSuccessful) {
         if (loginState.isLoginSuccessful) {
             onVerificationSuccess()
+        }
+    }
+
+    // After email change success: clear OTP, close dialog, reset cooldown
+    LaunchedEffect(loginState.changeEmailSuccess) {
+        if (loginState.changeEmailSuccess) {
+            otp = ""
+            showChangeEmailDialog = false
+            resendCooldown = 60
+            viewModel.clearChangeEmailSuccess()
         }
     }
 
@@ -100,7 +116,7 @@ fun EmailVerificationScreen(
         ) {
             Spacer(modifier = Modifier.height(40.dp))
 
-            // Email icon / illustration
+            // Email icon
             Box(
                 modifier = Modifier
                     .size(80.dp)
@@ -131,11 +147,31 @@ fun EmailVerificationScreen(
                 textAlign = TextAlign.Center
             )
             Text(
-                text = email,
+                text = displayEmail,
                 style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                 color = Colors.primary,
                 textAlign = TextAlign.Center
             )
+
+            Spacer(modifier = Modifier.height(Spacing.sm))
+
+            // "Wrong email?" link
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Wrong email? ",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted
+                )
+                Text(
+                    text = "Change it",
+                    style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary,
+                    modifier = Modifier.clickable { showChangeEmailDialog = true }
+                )
+            }
 
             Spacer(modifier = Modifier.height(Spacing.xxxl))
 
@@ -219,7 +255,7 @@ fun EmailVerificationScreen(
 
             Spacer(modifier = Modifier.height(Spacing.xl))
 
-            // Verify button (manual submit if user doesn't want auto-submit)
+            // Verify button
             Button(
                 onClick = { viewModel.verifyEmail(otp) },
                 enabled = otp.length == 6 && !loginState.isLoading,
@@ -280,6 +316,129 @@ fun EmailVerificationScreen(
                 color = Colors.textMuted,
                 textAlign = TextAlign.Center
             )
+        }
+    }
+
+    // ── Change Email Dialog ────────────────────────────────────────────────
+    if (showChangeEmailDialog) {
+        ChangeVerificationEmailDialog(
+            currentEmail = displayEmail,
+            isLoading = loginState.isLoading,
+            error = loginState.changeEmailError,
+            onDismiss = {
+                @Suppress("UNUSED_VALUE")
+                showChangeEmailDialog = false
+            },
+            onConfirm = { updatedEmail -> viewModel.updateVerificationEmail(updatedEmail) }
+        )
+    }
+}
+
+@Composable
+private fun ChangeVerificationEmailDialog(
+    currentEmail: String,
+    isLoading: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var newEmail by remember { mutableStateOf("") }
+    val isValid = android.util.Patterns.EMAIL_ADDRESS.matcher(newEmail.trim()).matches()
+        && newEmail.trim().lowercase() != currentEmail.trim().lowercase()
+
+    Dialog(onDismissRequest = { if (!isLoading) onDismiss() }) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(Spacing.xl),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Change Email Address",
+                    style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+
+                Spacer(modifier = Modifier.height(Spacing.sm))
+
+                Text(
+                    text = "Enter the correct email address. We'll send a new verification code.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(Spacing.lg))
+
+                OutlinedTextField(
+                    value = newEmail,
+                    onValueChange = { newEmail = it },
+                    label = { Text("New email address") },
+                    placeholder = { Text("you@example.com") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLoading,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Colors.textPrimary,
+                        unfocusedTextColor = Colors.textPrimary,
+                        cursorColor = Colors.primary,
+                        focusedBorderColor = Colors.primary,
+                        unfocusedBorderColor = Colors.textMuted
+                    )
+                )
+
+                if (error != null) {
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Text(
+                        text = error,
+                        style = AppTextStyles.caption,
+                        color = Colors.error,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(Spacing.xl))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        enabled = !isLoading,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(BorderRadius.md)
+                    ) {
+                        Text("Cancel", color = Colors.textSecondary)
+                    }
+
+                    Button(
+                        onClick = { onConfirm(newEmail.trim()) },
+                        enabled = isValid && !isLoading,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Colors.buttonText,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                "Update",
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.buttonText
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

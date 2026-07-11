@@ -459,6 +459,52 @@ class LoginViewModel @Inject constructor(
     }
 
     /**
+     * Updates the email address for an unverified account and resends a fresh OTP.
+     * Called from the change-email dialog on EmailVerificationScreen.
+     */
+    fun updateVerificationEmail(newEmail: String) {
+        viewModelScope.launch {
+            _loginState.update { it.copy(isLoading = true, changeEmailError = null, changeEmailSuccess = false) }
+            try {
+                val currentEmail = _loginState.value.pendingVerificationEmail
+                val response = apiService.updateVerificationEmail(
+                    live.airuncoach.airuncoach.network.model.UpdateVerificationEmailRequest(
+                        currentEmail = currentEmail,
+                        newEmail = newEmail.trim().lowercase()
+                    )
+                )
+                if (response.ok == true && response.email != null) {
+                    _loginState.update {
+                        it.copy(
+                            isLoading = false,
+                            pendingVerificationEmail = response.email,
+                            changeEmailError = null,
+                            changeEmailSuccess = true
+                        )
+                    }
+                    android.util.Log.d("LoginViewModel", "📧 Verification email updated to ${response.email}")
+                } else {
+                    _loginState.update {
+                        it.copy(isLoading = false, changeEmailError = response.error ?: "Failed to update email")
+                    }
+                }
+            } catch (e: retrofit2.HttpException) {
+                val errorBody = e.response()?.errorBody()?.string()
+                val errorMessage = try {
+                    com.google.gson.JsonParser.parseString(errorBody).asJsonObject.get("error")?.asString ?: "Failed to update email"
+                } catch (_: Exception) { "Failed to update email" }
+                _loginState.update { it.copy(isLoading = false, changeEmailError = errorMessage) }
+            } catch (e: Exception) {
+                _loginState.update { it.copy(isLoading = false, changeEmailError = e.message ?: "Failed to update email") }
+            }
+        }
+    }
+
+    fun clearChangeEmailSuccess() {
+        _loginState.update { it.copy(changeEmailSuccess = false) }
+    }
+
+    /**
      * Called when user returns from email verification screen back to sign-up.
      */
     fun resetVerificationState() {

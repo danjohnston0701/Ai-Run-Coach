@@ -337,6 +337,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/auth/update-verification-email
+  // Allows a user to correct their email address before verifying.
+  // Only permitted while the account is still unverified.
+  app.post("/api/auth/update-verification-email", async (req: Request, res: Response) => {
+    try {
+      const { currentEmail, newEmail } = req.body;
+      if (!currentEmail || !newEmail) {
+        return res.status(400).json({ error: "Current email and new email are required" });
+      }
+
+      const trimmedNew = newEmail.trim().toLowerCase();
+
+      // Basic format check
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmedNew)) {
+        return res.status(400).json({ error: "Please enter a valid email address" });
+      }
+
+      const user = await storage.getUserByEmail(currentEmail);
+      if (!user) return res.status(400).json({ error: "Account not found" });
+      if (user.emailVerified) {
+        return res.status(400).json({ error: "This account is already verified — email cannot be changed here" });
+      }
+
+      // Make sure the new email isn't already taken by a different account
+      const existingNew = await storage.getUserByEmail(trimmedNew);
+      if (existingNew && existingNew.id !== user.id) {
+        return res.status(400).json({ error: "That email address is already registered" });
+      }
+
+      // Generate a fresh OTP for the new address
+      const cryptoMod = await import("crypto");
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpHash = cryptoMod.createHash("sha256").update(otp).digest("hex");
+      const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      await storage.updateUser(user.id, {
+        email: trimmedNew,
+        emailVerificationToken: otpHash,
+        emailVerificationExpiry: otpExpiry,
+      });
+
+      const { sendEmailVerificationEmail } = await import("./email-service");
+      await sendEmailVerificationEmail({ email: trimmedNew, name: user.name, otp });
+
+      console.log(`[UpdateVerificationEmail] Email updated from ${currentEmail} to ${trimmedNew}, OTP sent`);
+      res.json({ ok: true, email: trimmedNew });
+    } catch (error: any) {
+      console.error("Update verification email error:", error);
+      res.status(500).json({ error: "Failed to update email" });
+    }
+  });
+
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
       const { email, password, timezone } = req.body;

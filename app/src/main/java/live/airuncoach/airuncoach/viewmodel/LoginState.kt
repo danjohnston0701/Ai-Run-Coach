@@ -11,4 +11,6 @@ data class LoginState(
     // Email verification flow
     val requiresEmailVerification: Boolean = false,
     val pendingVerificationEmail: String = "",
+    val changeEmailError: String? = null,   // Error specific to the change-email dialog
+    val changeEmailSuccess: Boolean = false, // True briefly after a successful email change
 )

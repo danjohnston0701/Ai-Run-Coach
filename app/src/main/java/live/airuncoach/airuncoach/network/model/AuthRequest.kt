@@ -29,3 +29,14 @@ data class VerifyEmailRequest(
 data class ResendVerificationRequest(
     val email: String
 )
+
+data class UpdateVerificationEmailRequest(
+    val currentEmail: String,
+    val newEmail: String
+)
+
+data class UpdateVerificationEmailResponse(
+    val ok: Boolean? = null,
+    val email: String? = null,
+    val error: String? = null
+)

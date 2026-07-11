@@ -40,6 +40,9 @@ interface ApiService {
     @POST("/api/auth/resend-verification")
     suspend fun resendVerification(@Body request: ResendVerificationRequest): retrofit2.Response<Unit>
 
+    @POST("/api/auth/update-verification-email")
+    suspend fun updateVerificationEmail(@Body request: UpdateVerificationEmailRequest): UpdateVerificationEmailResponse
+
     @POST("/api/auth/change-password")
     suspend fun changePassword(@Body request: ChangePasswordRequest): retrofit2.Response<Unit>
 
