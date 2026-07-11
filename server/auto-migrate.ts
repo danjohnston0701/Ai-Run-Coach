@@ -365,6 +365,16 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_observer_invitations_session",
       sql: "CREATE INDEX IF NOT EXISTS idx_observer_invitations_session ON observer_invitations(session_id)",
     },
+    // ── group_run_participants.completed_at ──────────────────────────────────
+    // Track when each participant finishes their run
+    {
+      name: "group_run_participants.completed_at",
+      sql: "ALTER TABLE group_run_participants ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP DEFAULT NULL",
+    },
+    {
+      name: "idx_group_run_participants_completed_at",
+      sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_completed_at ON group_run_participants(group_run_id, completed_at)",
+    },
   ];
 
   let succeeded = 0;

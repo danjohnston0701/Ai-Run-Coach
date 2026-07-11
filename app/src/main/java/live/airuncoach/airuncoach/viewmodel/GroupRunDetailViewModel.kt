@@ -171,4 +171,20 @@ class GroupRunDetailViewModel @Inject constructor(
             }
         }
     }
+
+    fun editGroupRun(groupRunId: String, request: CreateGroupRunRequest) {
+        viewModelScope.launch {
+            _actionLoading.value = true
+            _actionError.value = null
+            try {
+                val updated = apiService.updateGroupRun(groupRunId, request)
+                _state.value = GroupRunDetailState.Success(updated)
+            } catch (e: Exception) {
+                _actionError.value = "Failed to update group run: ${e.message}"
+                Log.e("GroupRunDetailVM", "edit error", e)
+            } finally {
+                _actionLoading.value = false
+            }
+        }
+    }
 }

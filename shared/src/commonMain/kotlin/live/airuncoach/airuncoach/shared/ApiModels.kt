@@ -189,6 +189,12 @@ data class PaginatedRoutesResponse(
     val pageSize: Int
 )
 
+@Serializable
+data class CoachingResponse(
+    val message: String,
+    val isCompletion: Boolean = false  // True when run has reached target distance/time
+)
+
 /* ------------------------------------------------------------ */
 /* Error Response */
 /* ------------------------------------------------------------ */

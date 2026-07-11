@@ -20,14 +20,12 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.GroupRun
 import live.airuncoach.airuncoach.domain.model.GroupRunParticipant
+import live.airuncoach.airuncoach.network.model.CreateGroupRunRequest
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.GroupRunDetailState
 import live.airuncoach.airuncoach.viewmodel.GroupRunDetailViewModel
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,7 +130,7 @@ fun GroupRunDetailScreenEnhanced(
                         viewModel.markReady(groupRunId)
                         onMarkReadyAndNavigate(groupRunId)
                     },
-                    onStartRun = { viewModel.startRun(groupRunId) },
+                    onStartRun = { onStartRun(groupRunId) },
                     onViewResults = { onViewResults(groupRunId) },
                     onInviteMore = { showInviteDialog = true },
                     onClearError = { viewModel.clearActionError() },
@@ -153,6 +151,31 @@ fun GroupRunDetailScreenEnhanced(
                             showInviteDialog = false
                         },
                         onDismiss = { showInviteDialog = false }
+                    )
+                }
+
+                // Edit dialog
+                if (showEditDialog) {
+                    EditGroupRunDialog(
+                        groupRun = gr,
+                        onDismiss = { showEditDialog = false },
+                        onSave = { name, description, meetingPoint, meetingLat, meetingLng, distance, dateTime, maxParticipants ->
+                            viewModel.editGroupRun(
+                                groupRunId,
+                                CreateGroupRunRequest(
+                                    name = name,
+                                    description = description,
+                                    meetingPoint = meetingPoint,
+                                    meetingLat = meetingLat,
+                                    meetingLng = meetingLng,
+                                    distance = distance,
+                                    dateTime = dateTime,
+                                    maxParticipants = maxParticipants.toIntOrNull() ?: 10,
+                                    isPublic = gr.isPublic
+                                )
+                            )
+                            showEditDialog = false
+                        }
                     )
                 }
 
@@ -571,20 +594,24 @@ fun ParticipantRowEnhanced(participant: GroupRunParticipant, status: String) {
                         )
                     }
                 }
-                if (participant.readyToStart && status == "accepted") {
-                    Text("Ready", style = AppTextStyles.small, color = Colors.success)
+                if (participant.completedAt != null && status == "accepted") {
+                    Text("✓ Finished", style = AppTextStyles.small, color = Colors.success)
+                } else if (participant.readyToStart && status == "accepted") {
+                    Text("Ready", style = AppTextStyles.small, color = Colors.primary)
                 }
             }
 
             // Status badge
-            val statusColor = when (status) {
-                "accepted" -> Colors.success
-                "declined" -> Colors.warning
+            val statusColor = when {
+                participant.completedAt != null -> Colors.success
+                status == "accepted" -> Colors.success
+                status == "declined" -> Colors.warning
                 else -> Colors.textMuted
             }
-            val statusLabel = when (status) {
-                "accepted" -> "✓ Going"
-                "declined" -> "✗ Declined"
+            val statusLabel = when {
+                participant.completedAt != null -> "✓ Completed"
+                status == "accepted" -> "✓ Going"
+                status == "declined" -> "✗ Declined"
                 else -> "◇ Invited"
             }
             Text(
@@ -665,11 +692,11 @@ fun GroupRunActionButtonsEnhanced(
                 Button(
                     onClick = onStartRun,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.success)
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
                 ) {
-                    Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Settings, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Start Group Run", color = Colors.buttonText)
+                    Text("Prepare Group Run", color = Colors.buttonText)
                 }
             }
         }
@@ -820,6 +847,91 @@ fun InviteFriendsDialogEnhanced(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Close", color = Colors.textSecondary)
+            }
+        }
+    )
+}
+
+@Composable
+fun EditGroupRunDialog(
+    groupRun: GroupRun,
+    onDismiss: () -> Unit,
+    onSave: (name: String, description: String, meetingPoint: String?, meetingLat: Double?, meetingLng: Double?, distance: Double, dateTime: String, maxParticipants: String) -> Unit
+) {
+    var name by remember { mutableStateOf(groupRun.name ?: "") }
+    var description by remember { mutableStateOf(groupRun.description ?: "") }
+    var meetingPoint by remember { mutableStateOf(groupRun.meetingPoint ?: "") }
+    var distance by remember { mutableStateOf(groupRun.distance?.toString() ?: "") }
+    var maxParticipants by remember { mutableStateOf(groupRun.maxParticipants?.toString() ?: "10") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Colors.backgroundSecondary,
+        title = {
+            Text("Edit Group Run", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Run Name *") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 3
+                )
+                OutlinedTextField(
+                    value = meetingPoint,
+                    onValueChange = { meetingPoint = it },
+                    label = { Text("Meeting Point") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    OutlinedTextField(
+                        value = distance,
+                        onValueChange = { distance = it },
+                        label = { Text("Distance (km) *") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = maxParticipants,
+                        onValueChange = { maxParticipants = it },
+                        label = { Text("Max Participants") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotEmpty() && distance.isNotEmpty()) {
+                        onSave(
+                            name,
+                            description,
+                            meetingPoint.takeIf { it.isNotEmpty() },
+                            groupRun.meetingLat,
+                            groupRun.meetingLng,
+                            distance.toDoubleOrNull() ?: 0.0,
+                            groupRun.dateTime ?: "",
+                            maxParticipants
+                        )
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+            ) {
+                Text("Save", color = Colors.buttonText)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Colors.textSecondary)
             }
         }
     )

@@ -165,10 +165,11 @@ const formatPaceForTTS = (pace: string | undefined): string => {
       return `${min} minutes and ${sec} seconds per kilometer`;
     }
   }
-  // Fallback: if the pace already contains "per kilometer" / "per km", return as-is to avoid duplication.
+  // Fallback: if the pace already contains "per kilometer" / "per kilometre" / "per km", return as-is to avoid duplication.
+  // Check for BOTH American and British spellings to prevent "per kilometer per kilometre" in audio.
   // Otherwise append the unit so TTS always hears the full unit.
   const lcPace = pace.toLowerCase();
-  if (lcPace.includes('per kilometer') || lcPace.includes('per km') || lcPace.includes('/km')) {
+  if (lcPace.includes('per kilometer') || lcPace.includes('per kilometre') || lcPace.includes('per km') || lcPace.includes('/km')) {
     return pace;
   }
   return `${pace} per kilometer`;
@@ -996,6 +997,95 @@ Provide response as JSON with fields: highlights (array), struggles (array), tip
       overallScore: 7,
       summary: "Great effort on your run today!"
     };
+  }
+}
+
+/**
+ * Check if a run has been completed (reached target distance or target time)
+ * Returns true if either target has been reached, false otherwise
+ */
+export function isRunCompleted(params: {
+  distance: number;
+  targetDistance?: number;
+  elapsedTime: number;
+  targetTime?: number;
+}): boolean {
+  const { distance, targetDistance, elapsedTime, targetTime } = params;
+  
+  // Check if distance target is reached (with 1% tolerance for GPS precision)
+  if (targetDistance && targetDistance > 0) {
+    const distanceThreshold = targetDistance * 0.99;
+    if (distance >= distanceThreshold) return true;
+  }
+  
+  // Check if time target is reached (with 2% tolerance)
+  if (targetTime && targetTime > 0) {
+    const timeThreshold = targetTime * 0.98;
+    if (elapsedTime >= timeThreshold) return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Generate a brief congratulatory summary when the runner reaches their target
+ * Called ONLY when isRunCompleted() returns true
+ * This is the FINAL coaching message - no more coaching after this
+ */
+export async function generateCompletionSummary(params: {
+  distance: number;
+  targetDistance?: number;
+  elapsedTime: number;
+  targetTime?: number;
+  currentPace?: string;
+  coachName: string;
+  coachTone: string;
+  coachAccent?: string;
+  runnerName?: string;
+  activityType?: string;
+}): Promise<string> {
+  const { distance, targetDistance, elapsedTime, targetTime, currentPace, coachName, coachTone, coachAccent, runnerName, activityType } = params;
+  
+  // Format the final stats
+  const totalTimeMin = Math.floor(elapsedTime / 60);
+  const totalTimeSec = Math.round(elapsedTime % 60);
+  const totalTimeStr = `${totalTimeMin} minutes and ${totalTimeSec} seconds`;
+  const finalPace = currentPace || 'unknown';
+  const activityLabel = activityType || 'run';
+  
+  // Build the summary prompt
+  const summaryPrompt = `You are ${coachName}, giving a brief final congratulations as ${runnerName || 'the runner'} completes their ${activityLabel}.
+  
+COMPLETION STATS:
+- Total distance: ${distance} km${targetDistance ? ` (target was ${targetDistance} km)` : ''}
+- Total time: ${totalTimeStr}${targetTime ? ` (target was ${Math.floor(targetTime / 60)} min ${Math.round(targetTime % 60)}s)` : ''}
+- Final pace: ${finalPace}
+
+Give ONE SENTENCE of brief, celebratory congratulations. 
+- Use their name naturally if provided.
+- Reference the specific distance or time they just completed.
+- NO coaching advice or tips — this is the finish line moment.
+- Short and punchy — maximum 2 sentences.
+- ${toneDirective(coachTone)}
+
+Example: "You crushed that 10 kilometres in 50 minutes! Well done!"`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a running coach giving a final congratulations message. Be brief, positive, and celebratory. NO further coaching advice." },
+        { role: "user", content: summaryPrompt }
+      ],
+      max_tokens: 60,
+      temperature: 0.8,
+    });
+    
+    return completion.choices[0].message.content || `Well done completing your ${activityLabel}!`;
+  } catch (error) {
+    console.error("Error generating completion summary:", error);
+    // Fallback message if AI fails
+    return `Congratulations on completing your ${distance} kilometre ${activityLabel} in ${totalTimeMin}:${totalTimeSec.toString().padStart(2, '0')}! Great effort!`;
   }
 }
 

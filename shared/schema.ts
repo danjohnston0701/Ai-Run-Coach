@@ -1930,6 +1930,7 @@ export const groupRunParticipants = pgTable("group_run_participants", {
   readyToStart: boolean("ready_to_start").notNull().default(false),
   runId: varchar("run_id").references(() => runs.id),              // linked completed run
   joinedAt: timestamp("joined_at").defaultNow(),
+  completedAt: timestamp("completed_at"),                            // when the participant finished their run
 });
 
 export type GroupRunParticipant = typeof groupRunParticipants.$inferSelect;

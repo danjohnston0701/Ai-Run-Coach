@@ -135,13 +135,18 @@ function mapAccentToLanguageCode(accent: string | undefined): string {
  */
 export function sanitizeForTTS(text: string): string {
   return text
+    // ── CRITICAL: Normalize pace unit spelling FIRST ────────────────────────────
+    // The AI may use British spelling "kilometre" but we always say "kilometer"
+    // in Polly audio. Do this BEFORE other pace replacements to avoid duplication.
+    .replace(/per kilomet(?:re|er)s?/gi, 'per kilometer')
+    
     // ── Pace notation — comprehensive conversion ──────────────────────────────
     // Three passes to catch every pattern GPT might produce:
     //
     // Pass 1: "M:SS minutes per kilometer" (AI mixes colon notation with spoken unit)
     //   e.g. "5:00 minutes per kilometer" → "5 minutes per kilometer"
     //   e.g. "5:20 minutes per kilometer" → "5 minutes and 20 seconds per kilometer"
-    .replace(/(\d+):(\d{2})\s+minutes?\s+per\s+k(?:ilomete)?r(?:s)?/gi, (_, m, s) => {
+    .replace(/(\d+):(\d{2})\s+minutes?\s+per\s+kilometer/gi, (_, m, s) => {
       const min = parseInt(m, 10);
       const sec = parseInt(s, 10);
       if (sec === 0) return `${min} minutes per kilometer`;

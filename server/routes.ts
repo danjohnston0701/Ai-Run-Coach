@@ -4533,19 +4533,43 @@ function transformRunForAndroid(run: any) {
   app.post("/api/ai/elevation-coaching", async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
+      
+      // Check if run has been completed — if so, send final summary and stop coaching
+      if (aiService.isRunCompleted({
+        distance: req.body.distance,
+        targetDistance: req.body.targetDistance,
+        elapsedTime: req.body.elapsedTime,
+        targetTime: req.body.targetTime
+      })) {
+        const finalMessage = await aiService.generateCompletionSummary(req.body);
+        return res.json({ message: finalMessage, isCompletion: true });
+      }
+      
       const tip = await aiService.getElevationCoaching(req.body);
-      res.json({ message: tip });
+      res.json({ message: tip, isCompletion: false });
     } catch (error: any) {
       console.error("AI elevation coaching error:", error);
       res.status(500).json({ error: "Failed to get elevation coaching" });
     }
   });
-  
+
   app.post("/api/ai/pace-update", async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
+      
+      // Check if run has been completed — if so, send final summary and stop coaching
+      if (aiService.isRunCompleted({
+        distance: req.body.distance,
+        targetDistance: req.body.targetDistance,
+        elapsedTime: req.body.elapsedTime,
+        targetTime: req.body.targetTime
+      })) {
+        const finalMessage = await aiService.generateCompletionSummary(req.body);
+        return res.json({ message: finalMessage, isCompletion: true });
+      }
+      
       const message = await aiService.generatePaceUpdate(req.body);
-      res.json({ message });
+      res.json({ message, isCompletion: false });
     } catch (error: any) {
       console.error("AI pace update error:", error);
       res.status(500).json({ error: "Failed to get pace update" });
@@ -4555,8 +4579,20 @@ function transformRunForAndroid(run: any) {
   app.post("/api/ai/phase-coaching", async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
+      
+      // Check if run has been completed — if so, send final summary and stop coaching
+      if (aiService.isRunCompleted({
+        distance: req.body.distance,
+        targetDistance: req.body.targetDistance,
+        elapsedTime: req.body.elapsedTime,
+        targetTime: req.body.targetTime
+      })) {
+        const finalMessage = await aiService.generateCompletionSummary(req.body);
+        return res.json({ message: finalMessage, isCompletion: true });
+      }
+      
       const message = await aiService.generatePhaseCoaching(req.body);
-      res.json({ message });
+      res.json({ message, isCompletion: false });
     } catch (error: any) {
       console.error("AI phase coaching error:", error);
       res.status(500).json({ error: "Failed to get phase coaching" });
@@ -4566,8 +4602,20 @@ function transformRunForAndroid(run: any) {
   app.post("/api/ai/struggle-coaching", async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
+      
+      // Check if run has been completed — if so, send final summary and stop coaching
+      if (aiService.isRunCompleted({
+        distance: req.body.distance,
+        targetDistance: req.body.targetDistance,
+        elapsedTime: req.body.elapsedTime,
+        targetTime: req.body.targetTime
+      })) {
+        const finalMessage = await aiService.generateCompletionSummary(req.body);
+        return res.json({ message: finalMessage, isCompletion: true });
+      }
+      
       const message = await aiService.generateStruggleCoaching(req.body);
-      res.json({ message });
+      res.json({ message, isCompletion: false });
     } catch (error: any) {
       console.error("AI struggle coaching error:", error);
       res.status(500).json({ error: "Failed to get struggle coaching" });
@@ -15751,6 +15799,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         invitationStatus: groupRunParticipants.invitationStatus,
         readyToStart: groupRunParticipants.readyToStart,
         runId: groupRunParticipants.runId,
+        completedAt: groupRunParticipants.completedAt,
         name: users.name,
         profilePic: users.profilePic,
       })
@@ -15792,6 +15841,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         role: p.role,
         runId: p.runId,
         readyToStart: p.readyToStart,
+        completedAt: p.completedAt?.toISOString() ?? null,
       })),
     };
   }
@@ -15849,6 +15899,41 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     } catch (error: any) {
       console.error("[POST /api/group-runs]", error);
       res.status(500).json({ error: "Failed to create group run" });
+    }
+  });
+
+  // PUT /api/group-runs/:id — update group run details (organiser only)
+  app.put("/api/group-runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user!.userId;
+      const { name, description, meetingPoint, meetingLat, meetingLng, distance, dateTime, maxParticipants, isPublic } = req.body;
+
+      // Check that user is organiser
+      const [gr] = await db.select({ hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id));
+      if (!gr) return res.status(404).json({ error: "Group run not found" });
+      if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can edit this run" });
+
+      // Build update object with only provided fields
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (description !== undefined) updateData.description = description;
+      if (meetingPoint !== undefined) updateData.meetingPoint = meetingPoint;
+      if (meetingLat !== undefined) updateData.meetingLat = meetingLat;
+      if (meetingLng !== undefined) updateData.meetingLng = meetingLng;
+      if (distance !== undefined) updateData.distance = Number(distance);
+      if (dateTime !== undefined) updateData.dateTime = new Date(dateTime);
+      if (maxParticipants !== undefined) updateData.maxParticipants = maxParticipants;
+      if (isPublic !== undefined) updateData.isPublic = isPublic;
+
+      await db.update(groupRuns).set(updateData).where(eq(groupRuns.id, id));
+
+      const updated = await buildGroupRunResponse(id, userId);
+      if (!updated) return res.status(404).json({ error: "Group run not found" });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("[PUT /api/group-runs/:id]", error);
+      res.status(500).json({ error: "Failed to update group run" });
     }
   });
 
@@ -16010,17 +16095,21 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const { runId } = req.body as { runId: string };
 
       if (runId) {
-        // Link the participant row to the run
+        // Link the participant row to the run and mark them as completed
         await db.update(groupRunParticipants)
-          .set({ runId })
+          .set({ runId, completedAt: new Date() })
           .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
         // Also stamp the run itself so we can look up group runs by runId
         await db.update(runs).set({ groupRunId: id }).where(eq(runs.id, runId));
       }
 
-      // If organiser, mark whole run as completed
-      const [gr] = await db.select({ hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id));
-      if (gr?.hostUserId === userId) {
+      // Check if all accepted participants have completed
+      const allAccepted = await db.select().from(groupRunParticipants)
+        .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.invitationStatus, 'accepted')));
+      const allDone = allAccepted.every(p => !!p.runId);
+
+      // If all participants have finished, mark the group run as completed
+      if (allDone && allAccepted.length > 0) {
         await db.update(groupRuns).set({ status: "completed" }).where(eq(groupRuns.id, id));
       }
 

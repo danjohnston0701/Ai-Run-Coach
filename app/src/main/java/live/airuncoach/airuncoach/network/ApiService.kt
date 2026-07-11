@@ -175,6 +175,12 @@ interface ApiService {
     @POST("/api/group-runs")
     suspend fun createGroupRun(@Body request: CreateGroupRunRequest): GroupRun
 
+    @PUT("/api/group-runs/{id}")
+    suspend fun updateGroupRun(
+        @Path("id") groupRunId: String,
+        @Body request: CreateGroupRunRequest
+    ): GroupRun
+
     @POST("/api/group-runs/{id}/invite")
     suspend fun inviteFriendsToGroupRun(
         @Path("id") groupRunId: String,

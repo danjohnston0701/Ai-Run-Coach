@@ -57,6 +57,8 @@ fun MapMyRunSetupScreen(
     initialMinutes: Int = 0,
     initialSeconds: Int = 0,
     initialAiCoachEnabled: Boolean = false,
+    isGroupRun: Boolean = false,
+    groupRunId: String? = null,
     onNavigateBack: () -> Unit = {},
     onGenerateRoute: (
         distance: Float,
@@ -111,9 +113,13 @@ fun MapMyRunSetupScreen(
     // Pending email text — lifted from LiveTrackingObserverSection so the Prepare Run button can
     // auto-flush it into liveTrackingObservers even if the user never pressed the ✓ checkmark.
     var liveTrackingPendingEmail by remember { mutableStateOf("") }
-    var isGroupRunEnabled by remember { mutableStateOf(false) }
+    var isGroupRunEnabled by remember { mutableStateOf(isGroupRun) }
     var groupRunParticipants by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs for group run participants
-    var isAiCoachEnabled by remember { mutableStateOf(initialAiCoachEnabled) } // Initialize from dashboard preference
+    // AI Coach should be ENABLED by default for better user experience
+    var isAiCoachEnabled by remember { mutableStateOf(true) }
+
+    // TODO: Load group run details if this is a group run screen
+    // This would require injecting ApiService directly or creating a ViewModel for it
 
     // GPS State
     var currentLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
@@ -244,15 +250,17 @@ fun MapMyRunSetupScreen(
 
             item { Spacer(modifier = Modifier.height(Spacing.xl)) }
 
-            // Target distance — KEEP functionally & visually close to your original (as requested)
-            item {
-                TargetDistanceCard(
-                    distance = targetDistance,
-                    onDistanceChanged = { targetDistance = it.roundToInt().toFloat() }
-                )
-            }
+            // Target distance — HIDE for group runs (distance is already set in group run record)
+            if (!isGroupRun) {
+                item {
+                    TargetDistanceCard(
+                        distance = targetDistance,
+                        onDistanceChanged = { targetDistance = it.roundToInt().toFloat() }
+                    )
+                }
 
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+                item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+            }
 
             // Target time — same function, more compact / less heavy
             item {
@@ -281,20 +289,22 @@ fun MapMyRunSetupScreen(
 
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
-            // Group Run only (Live Tracking hidden until iOS app launch)
-            item {
-                val friendsList = when (friendsState) {
-                    is FriendsUiState.Success -> (friendsState as FriendsUiState.Success).friends
-                    else -> emptyList()
+            // Group Run toggle — HIDE if this is already a group run (toggle is already enabled)
+            if (!isGroupRun) {
+                item {
+                    val friendsList = when (friendsState) {
+                        is FriendsUiState.Success -> (friendsState as FriendsUiState.Success).friends
+                        else -> emptyList()
+                    }
+                    GroupRunSection(
+                        groupRunEnabled = isGroupRunEnabled,
+                        onToggleGroupRun = { isGroupRunEnabled = it },
+                        groupRunParticipants = groupRunParticipants,
+                        onParticipantsChanged = { groupRunParticipants = it },
+                        friends = friendsList,
+                        isLoadingFriends = friendsState is FriendsUiState.Loading
+                    )
                 }
-                GroupRunSection(
-                    groupRunEnabled = isGroupRunEnabled,
-                    onToggleGroupRun = { isGroupRunEnabled = it },
-                    groupRunParticipants = groupRunParticipants,
-                    onParticipantsChanged = { groupRunParticipants = it },
-                    friends = friendsList,
-                    isLoadingFriends = friendsState is FriendsUiState.Loading
-                )
             }
 /*Hide AI Pre-Summary text
             if (mode == "no_route") {
@@ -430,7 +440,7 @@ fun MapMyRunSetupScreen(
                                         !hasLocationPermission -> "GRANT"
                                         isGettingLocation -> "GPS…"
                                         currentLocation == null -> "WAITING"
-                                        else -> "PREPARE FOR PHONE"
+                                        else -> "Prepare for Phone"
                                     },
                                     leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                                         R.drawable.icon_navigation_vector else null,

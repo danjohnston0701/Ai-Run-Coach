@@ -32,5 +32,6 @@ data class GroupRunParticipant(
     @SerializedName("invitationStatus") val invitationStatus: String, // "pending"|"accepted"|"declined"
     @SerializedName("role") val role: String = "participant",         // "organiser"|"participant"
     @SerializedName("runId") val runId: String? = null,               // linked run session after run
-    @SerializedName("readyToStart") val readyToStart: Boolean = false
+    @SerializedName("readyToStart") val readyToStart: Boolean = false,
+    @SerializedName("completedAt") val completedAt: String? = null    // when they finished their run
 )

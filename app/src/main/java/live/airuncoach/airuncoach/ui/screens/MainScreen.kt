@@ -1285,6 +1285,8 @@ fun MainScreen(
                 val groupRunId = backStackEntry.arguments?.getString("groupRunId") ?: return@composable
                 MapMyRunSetupScreen(
                     mode = "no_route",
+                    isGroupRun = true,
+                    groupRunId = groupRunId,
                     onNavigateBack = { navController.popBackStack() },
                     onGenerateRoute = { _, _, _, _, _, _, _, _, _, _ ->
                         // Group runs don't support route generation - ignore this callback
