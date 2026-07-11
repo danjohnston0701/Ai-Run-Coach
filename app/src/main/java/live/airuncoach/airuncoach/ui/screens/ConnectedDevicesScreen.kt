@@ -160,8 +160,7 @@ fun ConnectedDevicesScreen(
                 Text(
                     "Connect your Ai Run Coach app to your fitness devices and services. Get real-time coaching with your Garmin watch, and import your historic Strava runs so your AI coach has full context from day one.",
                     style = AppTextStyles.body,
-                    color = Colors.textSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
+                    color = Colors.textSecondary
                 )
             }
 
