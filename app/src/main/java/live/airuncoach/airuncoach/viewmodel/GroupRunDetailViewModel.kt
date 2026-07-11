@@ -12,6 +12,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.GroupRun
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.CreateGroupRunRequest
 import live.airuncoach.airuncoach.network.model.GroupRunRespondRequest
 import live.airuncoach.airuncoach.network.model.InviteFriendsRequest
 import retrofit2.HttpException
