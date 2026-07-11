@@ -167,7 +167,7 @@ fun PersonalDetailsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
-                .imePadding() // Add padding when keyboard appears
+                
                 .padding(bottom = Spacing.lg) // Add bottom padding so content doesn't hide behind button
         ) {
             item {

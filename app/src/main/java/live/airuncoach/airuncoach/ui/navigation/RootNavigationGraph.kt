@@ -157,16 +157,32 @@ fun RootNavigationGraph(navController: NavHostController) {
         }
 
         composable(AppRoutes.MAIN) {
-            MainScreen(
-                onNavigateToLogin = {
-                    navController.navigate(AppRoutes.LOGIN) {
-                        popUpTo(AppRoutes.MAIN) { inclusive = true }
-                    }
-                },
-                onNavigateToGarminUpdate = { version, releaseNote ->
-                    navController.navigate(AppRoutes.garminWatchUpdate(version, releaseNote))
+            val sessionManager = remember { SessionManager(context) }
+            
+            // Check if user needs to complete onboarding on app restart
+            if (sessionManager.needsProfileSetup()) {
+                // Navigate to personal details
+                navController.navigate("personal_details") {
+                    popUpTo(AppRoutes.MAIN) { inclusive = true }
                 }
-            )
+            } else if (sessionManager.needsCoachSetup()) {
+                // Navigate to coach settings
+                navController.navigate("coach_settings") {
+                    popUpTo(AppRoutes.MAIN) { inclusive = true }
+                }
+            } else {
+                // Only show MainScreen if onboarding is complete
+                MainScreen(
+                    onNavigateToLogin = {
+                        navController.navigate(AppRoutes.LOGIN) {
+                            popUpTo(AppRoutes.MAIN) { inclusive = true }
+                        }
+                    },
+                    onNavigateToGarminUpdate = { version, releaseNote ->
+                        navController.navigate(AppRoutes.garminWatchUpdate(version, releaseNote))
+                    }
+                )
+            }
         }
 
         composable("personal_details") {
