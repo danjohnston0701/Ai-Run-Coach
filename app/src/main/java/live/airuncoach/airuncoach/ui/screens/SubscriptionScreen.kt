@@ -242,11 +242,9 @@ private fun PlansTabContent(
             )
         }
 
-        // Billing Period Toggle — only show if user is comparing plans
-        if (!isPremium) {
-            item {
-                BillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
-            }
+        // Billing Period Toggle — always show so users can compare monthly vs annual pricing
+        item {
+            BillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
         }
 
         // Plan Cards
@@ -274,14 +272,31 @@ private fun PlansTabContent(
                 isCurrent = isPremium && currentTier == "lite",
                 isAnnual = isAnnual,
                 onUpgradeClick = {
+                    val packageName = context.packageName
+                    val productId = if (isAnnual) "lite_annual" else "lite_monthly"
+                    
                     if (!isPremium) {
+                        // Non-premium user: try to purchase through billing client
                         activity?.let {
-                            val productId = if (isAnnual) "lite_annual" else "lite_monthly"
                             val liteProduct = subscriptions.find { sub -> sub.productId == productId }
                             if (liteProduct != null) {
                                 viewModel.purchaseSubscription(it, liteProduct)
+                            } else {
+                                // Fallback to Play Store if product not found
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = "https://play.google.com/store/account/subscriptions?package=$packageName&sku=$productId".toUri()
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
                             }
                         }
+                    } else {
+                        // Premium user: navigate to Play Store to manage subscription
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            data = "https://play.google.com/store/account/subscriptions?package=$packageName&sku=$productId".toUri()
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
                     }
                 }
             )
@@ -295,14 +310,31 @@ private fun PlansTabContent(
                 isPopular = true,
                 isAnnual = isAnnual,
                 onUpgradeClick = {
+                    val packageName = context.packageName
+                    val productId = if (isAnnual) "standard_annual" else "standard_monthly"
+                    
                     if (!isPremium) {
+                        // Non-premium user: try to purchase through billing client
                         activity?.let {
-                            val productId = if (isAnnual) "standard_annual" else "standard_monthly"
                             val standardProduct = subscriptions.find { sub -> sub.productId == productId }
                             if (standardProduct != null) {
                                 viewModel.purchaseSubscription(it, standardProduct)
+                            } else {
+                                // Fallback to Play Store if product not found
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = "https://play.google.com/store/account/subscriptions?package=$packageName&sku=$productId".toUri()
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
                             }
                         }
+                    } else {
+                        // Premium user: navigate to Play Store to manage subscription
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            data = "https://play.google.com/store/account/subscriptions?package=$packageName&sku=$productId".toUri()
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
                     }
                 }
             )
@@ -664,7 +696,7 @@ private fun PlanCard(
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
-            // Upgrade Button
+            // Upgrade Button (shown for all non-current plans, or for managing current plan)
             if (!isCurrent) {
                 Button(
                     onClick = onUpgradeClick,
@@ -681,6 +713,33 @@ private fun PlanCard(
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Colors.buttonText
+                    )
+                }
+            } else {
+                // Button to manage current plan in Google Play Store
+                Button(
+                    onClick = onUpgradeClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = plan.accentColor.copy(alpha = 0.2f),
+                        contentColor = plan.accentColor
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .padding(end = 8.dp)
+                    )
+                    Text(
+                        text = "Manage in Play Store",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = plan.accentColor
                     )
                 }
             }
