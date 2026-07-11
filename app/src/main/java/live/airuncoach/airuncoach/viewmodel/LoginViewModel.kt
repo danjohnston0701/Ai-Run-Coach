@@ -266,8 +266,11 @@ class LoginViewModel @Inject constructor(
 
                 android.util.Log.d("LoginViewModel", "✅ Registration API call successful!")
 
-                // New flow: server requires email verification before issuing a token
-                if (response.requiresVerification == true) {
+                // New flow: server requires email verification before issuing a token.
+                // We check for ABSENCE of a token (most reliable signal) rather than
+                // requiresVerification boolean which can fail to parse in some Gson configurations.
+                val requiresVerification = response.requiresVerification == true || response.token == null
+                if (requiresVerification) {
                     android.util.Log.d("LoginViewModel", "📧 Email verification required for ${_loginState.value.email}")
                     _loginState.update {
                         it.copy(
