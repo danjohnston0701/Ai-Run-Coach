@@ -88,6 +88,7 @@ import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
+import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { registerSamsungCompanionRoutes } from "./routes-samsung-companion";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
@@ -2154,6 +2155,28 @@ function transformRunForAndroid(run: any) {
       .set({ isCompleted: true, completedRunId: runId })
       .where(eq(plannedWorkouts.id, wid));
     console.log(`✅ [autoComplete] Planned workout ${wid} marked complete via run ${runId}`);
+
+    // ── Orientation session completion → trigger enrichment for weeks 1-2 ──────
+    // When a new user completes their orientation run, we now have real pace + HR data
+    // to enrich all week 1-2 sessions with accurate numeric targets.
+    if ((pw as any).workoutType === "orientation" && (pw as any).trainingPlanId) {
+      const planId = (pw as any).trainingPlanId;
+      const userId = (savedRun as any)?.userId;
+
+      setImmediate(async () => {
+        try {
+          console.log(`[autoComplete] Orientation complete — enriching weeks 1-2 for plan ${planId}`);
+          const workoutIds = await getWorkoutIdsForPlanWeeks(planId, [1, 2]);
+          if (workoutIds.length > 0) {
+            await enrichWorkoutBlock(userId, workoutIds);
+            await markPlanEnrichedThroughWeek(planId, 2);
+            console.log(`[autoComplete] ✅ Weeks 1-2 enriched after orientation for plan ${planId}`);
+          }
+        } catch (e) {
+          console.error(`[autoComplete] Enrichment after orientation failed for plan ${planId}:`, e);
+        }
+      });
+    }
 
     // Advance the week if all workouts in this week are now done
     if ((pw as any).weeklyPlanId && (pw as any).trainingPlanId) {

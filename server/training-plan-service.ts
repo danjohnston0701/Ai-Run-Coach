@@ -13,6 +13,7 @@ import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this 
 import { generateSessionInstructions } from "./session-coaching-service";
 import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 import { assessOrientationNeed, generateOrientationCoachingPrompt, type OrientationAssessment } from "./orientation-session-service";
+import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { jsonrepair } from "jsonrepair";
 import OpenAI from "openai";
 
@@ -267,7 +268,7 @@ export async function generateTrainingPlan(
     const recentRuns = aiRunCoachRuns.slice(0, 30);
 
     // ── Check if user has HR data in recent runs ──
-    const runsWithHRData = recentRuns.filter(r => r.heartRate && r.heartRate > 0);
+    const runsWithHRData = recentRuns.filter(r => r.avgHeartRate && r.avgHeartRate > 0);
     const hasHRHistory = runsWithHRData.length >= 3; // At least 3 runs with HR data
 
     // Determine which HR zone scenario applies
@@ -362,8 +363,8 @@ export async function generateTrainingPlan(
         .filter((v): v is number => v !== null)
         .reduce((a, b, _, arr) => a + b / arr.length, 0),
       avgHeartRate: last3Runs
-        .filter(r => r.heartRate && r.heartRate > 0)
-        .reduce((sum, r) => sum + (r.heartRate || 0), 0) / Math.max(last3Runs.length, 1),
+        .filter(r => r.avgHeartRate && r.avgHeartRate > 0)
+        .reduce((sum, r) => sum + (r.avgHeartRate || 0), 0) / Math.max(last3Runs.length, 1),
       daysSpan: daysSpanBetweenFirstAndLatest,
     } : null;
 
@@ -484,7 +485,7 @@ export async function generateTrainingPlan(
     // Collect peak HR from recent runs (stored as heartRate field which represents avg HR;
     // we use the top-end values as a peak-HR proxy until dedicated maxHR fields are added)
     const peakHRsFromHistory = recentRuns
-      .map(r => r.heartRate ?? 0)
+      .map(r => r.avgHeartRate ?? 0)
       .filter(hr => hr > 0);
     const maxHR = HeartRateZones.estimateMaxHRFromHistory(peakHRsFromHistory, userAge);
     const maxHRSource = peakHRsFromHistory.length >= 3 ? 'run-history' : 'tanaka-formula';
@@ -492,9 +493,9 @@ export async function generateTrainingPlan(
 
     // ── LTHR estimation for enhanced zone targeting ──
     const avgHrPaceData = recentRuns
-      .filter(r => r.heartRate && r.heartRate > 0 && r.avgPace)
+      .filter(r => r.avgHeartRate && r.avgHeartRate > 0 && r.avgPace)
       .map(r => ({
-        avgHR: r.heartRate!,
+        avgHR: r.avgHeartRate!,
         avgPaceSecs: (() => {
           if (!r.avgPace) return 0;
           const parts = r.avgPace.replace(/\/km.*/, '').trim().split(':');
@@ -615,20 +616,28 @@ DO NOT treat the absence of run data as evidence of low fitness. Instead:
   const isLongDistanceGoal = targetDistance > 10 || ['ultra', 'marathon', 'half_marathon', '10k'].includes(goalType);
 
   if (isLongDistanceGoal) {
-    // For any goal over 10km, build the optimal plan for the goal — fitness level informs PACE only.
-    // Anyone targeting >10km is not a beginner runner. The adaptive coaching system handles
-    // session-level pullbacks if the runner struggles in practice.
     return `IMPORTANT: This runner has NO previous run data recorded in this app — they are NEW to this app only.
-Build the OPTIMAL plan for this ${targetDistance}km goal. Key principle: fitness level (${experienceLevel}) informs training PACES and session intensity only — it does NOT cap session distances or weekly volume.
-- Session distances and weekly volume must be built to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks — do NOT water down distances based on fitness level
+Build the OPTIMAL plan for this ${targetDistance}km goal. Key principle: fitness level (${experienceLevel}) informs session intensity only — it does NOT cap session distances or weekly volume.
+- Session distances and weekly volume must be built to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks
 - Start at ~${Math.round(weeklyMileageBase)}km/week and build to meet the event requirements
-- Paces: estimate appropriate training paces for a ${experienceLevel} runner — adjust effort levels to match the stated level, but keep distances true to the goal
-- The adaptive coaching system will adjust individual sessions based on actual performance — build the plan for the goal, not a conservative version of it`;
+- Paces will be set after their first session using real performance data — focus on session structure, not numeric targets
+
+🔑 ORIENTATION SESSION RULE (new users only):
+Set the FIRST workout's workoutType to "orientation". This is a calibration run — NOT a full training session.
+- effortLabel: "orientation_calibration"
+- distance: 3–5km (comfortable, not exhausting)
+- instructions: "Easy exploration run. Start at a comfortable pace and let it settle naturally over the first kilometre. Run the whole session at a conversational effort — you should be able to speak in full sentences throughout. Your coach will use your pace and heart rate data from today to calibrate all future session targets specifically to you."
+- All other week 1-2 sessions: set workoutType and effortLabel as designed, but note in instructions that specific targets will appear once the orientation run is complete`;
   } else {
-    // For ≤10km goals, fitness level can influence starting volume as well as paces
     return `IMPORTANT: This runner has NO previous run data recorded in this app.
-Use their stated fitness level (${experienceLevel}) and the ${weeklyMileageBase.toFixed(0)}km/week baseline to set appropriate starting volume and paces.
-Build progressively toward the ${targetDistance}km goal.`;
+Use their stated fitness level (${experienceLevel}) and the ${weeklyMileageBase.toFixed(0)}km/week baseline to set appropriate starting volume.
+Build progressively toward the ${targetDistance}km goal.
+
+🔑 ORIENTATION SESSION RULE (new users only):
+Set the FIRST workout's workoutType to "orientation". This is a calibration run.
+- effortLabel: "orientation_calibration"
+- distance: 2–3km (gentle, achievable)
+- instructions: "Easy exploration run at a comfortable conversational pace. Your coach will use your data from this session to set your personalised training targets."`;
   }
 })()}
 `;
@@ -1018,17 +1027,19 @@ Return your complete coaching plan as JSON with this structure:
           "dayOfWeek": 1,
           "workoutType": "easy",
           "distance": 6.0,
-          "targetPace": "Pace appropriate for this session type and this athlete's current fitness",
-          "intensity": "Your chosen intensity label for this session",
+          "effortLabel": "easy_aerobic",
+          "targetPace": null,
+          "intensity": "z2",
           "description": "Session name, personalised to this athlete and their goal — not a generic label",
-          "instructions": "Detailed, specific coaching instructions for this session — reference the athlete's actual pace data, their goal, and explain why this session matters at this point in the plan"
+          "instructions": "2-3 sentences — session purpose, what the athlete should focus on, and why this session matters at this stage of the plan"
         },
         {
           "dayOfWeek": 3,
           "workoutType": "tempo",
           "distance": 5.0,
-          "targetPace": "Appropriate threshold pace for this athlete based on their goal and current fitness",
-          "intensity": "z4",
+          "effortLabel": "lactate_threshold",
+          "targetPace": null,
+          "intensity": "z3",
           "description": "Personalised session description",
           "instructions": "Specific coaching instructions for this athlete"
         },
@@ -1036,17 +1047,13 @@ Return your complete coaching plan as JSON with this structure:
           "dayOfWeek": 5,
           "workoutType": "intervals",
           "distance": 5.0,
-          "targetPace": "Appropriate interval pace based on your coaching assessment",
+          "effortLabel": "vo2max_intervals",
+          "targetPace": null,
           "intensity": "z5",
           "intervalCount": 6,
           "intervalDistanceMeters": 400,
           "intervalDurationSeconds": null,
           "restDurationSeconds": 90,
-          "intervalHeartRateMin": 155,
-          "intervalHeartRateMax": 170,
-          "restHeartRateMax": 135,
-          "intervalTargetPace": "4:30",
-          "restTargetPace": null,
           "description": "Personalised session description",
           "instructions": "Specific coaching instructions for this athlete"
         },
@@ -1054,16 +1061,12 @@ Return your complete coaching plan as JSON with this structure:
           "dayOfWeek": 6,
           "workoutType": "walk_run",
           "duration": 1800,
+          "effortLabel": "aerobic_walk_run",
           "targetPace": null,
           "intensity": "z2",
           "intervalCount": 5,
           "intervalDurationSeconds": 180,
           "restDurationSeconds": 120,
-          "intervalHeartRateMin": 125,
-          "intervalHeartRateMax": 145,
-          "restHeartRateMax": 120,
-          "intervalTargetPace": "6:30",
-          "restTargetPace": "8:00",
           "sessionGoal": "build_fitness",
           "description": "Walk-run intervals — personalised to this athlete",
           "instructions": "Specific coaching instructions for this walk-run athlete"
@@ -1074,14 +1077,15 @@ Return your complete coaching plan as JSON with this structure:
 }
 
 OUTPUT NOTES:
-- workoutType: use any appropriate label ("easy", "walk_run", "tempo", "intervals", "long_run", "fartlek", "strides", "progression_run", "hill_repeats", "race_pace", "recovery", "time_trial", "back_to_back_long", "rehab_strength", etc.). Use "rest" for rest days only.
+- workoutType: use any appropriate label — "easy", "walk_run", "tempo", "intervals", "long_run", "fartlek", "strides", "progression_run", "hill_repeats", "race_pace", "recovery", "time_trial", "back_to_back_long", "rehab_strength", or any coaching concept you choose. Use "rest" for rest days only. Novel session types are fully supported.
+- effortLabel: REQUIRED on every non-rest session. Use any descriptive coaching label that captures the physiological intent — "easy_aerobic", "threshold", "race_pace", "hill_power", "neuromuscular_strides", "temperval", "fartlek_surges", or anything that fits. This is stored and used to assign precise numeric targets based on this runner's actual data.
+- targetPace: always null — do NOT output specific pace values. Numeric targets are assigned after generation using the runner's real performance data. Guessing paces without real data produces unreliable results.
+- intensity: the HR zone label (z1–z5). Set this based on the physiological demand of the session — not as a paired target with targetPace, since they will be aligned with real data later.
+- For "walk_run" and "intervals" workoutTypes: you MUST include intervalCount, intervalDurationSeconds (for time-based) OR intervalDistanceMeters (for distance-based), and restDurationSeconds (recovery phase duration). These fields power the in-run AI coaching engine. Do NOT include intervalHeartRateMin/Max, intervalTargetPace, or restTargetPace — those will be set during enrichment.
 - safetyDisclaimer: required when injuries are present — the "disclaimer" text must address the athlete directly and state this is AI training guidance, not medical advice.
-- instructions: 2-3 sentences — session purpose, specific target metric for this athlete, physiological adaptation at this plan stage.
 - coachingApproach: name the methodology chosen (e.g. polarised, threshold-focused, time-on-feet) and why it suits this athlete.
 - weekDescription: name the specific training phase — not generic phrases like "continue building fitness".
-- estimatedWeeklyMileage: peak weekly volume, not starting volume.
-- For athletes with no run history: use stated fitness level — do not default to overly conservative language unless genuinely warranted.
-- For "walk_run" and "intervals" workoutTypes: you MUST include intervalCount, intervalDurationSeconds (for time-based) OR intervalDistanceMeters (for distance-based), restDurationSeconds (recovery phase duration), intervalHeartRateMin/Max (work phase HR targets), restHeartRateMax (recovery phase max HR), and intervalTargetPace/restTargetPace where applicable. These fields power the in-run AI coaching engine — without them the athlete will not receive any in-run coaching cues.`;
+- estimatedWeeklyMileage: peak weekly volume, not starting volume.`;
 
     // Fetch AI runner profile for richer personalisation
     const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
@@ -1438,6 +1442,11 @@ App capabilities available in every session: real-time GPS pace/distance, live a
           ? Number(workout.distance)
           : null;
 
+        // Determine if this workout is pending enrichment (new architecture)
+        // Orientation sessions and rest days are excluded from enrichment
+        const isEnrichmentPending =
+          workout.workoutType !== "rest" && workout.workoutType !== "orientation";
+
         const plannedWorkoutResult = await db
           .insert(plannedWorkouts)
           .values({
@@ -1447,30 +1456,32 @@ App capabilities available in every session: real-time GPS pace/distance, live a
             scheduledDate,
             workoutType: workout.workoutType,
             distance: safeDistance,
-            targetPace: workout.targetPace,
+            targetPace: null, // Always null at generation — enrichment service fills this in
             intensity: workout.intensity,
             hrZoneNumber,
             hrZoneMinBpm,
             hrZoneMaxBpm,
             hrZoneScenario: hrZoneNumber ? (hrZoneScenario as 'device' | 'history' | 'effort') : null,
-            effortDescription,
+            effortDescription: workout.effortLabel ?? effortDescription, // Store GPT's effort intent
+            effortLabel: workout.effortLabel ?? null,
+            isEnrichmentPending,
             description: workout.description,
             instructions: workout.instructions,
             isCompleted: false,
-            // Interval/rep structure
+            // Interval/rep structure — set by GPT at generation time
             intervalCount:          workout.intervalCount ?? null,
             intervalDistanceMeters: workout.intervalDistanceMeters ?? null,
             intervalDurationSeconds: workout.intervalDurationSeconds ?? null,
-            // Per-phase coaching targets (walk_run + interval sessions)
             restDurationSeconds:    workout.restDurationSeconds ?? null,
-            intervalHeartRateMin:   workout.intervalHeartRateMin ?? null,
-            intervalHeartRateMax:   workout.intervalHeartRateMax ?? null,
-            restHeartRateMax:       workout.restHeartRateMax ?? null,
-            intervalTargetPace:     workout.intervalTargetPace ?? null,
-            restTargetPace:         workout.restTargetPace ?? null,
-            sessionGoal: workout.sessionGoal, // "build_fitness", "develop_speed", etc
+            // Per-phase numeric targets — null at generation, filled by enrichment
+            intervalHeartRateMin:   null,
+            intervalHeartRateMax:   null,
+            restHeartRateMax:       null,
+            intervalTargetPace:     null,
+            restTargetPace:         null,
+            sessionGoal: workout.sessionGoal,
             sessionIntent: workout.sessionIntent,
-          })
+          } as any)
           .returning({ id: plannedWorkouts.id });
 
         // Collect workout info for background session instruction generation
@@ -1491,9 +1502,36 @@ App capabilities available in every session: real-time GPS pace/distance, live a
 
     console.log(`✅ Generated ${isRollingPlan ? `block 1 (weeks 1-${weeksToGenerate}) of ${weeksUntilTarget}` : `${weeksUntilTarget}`}-week training plan for user ${userId} (${pendingSessionInstructions.length} workouts queued for coaching instructions)${nextBlockAt ? `, next block scheduled at ${nextBlockAt.toDateString()}` : ''}`);
 
-    // Fire-and-forget: generate session instructions in the background so the plan
-    // is returned to the user immediately (~60s instead of ~5min).
-    // Instructions are generated in parallel batches of 5 to stay within rate limits.
+    // ── Enrichment: add runner-specific numeric targets to the first 2 weeks ──
+    // For returning users (any run history): enrich immediately — even without HR data the
+    // enrichment service uses their pace history + fitness level for reasonable estimates.
+    // For new users (no runs at all): weeks 1-2 stay with placeholders until orientation completes.
+    setImmediate(async () => {
+      try {
+        if (hasRunHistory) {
+          // Returning user — enrich weeks 1-2 immediately using available data
+          console.log(`[Plan] Enriching weeks 1-2 for returning user ${userId} (HR data: ${hasHRHistory ? 'yes' : 'no — pace-only estimate'}`);
+          const workoutIdsToEnrich = await getWorkoutIdsForPlanWeeks(planId, [1, 2]);
+          if (workoutIdsToEnrich.length > 0) {
+            await enrichWorkoutBlock(userId, workoutIdsToEnrich);
+            await markPlanEnrichedThroughWeek(planId, 2);
+            console.log(`[Plan] ✅ Weeks 1-2 enriched for plan ${planId}`);
+          }
+        } else {
+          // New user — mark plan as using enrichment architecture with week 0 (nothing enriched yet)
+          // Enrichment will fire after orientation session completes
+          await markPlanEnrichedThroughWeek(planId, 0);
+          console.log(`[Plan] New user ${userId} — enrichment will fire after orientation session completes`);
+        }
+      } catch (enrichErr) {
+        console.error(`[Plan] Enrichment failed for plan ${planId}:`, enrichErr);
+        // Non-fatal — plan is still usable, just without numeric targets until enrichment retries
+      }
+    });
+
+    // Fire-and-forget: generate session instructions in the background.
+    // For enriched workouts this will be re-run after enrichment completes with better data.
+    // For un-enriched workouts (new users weeks 1+) this generates placeholder briefings.
     setImmediate(() => {
       generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch((err) =>
         console.error(`[SessionInstructions] Background generation failed for plan ${planId}:`, err)
@@ -1620,10 +1658,10 @@ Return valid JSON only:
           "dayOfWeek": 1,
           "workoutType": "tempo",
           "distance": 7.0,
-          "targetPace": "Pace appropriate for this stage of the plan",
+          "effortLabel": "lactate_threshold",
           "intensity": "z4",
           "description": "Personalised session name",
-          "instructions": "2-3 sentences: session purpose, specific target, why it matters now"
+          "instructions": "2-3 sentences: session purpose, physiological intent, why it matters at this point in the plan"
         }
       ]
     }
@@ -1717,14 +1755,18 @@ STRUCTURAL CONSTRAINTS:
       const scheduledDate = new Date(planWeekStart);
       scheduledDate.setDate(planWeekStart.getDate() + ((weekNum - 1) * 7) + dayOffsetFromMonday);
 
+      const workoutType = workout.workoutType || 'easy';
       const workoutResult = await db.insert(plannedWorkouts).values({
         weeklyPlanId,
         trainingPlanId: planId,
         dayOfWeek,
         scheduledDate,
-        workoutType: workout.workoutType || 'easy',
+        workoutType,
         distance: parseFloat(String(workout.distance ?? 0).replace(/[^\d.]/g, '')) || 0,
-        targetPace: workout.targetPace,
+        targetPace: null, // Always null at generation — enrichment service fills this in
+        effortLabel: workout.effortLabel ?? null,
+        effortDescription: workout.effortLabel ?? null, // Mirror to effortDescription for display
+        isEnrichmentPending: workoutType !== 'rest',
         intensity: workout.intensity,
         description: workout.description,
         instructions: workout.instructions,
@@ -1733,15 +1775,15 @@ STRUCTURAL CONSTRAINTS:
         intervalDurationSeconds: workout.intervalDurationSeconds ?? null,
         // Per-phase coaching targets (walk_run + interval sessions)
         restDurationSeconds:    workout.restDurationSeconds ?? null,
-        intervalHeartRateMin:   workout.intervalHeartRateMin ?? null,
-        intervalHeartRateMax:   workout.intervalHeartRateMax ?? null,
-        restHeartRateMax:       workout.restHeartRateMax ?? null,
-        intervalTargetPace:     workout.intervalTargetPace ?? null,
-        restTargetPace:         workout.restTargetPace ?? null,
+        intervalHeartRateMin:   null,
+        intervalHeartRateMax:   null,
+        restHeartRateMax:       null,
+        intervalTargetPace:     null,
+        restTargetPace:         null,
         sessionGoal:            workout.sessionGoal ?? null,
         sessionIntent:          workout.sessionIntent ?? null,
         isCompleted: false,
-      }).returning({ id: plannedWorkouts.id });
+      } as any).returning({ id: plannedWorkouts.id });
 
       if (workoutResult[0]) {
         pendingSessionInstructions.push({
@@ -1764,7 +1806,25 @@ STRUCTURAL CONSTRAINTS:
 
   console.log(`✅ [NextBlock] Generated block ${blockNumber} (weeks ${nextBlockStart}–${nextBlockEnd}) for plan ${planId}. Next block at: ${newNextBlockAt?.toDateString() ?? 'N/A (plan complete)'}`);
 
-  // Background session instruction generation
+  // Enrich the newly generated block immediately — user shouldn't wait for the daily scheduler job
+  setImmediate(async () => {
+    try {
+      console.log(`[NextBlock] Enriching weeks ${nextBlockStart}–${nextBlockEnd} for plan ${planId}`);
+      const weekNumbers: number[] = [];
+      for (let w = nextBlockStart; w <= nextBlockEnd; w++) weekNumbers.push(w);
+      const workoutIds = await getWorkoutIdsForPlanWeeks(planId, weekNumbers);
+      if (workoutIds.length > 0) {
+        await enrichWorkoutBlock(userId, workoutIds);
+        await markPlanEnrichedThroughWeek(planId, nextBlockEnd);
+        console.log(`[NextBlock] ✅ Enriched weeks ${nextBlockStart}–${nextBlockEnd} for plan ${planId}`);
+      }
+    } catch (err) {
+      console.error(`[NextBlock] Enrichment failed for weeks ${nextBlockStart}–${nextBlockEnd}:`, err);
+      // Non-fatal — scheduler will retry tomorrow
+    }
+  });
+
+  // Background session instruction generation (enrichment regen fires after enrichment completes)
   setImmediate(() => {
     generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch(err =>
       console.error(`[NextBlock][SessionInstructions] Background generation failed:`, err)

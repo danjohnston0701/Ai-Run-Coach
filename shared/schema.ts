@@ -1284,6 +1284,10 @@ export const trainingPlans = pgTable("training_plans", {
   // nextBlockAt: when the next block should be generated (start of the last week of current block).
   generatedThroughWeek: integer("generated_through_week"),  // null = legacy plans (all weeks exist)
   nextBlockAt: timestamp("next_block_at"),                  // null = next block not yet scheduled
+  // Session enrichment architecture — enriches sessions with runner-specific numeric targets post-generation.
+  // enrichedThroughWeek: how many weeks have been enriched with real pace/HR targets.
+  // null = legacy plan (no enrichment architecture); 2 = weeks 1-2 enriched; etc.
+  enrichedThroughWeek: integer("enriched_through_week"),
   // Injury/safety — populated by AI when active injuries are present at plan creation time.
   // Stored as a JSON string: { medicalClearanceRequired, prerequisiteChecks, stopCriteria, progressionGates, disclaimer }
   safetyDisclaimer: text("safety_disclaimer"),
@@ -1344,7 +1348,13 @@ export const plannedWorkouts = pgTable("planned_workouts", {
   sessionInstructionsId: varchar("session_instructions_id").references(() => sessionInstructions.id),
   sessionGoal: text("session_goal"), // "build_fitness", "develop_speed", "active_recovery", "endurance"
   sessionIntent: text("session_intent"), // What the session is designed to achieve
-  
+  // Enrichment architecture — effortLabel is GPT's coaching intent (e.g. "easy_aerobic", "threshold", "temperval").
+  // Stored at plan generation time; numeric targets (targetPace, hrZone etc.) are filled by enrichment service.
+  effortLabel: text("effort_label"),
+  // isEnrichmentPending: true when the session was created under the new architecture and hasn't been enriched yet.
+  // Used to show placeholder copy to the user until enrichment fires.
+  isEnrichmentPending: boolean("is_enrichment_pending").default(false),
+
   createdAt: timestamp("created_at").defaultNow(),
 });
 

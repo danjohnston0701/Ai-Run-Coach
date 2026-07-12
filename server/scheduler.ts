@@ -7,6 +7,7 @@ import { db } from './db';
 import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '@shared/schema';
 import { eq, and, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
+import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from './session-enrichment-service';
 
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
 // Stores the reminder send timestamp so we don't send twice in the same calendar day for a user
@@ -279,6 +280,41 @@ export function startScheduler(): void {
     });
   });
   console.log('[Scheduler] Coaching plan reminders scheduled (once daily at 8 AM UTC, respects user timezone)');
+
+  // Session enrichment — rolling 2-week block enrichment.
+  // Runs daily at 6 AM UTC. Finds all active plans where the calendar has passed
+  // the end of the last enriched block and enriches the next 2 weeks.
+  // This ensures users always see complete, accurate sessions for the next 2 weeks ahead.
+  cron.schedule('0 6 * * *', async () => {
+    try {
+      const plansToEnrich = await findPlansNeedingEnrichment();
+      if (plansToEnrich.length === 0) return;
+
+      console.log(`[Scheduler] Enrichment: ${plansToEnrich.length} plan(s) need next block enriched`);
+
+      for (const { planId, userId, nextWeeksToEnrich } of plansToEnrich) {
+        try {
+          const workoutIds = await getWorkoutIdsForPlanWeeks(planId, nextWeeksToEnrich);
+          if (workoutIds.length === 0) continue;
+
+          const { enriched, failed } = await enrichWorkoutBlock(userId, workoutIds);
+          const throughWeek = Math.max(...nextWeeksToEnrich);
+          await markPlanEnrichedThroughWeek(planId, throughWeek);
+
+          console.log(
+            `[Scheduler] Enrichment: plan ${planId} — weeks ${nextWeeksToEnrich.join(",")} ` +
+            `enriched (${enriched} sessions done, ${failed} failed)`
+          );
+        } catch (planErr) {
+          console.error(`[Scheduler] Enrichment failed for plan ${planId}:`, planErr);
+          // Continue to next plan — don't let one failure block others
+        }
+      }
+    } catch (err) {
+      console.error('[Scheduler] Enrichment job error:', err);
+    }
+  });
+  console.log('[Scheduler] Session enrichment scheduled (daily at 6 AM UTC)');
   
   // Webhook failure queue processor (⚡ Optimized: 5m → 30m, still robust for retries)
   cron.schedule('*/30 * * * *', () => {
