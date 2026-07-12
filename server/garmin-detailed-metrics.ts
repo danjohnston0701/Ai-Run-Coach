@@ -28,6 +28,18 @@ function secsToMSS(totalSec: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+// ─── Helper: Haversine distance between two lat/lng points (metres) ───────────
+
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000; // Earth radius in metres
+  const toRad = (d: number) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // ─── Core algorithm: compute km splits from any per-point time-series ─────────
 
 /**
@@ -150,6 +162,156 @@ export function computeKmSplitsFromSamples(
   if (remaining >= 100 && splits.length > 0) {
     const durSec = Math.max(Math.round(lastPt.elapsedSec - prevCrossTime), 1);
     const distKm = remaining / 1000;
+    const paceSecPerKm = distKm > 0 ? Math.round(durSec / distKm) : 0;
+
+    const slice    = pts.slice(prevIdx);
+    const hrs      = slice.filter(p => p.hr      != null).map(p => p.hr!);
+    const cads     = slice.filter(p => p.cadence != null).map(p => p.cadence!);
+    const alts     = slice.filter(p => p.altitude != null).map(p => p.altitude!);
+    const elevGain = alts.length >= 2
+      ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
+      : 0;
+
+    splits.push({
+      km:       splits.length + 1,
+      time:     durSec * 1000,
+      pace:     paceSecPerKm > 0 ? secsToMSS(paceSecPerKm) : '0:00',
+      duration: durSec,
+      distance: Math.round(distKm * 1000) / 1000,
+      hr:       hrs.length  > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+      cadence:  cads.length > 0 ? Math.round(cads.reduce((a, b) => a + b, 0) / cads.length) : null,
+      elevGain: alts.length >= 2 ? Math.round(elevGain * 10) / 10 : null,
+    });
+  }
+
+  return splits;
+}
+
+// ─── Compute km splits from a stored GPS track (phone or Garmin format) ──────
+
+/**
+ * Returns `true` if all km splits in an array have the same duration — which is
+ * the telltale sign that Garmin divided total_time / total_km instead of tracking
+ * each km boundary.
+ */
+export function hasIdenticalKmSplits(splits: any[]): boolean {
+  if (!splits || splits.length < 2) return false;
+  const first = splits[0].duration ?? Math.round((splits[0].time ?? 0) / 1000);
+  if (first <= 0) return false;
+  return splits.every(s => {
+    const dur = s.duration ?? Math.round((s.time ?? 0) / 1000);
+    return Math.abs(dur - first) <= 1;   // within 1 second → treat as identical
+  });
+}
+
+/**
+ * Compute accurate km splits from a GPS track array in phone-upload format:
+ *   `{lat, lng, timestamp, speed?, heartRate?, cadence?, altitude?}`
+ *
+ * where `timestamp` is **elapsed seconds** since run start (not epoch).
+ *
+ * Strategy:
+ *  1. Use Haversine between consecutive lat/lng pairs to get cumulative distance.
+ *  2. Find exact km-boundary crossing times via linear interpolation.
+ *  3. Average HR, cadence, and elevation gain per km window.
+ *
+ * Falls back to `computeKmSplitsFromSamples` if the track lacks lat/lng but has
+ * speed + timestamp (rare, but defensive).
+ */
+export function computeKmSplitsFromGpsTrack(gpsTrack: any[]): KmSplitRecord[] {
+  if (!gpsTrack || gpsTrack.length < 5) return [];
+
+  // Normalise: some tracks use {lat,lng} others use {latitude,longitude}
+  interface GptPt {
+    lat:       number;
+    lng:       number;
+    timeSec:   number;   // elapsed seconds
+    hr:        number | null;
+    cadence:   number | null;
+    altitude:  number | null;
+  }
+
+  const pts: GptPt[] = [];
+  let cumDistM = 0;
+
+  // Parallel cumulative-distance array so we can interpolate crossings
+  const cumDists: number[] = [];
+
+  for (const p of gpsTrack) {
+    const lat = p.lat ?? p.latitude;
+    const lng = p.lng ?? p.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+
+    // timestamp is elapsed seconds in phone format; fallback to startTimeInSeconds
+    const timeSec: number =
+      typeof p.timestamp === 'number'            ? p.timestamp            :
+      typeof p.elapsedTime === 'number'          ? p.elapsedTime          :
+      typeof p.startTimeInSeconds === 'number'   ? p.startTimeInSeconds   : -1;
+    if (timeSec < 0) continue;
+
+    if (pts.length > 0) {
+      const prev = pts[pts.length - 1];
+      cumDistM += haversineM(prev.lat, prev.lng, lat, lng);
+    }
+
+    pts.push({
+      lat, lng, timeSec,
+      hr:       typeof p.heartRate === 'number' && p.heartRate > 0 ? p.heartRate : null,
+      cadence:  typeof p.cadence   === 'number' && p.cadence   > 0 ? p.cadence   : null,
+      altitude: typeof p.altitude  === 'number'                     ? p.altitude  : null,
+    });
+    cumDists.push(cumDistM);
+  }
+
+  if (pts.length < 5 || cumDistM < 1000) return [];
+
+  // ── Walk through points and detect km crossings ──────────────────────────
+  const splits: KmSplitRecord[] = [];
+  let nextBoundaryM = 1000;
+  let prevCrossTime = pts[0].timeSec;
+  let prevIdx       = 0;
+
+  for (let i = 1; i < pts.length; i++) {
+    if (cumDists[i] >= nextBoundaryM) {
+      const prevDist = cumDists[i - 1];
+      const currDist = cumDists[i];
+      const frac     = (nextBoundaryM - prevDist) / Math.max(currDist - prevDist, 0.01);
+      const crossSec = pts[i - 1].timeSec + frac * (pts[i].timeSec - pts[i - 1].timeSec);
+
+      const durSec       = Math.max(Math.round(crossSec - prevCrossTime), 1);
+      const paceSecPerKm = durSec;   // 1 km → duration = pace
+
+      const slice    = pts.slice(prevIdx, i + 1);
+      const hrs      = slice.filter(p => p.hr      != null).map(p => p.hr!);
+      const cads     = slice.filter(p => p.cadence != null).map(p => p.cadence!);
+      const alts     = slice.filter(p => p.altitude != null).map(p => p.altitude!);
+      const elevGain = alts.length >= 2
+        ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
+        : 0;
+
+      splits.push({
+        km:       splits.length + 1,
+        time:     durSec * 1000,
+        pace:     secsToMSS(paceSecPerKm),
+        duration: durSec,
+        distance: 1.0,
+        hr:       hrs.length  > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+        cadence:  cads.length > 0 ? Math.round(cads.reduce((a, b) => a + b, 0) / cads.length) : null,
+        elevGain: alts.length >= 2 ? Math.round(elevGain * 10) / 10 : null,
+      });
+
+      prevCrossTime = crossSec;
+      prevIdx       = i;
+      nextBoundaryM += 1000;
+    }
+  }
+
+  // ── Partial final-km split (≥ 100 m) ────────────────────────────────────
+  const remaining = cumDists[pts.length - 1] - (nextBoundaryM - 1000);
+  if (remaining >= 100 && splits.length > 0) {
+    const lastPt   = pts[pts.length - 1];
+    const durSec   = Math.max(Math.round(lastPt.timeSec - prevCrossTime), 1);
+    const distKm   = remaining / 1000;
     const paceSecPerKm = distKm > 0 ? Math.round(durSec / distKm) : 0;
 
     const slice    = pts.slice(prevIdx);

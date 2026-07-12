@@ -74,6 +74,8 @@ import {
   extractGpsTrack,
   buildDetailedMetricsFromGarminActivity,
   computeKmSplitsFromSamples,
+  computeKmSplitsFromGpsTrack,
+  hasIdenticalKmSplits,
 } from "./garmin-detailed-metrics";
 import { generateFitFile } from "./fit-file-generator";
 import {
@@ -1616,45 +1618,73 @@ function transformRunForAndroid(run: any) {
         }
         return [];
       })(),
-      kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits.map((s: any) => {
-        // Normalise pace to "M:SS" string for the Android KmSplit model.
-        // DB may store pace as:
-        //   (a) integer seconds per km  → 442  → "7:22"
-        //   (b) float min/km (legacy)   → 5.38 → "5:23"
-        //   (c) "M:SS" string already   → "5:22" → unchanged
-        //   (d) undefined / null (raw Garmin splits with no pace field) → "0:00"
-        const paceVal = s.pace;
-        let paceStr: string;
-        if (typeof paceVal === 'number') {
-          // Could be total seconds (e.g. 442) or decimal min/km (e.g. 5.38)
-          // If value ≥ 60 it's seconds; if < 60 it's decimal min/km
-          const totalSec = paceVal >= 60 ? Math.round(paceVal) : Math.round(paceVal * 60);
-          const mins = Math.floor(totalSec / 60);
-          const secs = totalSec % 60;
-          paceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-        } else if (typeof paceVal === 'string' && paceVal.includes(':')) {
-          // Already "M:SS" — pass through
-          paceStr = paceVal;
-        } else if (typeof paceVal === 'string' && paceVal.length > 0) {
-          // Could be a decimal string "5.38" (legacy Garmin format) or raw seconds "442"
-          const num = parseFloat(paceVal);
-          if (!isNaN(num) && num > 0) {
-            const totalSec = num >= 60 ? Math.round(num) : Math.round(num * 60);
+      kmSplits: (() => {
+        // ── Step 1: normalise whatever is in the DB ──────────────────────────
+        function normaliseSplit(s: any) {
+          // Normalise pace to "M:SS" string for the Android KmSplit model.
+          // DB may store pace as:
+          //   (a) integer seconds per km  → 442  → "7:22"
+          //   (b) float min/km (legacy)   → 5.38 → "5:23"
+          //   (c) "M:SS" string already   → "5:22" → unchanged
+          //   (d) undefined / null (raw Garmin splits with no pace field) → "0:00"
+          const paceVal = s.pace;
+          let paceStr: string;
+          if (typeof paceVal === 'number') {
+            const totalSec = paceVal >= 60 ? Math.round(paceVal) : Math.round(paceVal * 60);
             const mins = Math.floor(totalSec / 60);
             const secs = totalSec % 60;
             paceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+          } else if (typeof paceVal === 'string' && paceVal.includes(':')) {
+            paceStr = paceVal;
+          } else if (typeof paceVal === 'string' && paceVal.length > 0) {
+            const num = parseFloat(paceVal);
+            if (!isNaN(num) && num > 0) {
+              const totalSec = num >= 60 ? Math.round(num) : Math.round(num * 60);
+              const mins = Math.floor(totalSec / 60);
+              const secs = totalSec % 60;
+              paceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+            } else {
+              paceStr = '0:00';
+            }
           } else {
             paceStr = '0:00';
           }
-        } else {
-          paceStr = '0:00';
+          const timeMs = typeof s.duration === 'number' ? s.duration * 1000
+                       : (typeof s.time === 'number' ? (s.time > 86400 ? s.time : s.time * 1000) : 0);
+          return { ...s, pace: paceStr, time: timeMs };
         }
-        // `time` in the DB may be ms (phone-sourced, > 86400) or seconds (Garmin-sourced, ≤ 86400)
-        // `duration` field (if present) is always seconds.
-        const timeMs = typeof s.duration === 'number' ? s.duration * 1000
-                     : (typeof s.time === 'number' ? (s.time > 86400 ? s.time : s.time * 1000) : 0);
-        return { ...s, pace: paceStr, time: timeMs };
-      }) : [],
+
+        const storedSplits: any[] = Array.isArray(run.kmSplits) ? run.kmSplits : [];
+        const normalised = storedSplits.map(normaliseSplit);
+
+        // ── Step 2: detect identical (Garmin-averaged) splits ────────────────
+        // If all splits have the same duration (within ±1 s), Garmin divided
+        // total_time / total_km instead of tracking km boundaries individually.
+        // We recompute from the GPS track when it's available; the accurate
+        // splits are also persisted back to the DB asynchronously so subsequent
+        // fetches serve correct data without recomputing every time.
+        if (hasIdenticalKmSplits(storedSplits)) {
+          const gpsTrack = Array.isArray(run.gpsTrack) ? run.gpsTrack
+                         : Array.isArray(run.gpsTrack?.samples) ? run.gpsTrack.samples
+                         : null;
+          if (gpsTrack && gpsTrack.length >= 5) {
+            const recomputed = computeKmSplitsFromGpsTrack(gpsTrack);
+            if (recomputed.length > 0) {
+              console.log(`[transformRunForAndroid] Recomputed ${recomputed.length} km splits from GPS track for run ${run.id} (was identical)`);
+              // ── Persist the fix back to the DB asynchronously ───────────────
+              setImmediate(() => {
+                db.update(runs)
+                  .set({ kmSplits: recomputed } as any)
+                  .where(eq(runs.id, run.id))
+                  .catch((err: any) => console.warn(`[transformRunForAndroid] Failed to persist recomputed splits for run ${run.id}:`, err?.message));
+              });
+              return recomputed;
+            }
+          }
+        }
+
+        return normalised;
+      })(),
       // heartRateData: prefer dedicated column; vívoactive 4 embeds HR per GPS point
       heartRateData: normalizeNumericSeries(run.heartRateData).filter(v => v > 0).length > 0
         ? normalizeNumericSeries(run.heartRateData)
