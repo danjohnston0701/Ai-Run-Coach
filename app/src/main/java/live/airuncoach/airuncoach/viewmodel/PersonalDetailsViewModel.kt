@@ -89,7 +89,7 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
             val request = UpdateUserRequest(
                 name = _name.value,
                 email = _email.value,
-                dob = _dateOfBirth.value.ifBlank { null },
+                dob = formatDateOfBirth(_dateOfBirth.value),
                 gender = _gender.value.ifBlank { null },
                 weight = _weight.value.toDoubleOrNull(),
                 height = _height.value.toDoubleOrNull(),
@@ -104,6 +104,17 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 // Handle error
             }
         }
+    }
+
+    /**
+     * Formats a date of birth string from digits-only (ddmmyyyy) to dd/mm/yyyy format.
+     * Returns null if the input is blank or invalid.
+     */
+    private fun formatDateOfBirth(digitsOnly: String): String? {
+        if (digitsOnly.isBlank() || digitsOnly.length != 8) {
+            return null
+        }
+        return "${digitsOnly.take(2)}/${digitsOnly.drop(2).take(2)}/${digitsOnly.drop(4)}"
     }
 }
 

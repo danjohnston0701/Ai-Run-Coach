@@ -73,6 +73,7 @@ import {
   extractKmSplits,
   extractGpsTrack,
   buildDetailedMetricsFromGarminActivity,
+  computeKmSplitsFromSamples,
 } from "./garmin-detailed-metrics";
 import { generateFitFile } from "./fit-file-generator";
 import {
@@ -1616,20 +1617,40 @@ function transformRunForAndroid(run: any) {
         return [];
       })(),
       kmSplits: Array.isArray(run.kmSplits) ? run.kmSplits.map((s: any) => {
-        // The Android KmSplit model expects `pace` as a "M:SS" string (e.g. "7:22")
-        // but the DB stores it as an integer (seconds per km, e.g. 442).
-        // Also ensure `time` is in milliseconds — the Android model uses Long (ms).
+        // Normalise pace to "M:SS" string for the Android KmSplit model.
+        // DB may store pace as:
+        //   (a) integer seconds per km  → 442  → "7:22"
+        //   (b) float min/km (legacy)   → 5.38 → "5:23"
+        //   (c) "M:SS" string already   → "5:22" → unchanged
+        //   (d) undefined / null (raw Garmin splits with no pace field) → "0:00"
         const paceVal = s.pace;
         let paceStr: string;
         if (typeof paceVal === 'number') {
-          const totalSec = Math.round(paceVal);
+          // Could be total seconds (e.g. 442) or decimal min/km (e.g. 5.38)
+          // If value ≥ 60 it's seconds; if < 60 it's decimal min/km
+          const totalSec = paceVal >= 60 ? Math.round(paceVal) : Math.round(paceVal * 60);
           const mins = Math.floor(totalSec / 60);
           const secs = totalSec % 60;
           paceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+        } else if (typeof paceVal === 'string' && paceVal.includes(':')) {
+          // Already "M:SS" — pass through
+          paceStr = paceVal;
+        } else if (typeof paceVal === 'string' && paceVal.length > 0) {
+          // Could be a decimal string "5.38" (legacy Garmin format) or raw seconds "442"
+          const num = parseFloat(paceVal);
+          if (!isNaN(num) && num > 0) {
+            const totalSec = num >= 60 ? Math.round(num) : Math.round(num * 60);
+            const mins = Math.floor(totalSec / 60);
+            const secs = totalSec % 60;
+            paceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+          } else {
+            paceStr = '0:00';
+          }
         } else {
-          paceStr = paceVal || '0:00';
+          paceStr = '0:00';
         }
-        // `time` in the DB is duration in seconds for this split; Android expects milliseconds
+        // `time` in the DB may be ms (phone-sourced, > 86400) or seconds (Garmin-sourced, ≤ 86400)
+        // `duration` field (if present) is always seconds.
         const timeMs = typeof s.duration === 'number' ? s.duration * 1000
                      : (typeof s.time === 'number' ? (s.time > 86400 ? s.time : s.time * 1000) : 0);
         return { ...s, pace: paceStr, time: timeMs };
@@ -5034,8 +5055,87 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  // ==================== SUBSCRIPTIONS (Placeholder) ====================
-  
+  // ==================== SUBSCRIPTIONS ====================
+
+  /**
+   * POST /api/subscriptions/verify-purchase
+   *
+   * Called by the Android app after a Google Play purchase is acknowledged.
+   * Updates the user's subscription tier, status, billing period, and approximate
+   * expiry date in the database so all services read the correct entitlement.
+   *
+   * Also called on app startup when the billing client detects an active
+   * subscription, which keeps the DB in sync after automatic renewals.
+   *
+   * Product ID convention:
+   *   lite_monthly, lite_annual, standard_monthly, standard_annual
+   */
+  app.post("/api/subscriptions/verify-purchase", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { purchaseToken, productId, packageName } = req.body;
+
+      if (!purchaseToken || !productId) {
+        return res.status(400).json({ error: "purchaseToken and productId are required" });
+      }
+
+      // ── Derive tier and billing period from productId ───────────────────────
+      // e.g. "lite_monthly" → tier="lite", billingPeriod="monthly"
+      //      "standard_annual" → tier="standard", billingPeriod="annual"
+      let tier: string;
+      let billingPeriod: string;
+
+      if (productId.startsWith("lite")) {
+        tier = "lite";
+      } else if (productId.startsWith("standard")) {
+        tier = "standard";
+      } else {
+        console.warn(`[Subscription] Unknown productId: ${productId} for user ${userId}`);
+        return res.status(400).json({ error: `Unknown product ID: ${productId}` });
+      }
+
+      billingPeriod = productId.endsWith("annual") ? "annual" : "monthly";
+
+      // ── Calculate approximate next renewal date ─────────────────────────────
+      const now = new Date();
+      const expiresAt = new Date(now);
+      if (billingPeriod === "annual") {
+        expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+      } else {
+        expiresAt.setMonth(expiresAt.getMonth() + 1);
+      }
+
+      // ── Update user record in database ──────────────────────────────────────
+      const updatedUser = await storage.updateUser(userId, {
+        subscriptionTier: tier,
+        subscriptionStatus: "active",
+        entitlementType: `google_play_${billingPeriod}`,   // e.g. "google_play_monthly"
+        entitlementExpiresAt: expiresAt,
+      });
+
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      console.log(
+        `[Subscription] ✅ User ${userId} (${updatedUser.email}) upgraded to ${tier} ` +
+        `(${billingPeriod}) via Google Play. Token: ${purchaseToken.substring(0, 20)}...`
+      );
+
+      res.json({
+        success: true,
+        tier,
+        billingPeriod,
+        subscriptionStatus: "active",
+        expiresAt: expiresAt.toISOString(),
+        user: updatedUser,
+      });
+    } catch (error: any) {
+      console.error("[Subscription] POST /api/subscriptions/verify-purchase error:", error);
+      res.status(500).json({ error: "Failed to verify purchase" });
+    }
+  });
+
   app.get("/api/subscriptions/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const user = await storage.getUser(req.user!.userId);
@@ -7325,17 +7425,53 @@ function transformRunForAndroid(run: any) {
             // Update runs record with additional detail data if it exists
             if (existingActivity.runId) {
               const paceData = extractPaceData(samples);
-              const splits = detail.splits || null;
-              
+
+              // ── Km splits ─────────────────────────────────────────────────────
+              // Only write Garmin splits if the phone hasn't already stored its own
+              // per-km splits.  The phone computes splits precisely at each km boundary
+              // from wall-clock time; the Garmin webhook splits are "auto-lap" records
+              // that often lack a `pace` field or use a decimal format ("5.38"), which
+              // causes every split to display as "0:00 /km".  If the DB already has
+              // phone-sourced splits we keep them; otherwise we normalise Garmin's
+              // split data into the M:SS format the app expects.
+              const [existingRunRow] = await db.select({ kmSplits: runs.kmSplits }).from(runs).where(eq(runs.id, existingActivity.runId)).limit(1);
+              const existingKmSplits = Array.isArray((existingRunRow as any)?.kmSplits) ? (existingRunRow as any).kmSplits : null;
+              const hasPhoneSplits = existingKmSplits != null && existingKmSplits.length > 0;
+
+              let normalizedSplits: any[] | null = null;
+              if (!hasPhoneSplits) {
+                // ── Priority 1: compute splits from per-second samples (most accurate) ──
+                // Garmin's per-second data has cumulative distance + timestamps, so we can
+                // find exact km-boundary crossings and compute a precise duration per km.
+                const computedFromSamples = computeKmSplitsFromSamples(
+                  Array.isArray(samples) ? samples : [],
+                );
+                if (computedFromSamples.length > 0) {
+                  normalizedSplits = computedFromSamples;
+                  console.log(`[Garmin Webhook] Computed ${computedFromSamples.length} km splits from per-second samples (paces: ${computedFromSamples.map((s: any) => s.pace).join(', ')})`);
+                } else if (Array.isArray(detail.splits) && detail.splits.length > 0) {
+                  // ── Priority 2: fall back to Garmin auto-lap records ──────────────────
+                  // These sometimes have equal paces (averaged over the whole run) but are
+                  // better than nothing when no sample data is available.
+                  normalizedSplits = extractKmSplits(detail.splits);
+                  console.log(`[Garmin Webhook] Fell back to ${normalizedSplits.length} Garmin auto-lap splits (samples unavailable)`);
+                }
+              }
+
+              const updateSet: Record<string, any> = {
+                paceData: paceData.length > 0 ? { samples: paceData } : null,
+              };
+              if (!hasPhoneSplits) {
+                // Only set kmSplits when there's nothing to preserve from the phone
+                updateSet.kmSplits = normalizedSplits && normalizedSplits.length > 0 ? normalizedSplits : null;
+              }
+
               await db
                 .update(runs)
-                .set({
-                  paceData: paceData.length > 0 ? { samples: paceData } : null,
-                  kmSplits: splits,
-                })
+                .set(updateSet)
                 .where(eq(runs.id, existingActivity.runId));
               
-              console.log(`[Garmin Webhook] Updated runs record ${existingActivity.runId} with detailed metrics`);
+              console.log(`[Garmin Webhook] Updated runs record ${existingActivity.runId} with detailed metrics${hasPhoneSplits ? ' (preserved phone kmSplits)' : normalizedSplits ? ` (${normalizedSplits.length} Garmin splits normalised)` : ' (no splits)'}`);
             }
           } else {
             console.warn(`[Garmin Webhook] No existing garmin_activity found for ${activityId}, skipping detail update`);
@@ -11764,62 +11900,14 @@ function transformRunForAndroid(run: any) {
             }
 
             // ── Compute accurate per-km splits from garminRealtimeData ────────────
-            // The watch's kmSplits often have identical pace/duration for every km
-            // (because it divides total_time / total_km instead of tracking each km
-            // boundary individually).  We can do better using cumulativeDistance,
-            // elapsedTime, heartRate, cadence, and altitude from the data stream.
-            const withDist = allDataPoints.filter(
-              d => d.cumulativeDistance != null && d.elapsedTime != null
-            );
-            if (withDist.length >= 5) {
-              const computedSplits: any[] = [];
-              let nextKmBoundary = 1000;  // metres
-              let prevIdx = 0;            // index of previous km boundary (or start)
-
-              for (let i = 1; i < withDist.length; i++) {
-                const dist = withDist[i].cumulativeDistance!;
-                if (dist >= nextKmBoundary) {
-                  // Interpolate the exact crossing time
-                  const prevDist = withDist[i - 1].cumulativeDistance!;
-                  const prevTime = withDist[i - 1].elapsedTime!;
-                  const currTime = withDist[i].elapsedTime!;
-                  const frac = (nextKmBoundary - prevDist) / Math.max(dist - prevDist, 0.01);
-                  const crossTime = prevTime + frac * (currTime - prevTime);
-
-                  // Elapsed time for just this km
-                  const startTime = prevIdx === 0 ? (withDist[0].elapsedTime ?? 0) : computedSplits.length > 0
-                    ? computedSplits.reduce((s, sp) => s + sp.duration, 0) + (withDist[0].elapsedTime ?? 0)
-                    : 0;
-                  const splitDuration = Math.round(crossTime - startTime);
-
-                  // Slice data points within this km for HR, cadence, altitude
-                  const slice = withDist.slice(prevIdx, i + 1);
-                  const hrs = slice.filter(d => d.heartRate && d.heartRate > 20).map(d => d.heartRate!);
-                  const cads = slice.filter(d => d.cadence && d.cadence > 0).map(d => d.cadence!);
-                  const alts = slice.filter(d => d.altitude != null).map(d => d.altitude!);
-                  const elevGain = alts.length >= 2
-                    ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
-                    : 0;
-
-                  computedSplits.push({
-                    km: computedSplits.length + 1,
-                    distance: 1000,
-                    duration: splitDuration,
-                    pace: splitDuration,  // for 1km, duration in sec = sec/km
-                    hr: hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
-                    cadence: cads.length > 0 ? Math.round(cads.reduce((a, b) => a + b, 0) / cads.length) : null,
-                    elevGain: Math.round(elevGain * 10) / 10,
-                  });
-
-                  prevIdx = i;
-                  nextKmBoundary += 1000;
-                }
-              }
-
-              if (computedSplits.length > 0) {
-                storedKmSplits = computedSplits;
-                console.log(`[Companion] Computed ${computedSplits.length} km splits from garminRealtimeData (paces: ${computedSplits.map(s => s.pace).join(', ')})`);
-              }
+            // Delegate to the shared computeKmSplitsFromSamples utility, which
+            // handles both companion-app format (elapsedTime / cumulativeDistance)
+            // and Garmin-webhook format (startTimeInSeconds / totalDistanceInMeters).
+            // This replaces the old inline algorithm with a single tested code path.
+            const computedFromRealtime = computeKmSplitsFromSamples(allDataPoints);
+            if (computedFromRealtime.length > 0) {
+              storedKmSplits = computedFromRealtime;
+              console.log(`[Companion] Computed ${computedFromRealtime.length} km splits from garminRealtimeData (paces: ${computedFromRealtime.map(s => s.pace).join(', ')})`);
             }
           }
 
@@ -11828,17 +11916,29 @@ function transformRunForAndroid(run: any) {
             storedKmSplits = kmSplits;
           }
 
-          // Build time-series from splits if garminRealtimeData didn't provide them
+          // Build time-series from splits if garminRealtimeData didn't provide them.
+          // split.pace is now always "M:SS"; convert it to seconds-per-km for the numeric series.
           if (storedKmSplits && storedKmSplits.length > 0) {
             let elapsed = 0;
             const kmHr: any[]   = [];
             const kmPace: any[] = [];
             const kmAlt: any[]  = [];
             for (const split of storedKmSplits) {
-              const midpoint = elapsed + Math.round((split.duration || 0) / 2);
+              const durSec   = split.duration || Math.round((split.time || 0) / 1000) || 0;
+              const midpoint = elapsed + Math.round(durSec / 2);
               if (split.hr != null)   kmHr.push({ time: midpoint, value: split.hr });
-              if (split.pace != null && split.pace > 0) kmPace.push({ time: midpoint, value: split.pace });
-              elapsed += (split.duration || 0);
+              // Convert "M:SS" pace string → numeric seconds-per-km for the chart series
+              const paceRaw = split.pace;
+              let paceSec: number | null = null;
+              if (typeof paceRaw === 'number' && paceRaw > 0) {
+                paceSec = paceRaw;
+              } else if (typeof paceRaw === 'string' && paceRaw.includes(':')) {
+                const parts = paceRaw.split(':');
+                const p = parseInt(parts[0], 10) * 60 + parseInt(parts[1] ?? '0', 10);
+                if (p > 0) paceSec = p;
+              }
+              if (paceSec != null) kmPace.push({ time: midpoint, value: paceSec });
+              elapsed += durSec;
             }
             let cumAscent = 0;
             for (const split of storedKmSplits) {
@@ -11955,28 +12055,51 @@ function transformRunForAndroid(run: any) {
         if (distKmCheck >= 0.1) {
           const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
           const phoneRuns = await db
-            .select({ id: runs.id, distance: runs.distance })
+            .select({ id: runs.id, distance: runs.distance, externalId: runs.externalId })
             .from(runs)
             .where(and(
               eq(runs.userId, userId),
-              gte(runs.createdAt, twoHoursAgo),
-              isNull(runs.externalId),   // phone-uploaded runs have no externalId
+              gte(runs.createdAt, twoHoursAgo)
             ))
             .limit(10);
+          
+          // Try to find a matching phone run (externalId=null, similar distance)
           const phoneMatch = phoneRuns.find((r: any) =>
+            r.externalId === null &&
             Math.abs((r.distance ?? 0) - distKmCheck) / Math.max(distKmCheck, 0.1) < 0.1
           );
+          
           if (phoneMatch) {
             console.log(`[Offline Batch] Phone run ${phoneMatch.id} matches batch (${distKmCheck.toFixed(2)} km) — linking to phone run, will NOT overwrite existing rich data`);
-            // Tag the phone run with the watch session ID + source so future lookups match
-            await db.update(runs).set({
-              externalId:     sessionId,
-              externalSource: 'garmin_companion',
-              hasGarminData:  true,
-            }).where(eq(runs.id, phoneMatch.id));
-            // Fetch the FULL run so we know which data fields are already populated
-            const [fullPhoneRun] = await db.select().from(runs).where(eq(runs.id, phoneMatch.id));
-            existingRun = fullPhoneRun as any;
+            try {
+              // Tag the phone run with the watch session ID + source so future lookups match
+              await db.update(runs).set({
+                externalId:     sessionId,
+                externalSource: 'garmin_companion',
+                hasGarminData:  true,
+              }).where(eq(runs.id, phoneMatch.id));
+            } catch (updateError: any) {
+              // Handle race condition: if another request beat us to setting this externalId,
+              // just fetch the existing run that now has this sessionId as externalId
+              if (updateError.code === '23505') { // unique constraint violation
+                console.log(`[Offline Batch] Race condition: sessionId ${sessionId} already assigned to another run. Fetching that run instead.`);
+                const [existingWithId] = await db
+                  .select()
+                  .from(runs)
+                  .where(and(eq(runs.userId, userId), eq(runs.externalId, sessionId)));
+                if (existingWithId) {
+                  existingRun = existingWithId as any;
+                }
+              } else {
+                throw updateError;
+              }
+            }
+            
+            // If we didn't encounter a race condition, fetch the FULL run we just updated
+            if (!existingRun) {
+              const [fullPhoneRun] = await db.select().from(runs).where(eq(runs.id, phoneMatch.id));
+              existingRun = fullPhoneRun as any;
+            }
           }
         }
       }
@@ -12212,7 +12335,14 @@ function transformRunForAndroid(run: any) {
         updatePayload.elevation     = finalAscent;
       }
 
-      await db.update(runs).set(updatePayload).where(eq(runs.id, existingRun.id));
+      // Filter out undefined values so we only update fields where batch data should be used
+      const cleanedPayload = Object.fromEntries(
+        Object.entries(updatePayload).filter(([_, v]) => v !== undefined)
+      );
+
+      if (Object.keys(cleanedPayload).length > 0) {
+        await db.update(runs).set(cleanedPayload).where(eq(runs.id, existingRun.id));
+      }
 
       console.log(`[Offline Batch] Session ${sessionId}: ${points.length} pts → GPS:${gpsTrack.length} HR:${heartRateData.length} pace:${paceData.length} alt:${altitudeData.length} splits:${kmSplits.length}`);
       // Include runId so the watch can forward it to the phone app for the sync notification deep link

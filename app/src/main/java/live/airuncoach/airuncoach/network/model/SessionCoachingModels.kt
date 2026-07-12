@@ -114,6 +114,17 @@ data class SessionCoachingContext(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Request body for POST /api/workouts/{workoutId}/prepare-coaching.
+ *
+ * Must be a concrete data class — Retrofit's Gson converter cannot serialize
+ * wildcard types like Map<String, Any?> at runtime.
+ */
+data class PrepareCoachingRequest(
+    /** True when the user has a Garmin watch paired and connected. */
+    val hasWatchConnected: Boolean?
+)
+
+/**
  * Response from POST /api/workouts/{workoutId}/prepare-coaching
  *
  * Contains the full bespoke SessionCoachingPlan generated for this workout.

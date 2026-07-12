@@ -23,11 +23,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.ClickableText
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
-import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -98,6 +100,7 @@ fun SignUpScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.xxxl)
                 .padding(top = 60.dp)
+                .navigationBarsPadding()
                 .padding(bottom = Spacing.xxxl),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -443,12 +446,47 @@ fun SignUpScreen(
 
             Spacer(modifier = Modifier.height(Spacing.xl))
 
-            // Terms and Privacy
-            Text(
-                text = "By continuing, you agree to our Terms of\nService and Privacy Policy",
-                style = AppTextStyles.small,
-                color = Colors.textMuted,
-                textAlign = TextAlign.Center
+            // Terms and Privacy with hyperlinks
+            val uriHandler = LocalUriHandler.current
+            val termsUrl = "https://airuncoach.live/privacy"
+            
+            val termsAnnotatedString = buildAnnotatedString {
+                append("By continuing, you agree to our ")
+                pushStringAnnotation(tag = "URL", annotation = termsUrl)
+                withStyle(
+                    style = SpanStyle(
+                        color = Colors.primary,
+                        textDecoration = TextDecoration.Underline
+                    )
+                ) {
+                    append("Terms of Service")
+                }
+                pop()
+                append(" and ")
+                pushStringAnnotation(tag = "URL", annotation = termsUrl)
+                withStyle(
+                    style = SpanStyle(
+                        color = Colors.primary,
+                        textDecoration = TextDecoration.Underline
+                    )
+                ) {
+                    append("Privacy Policy")
+                }
+                pop()
+            }
+            
+            ClickableText(
+                text = termsAnnotatedString,
+                style = AppTextStyles.small.copy(
+                    color = Colors.textMuted,
+                    textAlign = TextAlign.Center
+                ),
+                onClick = { offset ->
+                    termsAnnotatedString.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                        .firstOrNull()?.let { annotation ->
+                            uriHandler.openUri(annotation.item)
+                        }
+                }
             )
         }
     }

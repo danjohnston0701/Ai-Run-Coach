@@ -38,6 +38,7 @@ import live.airuncoach.airuncoach.network.model.WeatherPayload
 import live.airuncoach.airuncoach.network.model.IntervalCoachingRequest
 import live.airuncoach.airuncoach.network.model.IntervalCoachingResponse
 import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
+import live.airuncoach.airuncoach.network.model.PrepareCoachingRequest
 import live.airuncoach.airuncoach.network.model.SessionInstructionsResponse
 import live.airuncoach.airuncoach.service.GarminWatchManager
 import live.airuncoach.airuncoach.service.SessionCoachingHelper
@@ -392,8 +393,11 @@ class RunSessionViewModel @Inject constructor(
                 // Pass watch connectivity so OpenAI knows for certain whether HR data will be
                 // available during the run, overriding the history-based inference.
                 val isWatchConnected = garminWatchManager.isWatchConnected.value == true
-                val body = mapOf<String, Any?>("hasWatchConnected" to isWatchConnected)
-                val response = apiService.prepareSessionCoaching(workoutId, forceRegenerate = force, body = body)
+                val response = apiService.prepareSessionCoaching(
+                    workoutId       = workoutId,
+                    forceRegenerate = force,
+                    body            = PrepareCoachingRequest(hasWatchConnected = isWatchConnected)
+                )
                 if (response.isSuccessful) {
                     val body = response.body()
                     activeSessionCoachingPlan = body?.plan

@@ -14,6 +14,11 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.automirrored.filled.Help
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,14 +61,28 @@ fun SubscriptionScreen(
     val billingConnectionState by viewModel.billingConnectionState.collectAsState()
     val context = LocalContext.current
     val activity = context as? Activity
-    val isPremium = viewModel.isPremiumUser()
+
+    // Use reactive tier state so the screen updates immediately after a purchase
+    // without needing navigation away and back.
+    val currentTier by viewModel.subscriptionTierState.collectAsState()
+    val isPremium = currentTier == "lite" || currentTier == "standard"
     val isTrialExpired = viewModel.isTrialExpired()
     val trialDaysRemaining = viewModel.trialDaysRemaining()
     val trialExpiresAt = viewModel.getTrialExpiresAt()
-    val currentTier = viewModel.getSubscriptionTier()
 
-    // Open directly to Plans tab if trial has expired so user sees the upgrade path immediately
-    var selectedTab by remember { mutableIntStateOf(if (isTrialExpired) 0 else 0) } // 0 = Plans, 1 = Usage
+    // Show an upgrade-success banner for a few seconds when a purchase completes
+    val purchaseJustCompleted by viewModel.purchaseJustCompleted.collectAsState()
+    val lastBillingPeriod by viewModel.lastBillingPeriod.collectAsState()
+
+    LaunchedEffect(purchaseJustCompleted) {
+        if (purchaseJustCompleted) {
+            delay(4_000)
+            viewModel.clearPurchaseJustCompleted()
+        }
+    }
+
+    // Open directly to Plans tab
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Plans, 1 = Usage
 
     Column(
         modifier = Modifier
@@ -93,6 +113,50 @@ fun SubscriptionScreen(
                 color = Colors.textPrimary
             )
             Spacer(modifier = Modifier.width(24.dp))
+        }
+
+        // ── Upgrade success banner ───────────────────────────────────────────
+        AnimatedVisibility(
+            visible = purchaseJustCompleted,
+            enter   = slideInVertically { -it } + fadeIn(),
+            exit    = slideOutVertically { -it } + fadeOut()
+        ) {
+            val tierLabel = currentTier.replaceFirstChar { it.uppercase() }
+            val periodLabel = when (lastBillingPeriod) {
+                "annual"  -> "annual"
+                "monthly" -> "monthly"
+                else      -> "monthly"
+            }
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF22C55E).copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(Spacing.lg),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🎉", fontSize = 28.sp)
+                    Column {
+                        Text(
+                            text = "Welcome to $tierLabel!",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF22C55E)
+                        )
+                        Text(
+                            text = "Your $periodLabel subscription is now active.",
+                            fontSize = 13.sp,
+                            color = Colors.textSecondary
+                        )
+                    }
+                }
+            }
         }
 
         // Tab Bar

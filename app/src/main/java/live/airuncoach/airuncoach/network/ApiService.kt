@@ -583,6 +583,17 @@ interface ApiService {
     @POST("/api/share/generate")
     suspend fun generateShareImage(@Body request: ShareImageRequest): okhttp3.ResponseBody
 
+    // ========== SUBSCRIPTIONS ==========
+
+    /**
+     * Verify a Google Play purchase and update the user's tier in the database.
+     * Call this after every successful purchase acknowledgment, and also on
+     * startup whenever the billing client finds an active subscription that is
+     * not yet reflected in the database.
+     */
+    @POST("/api/subscriptions/verify-purchase")
+    suspend fun verifyPurchase(@Body request: VerifyPurchaseRequest): VerifyPurchaseResponse
+
     // ========== USAGE & TIER LIMITS ==========
 
     @GET("/api/usage/current")
@@ -610,12 +621,15 @@ interface ApiService {
      * Generate (or return cached) bespoke SessionCoachingPlan for a workout.
      * Called at "Prepare Run" time. Returns phases, triggers, cueingStrategy.
      * Pass forceRegenerate=true to bypass cache.
+     *
+     * NOTE: body must be a concrete data class — Retrofit/Gson cannot serialize
+     * wildcard types (Map<String, Any?>) at runtime.
      */
     @POST("/api/workouts/{workoutId}/prepare-coaching")
     suspend fun prepareSessionCoaching(
         @Path("workoutId") workoutId: String,
         @Query("force") forceRegenerate: Boolean = false,
-        @Body body: Map<String, Any?> = emptyMap()
+        @Body body: PrepareCoachingRequest
     ): Response<PrepareCoachingResponse>
 
     /**
