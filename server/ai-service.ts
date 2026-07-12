@@ -4851,6 +4851,17 @@ export interface EliteCoachingParams {
   etaOverTargetPercent?: number;         // how far over target as % (negative = under)
   remainingMeters?: number;              // meters remaining for final triggers
 
+  // ── Technique coaching — specific category selected by the Android app ──────
+  // The app picks a category (e.g. "breathing_rhythm", "mental_smile") from its
+  // rotation system and sends the exact coaching cue to deliver here so the AI
+  // focuses on that one area rather than choosing generically.
+  techniqueCategory?: string;          // e.g. "posture_shoulders", "breathing_rhythm"
+  techniqueHint?: string;              // The specific cue text for this category
+  runPhase?: string;                   // EARLY | BUILDING | SUSTAINING | FINISHING
+  isUphill?: boolean;
+  fatigueLevel?: string;               // FRESH | MODERATE | FATIGUED
+  recentTechniqueCategories?: string[]; // Last 3-5 categories used (for variety context)
+
   // Coaching programme context — populated when run is a scheduled plan workout
   trainingPlanId?: string;
   workoutId?: string;
@@ -4872,6 +4883,7 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
     projectedFinishTime, consecutiveConsistentSplits, isNegativeSplitting,
     fastestSplitKm, fastestSplitPace,
     targetTimeCategory, etaOverTargetPercent, remainingMeters,
+    techniqueCategory, techniqueHint, runPhase, isUphill, fatigueLevel, recentTechniqueCategories,
     trainingPlanId, workoutType, workoutDescription, planGoalType, planWeekNumber, planTotalWeeks
   } = params;
 
@@ -4937,37 +4949,122 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
   switch (coachingType) {
 
     case 'technique_form': {
-      // For Zone 1-2 aerobic runs, focus on breathing/comfort, NOT posture/form correction
+      // ── Build category-specific coaching cue ──────────────────────────────
+      // The Android app selects the category (e.g. "breathing_rhythm", "mental_smile",
+      // "posture_shoulders") from its rotation system and sends:
+      //   techniqueCategory — the selected category key
+      //   techniqueHint     — the exact coaching cue text to deliver
+      //   recentTechniqueCategories — what was recently coached (for variety context)
+      //
+      // We MUST use this category — the rotation system on the device ensures the
+      // full library of 40+ coaching types gets used, not just the ones that happen
+      // to match generic conditionals.
+
       const isAerobicZone = targetHeartRateZone && targetHeartRateZone <= 2;
-      
-      typePrompt = `COACHING TYPE: Running technique & form check.
+
+      // Format recent categories for context (so AI doesn't repeat them)
+      const recentCatContext = recentTechniqueCategories && recentTechniqueCategories.length > 0
+        ? `\nYou have RECENTLY coached: ${recentTechniqueCategories.join(', ')}. Do NOT repeat these — coach the NEW category assigned below.`
+        : '';
+
+      if (techniqueCategory && techniqueHint) {
+        // ── Primary path: use the app-selected category ────────────────────
+        // Map category keys to human-readable labels for the prompt
+        const categoryLabel = techniqueCategory
+          .replace(/_/g, ' ')
+          .replace(/\b\w/g, c => c.toUpperCase());
+
+        // Group the category to set the right system persona
+        const isBreathing   = techniqueCategory.startsWith('breathing');
+        const isMental      = techniqueCategory.startsWith('mental');
+        const isRecovery    = techniqueCategory.startsWith('recovery');
+        const isHill        = techniqueCategory.startsWith('hill');
+        const isPacing      = techniqueCategory.startsWith('pacing');
+        const isHydration   = techniqueCategory.startsWith('hydration') || techniqueCategory.startsWith('fueling');
+        const isWeather     = techniqueCategory.startsWith('weather');
+        const isBodySignal  = techniqueCategory.startsWith('body');
+        const isHR          = techniqueCategory.startsWith('hr_');
+
+        let systemPersona: string;
+        if (isBreathing)        systemPersona = 'You are an expert in running breathing mechanics. Coach exactly the breathing technique specified — specific, actionable, spoken aloud while running.';
+        else if (isMental)      systemPersona = 'You are a sports psychologist and running coach specialising in mental toughness. Deliver the mental coaching cue naturally as if mid-run conversation.';
+        else if (isRecovery)    systemPersona = 'You are a running coach specialising in in-run recovery and tension release. Guide the runner through the specific recovery action.';
+        else if (isHill)        systemPersona = 'You are a hill running specialist. Coach the specific hill technique the runner needs right now.';
+        else if (isPacing)      systemPersona = 'You are an elite pacing and race strategy coach. Deliver the specific pacing cue with context from their current run data.';
+        else if (isHydration)   systemPersona = 'You are a sports nutrition and hydration coach. Give the hydration/fueling cue conversationally while the runner is mid-run.';
+        else if (isWeather)     systemPersona = 'You are a running coach specialising in environmental adaptation. Coach the weather-specific strategy for today\'s conditions.';
+        else if (isBodySignal)  systemPersona = 'You are a running coach and physiotherapist. Coach the body awareness cue — help the runner tune in to their body\'s signals.';
+        else if (isHR)          systemPersona = 'You are a heart rate and training zone specialist. Deliver the HR-focused coaching cue referencing their current heart rate data.';
+        else                    systemPersona = 'You specialize in running biomechanics and form coaching. Deliver one highly specific, actionable technique cue — never generic.';
+
+        typePrompt = `COACHING TYPE: Running technique — ${categoryLabel}
+${recentCatContext}
 
 ${status}
 ${noTerrainRule}
 
-Give a focused technique coaching cue (2-3 sentences). Pick ONE technique area and coach it with specific, actionable cues the runner can apply RIGHT NOW:
+ASSIGNED TECHNIQUE AREA: ${categoryLabel}
+COACHING CUE TO DELIVER: "${techniqueHint}"
 
-${isAerobicZone ? `
-For this Zone 2 AEROBIC BASE BUILD session, focus on COMFORT and RELAXATION:
-- Breathing should be steady and conversational — if you can't speak in full sentences, ease up
-- Relax your jaw, shoulders, and arms — tension here wastes energy
-- Let your natural rhythm settle in — your body is adapting right now, building capillaries and mitochondria
-- Stay comfortable and patient. This "easy" pace is exactly where the adaptation happens. Elite runners built their speed HERE.
-` : `
-Choose the most relevant for this moment in the run:
-${progress < 30 ? `- EARLY RUN: Focus on establishing good form — relaxed shoulders, arms at 90 degrees, slight forward lean from ankles, landing under hips.` :
-  progress < 70 ? `- MID RUN: Focus on efficiency — are they bouncing too much? Arms crossing midline? Tension creeping into shoulders or jaw? Quick feet.` :
-  `- LATE RUN: Focus on fatigue management — when tired, form breaks down. Cue them to check posture (tall spine), relax hands (no clenching), drive arms forward.`}
-${cadence && cadence < 165 ? `- Their cadence is ${cadence} spm — below optimal. Cue quicker steps: "Think quick, light feet. Your arms set the rhythm — pump them faster and your legs will follow."` : ''}
-${heartRate && heartRate > 170 ? `- HR is high (${heartRate}bpm) — cue breathing technique: "Breathe from your belly. Try a 2-in, 2-out pattern matched to your footstrike."` : ''}
-${hasRoute && currentGrade && currentGrade > 3 ? `- On uphill: "Shorten your stride, lean into the hill from your ankles, pump your arms, and maintain effort — not pace."` : ''}
-${hasRoute && currentGrade && currentGrade < -3 ? `- On downhill: "Lean slightly forward, increase turnover, stay light on your feet. Don't brake with your heels."` : ''}
-`}
+Your task: Turn this coaching cue into a natural, conversational 2-3 sentence spoken coaching message.
 
-Reference at least one data point. Keep it conversational — this is spoken aloud while running.`;
-      systemExtra = isAerobicZone 
-        ? 'For this Zone 2 session, emphasize comfort and sustainability. Coach breathing rhythm, relaxation, and how to stay comfortable at effort.' 
-        : 'You specialize in running biomechanics and form coaching. Give one specific, actionable technique cue — not a generic reminder.';
+Rules:
+1. Coach ONLY the "${categoryLabel}" area — do NOT switch to a different technique.
+2. Make it specific and immediately actionable — the runner should be able to apply it in the next 10 seconds.
+3. Reference at least one real data point from their run (pace, HR, distance, elapsed time) to make it feel personalised.
+4. Do NOT say "great job" or give generic praise — just coach the technique.
+5. Keep it natural and conversational — this is spoken aloud while the runner is moving.
+${cadence ? `\nCurrent cadence: ${cadence} spm` : ''}
+${heartRate ? `\nCurrent heart rate: ${heartRate} bpm` : ''}
+${isOnHill || (currentGrade && Math.abs(currentGrade) > 3) ? `\nCurrently ${currentGrade && currentGrade > 0 ? 'climbing' : 'descending'} (grade: ${currentGrade?.toFixed(1)}%)` : ''}
+${fatigueLevel ? `\nFatigue level: ${fatigueLevel}` : ''}
+${runPhase ? `\nRun phase: ${runPhase}` : ''}`;
+
+        systemExtra = systemPersona;
+
+      } else if (isAerobicZone) {
+        // ── Aerobic zone fallback (no category sent) ───────────────────────
+        typePrompt = `COACHING TYPE: Zone 2 aerobic comfort check.
+
+${status}
+${noTerrainRule}
+${recentCatContext}
+
+For this Zone 2 AEROBIC BASE BUILD session, pick ONE of the following to coach:
+- Breathing rhythm — steady and conversational, diaphragmatic breathing
+- Relaxation — jaw, shoulders, and arms should be relaxed and tension-free
+- Cadence feel — light, quick steps without overstriding
+- Mental comfort — this easy pace is where adaptation happens, trust the process
+
+Give a 2-3 sentence conversational coaching message. Reference at least one data point.`;
+        systemExtra = 'For this Zone 2 session, emphasize comfort and sustainability. Coach breathing, relaxation, or the value of easy-pace adaptation.';
+
+      } else {
+        // ── Generic fallback (no category, no aerobic zone) ────────────────
+        // This should rarely fire now that the app always sends a category.
+        // Deliberately avoids the arm-swing default by cycling through areas.
+        const genericAreas = [
+          { area: 'posture', cue: 'Check your posture — tall spine, chin level, shoulders relaxed and down away from your ears.' },
+          { area: 'breathing', cue: 'Focus on your breathing — breathe from your belly, not your chest. Try matching your breath to your steps.' },
+          { area: 'foot strike', cue: 'Land your feet under your hips, not in front of you. Quick, light steps reduce impact and save energy.' },
+          { area: 'core engagement', cue: 'Gently brace your core — imagine someone is about to lightly tap your stomach. This stabilises your entire stride.' },
+          { area: 'mental focus', cue: 'Quick body scan — where are you holding tension? Jaw, hands, shoulders? Release it now.' },
+        ];
+        // Pick pseudo-randomly based on elapsed time so different cues fire at different points
+        const pick = genericAreas[Math.floor(elapsedTime / 120) % genericAreas.length];
+
+        typePrompt = `COACHING TYPE: Running form check — ${pick.area}.
+
+${status}
+${noTerrainRule}
+${recentCatContext}
+
+Coach this specific area: ${pick.area}
+Cue: "${pick.cue}"
+
+Give a 2-3 sentence conversational coaching message. Make it immediately actionable. Reference at least one data point from their run.`;
+        systemExtra = 'Deliver one specific, actionable form cue. Never use arm swing as the default — there are many coaching areas to explore.';
+      }
       break;
     }
 
