@@ -473,6 +473,9 @@ class GarminWatchManager(
      * @param intervalCount    Number of intervals for interval workouts (nullable)
      * @param intervalDistKm   Distance per interval in km (nullable)
      * @param intervalDurSecs  Duration per interval in seconds (nullable)
+     * @param plannedWorkoutId The planned_workout DB id — stored on the watch and sent with the
+     *                         companion session/start call so the backend can auto-complete the
+     *                         workout when the Garmin activity webhook arrives.
      */
     fun sendPreparedRun(
         distanceKm: Float,
@@ -484,7 +487,8 @@ class GarminWatchManager(
         targetPace: String? = null,
         intervalCount: Int? = null,
         intervalDistKm: Float? = null,
-        intervalDurSecs: Int? = null
+        intervalDurSecs: Int? = null,
+        plannedWorkoutId: String? = null
     ) {
         val payload = mutableMapOf<String, Any>(
             "type"     to "preparedRun",
@@ -499,6 +503,7 @@ class GarminWatchManager(
         intervalCount?.let    { payload["intervalCount"]    = it }
         intervalDistKm?.let   { payload["intervalDistKm"]  = it }
         intervalDurSecs?.let  { payload["intervalDurSecs"] = it }
+        plannedWorkoutId?.let { payload["plannedWorkoutId"] = it }
 
         Log.d(TAG, "Sending preparedRun to watch: type=$runType dist=${distanceKm}km workout=$workoutType")
         cachedPreparedRunPayload = payload

@@ -237,6 +237,16 @@ class RunView extends Ui.View {
         if (wt != null) { _prepWorkoutType = wt; }
         if (wd != null) { _prepWorkoutDesc = wd; }
         if (dd != null) { _prepRunDist     = dd.toFloat(); }
+        // Store plannedWorkoutId so DataStreamer can include it in the session/start payload
+        // This is the critical link that lets the backend auto-complete the planned workout
+        // when the Garmin activity webhook arrives after the run.
+        var pwid = data.get("plannedWorkoutId");
+        if (pwid != null) {
+            App.Storage.setValue("plannedWorkoutId", pwid);
+            Sys.println("setCoachingMode: plannedWorkoutId stored = " + pwid);
+        } else {
+            App.Storage.deleteValue("plannedWorkoutId");
+        }
     }
 
     function isPaused()  { return _isPaused; }

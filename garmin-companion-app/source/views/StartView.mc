@@ -33,6 +33,7 @@ class StartView extends Ui.View {
     private var _prepIntervalCnt = 0;
     private var _prepIntervalDist = 0.0;
     private var _prepIntervalDur  = 0;
+    private var _prepPlannedWorkoutId = null;
 
     // Animation
     private var _timer      = null;
@@ -111,7 +112,9 @@ class StartView extends Ui.View {
             if (ic   != null) { _prepIntervalCnt  = ic.toNumber(); }
             if (id   != null) { _prepIntervalDist = id.toFloat(); }
             if (idr  != null) { _prepIntervalDur  = idr.toNumber(); }
-            Sys.println("preparedRun received: " + _prepRunType);
+            var pwid = data["plannedWorkoutId"];
+            if (pwid != null) { _prepPlannedWorkoutId = pwid; }
+            Sys.println("preparedRun received: " + _prepRunType + " workoutId=" + _prepPlannedWorkoutId);
             // Two-pulse haptic so user knows the run is ready on their wrist
             _vibePrepared();
             Ui.requestUpdate();
@@ -294,12 +297,13 @@ class StartView extends Ui.View {
 
         if (_isPreparedRun) {
             view.setCoachingMode({
-                "runType"      => _prepRunType,
-                "distance"     => _prepRunDist,
-                "workoutType"  => _prepWorkoutType,
-                "targetPace"   => _prepTargetPace,
-                "workoutDesc"  => _prepWorkoutDesc,
-                "intervalCount"    => _prepIntervalCnt,
+                "runType"           => _prepRunType,
+                "distance"          => _prepRunDist,
+                "workoutType"       => _prepWorkoutType,
+                "targetPace"        => _prepTargetPace,
+                "workoutDesc"       => _prepWorkoutDesc,
+                "intervalCount"     => _prepIntervalCnt,
+                "plannedWorkoutId"  => _prepPlannedWorkoutId,
                 "intervalDistKm"   => _prepIntervalDist,
                 "intervalDurSecs"  => _prepIntervalDur
             });
@@ -335,6 +339,7 @@ class StartView extends Ui.View {
         _prepIntervalCnt  = 0;
         _prepIntervalDist = 0.0;
         _prepIntervalDur  = 0;
+        _prepPlannedWorkoutId = null;
     }
 }
 

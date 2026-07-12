@@ -658,7 +658,8 @@ class RunSessionViewModel @Inject constructor(
             targetPace       = targetPace,
             intervalCount    = intervalCount,
             intervalDistKm   = intervalDistKm,
-            intervalDurSecs  = intervalDurSecs
+            intervalDurSecs  = intervalDurSecs,
+            plannedWorkoutId = workoutId
         )
 
         _watchSendState.value = live.airuncoach.airuncoach.ui.components.WatchSendState.SENT

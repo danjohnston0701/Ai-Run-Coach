@@ -178,6 +178,13 @@ class DataStreamer {
             "deviceModel" => deviceInfo.partNumber,
             "activityType" => "running"
         };
+        // Include the planned workout ID so the backend can auto-complete the planned_workout
+        // record when the Garmin activity webhook arrives after the run finishes.
+        var plannedWorkoutId = App.Storage.getValue("plannedWorkoutId");
+        if (plannedWorkoutId != null) {
+            payload.put("plannedWorkoutId", plannedWorkoutId);
+            Sys.println("DataStreamer.startSession: plannedWorkoutId=" + plannedWorkoutId);
+        }
         
         var url = _baseUrl + "/api/garmin-companion/session/start";
         var options = {
