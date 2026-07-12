@@ -38,7 +38,11 @@ data class ElevationCoachingRequest(
 
     // Pace consistency — how steady have they been?
     @SerializedName("paceSpreadSeconds") val paceSpreadSeconds: Int? = null, // fastest-to-slowest split spread
-    @SerializedName("isNegativeSplitting") val isNegativeSplitting: Boolean? = null
+    @SerializedName("isNegativeSplitting") val isNegativeSplitting: Boolean? = null,
+
+    // Runner experience — used to tailor tone (softer for newcomers/beginners with little history)
+    @SerializedName("fitnessLevel") val fitnessLevel: String? = null,
+    @SerializedName("totalRunsAllTime") val totalRunsAllTime: Int? = null
 )
 
 data class KmSplitElevation(

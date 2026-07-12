@@ -31,11 +31,6 @@ data class PaceUpdate(
     @SerializedName("targetTime") val targetTime: Int? = null,
     @SerializedName("targetPace") val targetPace: String? = null,
     @SerializedName("averagePace") val averagePace: String? = null,
-    // Stride analysis
-    @SerializedName("strideLength") val strideLength: Double? = null,
-    @SerializedName("strideZone") val strideZone: String? = null,
-    @SerializedName("optimalStrideMin") val optimalStrideMin: Double? = null,
-    @SerializedName("optimalStrideMax") val optimalStrideMax: Double? = null,
     @SerializedName("terrainContext") val terrainContext: String? = null,
     @SerializedName("isFatigued") val isFatigued: Boolean? = null,
     @SerializedName("hasRoute") val hasRoute: Boolean = false,

@@ -22,13 +22,11 @@ data class PhaseCoachingUpdate(
     @SerializedName("targetTime") val targetTime: Int? = null,
     @SerializedName("targetPace") val targetPace: String? = null,
     @SerializedName("kmSplits") val kmSplits: List<live.airuncoach.airuncoach.domain.model.KmSplit>? = null,
-    // Stride analysis
-    @SerializedName("strideLength") val strideLength: Double? = null,
-    @SerializedName("strideZone") val strideZone: String? = null, // "OPTIMAL", "OVERSTRIDING", "UNDERSTRIDING"
-    @SerializedName("optimalStrideMin") val optimalStrideMin: Double? = null,
-    @SerializedName("optimalStrideMax") val optimalStrideMax: Double? = null,
     @SerializedName("terrainContext") val terrainContext: String? = null,
     @SerializedName("isFatigued") val isFatigued: Boolean? = null,
+    // Target context — explicit flag so the AI never invents a target when none was set
+    @SerializedName("hasTarget") val hasTarget: Boolean = false,
+    @SerializedName("totalRunsAllTime") val totalRunsAllTime: Int? = null,
     @SerializedName("hasRoute") val hasRoute: Boolean = false,
     // Navigation coaching context
     @SerializedName("navigationInstruction") val navigationInstruction: String? = null,

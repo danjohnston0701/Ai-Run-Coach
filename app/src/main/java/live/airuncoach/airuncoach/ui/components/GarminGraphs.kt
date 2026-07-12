@@ -17,11 +17,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.ui.extensions.getHeartRateZoneDistribution
 import live.airuncoach.airuncoach.ui.theme.*
+import java.util.Locale
 
 /**
  * Heart Rate Zone vs Pace Chart
@@ -130,6 +134,8 @@ private fun HRZonePaceScatterPlot(
     data: List<Triple<Float, Float, Int>>,
     modifier: Modifier = Modifier
 ) {
+    val textMeasurer = rememberTextMeasurer()
+    
     Canvas(
         modifier = modifier
             .fillMaxWidth()
@@ -187,12 +193,14 @@ private fun HRZonePaceScatterPlot(
             hrConfig = hrConfig,
             padding = padding,
             chartWidth = chartWidth,
-            chartHeight = chartHeight
+            chartHeight = chartHeight,
+            textMeasurer = textMeasurer
         )
         
         // Draw data points
         data.forEach { (pace, hr, zone) ->
-            val x = scaleToCanvas(pace, paceConfig, padding, chartWidth)
+            // REVERSED pace axis: higher pace values (slower) go to the left
+            val xReversed = padding + chartWidth * (1f - (pace - paceConfig.visualMin) / paceConfig.range)
             val y = size.height - padding - ((hr - hrConfig.visualMin) / hrConfig.range) * chartHeight
             
             val color = getZoneColor(zone)
@@ -201,7 +209,7 @@ private fun HRZonePaceScatterPlot(
             drawCircle(
                 color = color,
                 radius = radius,
-                center = Offset(x, y)
+                center = Offset(xReversed, y)
             )
         }
     }
@@ -227,27 +235,62 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawZoneBands(
 /**
  * Draw axis labels and grid lines
  */
-@Suppress("UNUSED_PARAMETER")
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAxisLabelsAndGrid(
     paceConfig: AxisConfig,
     hrConfig: AxisConfig,
     padding: Float,
     chartWidth: Float,
-    chartHeight: Float
+    chartHeight: Float,
+    textMeasurer: androidx.compose.ui.text.TextMeasurer
 ) {
-    // TODO: Draw pace labels (bottom) with grid lines
-    val paceStep = calculateLabelStep(paceConfig.range)
-    var pace = paceConfig.visualMin
-    while (pace <= paceConfig.visualMax) {
-        // Label + grid line
-        pace += paceStep
+    // Draw pace labels (bottom) with grid lines - REVERSED axis
+    // Slower pace (higher min/km) on LEFT, faster pace (lower min/km) on RIGHT
+    val paceLabels = generatePaceLabels(paceConfig.visualMin, paceConfig.visualMax)
+    paceLabels.forEach { pace ->
+        // REVERSED: higher pace value = further left on canvas
+        val xReversed = padding + chartWidth * (1f - (pace - paceConfig.visualMin) / paceConfig.range)
+        
+        // Draw vertical grid line
+        drawLine(
+            color = Colors.border.copy(alpha = 0.2f),
+            start = Offset(xReversed, padding),
+            end = Offset(xReversed, size.height - padding),
+            strokeWidth = 1f
+        )
+        
+        // Draw pace label (format as min:sec)
+        val label = formatPaceMinutes(pace)
+        val textLayoutResult = textMeasurer.measure(label, TextStyle(fontSize = 12.sp))
+        drawText(
+            textLayoutResult,
+            color = Colors.textSecondary,
+            topLeft = Offset(xReversed - textLayoutResult.size.width / 2f, size.height - padding + 10f)
+        )
     }
     
-    // TODO: Draw HR labels (left) with grid lines
+    // Draw HR labels (left) with grid lines
     val hrStep = calculateLabelStep(hrConfig.range)
     var hr = hrConfig.visualMin
     while (hr <= hrConfig.visualMax) {
-        // Label + grid line
+        val y = size.height - padding - ((hr - hrConfig.visualMin) / hrConfig.range) * chartHeight
+        
+        // Draw horizontal grid line
+        drawLine(
+            color = Colors.border.copy(alpha = 0.2f),
+            start = Offset(padding, y),
+            end = Offset(size.width - padding, y),
+            strokeWidth = 1f
+        )
+        
+        // Draw HR label
+        val label = "${hr.toInt()} bpm"
+        val textLayoutResult = textMeasurer.measure(label, TextStyle(fontSize = 12.sp))
+        drawText(
+            textLayoutResult,
+            color = Colors.textSecondary,
+            topLeft = Offset(padding - textLayoutResult.size.width - 10f, y - textLayoutResult.size.height / 2f)
+        )
+        
         hr += hrStep
     }
 }
@@ -381,4 +424,49 @@ private fun ZoneBreakdownItem(
             color = color
         )
     }
+}
+
+/**
+ * Generate pace labels for the axis (at least 5 labels across the range)
+ * Each label maintains 1 decimal place for consistency
+ */
+private fun generatePaceLabels(minPace: Float, maxPace: Float): List<Float> {
+    val range = maxPace - minPace
+    if (range <= 0) return listOf(minPace)
+    
+    // Generate at least 5 labels by choosing appropriate step size
+    val desiredLabelCount = 5
+    val rawStep = range / (desiredLabelCount - 1)
+    
+    // Round step to a sensible value (0.1, 0.2, 0.5, 1.0, etc.)
+    val step = when {
+        rawStep <= 0.1 -> 0.1f
+        rawStep <= 0.2 -> 0.2f
+        rawStep <= 0.5 -> 0.5f
+        rawStep <= 1.0 -> 1.0f
+        else -> 1.0f
+    }
+    
+    val labels = mutableListOf<Float>()
+    var pace = (minPace / step).toInt().toFloat() * step
+    
+    while (pace <= maxPace + step * 0.01f) {
+        if (pace >= minPace - step * 0.01f) {
+            labels.add((pace * 10).toInt() / 10f)  // Round to 1 decimal place
+        }
+        pace += step
+    }
+    
+    return labels.distinctBy { (it * 10).toInt() }  // Remove duplicates from rounding
+}
+
+/**
+ * Format pace (in min/km) as min:sec display format
+ * Input: 4.5 (4 min 30 sec per km)
+ * Output: "4:30"
+ */
+private fun formatPaceMinutes(paceMinPerKm: Float): String {
+    val minutes = paceMinPerKm.toInt()
+    val seconds = ((paceMinPerKm - minutes) * 60).toInt()
+    return String.format(Locale.US, "%d:%02d", minutes, seconds)
 }
