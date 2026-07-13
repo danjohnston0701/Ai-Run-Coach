@@ -14,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import live.airuncoach.airuncoach.data.SessionManager
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
@@ -34,18 +32,17 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModel
 import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModelFactory
 import live.airuncoach.airuncoach.viewmodel.CoachingTone
-import androidx.compose.ui.text.style.TextAlign
 import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoachSettingsScreen(
     onNavigateBack: () -> Unit = {},
-    onNavigateToDashboard: () -> Unit = {}
+    onNavigateToDashboard: () -> Unit = {},
+    isOnboarding: Boolean = false
 ) {
     val context = LocalContext.current
     val viewModel: CoachSettingsViewModel = viewModel(factory = CoachSettingsViewModelFactory(context))
-    val sessionManager = remember { SessionManager(context) }
     val coachName by viewModel.coachName.collectAsState()
     val voiceGender by viewModel.voiceGender.collectAsState()
     val accent by viewModel.accent.collectAsState()
@@ -75,34 +72,31 @@ fun CoachSettingsScreen(
     val masterAiEnabled by viewModel.masterAiEnabled.collectAsState()
     val showConsentSheet by viewModel.showConsentSheet.collectAsState()
 
-    // In-Run AI Coaching feature toggles
-    val paceCoachingEnabled by viewModel.paceCoachingEnabled.collectAsState()
-    val routeNavigationEnabled by viewModel.routeNavigationEnabled.collectAsState()
-    val elevationCoachingEnabled by viewModel.elevationCoachingEnabled.collectAsState()
-    val heartRateCoachingEnabled by viewModel.heartRateCoachingEnabled.collectAsState()
-    val cadenceStrideEnabled by viewModel.cadenceStrideEnabled.collectAsState()
-    val kmSplitsEnabled by viewModel.kmSplitsEnabled.collectAsState()
-    val struggleDetectionEnabled by viewModel.struggleDetectionEnabled.collectAsState()
-    val motivationalCoachingEnabled by viewModel.motivationalCoachingEnabled.collectAsState()
-    val halfKmCheckInEnabled by viewModel.halfKmCheckInEnabled.collectAsState()
-    val kmSplitIntervalKm by viewModel.kmSplitIntervalKm.collectAsState()
-
     Scaffold(
         topBar = {
-             TopAppBar(
-                title = { Text("Ai Coach Settings", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
+            TopAppBar(
+                title = {
+                    Text(
+                        "AI Coach Settings",
+                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(painterResource(id = R.drawable.icon_arrow_back_vector), contentDescription = "Back", tint = Colors.textPrimary)
+                        Icon(
+                            painterResource(id = R.drawable.icon_arrow_back_vector),
+                            contentDescription = "Back",
+                            tint = Colors.textPrimary
+                        )
                     }
                 },
+                windowInsets = WindowInsets(0),
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
             )
         },
         containerColor = Colors.backgroundRoot,
         bottomBar = {
-            // Sticky save button at the bottom — navigationBarsPadding() ensures it
-            // sits above the gesture/button nav bar on all devices
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -114,10 +108,6 @@ fun CoachSettingsScreen(
                     onClick = {
                         coroutineScope.launch {
                             viewModel.saveSettings()
-                            // Clear coach setup flag and complete onboarding
-                            sessionManager.setNeedsCoachSetup(false)
-                            sessionManager.clearOnboardingFlags()
-                            // Navigate to dashboard (location permission handled by navigation)
                             onNavigateToDashboard()
                         }
                     },
@@ -128,7 +118,10 @@ fun CoachSettingsScreen(
                     shape = RoundedCornerShape(BorderRadius.lg),
                     colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
                 ) {
-                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                    Text(
+                        if (isOnboarding) "Continue" else "Save Changes",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                    )
                 }
             }
         }
@@ -245,142 +238,18 @@ fun CoachSettingsScreen(
                 Spacer(modifier = Modifier.height(Spacing.xl))
             }
 
-            // ==================== IN-RUN AI COACHING FEATURES ====================
+            // Master AI Coach toggle
             item {
-                SectionTitle(title = "In-Run AI Coaching")
+                SectionTitle(title = "AI Coaching")
             }
 
-            // Master AI Coach toggle — must be ON for any coaching to work
             item {
                 MasterAiToggle(
                     enabled = masterAiEnabled,
                     onToggle = viewModel::onMasterAiToggled
                 )
-                Spacer(modifier = Modifier.height(Spacing.md))
+                Spacer(modifier = Modifier.height(Spacing.xl))
             }
-
-            // Individual toggles — only shown when master is ON
-            if (masterAiEnabled) {
-                item {
-                    Text(
-                        text = "Choose which coaching features are active during your runs.",
-                        style = AppTextStyles.body,
-                        color = Colors.textSecondary,
-                        modifier = Modifier.padding(bottom = Spacing.md)
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Pace Coaching",
-                        description = "Target pace guidance — warns when you're going too fast or slow",
-                        enabled = paceCoachingEnabled,
-                        onToggle = viewModel::onPaceCoachingToggled
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Route Navigation",
-                        description = "Turn-by-turn voice directions on mapped routes",
-                        enabled = routeNavigationEnabled,
-                        onToggle = viewModel::onRouteNavigationToggled
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Elevation Coaching",
-                        description = "Hill and gradient advice — pacing tips on climbs and descents",
-                        enabled = elevationCoachingEnabled,
-                        onToggle = viewModel::onElevationCoachingToggled
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Heart Rate Coaching",
-                        description = "Heart rate zone guidance during your run",
-                        enabled = heartRateCoachingEnabled,
-                        onToggle = viewModel::onHeartRateCoachingToggled
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Cadence & Stride",
-                        description = "Running form analysis — stride length and cadence coaching",
-                        enabled = cadenceStrideEnabled,
-                        onToggle = viewModel::onCadenceStrideToggled
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "500m Check-In",
-                        description = "Initial pace assessment at 500 metres into your run",
-                        enabled = halfKmCheckInEnabled,
-                        onToggle = viewModel::onHalfKmCheckInToggled
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Km Split Updates",
-                        description = "Pace and progress updates at each split interval",
-                        enabled = kmSplitsEnabled,
-                        onToggle = viewModel::onKmSplitsToggled
-                    )
-                }
-
-                // Km Split Interval selector — only show when km splits are enabled
-                if (kmSplitsEnabled) {
-                    item {
-                        KmSplitIntervalSelector(
-                            selectedInterval = kmSplitIntervalKm,
-                            availableIntervals = viewModel.availableKmSplitIntervals,
-                            onIntervalChanged = viewModel::onKmSplitIntervalChanged
-                        )
-                    }
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Struggle Detection",
-                        description = "Supportive coaching when your pace drops significantly",
-                        enabled = struggleDetectionEnabled,
-                        onToggle = viewModel::onStruggleDetectionToggled
-                    )
-                }
-
-                item {
-                    CoachingFeatureToggle(
-                        title = "Motivational Coaching",
-                        description = "Milestones, phase changes, technique tips, and encouragement",
-                        enabled = motivationalCoachingEnabled,
-                        onToggle = viewModel::onMotivationalCoachingToggled
-                    )
-                }
-            } else {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(BorderRadius.md),
-                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
-                    ) {
-                        Text(
-                            text = "Enable AI Coaching above to configure individual coaching features.",
-                            style = AppTextStyles.body,
-                            color = Colors.textMuted,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(Spacing.xl)
-                        )
-                    }
-                }
-            }
-
         }
     }
 

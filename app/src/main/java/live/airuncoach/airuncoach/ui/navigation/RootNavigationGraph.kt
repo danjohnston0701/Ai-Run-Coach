@@ -11,13 +11,16 @@ import live.airuncoach.airuncoach.data.AiConsentManager
 import live.airuncoach.airuncoach.data.SessionManager
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import live.airuncoach.airuncoach.ui.screens.AiCoachingOnboardingScreen
 import live.airuncoach.airuncoach.ui.screens.AiConsentScreen
 import live.airuncoach.airuncoach.ui.screens.EmailVerificationScreen
 import live.airuncoach.airuncoach.ui.screens.FitnessLevelScreen
 import live.airuncoach.airuncoach.ui.screens.ForgotPasswordScreen
 import live.airuncoach.airuncoach.ui.screens.GarminWatchUpdateScreen
+import live.airuncoach.airuncoach.ui.screens.InSessionCoachingSettingsScreen
 import live.airuncoach.airuncoach.ui.screens.InjuryOnboardingScreen
 import live.airuncoach.airuncoach.ui.screens.LoginScreen
+import live.airuncoach.airuncoach.ui.screens.OnboardingIntroScreen
 import live.airuncoach.airuncoach.ui.screens.SignUpScreen
 import live.airuncoach.airuncoach.ui.screens.LocationPermissionScreen
 import live.airuncoach.airuncoach.ui.screens.PermissionsAndConsentsScreen
@@ -134,23 +137,19 @@ fun RootNavigationGraph(navController: NavHostController) {
             val sessionManager = remember { SessionManager(context) }
             LocationPermissionScreen(
                 onPermissionGranted = {
-                    // After permissions, check if user is in onboarding flow
                     when {
                         sessionManager.needsProfileSetup() -> {
-                            // New user: proceed to personal details (next step in onboarding)
-                            // Full onboarding flow: location perms → personal details → injuries/fitness → coach settings → subscription → main
-                            navController.navigate("personal_details") {
+                            // New user: show intro screen first
+                            navController.navigate("onboarding_intro") {
                                 popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
                             }
                         }
                         sessionManager.needsCoachSetup() -> {
-                            // User completed profile but hasn't finished coach settings
-                            navController.navigate("coach_settings") {
+                            navController.navigate("ai_coaching_onboarding") {
                                 popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
                             }
                         }
                         else -> {
-                            // Existing user (already completed onboarding): check if they've seen the AI consent screen
                             if (consentManager.hasSeenConsent()) {
                                 navController.navigate(AppRoutes.MAIN) {
                                     popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
@@ -161,6 +160,17 @@ fun RootNavigationGraph(navController: NavHostController) {
                                 }
                             }
                         }
+                    }
+                }
+            )
+        }
+
+        // New intro screen — first step for new users after location permissions
+        composable("onboarding_intro") {
+            OnboardingIntroScreen(
+                onGetStarted = {
+                    navController.navigate("personal_details") {
+                        popUpTo("onboarding_intro") { inclusive = true }
                     }
                 }
             )
@@ -239,7 +249,7 @@ fun RootNavigationGraph(navController: NavHostController) {
             FitnessLevelScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateNext = {
-                    navController.navigate("coach_settings") {
+                    navController.navigate("ai_coaching_onboarding") {
                         popUpTo("fitness_level_onboarding") { inclusive = true }
                     }
                 },
@@ -247,13 +257,41 @@ fun RootNavigationGraph(navController: NavHostController) {
             )
         }
 
+        // AI Coaching consent/intro screen — shown in onboarding before coach settings
+        composable("ai_coaching_onboarding") {
+            AiCoachingOnboardingScreen(
+                onEnableAndContinue = {
+                    navController.navigate("coach_settings") {
+                        popUpTo("ai_coaching_onboarding") { inclusive = true }
+                    }
+                },
+                onSkip = {
+                    navController.navigate("coach_settings") {
+                        popUpTo("ai_coaching_onboarding") { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable("coach_settings") {
             CoachSettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToDashboard = {
-                    // Navigate to onboarding subscription instead of location permission
-                    navController.navigate("onboarding_subscription") {
+                    navController.navigate("coaching_prompts_settings") {
                         popUpTo("coach_settings") { inclusive = true }
+                    }
+                },
+                isOnboarding = true
+            )
+        }
+
+        // In-session coaching prompts screen — second part of coach setup in onboarding
+        composable("coaching_prompts_settings") {
+            InSessionCoachingSettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToDashboard = {
+                    navController.navigate("onboarding_subscription") {
+                        popUpTo("coaching_prompts_settings") { inclusive = true }
                     }
                 }
             )
