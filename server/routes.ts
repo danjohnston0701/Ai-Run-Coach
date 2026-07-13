@@ -15481,18 +15481,26 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       // Update each workout with new day of week and scheduled date
       for (const update of updates) {
+        // Parse date string "yyyy-MM-dd" as UTC date at midnight
+        const [year, month, day] = update.scheduledDate.split('-').map(Number);
+        const scheduledDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+        
+        if (isNaN(scheduledDate.getTime())) {
+          return res.status(400).json({ error: `Invalid date format: ${update.scheduledDate}` });
+        }
+        
         await db.update(plannedWorkouts)
           .set({
             dayOfWeek: update.dayOfWeek,
-            scheduledDate: new Date(update.scheduledDate)  // Convert string to Date for Drizzle
+            scheduledDate: scheduledDate
           })
           .where(eq(plannedWorkouts.id, update.workoutId));
       }
 
       res.json({ success: true, message: "Workouts rescheduled successfully" });
     } catch (error: any) {
-      console.error("Reschedule sessions error:", error);
-      res.status(500).json({ error: "Failed to reschedule sessions" });
+      console.error("Reschedule sessions error:", error.message || error);
+      res.status(500).json({ error: error.message || "Failed to reschedule sessions" });
     }
   });
 
