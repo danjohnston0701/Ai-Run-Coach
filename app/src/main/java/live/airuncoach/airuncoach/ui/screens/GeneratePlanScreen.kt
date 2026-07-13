@@ -394,14 +394,14 @@ fun GeneratePlanScreen(
                     Slider(
                         value = daysPerWeek.toFloat(),
                         onValueChange = { viewModel.setDaysPerWeek(it.toInt()) },
-                        valueRange = 3f..6f,
-                        steps = 2,
+                        valueRange = 1f..7f,
+                        steps = 5,
                         colors = SliderDefaults.colors(thumbColor = Colors.primary, activeTrackColor = Colors.primary),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("3 days", style = AppTextStyles.small, color = Colors.textMuted)
-                        Text("6 days", style = AppTextStyles.small, color = Colors.textMuted)
+                        Text("1 day", style = AppTextStyles.small, color = Colors.textMuted)
+                        Text("7 days", style = AppTextStyles.small, color = Colors.textMuted)
                     }
 
                     Spacer(modifier = Modifier.height(Spacing.lg))
