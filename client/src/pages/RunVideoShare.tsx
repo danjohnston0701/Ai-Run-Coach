@@ -239,7 +239,7 @@ export default function RunVideoShare() {
       .filter((p: any) => Number.isFinite(p.lng) && Number.isFinite(p.lat));
 
     const raw: LngLat[] = parsed.map((p: any): LngLat => [p.lng, p.lat]);
-    const coords = smoothPath(raw);
+    const coords = raw;
     coordsRef.current = coords;
 
     const cum: number[] = [0];
@@ -566,7 +566,7 @@ export default function RunVideoShare() {
       }
       ctx.textAlign = "left";
       ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = "30px 'Inter', sans-serif";
-      ctx.fillText(runName, 28, 130);
+      ctx.fillText(runName, 28, 162);
 
       // Bottom glass stat panel
       const pad = 40, panelH = 250, panelY = CH - panelH - 56, panelW = CW - pad * 2;
