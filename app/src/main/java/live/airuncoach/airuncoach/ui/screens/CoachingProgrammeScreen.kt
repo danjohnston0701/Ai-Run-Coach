@@ -494,6 +494,7 @@ fun TrainingPlanDashboardScreen(
                     }
                 },
                 actions = {},
+                windowInsets = WindowInsets(0), // parent Scaffold already consumed status bar insets
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
             )
         },
@@ -1562,9 +1563,9 @@ fun AiPlanSummary(details: TrainingPlanDetails) {
                         BaselineRow(icon = R.drawable.icon_chart_vector, text = "Avg frequency: ${baseline.runsPerWeek} runs/week")
                     }
                     if (!baseline.avgDistance.isNullOrBlank()) {
-                        // avgDistance is stored in metres — convert to km for display
+                        // avgDistance is sent from the server in km — format to 1 decimal place
                         val avgDistanceKm = baseline.avgDistance.toDoubleOrNull()
-                            ?.let { String.format(Locale.US, "%.1f", it / 1000.0) }
+                            ?.let { String.format(Locale.US, "%.1f", it) }
                             ?: baseline.avgDistance
                         BaselineRow(icon = R.drawable.icon_map_pin_vector, text = "Avg run distance: $avgDistanceKm km")
                     }

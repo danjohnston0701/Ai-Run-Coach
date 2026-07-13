@@ -108,6 +108,7 @@ fun PersonalDetailsScreen(
     val genderOptions = listOf("Male", "Female", "Non-binary", "Prefer not to say")
 
     Scaffold(
+        modifier = Modifier.imePadding(), // Scaffold shrinks above keyboard so Save button stays visible
         topBar = {
             TopAppBar(
                 title = { Text("Personal Details", style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
@@ -116,17 +117,17 @@ fun PersonalDetailsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
                     }
                 },
+                windowInsets = WindowInsets(0), // parent Scaffold already consumed status bar insets
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Colors.backgroundRoot)
             )
         },
         containerColor = Colors.backgroundRoot,
-        contentWindowInsets = WindowInsets(0), // outer Scaffold already applies nav bar insets
+        contentWindowInsets = WindowInsets(0),
         bottomBar = {
-            // Sticky save button at the bottom
+            // Sticky save button — no navigationBarsPadding() here because the outer
+            // MainScreen Scaffold already consumed nav bar insets via innerPadding
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding(),
+                modifier = Modifier.fillMaxWidth(),
                 color = Colors.backgroundRoot,
                 shadowElevation = 8.dp
             ) {
