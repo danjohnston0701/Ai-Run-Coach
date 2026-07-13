@@ -41,8 +41,9 @@ import {
   runs,
   users,
 } from "@shared/schema";
-import { eq, and, inArray, desc, lte, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, inArray, desc, isNotNull } from "drizzle-orm";
 import { getOrGenerateSessionCoaching } from "./session-coaching-service";
+import { HeartRateZones } from "./heart-rate-zones";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -182,14 +183,52 @@ export async function enrichWorkoutBlock(
     .orderBy(desc(runs.completedAt))
     .limit(60);
 
-  // Estimate max HR and build zone-pace correlation
-  const userAge = user.dateOfBirth
+  // ── Estimate max HR and build zone-pace correlation ──────────────────────────
+  const hasDOB = !!user.dateOfBirth;
+  const userAge = hasDOB
     ? Math.floor((Date.now() - new Date(user.dateOfBirth as string).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
     : (user as any).age ?? 35;
 
   const { maxHR, source: maxHRSource } = estimateMaxHR(recentRuns, userAge);
   const zonePaceData = buildZonePaceCorrelation(recentRuns, maxHR);
   const fitnessLevel = (user as any).fitnessLevel ?? "intermediate";
+
+  // ── 3-tier HR knowledge system ─────────────────────────────────────────────
+  // Tier 1: Real HR+pace correlation from run history (most accurate)
+  // Tier 2: Tanaka formula from DOB (physiologically grounded)
+  // Tier 3: Estimate from fitness level only (least accurate — last resort)
+  type HRTier = 1 | 2 | 3;
+  const hrTier: HRTier = zonePaceData.hasRealData ? 1 : hasDOB ? 2 : 3;
+
+  // For Tier 2 — pre-compute all zone BPM ranges from Tanaka formula server-side.
+  // These are passed explicitly to GPT so it doesn't guess. GPT decides WHICH zone
+  // a session belongs to; the server provides the exact BPM bounds for that zone.
+  const tanakaZoneRanges: Record<number, { min: number; max: number }> | null =
+    hrTier === 2
+      ? {
+          1: HeartRateZones.getZoneRange(1, maxHR),
+          2: HeartRateZones.getZoneRange(2, maxHR),
+          3: HeartRateZones.getZoneRange(3, maxHR),
+          4: HeartRateZones.getZoneRange(4, maxHR),
+          5: HeartRateZones.getZoneRange(5, maxHR),
+        }
+      : null;
+
+  console.log(`[Enrichment] HR tier: ${hrTier} (${hrTier === 1 ? 'real correlation data' : hrTier === 2 ? `Tanaka formula, maxHR=${maxHR}` : 'fitness level estimate'})`);
+
+  // Build the HR context block that goes into the prompt
+  const hrContextBlock =
+    hrTier === 1
+      ? `✅ TIER 1 — Real HR+pace correlation from ${zonePaceData.runsWithBothMetrics} runs:\n${zonePaceData.summary}\nUse these zone-pace ranges as the primary source of truth. Do NOT use population averages — this is runner-specific data.`
+      : hrTier === 2
+      ? `✅ TIER 2 — Tanaka formula zones (DOB known, max HR = ${maxHR} bpm, age = ${userAge}):
+  Zone 1: ${tanakaZoneRanges![1].min}–${tanakaZoneRanges![1].max} bpm  (very easy recovery)
+  Zone 2: ${tanakaZoneRanges![2].min}–${tanakaZoneRanges![2].max} bpm  (aerobic base / easy)
+  Zone 3: ${tanakaZoneRanges![3].min}–${tanakaZoneRanges![3].max} bpm  (tempo / comfortably hard)
+  Zone 4: ${tanakaZoneRanges![4].min}–${tanakaZoneRanges![4].max} bpm  (threshold / hard)
+  Zone 5: ${tanakaZoneRanges![5].min}–${tanakaZoneRanges![5].max} bpm  (max effort / sprint)
+The BPM values above will be applied server-side — your job is to assign the correct hrZoneNumber for each session and appropriate pace targets for a ${fitnessLevel} runner running in that zone.`
+      : `⚠️ TIER 3 — No HR data and no date of birth available. Estimate all targets from fitness level (${fitnessLevel}) only. Be appropriately conservative — err toward slower paces and lower HR ranges.`;
 
   // Load workouts to enrich — skip rest days
   const workouts = await db
@@ -241,12 +280,7 @@ export async function enrichWorkoutBlock(
 RUNNER DATA:
 - Fitness level: ${fitnessLevel}
 - Age: ${userAge}
-- Estimated max heart rate: ${maxHR} bpm (${maxHRSource})
-- ${zonePaceData.summary}
-${!zonePaceData.hasRealData
-  ? `\n⚠️ No heart rate data available — estimate all paces from fitness level (${fitnessLevel}) only. Be appropriately conservative.`
-  : `\n✅ Use the zone-pace ranges above as the primary source of truth. Do NOT use population-average zone paces — use THIS runner's actual data.`
-}
+- ${hrContextBlock}
 
 WORKOUTS TO ENRICH:
 ${workoutSummaries}
@@ -346,10 +380,25 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
             ? enrichment.restTargetPace
             : null;
 
-        const safeHRMin = enrichment.hrZoneMinBpm && enrichment.hrZoneMinBpm > 50 && enrichment.hrZoneMinBpm < 220
-          ? enrichment.hrZoneMinBpm : null;
-        const safeHRMax = enrichment.hrZoneMaxBpm && enrichment.hrZoneMaxBpm > 50 && enrichment.hrZoneMaxBpm < 220
-          ? enrichment.hrZoneMaxBpm : null;
+        // For Tier 2 (Tanaka): override BPM values with server-computed zone ranges —
+        // these are physiologically accurate from DOB and we don't want GPT guessing them.
+        // GPT still decides the zone NUMBER (coaching decision); server applies the right BPM range.
+        const zoneNum = enrichment.hrZoneNumber;
+        const finalHRMin =
+          hrTier === 2 && zoneNum && tanakaZoneRanges?.[zoneNum]
+            ? tanakaZoneRanges[zoneNum].min
+            : enrichment.hrZoneMinBpm && enrichment.hrZoneMinBpm > 50 && enrichment.hrZoneMinBpm < 220
+            ? enrichment.hrZoneMinBpm
+            : null;
+        const finalHRMax =
+          hrTier === 2 && zoneNum && tanakaZoneRanges?.[zoneNum]
+            ? tanakaZoneRanges[zoneNum].max
+            : enrichment.hrZoneMaxBpm && enrichment.hrZoneMaxBpm > 50 && enrichment.hrZoneMaxBpm < 220
+            ? enrichment.hrZoneMaxBpm
+            : null;
+
+        const safeHRMin = finalHRMin;
+        const safeHRMax = finalHRMax;
 
         await db
           .update(plannedWorkouts)
@@ -370,7 +419,7 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
         console.log(
           `[Enrichment] ✅ ${enrichment.id} (${workoutRecord.workoutType}): ` +
           `pace=${safePace ?? "unchanged"} | zone=${enrichment.hrZoneNumber ?? "unchanged"} ` +
-          `(${safeHRMin ?? "?"}–${safeHRMax ?? "?"} bpm)` +
+          `(${safeHRMin ?? "?"}–${safeHRMax ?? "?"} bpm) [HR tier ${hrTier}]` +
           (enrichment.enrichmentNote ? ` | ${enrichment.enrichmentNote}` : "")
         );
 
