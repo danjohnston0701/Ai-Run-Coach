@@ -103,7 +103,7 @@ fun PersonalDetailsScreen(
     val height by viewModel.height.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     var showGenderMenu by remember { mutableStateOf(false) }
-    var hasInjuries by remember { mutableStateOf<Boolean?>(null) }
+    var hasInjuries by remember { mutableStateOf(false) }  // Default to "No" for injuries
     
     val genderOptions = listOf("Male", "Female", "Non-binary", "Prefer not to say")
 
@@ -155,8 +155,7 @@ fun PersonalDetailsScreen(
                         .height(50.dp),
                     shape = RoundedCornerShape(BorderRadius.lg),
                     colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
-                    // Require the user to explicitly choose Yes or No before saving
-                    enabled = hasInjuries != null
+                    // hasInjuries defaults to false ("No"), so button is always enabled
                 ) {
                     Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
                 }
