@@ -58,7 +58,6 @@ fun SubscriptionScreen(
     @Suppress("UNUSED_PARAMETER") onBackClick: () -> Unit = {}
 ) {
     val subscriptions by viewModel.subscriptions.collectAsState()
-    val billingConnectionState by viewModel.billingConnectionState.collectAsState()
     val context = LocalContext.current
     val activity = context as? Activity
 
@@ -162,39 +161,28 @@ fun SubscriptionScreen(
         // Tab Bar
         CustomTabBar(selectedTab = selectedTab) { selectedTab = it }
 
-        // Content
-        if (billingConnectionState) {
-            when (selectedTab) {
-                0 -> PlansTabContent(
-                    subscriptions = subscriptions,
-                    isPremium = isPremium,
-                    activity = activity,
-                    viewModel = viewModel,
-                    isTrialExpired = isTrialExpired,
-                    trialDaysRemaining = trialDaysRemaining,
-                    trialExpiresAt = trialExpiresAt,
-                    currentTier = currentTier,
-                    onNavigateToChangePassword = onNavigateToChangePassword,
-                    onNavigateToGetSupport = onNavigateToGetSupport,
-                    onNavigateToDeleteAccount = onNavigateToDeleteAccount
-                )
-                1 -> UsageTabContent(
-                    viewModel = viewModel,
-                    isTrialExpired = isTrialExpired,
-                    trialDaysRemaining = trialDaysRemaining,
-                    trialExpiresAt = trialExpiresAt,
-                    onUpgradeClick = { selectedTab = 0 }
-                )
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Colors.backgroundDefault),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = Colors.primary)
-            }
+        // Content — show content even if billing connection failed (e.g., in emulator without Play Services)
+        when (selectedTab) {
+            0 -> PlansTabContent(
+                subscriptions = subscriptions,
+                isPremium = isPremium,
+                activity = activity,
+                viewModel = viewModel,
+                isTrialExpired = isTrialExpired,
+                trialDaysRemaining = trialDaysRemaining,
+                trialExpiresAt = trialExpiresAt,
+                currentTier = currentTier,
+                onNavigateToChangePassword = onNavigateToChangePassword,
+                onNavigateToGetSupport = onNavigateToGetSupport,
+                onNavigateToDeleteAccount = onNavigateToDeleteAccount
+            )
+            1 -> UsageTabContent(
+                viewModel = viewModel,
+                isTrialExpired = isTrialExpired,
+                trialDaysRemaining = trialDaysRemaining,
+                trialExpiresAt = trialExpiresAt,
+                onUpgradeClick = { selectedTab = 0 }
+            )
         }
     }
 }
