@@ -15484,7 +15484,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         await db.update(plannedWorkouts)
           .set({
             dayOfWeek: update.dayOfWeek,
-            scheduledDate: update.scheduledDate
+            scheduledDate: new Date(update.scheduledDate)  // Convert string to Date for Drizzle
           })
           .where(eq(plannedWorkouts.id, update.workoutId));
       }
