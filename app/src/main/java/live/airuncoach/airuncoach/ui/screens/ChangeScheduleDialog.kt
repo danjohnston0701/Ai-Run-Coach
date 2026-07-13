@@ -331,7 +331,8 @@ private fun DayButtonRow(
 
 
 /**
- * Calculate the Monday of the week given plan creation date and week number
+ * Calculate the Sunday of the week given plan creation date and week number
+ * (Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6)
  */
 private fun calculateWeekStartDate(planCreatedAt: String?, weekNumber: Int): Calendar? {
     if (planCreatedAt == null) return null
@@ -347,10 +348,10 @@ private fun calculateWeekStartDate(planCreatedAt: String?, weekNumber: Int): Cal
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
             
-            // Adjust to Monday of that week
+            // Adjust to Sunday of that week (DAY_OF_WEEK: 1=Sun, 2=Mon, 3=Tue ... 7=Sat)
             val dayOfWeek = get(Calendar.DAY_OF_WEEK)
-            val daysToMonday = if (dayOfWeek == 1) 6 else dayOfWeek - 2
-            add(Calendar.DAY_OF_MONTH, -daysToMonday)
+            val daysToSunday = dayOfWeek - 1  // 0 if already Sunday, 1 if Monday, etc.
+            add(Calendar.DAY_OF_MONTH, -daysToSunday)
             
             // Move forward to the requested week
             add(Calendar.WEEK_OF_YEAR, weekNumber - 1)
