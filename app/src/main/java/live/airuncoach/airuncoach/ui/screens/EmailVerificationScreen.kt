@@ -329,7 +329,7 @@ fun EmailVerificationScreen(
                 @Suppress("UNUSED_VALUE")
                 showChangeEmailDialog = false
             },
-            onConfirm = { updatedEmail -> viewModel.updateVerificationEmail(updatedEmail) }
+            onConfirm = { updatedEmail -> viewModel.updateVerificationEmail(updatedEmail, displayEmail) }
         )
     }
 }

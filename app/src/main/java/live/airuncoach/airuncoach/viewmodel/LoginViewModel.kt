@@ -467,14 +467,15 @@ class LoginViewModel @Inject constructor(
      * Updates the email address for an unverified account and resends a fresh OTP.
      * Called from the change-email dialog on EmailVerificationScreen.
      */
-    fun updateVerificationEmail(newEmail: String) {
+    fun updateVerificationEmail(newEmail: String, currentEmail: String? = null) {
         viewModelScope.launch {
             _loginState.update { it.copy(isLoading = true, changeEmailError = null, changeEmailSuccess = false) }
             try {
-                val currentEmail = _loginState.value.pendingVerificationEmail
+                val current = currentEmail?.takeIf { it.isNotBlank() }
+                    ?: _loginState.value.pendingVerificationEmail
                 val response = apiService.updateVerificationEmail(
                     live.airuncoach.airuncoach.network.model.UpdateVerificationEmailRequest(
-                        currentEmail = currentEmail,
+                        currentEmail = current,
                         newEmail = newEmail.trim().lowercase()
                     )
                 )
