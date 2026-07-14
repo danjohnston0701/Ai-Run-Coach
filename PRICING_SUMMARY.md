@@ -19,8 +19,8 @@
 | Period | USD | EUR | GBP | JPY | CAD | AUD |
 |--------|-----|-----|-----|-----|-----|-----|
 | **Monthly** | $12.99 | €13.99 | £11.49 | ¥2,320 | CA$17.99 | A$20.99 |
-| **Annual** | $149.99 | €149.99 | £119.99 | ¥24,700 | CA$199.99 | A$219.99 |
-| **Annual Discount** | $12.50/mo | €12.50/mo | £10.00/mo | ¥2,058/mo | CA$16.67/mo | A$18.33/mo |
+| **Annual** | $129.99 | €134.99 | £114.99 | ¥23,200 | CA$184.99 | A$204.99 |
+| **Annual Discount** | $10.83/mo | €11.25/mo | £9.58/mo | ¥1,933/mo | CA$15.42/mo | A$17.08/mo |
 
 **All prices shown are BEFORE VAT.** Actual checkout prices include local VAT (0-27% depending on country).
 

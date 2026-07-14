@@ -4,7 +4,7 @@
   "lite_tier": {
     "monthly": {
       "default_usd": 5.99,
-      "by_currency": {
+      "key_currencies": {
         "USD": 12.99,
         "EUR": 13.99,
         "GBP": 11.49,
@@ -26,7 +26,7 @@
     },
     "annual": {
       "default_usd": 59.99,
-      "by_currency": {
+      "key_currencies": {
         "USD": 59.99,
         "EUR": 64.99,
         "GBP": 53.99,
@@ -51,7 +51,7 @@
   "standard_tier": {
     "monthly": {
       "default_usd": 12.99,
-      "by_currency": {
+      "key_currencies": {
         "USD": 12.99,
         "EUR": 13.99,
         "GBP": 11.49,
@@ -73,41 +73,188 @@
     },
     "annual": {
       "default_usd": 149.99,
-      "by_currency": {
-        "USD": 149.99,
-        "EUR": 149.99,
-        "GBP": 119.99,
-        "JPY": 24700,
-        "CAD": 199.99,
-        "AUD": 219.99,
-        "NZD": 239.99,
-        "CHF": 119.99,
-        "INR": 15999,
-        "MXN": 2799.00,
-        "BRL": 749.99,
-        "SGD": 199.99,
-        "THB": 4999.00,
-        "KRW": 229000,
-        "AED": 549.99,
-        "RUB": 10999.00,
-        "ZAR": 2699.99
+      "key_currencies": {
+        "USD": 129.99,
+        "EUR": 134.99,
+        "GBP": 114.99,
+        "JPY": 23200,
+        "CAD": 184.99,
+        "AUD": 204.99,
+        "NZD": 199.99,
+        "CHF": 110.00,
+        "INR": 14700,
+        "MXN": 2649.00,
+        "BRL": 669.99,
+        "SGD": 179.99,
+        "THB": 4650.00,
+        "KRW": 210000,
+        "AED": 499.99,
+        "RUB": 9990.00,
+        "ZAR": 2449.99
       },
       "annual_discount": "$12.50/month equivalent"
     }
   },
-  "pricing_strategy": {
-    "currency_display": "App shows user's inferred currency code (e.g., 'USD', 'EUR', 'GBP') based on timezone",
-    "actual_pricing": "Google Play Store / App Store Connect handles all country-specific pricing and VAT",
-    "app_responsibility": "Display currency code for context only — don't hardcode per-country prices",
-    "store_responsibility": "Convert USD base prices to local currency, apply VAT, handle checkout",
-    "example_workflow": "1) User in UK logs in → 2) Server infers GBP from timezone → 3) App displays 'GBP' → 4) User taps Subscribe → 5) Store shows actual GBP price (£53.99 annual Lite, etc.) → 6) User pays in local currency with VAT"
+  "pricing_summary": {
+    "lite_tier": {
+      "entry_point": true,
+      "monthly_usd": 5.99,
+      "annual_usd": 59.99,
+      "annual_monthly_equivalent": 5.00,
+      "savings_annual": 11.89,
+      "price_reduction_from_original": "25% (was $7.99 monthly)"
+    },
+    "standard_tier": {
+      "entry_point": false,
+      "monthly_usd": 12.99,
+      "annual_usd": 149.99,
+      "annual_monthly_equivalent": 12.50,
+      "savings_annual": 5.01,
+      "for_serious_runners": true
+    }
   },
-  "key_pricing_points": {
-    "lite_tier_reduction": "Reduced from $7.99 to $5.99/month (25% lower entry barrier)",
-    "annual_discount_lite": "$5.00/month equivalent (save $11.89/year vs monthly)",
-    "standard_tier_monthly": "$12.99 USD ($13.99 EUR, £11.49 GBP, etc.)",
-    "standard_tier_annual": "$149.99 USD (save ~$5/month vs monthly)",
-    "conversion_expected": "15-25% uplift from currency localization; 30-40% uplift from price reduction"
+  "currency_display_strategy": {
+    "app_responsibility": "Display inferred currency code (e.g., 'USD', 'EUR', 'GBP') based on user's timezone",
+    "store_responsibility": "Handle all country-specific pricing, conversion, VAT calculation, and checkout",
+    "user_experience": "User sees currency → taps Subscribe → store shows localized price with VAT → checkout in local currency",
+    "no_hardcoding": "Never hardcode per-country prices in app code. Store platforms are source of truth."
   },
-  "note_for_developers": "Don't build dynamic pricing lookup. Let the platform stores handle it. Your job is to display the inferred currency and route users to the store for checkout. The store takes care of the rest."
+  "pricing_by_region": {
+    "americas": {
+      "USD": {
+        "countries": ["United States", "Bermuda", "British Virgin Islands", "Cayman Islands", "Ecuador", "El Salvador", "Kuwait", "Panama", "Turks & Caicos Islands"],
+        "lite_monthly": 12.99,
+        "lite_annual": 59.99,
+        "standard_monthly": 12.99,
+        "standard_annual": 129.99
+      },
+      "CAD": {
+        "countries": ["Canada"],
+        "lite_monthly": 17.99,
+        "lite_annual": 84.99,
+        "standard_monthly": 17.99,
+        "standard_annual": 184.99
+      },
+      "BRL": {
+        "countries": ["Brazil"],
+        "lite_monthly": 66.99,
+        "lite_annual": 309.99,
+        "standard_monthly": 66.99,
+        "standard_annual": 669.99
+      },
+      "MXN": {
+        "countries": ["Mexico"],
+        "lite_monthly": 265.00,
+        "lite_annual": 1199.00,
+        "standard_monthly": 265.00,
+        "standard_annual": 2649.00
+      }
+    },
+    "europe": {
+      "EUR": {
+        "countries": ["Austria", "Belgium", "Bulgaria", "Cyprus", "Czechia", "Estonia", "Finland", "France", "Germany", "Greece", "Ireland", "Italy", "Latvia", "Lithuania", "Netherlands", "Portugal", "Slovakia", "Slovenia", "Spain"],
+        "lite_monthly": 13.99,
+        "lite_annual": 64.99,
+        "standard_monthly": 13.99,
+        "standard_annual": 134.99
+      },
+      "GBP": {
+        "countries": ["United Kingdom", "Gibraltar"],
+        "lite_monthly": 11.49,
+        "lite_annual": 53.99,
+        "standard_monthly": 11.49,
+        "standard_annual": 114.99
+      },
+      "CHF": {
+        "countries": ["Switzerland", "Liechtenstein"],
+        "lite_monthly": 11.00,
+        "lite_annual": 49.00,
+        "standard_monthly": 11.00,
+        "standard_annual": 110.00
+      }
+    },
+    "asia_pacific": {
+      "JPY": {
+        "countries": ["Japan"],
+        "lite_monthly": 2320,
+        "lite_annual": 10700,
+        "standard_monthly": 2320,
+        "standard_annual": 23200
+      },
+      "AUD": {
+        "countries": ["Australia"],
+        "lite_monthly": 20.99,
+        "lite_annual": 94.99,
+        "standard_monthly": 20.99,
+        "standard_annual": 204.99
+      },
+      "NZD": {
+        "countries": ["New Zealand"],
+        "lite_monthly": 19.99,
+        "lite_annual": 99.99,
+        "standard_monthly": 19.99,
+        "standard_annual": 199.99
+      },
+      "SGD": {
+        "countries": ["Singapore"],
+        "lite_monthly": 17.99,
+        "lite_annual": 84.98,
+        "standard_monthly": 17.99,
+        "standard_annual": 179.99
+      },
+      "INR": {
+        "countries": ["India"],
+        "lite_monthly": 1450,
+        "lite_annual": 6800,
+        "standard_monthly": 1450,
+        "standard_annual": 14700
+      },
+      "KRW": {
+        "countries": ["South Korea"],
+        "lite_monthly": 21000,
+        "lite_annual": 99000,
+        "standard_monthly": 21000,
+        "standard_annual": 210000
+      },
+      "THB": {
+        "countries": ["Thailand"],
+        "lite_monthly": 475.00,
+        "lite_annual": 2150.00,
+        "standard_monthly": 475.00,
+        "standard_annual": 4650.00
+      }
+    },
+    "middle_east_africa": {
+      "AED": {
+        "countries": ["United Arab Emirates"],
+        "lite_monthly": 49.99,
+        "lite_annual": 229.99,
+        "standard_monthly": 49.99,
+        "standard_annual": 499.99
+      },
+      "ZAR": {
+        "countries": ["South Africa"],
+        "lite_monthly": 244.99,
+        "lite_annual": 1149.99,
+        "standard_monthly": 244.99,
+        "standard_annual": 2449.99
+      }
+    }
+  },
+  "key_differences": {
+    "lite_vs_standard": {
+      "lite_monthly": "$5.99 USD entry point (25% lower than original $7.99)",
+      "standard_monthly": "$12.99 USD (2x+ coaching)",
+      "lite_annual": "$59.99 USD (save $11.89 vs monthly)",
+      "standard_annual": "$149.99 USD (save $5.01 vs monthly)",
+      "use_case": "Lite for casual runners, Standard for race prep & serious training"
+    }
+  },
+  "implementation_notes": {
+    "do_not_hardcode_prices": "Prices change by country and VAT rules change. Let the store handle it.",
+    "app_displays_only": "Currency code inferred from timezone (e.g., 'Display Pricing In: GBP')",
+    "store_shows_actual_price": "When user taps Subscribe, store shows real price with correct VAT",
+    "no_currency_picker_mvp": "For MVP, currency is automatic. Manual override can be added later.",
+    "testing_important": "Test from different timezones to verify currency inference works"
+  }
 }
