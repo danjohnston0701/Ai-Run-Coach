@@ -674,13 +674,16 @@ async function getAllTimeStatsLive(userId: string) {
       .where(and(eq(goals.userId, userId), eq(goals.status, "completed")));
     
     const goalsAchieved = Number(completedGoalsResult?.count ?? 0);
+    
+    // Calculate longest consecutive run streak
+    const mostConsecutiveRuns = await calculateLongestConsecutiveRunStreak(userId);
 
     return {
       totalRuns,
       totalDistanceKm:     Math.round((Number(stats.totalDistanceKm ?? 0) / 1000) * 10) / 10,
       totalHours:          Math.round((Number(stats.totalDurationSec ?? 0) / 3600) * 10) / 10,
       totalCalories:       Number(stats.totalCalories ?? 0),
-      mostConsecutiveRuns: 0,  // To be calculated by stats service
+      mostConsecutiveRuns,
       longestRunKm:        Math.round((Number(stats.longestRunKm ?? 0) / 1000) * 10) / 10,
       longestRunTimeSec,
       highestElevationM,
@@ -705,6 +708,49 @@ function countPersonalRecordsInCache(cached: typeof userStats.$inferSelect): num
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Calculate the longest consecutive day streak of runs
+ * Considers runs on different calendar days (even hours apart) as consecutive
+ */
+async function calculateLongestConsecutiveRunStreak(userId: string): Promise<number> {
+  try {
+    // Get all run dates, sorted by date
+    const runDates = await db
+      .select({ runDate: runs.runDate })
+      .from(runs)
+      .where(eq(runs.userId, userId))
+      .orderBy(asc(runs.runDate));
+
+    if (runDates.length === 0) return 0;
+
+    let maxStreak = 1;
+    let currentStreak = 1;
+    let lastDate = new Date(runDates[0].runDate!);
+
+    for (let i = 1; i < runDates.length; i++) {
+      const currentDate = new Date(runDates[i].runDate!);
+      const dayDiff = Math.round((currentDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      if (dayDiff === 1) {
+        // Consecutive day
+        currentStreak++;
+        maxStreak = Math.max(maxStreak, currentStreak);
+      } else if (dayDiff > 1) {
+        // Streak broken
+        currentStreak = 1;
+      }
+      // If dayDiff === 0, same day, don't increment streak (only count once per day)
+
+      lastDate = currentDate;
+    }
+
+    return maxStreak;
+  } catch (error) {
+    console.error('Error calculating consecutive run streak:', error);
+    return 0;
+  }
+}
 
 function formatPace(minPerKm: number): string {
   if (!minPerKm || minPerKm <= 0) return '--';
