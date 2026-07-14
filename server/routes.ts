@@ -127,6 +127,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ v: "2026-03-25-v5", status: "ok" });
   });
 
+  // GET /api/googlePlayPricing — Public endpoint for Android app pricing
+  // Returns all Google Play Store pricing by currency for all subscription tiers
+  // iOS should use /api/applePricing (managed separately in App Store Connect)
+  app.get("/api/googlePlayPricing", (_req: Request, res: Response) => {
+    try {
+      const pricingData = {
+        source: "Google Play Store",
+        updated_at: "2026-07-14",
+        standard_tier_monthly: {
+          default_usd: 12.99,
+          by_currency: {
+            "USD": 12.99,
+            "EUR": 13.99,
+            "GBP": 11.49,
+            "JPY": 2320,
+            "CAD": 17.99,
+            "AUD": 20.99,
+            "NZD": 19.99,
+            "CHF": 11.00,
+            "INR": 1450,
+            "MXN": 265.00,
+            "BRL": 66.99,
+            "SGD": 17.99,
+            "THB": 475.00,
+            "KRW": 21000,
+            "AED": 49.99,
+            "RUB": 999.00,
+            "ZAR": 244.99,
+            "DZD": 1725.00,
+            "BDT": 1800.00,
+            "CZK": 339.99,
+            "DKK": 105.00,
+            "EGP": 739.99,
+            "GHS": 180.00,
+            "HKD": 99.90,
+            "HUF": 5199.00,
+            "IDR": 239000.00,
+            "IQD": 17000.00,
+            "ILS": 39.00,
+            "KES": 1900.00,
+            "KZT": 7190.00,
+            "MAD": 144.99,
+            "MYR": 56.99,
+            "MMK": 27000.00,
+            "NOK": 159.00,
+            "NGN": 19500.00,
+            "PKR": 3600.00,
+            "PHP": 899.00,
+            "PLN": 60.99,
+            "QAR": 47.00,
+            "RON": 69.99,
+            "SAR": 55.99,
+            "RSD": 1599.00,
+            "SEK": 159.00,
+            "LKR": 4375.00,
+            "TRY": 729.99,
+            "UAH": 699.99,
+            "VND": 341000.00,
+            "BOB": 88.99,
+            "CLP": 14400.00,
+            "COP": 42000.00,
+            "CRC": 5900.00,
+            "GEL": 39.00,
+            "MNT": 46500.00,
+            "MOP": 108.00,
+            "PEN": 43.99,
+            "PYG": 80000.00,
+            "TWD": 440.00,
+            "TZS": 34000.00,
+            "XAF": 8900.00,
+            "XOF": 8800.00
+          }
+        },
+        lite_tier_monthly: {
+          default_usd: 5.99,
+          note: "Lite tier is approximately 46% of Standard tier price",
+          by_currency: {
+            "USD": 5.99,
+            "EUR": 6.99,
+            "GBP": 5.49,
+            "JPY": 1160,
+            "CAD": 8.99,
+            "AUD": 10.99,
+            "NZD": 9.99,
+            "CHF": 5.50,
+            "INR": 725,
+            "MXN": 132.50,
+            "BRL": 33.99,
+            "SGD": 8.99,
+            "THB": 237.50,
+            "KRW": 10500,
+            "AED": 24.99,
+            "RUB": 499.00,
+            "ZAR": 122.49
+          }
+        }
+      };
+      res.json(pricingData);
+    } catch (error: any) {
+      console.error("[GET /api/googlePlayPricing] Error:", error);
+      res.status(500).json({ error: "Failed to fetch pricing data" });
+    }
+  });
+
   // Friends list — registered early to avoid being blocked by late-loading routes
   app.get("/api/users/:userId/friends", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
