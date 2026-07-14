@@ -113,6 +113,8 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastCoachingTime: Long = 0 // Cooldown between coaching events
     private val COACHING_COOLDOWN_MS = 30_000L // 30 second minimum gap between coaching
     private var hasCoachingFiredThisTick = false // Only one coaching trigger per location update
+    /** Set to true when the session_complete trigger fires — stops all further coaching plan triggers */
+    private var sessionCoachingPlanComplete = false
 
     // ── Global coaching coordinator ──
     // Prevents back-to-back audio from different coaching types (pace, splits, nav, HR, etc.)
@@ -983,6 +985,7 @@ class RunTrackingService : Service(), SensorEventListener {
             if (dynamicPlanJson != null) {
                 try {
                     dynamicCoachingPlan = gson.fromJson(dynamicPlanJson, live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan::class.java)
+                    sessionCoachingPlanComplete = false // Reset so new plan can fire all triggers
                     Log.d("RunTrackingService", "✅ Dynamic coaching plan loaded: strategy=${dynamicCoachingPlan?.cueingStrategy}, phases=${dynamicCoachingPlan?.phases?.size}, triggers=${dynamicCoachingPlan?.triggers?.size}")
                 } catch (e: Exception) {
                     Log.w("RunTrackingService", "Failed to deserialize dynamic coaching plan: ${e.message}")
@@ -4201,6 +4204,8 @@ class RunTrackingService : Service(), SensorEventListener {
         val plan = dynamicCoachingPlan ?: return
         if (hasCoachingFiredThisTick) return
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
+        // Stop all trigger evaluation once the session completion message has fired
+        if (sessionCoachingPlanComplete) return
 
         // First: update which phase we're in (distance-based, same logic as legacy engine)
         evaluateDynamicPhase(currentDistanceKm, plan)
@@ -4289,6 +4294,13 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
             // Mark fired BEFORE async call to prevent duplicate triggers this tick
             hasCoachingFiredThisTick = true
+
+            // Detect session completion — stop all further trigger evaluation after this fires
+            if (trigger.type.contains("session_complete") || trigger.type.contains("session_end")) {
+                sessionCoachingPlanComplete = true
+                Log.d("RunTrackingService", "✅ Session coaching plan complete — no further triggers will fire")
+            }
+
             fireLiveTriggerMessage(
                 trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
                 phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
@@ -5736,7 +5748,12 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun shouldTriggerElevationInsight(now: Long): Boolean {
         if (!hasRoute) return false
+        // Require at least 1km before any elevation coaching fires (prevents false positives at run start)
+        if (totalDistance < 1000.0) return false
+        // Check BOTH cooldowns — elevation insight shares the cooldown with terrain coaching to prevent
+        // back-to-back messages from the two separate elevation systems
         if ((now - lastElevationInsightTime) < ELEVATION_INSIGHT_COOLDOWN_MS) return false
+        if ((now - lastElevationCoachingTime) < ELEVATION_COOLDOWN_MS) return false
         val grade = calculateAverageGradient()
         return abs(grade) > 3f // Only when on a meaningful incline/decline
     }
@@ -6438,7 +6455,11 @@ class RunTrackingService : Service(), SensorEventListener {
     )
 
     private fun fireElevationInsightCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
-        lastElevationInsightTime = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        lastElevationInsightTime = now
+        // Also update lastElevationCoachingTime so the regular terrain coaching system
+        // respects this fire and doesn't produce a second elevation message within the cooldown window
+        lastElevationCoachingTime = now
         val request = buildBaseEliteRequest("elevation_insight", distKm, duration, avgSpeed)
         fireEliteCoaching(request, "Elevation")
     }

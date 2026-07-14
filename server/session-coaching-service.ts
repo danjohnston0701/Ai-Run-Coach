@@ -731,7 +731,15 @@ export async function getOrGenerateSessionCoaching(
   const params: GenerateSessionCoachingParams = {
     sessionType:           workout.workoutType,
     sessionGoal:           workout.sessionGoal ?? "general_fitness",
-    targetDurationMinutes: workout.duration ? Math.round(workout.duration / 60) : 45,
+    targetDurationMinutes: (() => {
+      if (workout.duration && workout.duration > 0) return Math.round(workout.duration / 60);
+      // Compute from distance × pace if available (avoids the bogus 45-min hardcoded fallback)
+      const paceSecPerKm = paceStringToSecPerKm(workout.targetPace);
+      if (workout.distance && paceSecPerKm) return Math.round((workout.distance * paceSecPerKm) / 60);
+      // Last resort: distance-only estimate at a moderate default (6 min/km)
+      if (workout.distance) return Math.round(workout.distance * 6);
+      return 30;
+    })(),
     targetDistanceKm:      workout.distance ?? 5,
     targetPaceMin:         paceStringToSecPerKm(workout.targetPace),
     targetPaceMax:         workout.targetPace

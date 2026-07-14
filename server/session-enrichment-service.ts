@@ -433,10 +433,18 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
         const safeHRMin = finalHRMin;
         const safeHRMax = finalHRMax;
 
+        // Compute corrected duration in seconds from distance × pace (fixes the "45 min for 35 min run" bug)
+        const effectivePaceSecs = parsePaceToSecs(safePace ?? workoutRecord.targetPace);
+        const correctedDurationSecs =
+          workoutRecord.distance && effectivePaceSecs
+            ? Math.round(workoutRecord.distance * effectivePaceSecs)
+            : workoutRecord.duration ?? null;
+
         await db
           .update(plannedWorkouts)
           .set({
             targetPace: safePace ?? workoutRecord.targetPace,
+            duration: correctedDurationSecs ?? workoutRecord.duration,
             hrZoneNumber: enrichment.hrZoneNumber ?? workoutRecord.hrZoneNumber,
             hrZoneMinBpm: safeHRMin ?? workoutRecord.hrZoneMinBpm,
             hrZoneMaxBpm: safeHRMax ?? workoutRecord.hrZoneMaxBpm,

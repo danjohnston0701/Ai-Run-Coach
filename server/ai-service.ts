@@ -5199,45 +5199,28 @@ Reference their actual split data.`;
       const isUphill = currentGrade && currentGrade >= 3;
       const isDownhill = currentGrade && currentGrade <= -3;
 
-      typePrompt = `COACHING TYPE: Terrain-aware run analysis — sound like you know EVERYTHING about this route.
+      // Guard: don't mention a "climb" if elevation gain is negligible (GPS noise)
+      const meaningfulClimb = totalElevationGain && totalElevationGain > 5;
+      const terrainLabel = isUphill ? 'UPHILL' : isDownhill ? 'DOWNHILL' : 'FLAT';
+      const terrainAction = isUphill
+        ? 'ease the pace slightly, shorten your stride, keep effort steady'
+        : isDownhill
+          ? 'let gravity help you, stay light on your feet'
+          : 'focus on rhythm and consistent pace';
+
+      typePrompt = `COACHING TYPE: Brief terrain cue.
 
 ${status}
 ${noTerrainRule}
 
-TERRAIN PROFILE:
-- Route classification: ${totalElevationGain && distance > 0.5 ? (totalElevationGain / distance < 5 ? 'FLAT' : totalElevationGain / distance < 15 ? 'UNDULATING' : totalElevationGain / distance < 30 ? 'HILLY' : 'MOUNTAINOUS') : 'unknown'}
-- Current gradient: ${currentGrade ? currentGrade.toFixed(1) + '%' : '~0% (flat)'}
-- Total climb: ${totalElevationGain ? Math.round(totalElevationGain) + 'm' : '0m'} | Total descent: ${totalElevationLoss ? Math.round(totalElevationLoss) + 'm' : '0m'}
-- Elevation gain per km: ${totalElevationGain && distance > 0.5 ? (totalElevationGain / distance).toFixed(1) + 'm/km' : 'minimal'}
+TERRAIN NOW: ${terrainLabel}
+${meaningfulClimb ? `- Climb so far: ${Math.round(totalElevationGain!)}m` : '- Minimal elevation change'}
 ${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
-${cadence ? `- Cadence: ${cadence} spm` : ''}
-${terrainAnalysis}
+- Suggested action: ${terrainAction}
 
-${isUphill ? `UPHILL — They're on a ${currentGrade!.toFixed(1)}% climb right now.
-YOUR COACHING MUST:
-- Correlate their pace change with the gradient — "your pace dropped Xs on this climb, that's exactly proportional to the grade"
-- Coach uphill technique: shorter stride, ankle lean, arm drive, effort > pace
-- If HR is high + climbing: "heart rate is elevated because of the gradient — that's physics, not fitness. Stay controlled."
-- If cadence dropped: "shorten your stride and quicken your feet — shorter faster steps are more efficient uphill"` :
-  isDownhill ? `DOWNHILL — They're on a ${Math.abs(currentGrade!).toFixed(1)}% descent right now.
-YOUR COACHING MUST:
-- Coach them to use this descent strategically — "this is free speed, let gravity do the work"
-- Technique: lean forward from ankles, increase cadence to 175+, light feet, avoid heel braking
-- If their pace is much faster than average: praise it but caution on quad fatigue
-- If they're banking time: "great section to recover heart rate while keeping pace up"` :
-  `FLAT/UNDULATING TERRAIN — The route is ${totalElevationGain && distance > 0.5 && totalElevationGain / distance < 5 ? 'very flat with minimal undulation' : 'gently undulating'}.
-YOUR COACHING MUST:
-- Acknowledge the terrain: "You're on a beautifully flat stretch" or "this route has gentle undulation"
-- On flat terrain, pace consistency is everything — praise tight splits or address drift
-- If pace spread is < 15s: "Your splits are incredibly consistent on this flat terrain — that's disciplined, smart running"
-- If they're negative splitting on flat: "You're getting faster as the run goes on — textbook pacing on a flat route"
-- If pace is drifting on flat: "On flat ground, pace drift usually means form is breaking down — reset: drop shoulders, pump arms, quick feet"
-- Coach one flat-specific technique: cadence rhythm, hip extension, relaxed upper body, forward lean
-- If HR is stable: "Your heart rate is steady — you've found a sustainable effort level, that's great running"
-- Energy management: if they look comfortable and have distance remaining, suggest conserving for a strong finish push`}
-
-Give 2-3 sentences that sound like you've analyzed every metre of this route. Reference SPECIFIC data points.`;
-      systemExtra = 'You are an elite running coach specializing in terrain analysis. You can see the full elevation profile, every split, and every metric. Sound like you KNOW this route. Correlate terrain with pace/HR/cadence changes. Be specific, not generic.';
+Deliver ONE concise coaching cue, MAXIMUM 15 WORDS. Spoken aloud — no percentages, no pace analysis. Just a clear, encouraging action word for what the terrain requires RIGHT NOW.
+NEVER say "X% climb" or "X metres of climb" — just describe what they should do.`;
+      systemExtra = `You are a running coach. Keep it SHORT — max 15 words. One clear action. Natural speech. No data analysis.`;
       break;
     }
 
@@ -5951,6 +5934,9 @@ MESSAGE VARIABLES — substituted live at trigger time:
 {hr} {pace} {cadence} {repNum} {totalReps} {repsLeft} {targetHRMax} {targetHRMin} {targetPaceMin} {targetPaceMax}
 
 VOICE: messages are read aloud — keep under 18 words. Write "heart rate" not "HR".
+PACE FORMAT IN preRunBrief: NEVER write pace as "6:57/km" — TTS reads colons as clock time. Say "6 minutes 57 per kilometre" instead.
+HR ZONE TRIGGERS: Every hr_zone trigger message MUST state the athlete's actual heart rate number and the zone boundary. Example: "Heart rate's at {hr} — ease back below {targetHRMax}." NEVER say just "heart rate high" without numbers.
+CADENCE TRIGGERS: For tempo, threshold, and interval sessions, ALWAYS include at least 2 cadence triggers (condition: "cadence < 170 AND elapsed_min > 5", frequencySeconds 180). Optimal tempo cadence is 170–180 spm.
 
 COACHING PRINCIPLES:
 - Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
