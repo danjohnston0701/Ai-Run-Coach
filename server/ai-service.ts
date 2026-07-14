@@ -1453,14 +1453,20 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
   }
 
   // Fitness level — known or inferred from run history
+  // IMPORTANT: when fitness level is not set, we NEVER know this runner's capacity.
+  // Even someone with 50 runs may have been going slowly — we cannot assume capability.
+  // Always err toward encouragement when fitness level is absent.
   if (fitnessLevel) {
     runnerProfileContext += `\nFitness level: ${fitnessLevel}.`;
   } else if (totalRunsAllTime === 0 || totalRunsAllTime === null || totalRunsAllTime === undefined) {
     runnerProfileContext += `\nFitness level: unknown — this is their first recorded run. Any target pace set is aspirational and exploratory; treat it as a directional goal, not a performance standard. This runner is discovering what their body can do. Celebrate the act of running, not just the numbers.`;
   } else if (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 5) {
     runnerProfileContext += `\nFitness level: unknown — only ${totalRunsAllTime} run(s) completed so far. Still establishing a physical baseline. Treat pace targets as directional rather than prescriptive — habit formation and consistency matter far more than pace gaps at this stage. Encourage the effort, not just the numbers.`;
-  } else if (typeof totalRunsAllTime === 'number' && totalRunsAllTime < 10) {
-    runnerProfileContext += `\nFitness level: unknown — only ${totalRunsAllTime} run(s) completed so far. Still building a foundation. Encourage consistency; address pace gaps without undue pressure.`;
+  } else if (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 15) {
+    runnerProfileContext += `\nFitness level: unknown — ${totalRunsAllTime} runs completed but no fitness level has been set. Capacity is still unconfirmed. Be encouraging and patient; avoid making pace-gap analysis the centrepiece of coaching.`;
+  } else if (typeof totalRunsAllTime === 'number') {
+    // 16+ runs and still no fitness level — notable gap in profile data
+    runnerProfileContext += `\nFitness level: not set (${totalRunsAllTime} runs recorded). Their capacity is unconfirmed by profile data. Coach with encouragement as the default; do not apply performance pressure based on assumed capability.`;
   }
 
   // ── Age & Physical calibration block ────────────────────────────────────
@@ -1485,6 +1491,12 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     }
 
     runnerProfileContext += ageNote;
+  } else {
+    // No date of birth — age is unknown. Could be a teenager or a 70-year-old.
+    // When age is unknown, never apply directness or performance pressure based on assumed youth.
+    // Default to a warm, accessible coaching posture — if they turn out to be young and fit,
+    // the coaching will feel generous; if they're older, we haven't caused harm.
+    runnerProfileContext += `\nRunner's age: not provided. Without knowing their age, assume a conservative coaching posture — be warm and encouraging rather than direct or demanding. Avoid any language that implies they "should" be hitting a certain pace for their age.`;
   }
 
   // BMI — affects cardiovascular load per km and how pace targets should be interpreted
@@ -1493,6 +1505,7 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     const bmi = runnerWeight / (heightM * heightM);
 
     let bmiNote = `\nPhysical build: BMI ${bmi.toFixed(1)}.`;
+
 
     if (bmi < 18.5) {
       bmiNote += ` Lean build — aerobic efficiency is typically high but monitor energy levels; may fatigue faster on longer efforts.`;
@@ -1512,6 +1525,12 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     }
 
     runnerProfileContext += bmiNote;
+  } else {
+    // No weight or height — physical capacity is completely unknown.
+    // Without BMI data we cannot know if a "slow" pace represents easy effort or maximum exertion.
+    // Never use pace numbers to imply the runner is underperforming — we have no reference point
+    // for what effort looks like for this person's body.
+    runnerProfileContext += `\nPhysical build: not provided. Cannot assess effort-to-pace ratio without body composition data. Do not assume standard effort-to-pace ratios — any pace may represent significant effort for this individual. Be encouraging and non-judgemental about pace.`;
   }
 
   // Accent-aware phrasing — makes the TEXT sound natural for the chosen accent
@@ -1578,15 +1597,21 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
 
   const isRunStart = (phase === 'EARLY' || phase === 'warmUp') && distance < 0.05;
 
-  // "No baseline" flag — true when runner has minimal run history and no fitness level set.
-  // Used to soften pace-gap instructions so the AI focuses on encouragement and habit-building
-  // rather than clinical target analysis. Derived purely from data — not a tone override.
-  const hasNoBaseline = !fitnessLevel && (
-    totalRunsAllTime === 0 ||
-    totalRunsAllTime === null ||
-    totalRunsAllTime === undefined ||
-    (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 5)
-  );
+  // ── Fully-blank profile safety catch ─────────────────────────────────────
+  // When ALL demographic fields are missing (no fitness level, no DOB, no weight/height),
+  // we have zero knowledge of who this person is or what they're capable of.
+  // Apply an explicit coaching posture directive: no directness, no pace pressure,
+  // no performance expectations. This is the safest possible coaching state.
+  const hasCompletelyUnknownProfile = !fitnessLevel && !runnerAge && (!runnerWeight || !runnerHeight);
+  if (hasCompletelyUnknownProfile) {
+    runnerProfileContext += `\n\nIMPORTANT — incomplete runner profile: This runner has not provided fitness level, age, or body composition data. We know nothing about their physical capacity, background, or health status. Apply ZERO performance pressure. Use only encouragement, acknowledgement of effort, and gentle guidance. Never tell them to "push harder", "pick it up", or frame their pace as a problem. Treat every coaching message as if this might be their first run ever.`;
+  }
+
+  // "No baseline" flag — true whenever fitness level is not set.
+  // We have no confirmed capacity data regardless of how many runs exist —
+  // a runner with 30 slow easy runs has very different capacity to one with 30 fast runs.
+  // Without a fitness level, we ALWAYS default to encouragement over performance analysis.
+  const hasNoBaseline = !fitnessLevel;
 
   // ── Target feasibility note ───────────────────────────────────────────────
   // For runners with no baseline, assess whether their pace target is realistic.
