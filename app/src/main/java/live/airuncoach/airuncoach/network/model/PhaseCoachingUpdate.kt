@@ -49,7 +49,9 @@ data class PhaseCoachingUpdate(
     @SerializedName("activeGoals") val activeGoals: List<ActiveGoalInfo>? = null,
     // ========== Session Coaching Context (Phase 1) ==========
     @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
-    @SerializedName("session_structure") val sessionStructure: SessionStructure? = null
+    @SerializedName("session_structure") val sessionStructure: SessionStructure? = null,
+    // User identity — allows server to inject the living AI runner profile
+    @SerializedName("userId") val userId: String? = null
 )
 
 data class ActiveGoalInfo(

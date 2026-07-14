@@ -944,7 +944,7 @@ Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenC
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}CRITICAL: NEVER praise a slow split when the runner is behind their target pace. Be honest about pace — if they need to pick it up, tell them clearly.
+      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the runner's experience level and the tone directive below.
 
 ${getPaceContextDirective(runHistory?.avgPaceSecondsPerKm || (params as any).recentPaceAvgSecPerKm, fitnessLevel, undefined, sessionType || 'run')}
 
@@ -1219,7 +1219,8 @@ export async function generatePhaseCoaching(params: {
   let paceVerdict = '';
   if (targetPace && currentPace) {
     paceComparisonInfo = `- Target pace: ${spokenTargetPace} (current: ${spokenPhasePace})`;
-    // Add explicit pace gap guidance for the AI
+    // Pure factual pace-gap data. No behavioral instructions here — the AI derives
+    // how to communicate this from toneDirective + runnerProfileContext + runnerProfileBlock.
     const targetParts = targetPace.split(':').map(Number);
     const currentParts = currentPace.split(':').map(Number);
     if (targetParts.length === 2 && currentParts.length === 2) {
@@ -1227,13 +1228,13 @@ export async function generatePhaseCoaching(params: {
       const currentSec = currentParts[0] * 60 + currentParts[1];
       const diffSec = currentSec - targetSec;
       if (diffSec > 30) {
-        paceVerdict = `BEHIND TARGET: Runner is ${Math.abs(diffSec)} seconds/km SLOWER than target pace. They need to pick it up!`;
+        paceVerdict = `Pace gap: runner is ${Math.abs(diffSec)} seconds/km slower than their target pace.`;
       } else if (diffSec > 10) {
-        paceVerdict = `SLIGHTLY BEHIND: Runner is ${Math.abs(diffSec)}s/km behind target. Gentle nudge to pick up pace.`;
+        paceVerdict = `Pace gap: runner is ${Math.abs(diffSec)} seconds/km behind their target pace.`;
       } else if (diffSec < -10) {
-        paceVerdict = `AHEAD OF TARGET: Runner is ${Math.abs(diffSec)}s/km faster than target. They could ease off to sustain.`;
+        paceVerdict = `Pace note: runner is ${Math.abs(diffSec)} seconds/km ahead of their target pace.`;
       } else {
-        paceVerdict = `ON TARGET: Runner is within ${Math.abs(diffSec)}s/km of target pace. Great pacing!`;
+        paceVerdict = `Pace note: runner is within ${Math.abs(diffSec)} seconds/km of their target pace — very close.`;
       }
       paceComparisonInfo += `\n  → ${paceVerdict}`;
     }
@@ -1251,11 +1252,11 @@ export async function generatePhaseCoaching(params: {
       const targetTotalMin = Math.floor(targetTime / 60);
       const diff = projectedMin - targetTotalMin;
       if (diff > 0) {
-        targetTimeInfo += `\n- ⚠️ Projected finish: ~${projectedMin} min ${projectedSec}s (${diff} min OVER target)`;
+        targetTimeInfo += `\n- Projected finish at current pace: ~${projectedMin} min ${projectedSec}s (${diff} min over target)`;
       } else if (diff < 0) {
-        targetTimeInfo += `\n- Projected finish: ~${projectedMin} min ${projectedSec}s (${Math.abs(diff)} min UNDER target)`;
+        targetTimeInfo += `\n- Projected finish at current pace: ~${projectedMin} min ${projectedSec}s (${Math.abs(diff)} min under target)`;
       } else {
-        targetTimeInfo += `\n- Projected finish: ~${projectedMin} min ${projectedSec}s (ON TARGET)`;
+        targetTimeInfo += `\n- Projected finish at current pace: ~${projectedMin} min ${projectedSec}s (on target)`;
       }
     }
   }
@@ -1421,7 +1422,7 @@ ${progressPercent > 80 ? "They're in the final stretch — be extra motivating!"
 Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.
 Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The runner's name is ${runnerFirstName} — use it naturally but not as a greeting.` : ''}`;
 
-    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. NEVER praise a slow pace as good when the runner is behind target — be honest and specific. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
+    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
 
     const paceCompletion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -1436,20 +1437,38 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     return paceCompletion.choices[0].message.content || `You're running ${avgPaceFormatted} per kilometre, target is ${targetPaceFormatted}.`;
   }
 
-  // Runner profile context — name, fitness level, physical stats
-  // NOTE: runnerFirstName inside the pace_coaching block above is block-scoped (const inside an if).
-  // We declare it again here for all other trigger paths so the template strings below can use it.
+  // ── Runner profile context ─────────────────────────────────────────────────
+  // Pure factual context about WHO this runner is. No tone directives here —
+  // toneDirective(coachTone) and runnerProfileBlock(runnerProfile) own all of
+  // that. The AI derives HOW to communicate from those signals; we just supply
+  // the FACTS it needs to personalise the content intelligently.
   const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+  const totalRunsAllTime = (params as any).totalRunsAllTime as number | undefined | null;
+
   let runnerProfileContext = '';
+
+  // Name
   if (runnerFirstName) {
-    runnerProfileContext += `\nThe runner's name is ${runnerFirstName}. Use their name naturally (not every sentence, but occasionally to personalise).`;
+    runnerProfileContext += `\nRunner's name: ${runnerFirstName}. Use naturally and occasionally — not every sentence.`;
   }
+
+  // Fitness level — known or inferred from run history
   if (fitnessLevel) {
-    runnerProfileContext += `\nRunner's fitness level: ${fitnessLevel}. Tailor your advice complexity and expectations to this level.`;
+    runnerProfileContext += `\nFitness level: ${fitnessLevel}.`;
+  } else if (totalRunsAllTime === 0 || totalRunsAllTime === null || totalRunsAllTime === undefined) {
+    runnerProfileContext += `\nFitness level: unknown — this is their first recorded run. Any target pace set is aspirational and exploratory; treat it as a directional goal, not a performance standard. This runner is discovering what their body can do. Celebrate the act of running, not just the numbers.`;
+  } else if (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 5) {
+    runnerProfileContext += `\nFitness level: unknown — only ${totalRunsAllTime} run(s) completed so far. Still establishing a physical baseline. Treat pace targets as directional rather than prescriptive — habit formation and consistency matter far more than pace gaps at this stage. Encourage the effort, not just the numbers.`;
+  } else if (typeof totalRunsAllTime === 'number' && totalRunsAllTime < 10) {
+    runnerProfileContext += `\nFitness level: unknown — only ${totalRunsAllTime} run(s) completed so far. Still building a foundation. Encourage consistency; address pace gaps without undue pressure.`;
   }
+
+  // Age
   if (runnerAge) {
     runnerProfileContext += ` Age: ${runnerAge}.`;
   }
+
+  // Physical stats — BMI for pacing/effort context
   if (runnerWeight && runnerHeight) {
     const heightM = runnerHeight / 100;
     const bmi = runnerWeight / (heightM * heightM);
@@ -1519,6 +1538,16 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
   }
 
   const isRunStart = (phase === 'EARLY' || phase === 'warmUp') && distance < 0.05;
+
+  // "No baseline" flag — true when runner has minimal run history and no fitness level set.
+  // Used to soften pace-gap instructions so the AI focuses on encouragement and habit-building
+  // rather than clinical target analysis. Derived purely from data — not a tone override.
+  const hasNoBaseline = !fitnessLevel && (
+    totalRunsAllTime === 0 ||
+    totalRunsAllTime === null ||
+    totalRunsAllTime === undefined ||
+    (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 5)
+  );
   
   // Build trigger-specific instruction
   const is500mCheckin = triggerType === '500m_checkin';
@@ -1542,8 +1571,11 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "He
     systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
   } else {
     // DURING RUN: Include metrics
+    // Tone, depth, and framing are entirely driven by toneDirective(coachTone),
+    // runnerProfileBlock(runnerProfile), and runnerProfileContext (factual context).
+    // No hardcoded behavior here — the AI calibrates from those signals.
     const triggerInstruction = is500mCheckin
-      ? `This is the runner's FIRST check-in at 500m. Give a brief (2-3 sentences) initial assessment of how their run is going so far.`
+      ? `This is the runner's first check-in at 500m. Give a brief initial read on how the run is going (2-3 sentences), weaving in their actual pace and distance.`
       : `Give a brief (2-3 sentences) phase-appropriate coaching message.`;
 
     // Build cadence coaching instruction (actionable, not just informational)
@@ -1575,12 +1607,14 @@ ${cadenceInstruction}
 ${noTerrainRule}${runnerProfileContext}${planContext}
 ${PACE_FORMAT_RULE}
 ${phaseVarietySeed}
-${triggerInstruction} Be ${coachTone} and direct.
+${triggerInstruction}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${runnerFirstName ? ` You may address them as "${runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
-Runners want to hear their real numbers — weave in their actual stats (pace, distance, time, cadence, heart rate) naturally in your coaching message. This should feel like a coach who is watching their real performance, not vague encouragement. CRITICAL: The pace values above (current pace and target pace if provided) are already fully formatted and should NOT be reformatted — use them exactly as shown. ${targetPace ? `Be clear about whether they are on track for target pace ${spokenTargetPace} — ${paceVerdict}. Do not praise a slow pace when they are behind target.` : ""}${targetTime && targetTime > 0 ? ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.` : ""}${cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ""}${elevationInstruction ? ' Acknowledge the elevation context.' : ""}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ""}`;
+Weave in the runner's actual stats (pace, distance, time, cadence, heart rate) naturally — this should feel like a real coach watching their performance, not generic encouragement. CRITICAL: Pace values are already fully formatted — do NOT reformat them.${targetPace ? (hasNoBaseline ? ` Mention their current pace naturally. They have a target pace but no established baseline — treat the gap as context, not a verdict. Focus on the run itself, not the shortfall.` : ` Comment on their pace relative to target (${paceVerdict}).`) : ''}${targetTime && targetTime > 0 ? (hasNoBaseline ? ` Their goal is ${formatDurationForTTS(targetTime)} — reference it lightly if it fits, but don't make projected finish time the centrepiece.` : ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.`) : ''}${cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ''}${elevationInstruction ? ' Acknowledge the elevation context.' : ''}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep coaching messages brief and impactful — always cite the runner's actual numbers (pace, distance, time etc). NEVER start with greetings like "Hey there", "Hey!", "Hi!" — jump straight into coaching. NEVER praise a poor split or slow pace when the runner is behind target — be honest and direct. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
+    // Single clean system message — all tone/personality is driven by toneDirective
+    // and the living runner profile. No hardcoded behavioral overrides.
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep messages concise (2-3 sentences) and always reference the runner's actual numbers. NEVER start with greetings — jump straight into coaching. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
   }
 
   const completion = await openai.chat.completions.create({
@@ -2633,13 +2667,13 @@ IMPORTANT: You are a fully qualified running coach with deep sports science know
         const targetSec = targetParts[0] * 60 + targetParts[1];
         const diffSec = currentSec - targetSec;
         
-        paceInfo += '\n\nPACE COMPARISON (CRITICAL for your response):';
+        paceInfo += '\n\nPACE COMPARISON:';
         if (diffSec > 15) {
-          paceInfo += `\n- Runner is ${Math.abs(diffSec)} seconds/km SLOWER than target → they are BEHIND pace and need to PICK UP SPEED.`;
+          paceInfo += `\n- Runner is ${Math.abs(diffSec)} seconds/km slower than target — behind pace. Address this in proportion to their experience level and the tone directive.`;
         } else if (diffSec < -15) {
-          paceInfo += `\n- Runner is ${Math.abs(diffSec)} seconds/km FASTER than target → they are AHEAD of pace and should ease off slightly to avoid burning out.`;
+          paceInfo += `\n- Runner is ${Math.abs(diffSec)} seconds/km faster than target — ahead of pace. For a structured session, consider advising they ease back; for a free run, simply acknowledge it.`;
         } else {
-          paceInfo += `\n- Runner is within ${Math.abs(diffSec)} seconds/km of target → they are ON PACE. Positive reinforcement.`;
+          paceInfo += `\n- Runner is within ${Math.abs(diffSec)} seconds/km of target — on pace. Acknowledge the effort.`;
         }
       }
     }

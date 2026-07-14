@@ -1357,7 +1357,8 @@ class RunSessionViewModel @Inject constructor(
                             readinessScore = it.readinessScore,
                             readinessRecommendation = it.readinessRecommendation
                         )
-                    }
+                    },
+                    userId = sessionManager.getUserId()
                 )
                 
                 // Call the API

@@ -1644,7 +1644,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     navigationDistance = distanceMeters,
                     // ========== NEW: Session Coaching Context ==========
                     linkedWorkoutId = planWorkoutId,
-                    sessionStructure = sessionInstructions?.sessionStructure
+                    sessionStructure = sessionInstructions?.sessionStructure,
+                    userId = currentUser?.id
                 )
                 
                 val response = apiService.getPhaseCoaching(update)
@@ -1963,7 +1964,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     rollingPaceSecondsPerKm = rollingPace,
                     progressPercent = progressFraction * 100,
                     // Plateau detection
-                    consecutiveBehindCues = consecutiveBehindTargetCues
+                    consecutiveBehindCues = consecutiveBehindTargetCues,
+                    userId = currentUser?.id
                 )
                 
                 Log.d("PaceCoaching", "Requesting LLM pace coaching: triggerType=${update.triggerType}, " +
@@ -3968,7 +3970,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = targetPaceStr,
-                        triggerType = "500m_checkin"
+                        triggerType = "500m_checkin",
+                        userId = currentUser?.id
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
@@ -5152,10 +5155,11 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun checkPhaseChange(newPhase: CoachingPhase) {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
         val now = System.currentTimeMillis()
-        // Allow trigger when:
-        // 1. Phase changed AND (first phase OR cooldown passed)
-        // This ensures first phase change (null -> EARLY) triggers coaching
-        if (newPhase != lastPhase && (lastPhase == null || (now - lastCoachingTime) > COACHING_COOLDOWN_MS) && canFireCoaching()) {
+        // Skip the null → EARLY transition: this is not a real phase change, it's just the
+        // run starting. The run-start prompt and the 500m check-in already cover this window.
+        // Firing here as well causes two coaching events within ~15 seconds at the 500m mark.
+        // Real phase-change coaching fires on genuine transitions: EARLY→MID, MID→LATE, etc.
+        if (newPhase != lastPhase && lastPhase != null && (now - lastCoachingTime) > COACHING_COOLDOWN_MS && canFireCoaching()) {
             lastPhase = newPhase
             lastCoachingTime = now
             hasCoachingFiredThisTick = true
@@ -5209,12 +5213,13 @@ class RunTrackingService : Service(), SensorEventListener {
                         triggerType = "phase_change",
                         // Explicit target flag — LLM must never mention a target when this is false
                         hasTarget = (targetTime != null || phaseTargetPaceStr != null),
-                        totalRunsAllTime = runHistoryStats?.totalRunsAllTime
+                        totalRunsAllTime = runHistoryStats?.totalRunsAllTime,
+                        userId = currentUser?.id
                     )
                     val response = apiService.getPhaseCoaching(update)
                     coachingHistory.add(AiCoachingNote(
                         time = getActiveRunDuration(),
-                        message = "Phase change: ${response.message}"
+                        message = response.message
                     ))
                     Log.d("RunTrackingService", "Phase coaching response: ${response.message}")
 

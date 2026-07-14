@@ -10822,15 +10822,17 @@ function transformRunForAndroid(run: any) {
     targetDistance?: number,
     phase?: string
   ): string => {
-    if (!distance || !targetDistance || targetDistance <= 0) {
-      return normalizeCoachTone(baseTone);
-    }
-    const progress = Math.max(0, Math.min(100, Math.round((distance / targetDistance) * 100)));
-
-    if (progress < 15) return "energetic";
-    if (progress < 50) return "encouraging";
-    if (progress < 90) return "supportive";
-    return "inspirational";
+    // Always respect the user's chosen coaching tone — it is their personal preference
+    // and defines the entire personality of their coach. Overriding it based on run
+    // progress breaks personalisation for every runner who isn't using "energetic".
+    //
+    // The toneDirective() in ai-service.ts already handles all tone-appropriate
+    // behaviour (how direct, warm, analytical, etc. the AI is). The runner profile
+    // block and factual context supply the calibration signal for intensity.
+    //
+    // The only case where we gently shift is: if NO tone is set at all, default to
+    // "encouraging" (never "energetic" — that was an arbitrary pushy default).
+    return normalizeCoachTone(baseTone) || 'encouraging';
   };
 
   // Helper function to map user coach settings to OpenAI base voice
@@ -10866,10 +10868,16 @@ function transformRunForAndroid(run: any) {
 
   // Helper: optionally fetch runner profile if userId is provided in the coaching request body.
   // Silently returns null if not available so in-run coaching degrades gracefully.
+  // NOTE: getRunnerProfile returns { profile, updatedAt } — we extract just the profile string.
   const getCoachingProfile = async (body: any): Promise<string | null> => {
     const uid = body.userId ?? body.user_id;
     if (!uid) return null;
-    return getRunnerProfile(Number(uid)).catch(() => null);
+    try {
+      const result = await getRunnerProfile(String(uid));
+      return result.profile ?? null;
+    } catch {
+      return null;
+    }
   };
 
   // Helper: resolve all coach voice/persona settings from the DB.
@@ -11263,7 +11271,8 @@ function transformRunForAndroid(run: any) {
       const baseTone = req.body.coachTone;
       
       const aiService = await import("./ai-service");
-      const message = await aiService.generateIntervalCoaching(req.body);
+      const runnerProfile = await getCoachingProfile(req.body);
+      const message = await aiService.generateIntervalCoaching({ ...req.body, runnerProfile });
       
       // Generate TTS audio
       let base64Audio: string | null = null;

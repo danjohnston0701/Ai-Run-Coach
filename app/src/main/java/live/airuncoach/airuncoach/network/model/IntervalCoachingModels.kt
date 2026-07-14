@@ -65,7 +65,11 @@ data class IntervalCoachingRequest(
     val currentPhase: String? = null,
     
     @SerializedName("rep_number")
-    val repNumber: Int? = null
+    val repNumber: Int? = null,
+
+    // User identity — allows server to inject the living AI runner profile
+    @SerializedName("userId")
+    val userId: String? = null
 )
 
 /**
