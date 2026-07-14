@@ -1463,16 +1463,55 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     runnerProfileContext += `\nFitness level: unknown — only ${totalRunsAllTime} run(s) completed so far. Still building a foundation. Encourage consistency; address pace gaps without undue pressure.`;
   }
 
-  // Age
+  // ── Age & Physical calibration block ────────────────────────────────────
+  // Age and BMI are not just data points — they shape HOW this runner should be coached:
+  // communication style, effort interpretation, what counts as an achievement, and how
+  // directly to address pace gaps. Derived from data; no tone override — the AI applies
+  // these calibrations within the chosen toneDirective.
+
   if (runnerAge) {
-    runnerProfileContext += ` Age: ${runnerAge}.`;
+    let ageNote = `\nRunner's age: ${runnerAge}.`;
+
+    if (runnerAge < 20) {
+      ageNote += ` Young runner — high capacity and recovery. Can handle energetic, direct coaching. Be encouraging about long-term potential, not just today's numbers.`;
+    } else if (runnerAge <= 35) {
+      ageNote += ` Prime athletic years — full coaching range applies. Direct feedback and performance focus are appropriate.`;
+    } else if (runnerAge <= 50) {
+      ageNote += ` Active adult runner. Recovery matters more than in younger years. Acknowledge the discipline it takes to prioritise training alongside life commitments. Celebrate consistency.`;
+    } else if (runnerAge <= 65) {
+      ageNote += ` Mature runner (50s–60s). Physiological pace ceilings are different to younger runners — effort and consistency matter far more than raw pace numbers. Be respectful, celebratory of achievement, and never make pace-gap analysis the centrepiece. Running at this age is genuinely impressive.`;
+    } else {
+      ageNote += ` Senior runner (65+). Every run is a genuine achievement. Focus entirely on effort, enjoyment, and health benefits. Pace comparison is rarely appropriate — completing the run is the win.`;
+    }
+
+    runnerProfileContext += ageNote;
   }
 
-  // Physical stats — BMI for pacing/effort context
+  // BMI — affects cardiovascular load per km and how pace targets should be interpreted
   if (runnerWeight && runnerHeight) {
     const heightM = runnerHeight / 100;
     const bmi = runnerWeight / (heightM * heightM);
-    runnerProfileContext += ` BMI: ${bmi.toFixed(1)}.`;
+
+    let bmiNote = `\nPhysical build: BMI ${bmi.toFixed(1)}.`;
+
+    if (bmi < 18.5) {
+      bmiNote += ` Lean build — aerobic efficiency is typically high but monitor energy levels; may fatigue faster on longer efforts.`;
+    } else if (bmi < 25) {
+      bmiNote += ` Standard athletic build — effort-to-pace ratios follow typical coaching tables.`;
+    } else if (bmi < 30) {
+      bmiNote += ` Above-average body mass — cardiovascular effort per km is meaningfully higher than standard pace tables assume. A pace that looks "slow" may represent real effort. Acknowledge the work without fixating on pace gaps.`;
+    } else if (bmi < 35) {
+      bmiNote += ` High body mass — cardiovascular load per km is substantially elevated. Standard pace targets are not directly applicable. Completing the run IS the achievement; pace comparison is secondary. Focus on effort, breathing, and completing the distance.`;
+    } else {
+      bmiNote += ` Very high body mass — every kilometre represents exceptional cardiovascular effort. This runner is doing something genuinely courageous. Pace is irrelevant as a benchmark. Celebrate movement, effort, and showing up. Keep tone warm, grounded, and free of any performance pressure.`;
+    }
+
+    // Combined age + BMI modifier: older + higher BMI = maximum encouragement, minimum pressure
+    if (runnerAge && runnerAge >= 50 && bmi >= 28) {
+      bmiNote += ` Note: combined age and body mass means this runner is working harder than pace numbers suggest — coaching should lean heavily toward encouragement and acknowledgement of effort.`;
+    }
+
+    runnerProfileContext += bmiNote;
   }
 
   // Accent-aware phrasing — makes the TEXT sound natural for the chosen accent
@@ -1548,7 +1587,36 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
     totalRunsAllTime === undefined ||
     (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 5)
   );
-  
+
+  // ── Target feasibility note ───────────────────────────────────────────────
+  // For runners with no baseline, assess whether their pace target is realistic.
+  // If it's in territory that requires significant training to achieve, flag it as
+  // aspirational so the AI doesn't use it as a pass/fail standard in coaching.
+  // Reference pace thresholds (beginner-friendly = ≥6:30/km, competitive = <5:00/km):
+  let targetFeasibilityNote = '';
+  if (hasNoBaseline && targetPace) {
+    // targetPace arrives as "MM:SS" string — convert to seconds/km
+    const [tMin, tSec] = targetPace.split(':').map(Number);
+    if (!isNaN(tMin) && !isNaN(tSec)) {
+      const targetSecPerKm = tMin * 60 + tSec;
+      if (targetSecPerKm < 300) {
+        // Sub 5:00/km — elite territory, almost certainly aspirational for a new runner
+        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is elite-level performance. For a runner without an established baseline, this is highly aspirational — treat it as a long-term goal, not a standard for today's run. Do not frame the pace gap as underperformance.`;
+      } else if (targetSecPerKm < 360) {
+        // 5:00–6:00/km — strong competitive pace, unlikely for most beginners
+        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is competitive. Without an established fitness baseline, this is aspirational — today's run is about building capacity, not hitting this pace. Treat the gap as normal and expected.`;
+      } else if (targetSecPerKm < 420) {
+        // 6:00–7:00/km — solid recreational pace, achievable but not guaranteed for a first-timer
+        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is a solid recreational runner's pace. Without prior baseline data, this is directional rather than prescriptive — any gap is informational, not a verdict.`;
+      }
+      // 7:00/km+ for a new runner is reasonable — no extra note needed
+    }
+  }
+
+  if (targetFeasibilityNote) {
+    runnerProfileContext += targetFeasibilityNote;
+  }
+
   // Build trigger-specific instruction
   const is500mCheckin = triggerType === '500m_checkin';
 

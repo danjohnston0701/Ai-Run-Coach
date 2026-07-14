@@ -3971,6 +3971,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = targetPaceStr,
                         triggerType = "500m_checkin",
+                        totalRunsAllTime = runHistoryStats?.totalRunsAllTime,
                         userId = currentUser?.id
                     )
                     val response = apiService.getPhaseCoaching(update)

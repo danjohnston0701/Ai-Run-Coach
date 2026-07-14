@@ -306,6 +306,9 @@ interface RunnerContext {
   name: string;
   age: number | null;
   gender: string | null;
+  heightCm: number | null;
+  weightKg: number | null;
+  bmi: number | null;
   fitnessLevel: string | null;
   desiredFitnessLevel: string | null;
   coachName: string;
@@ -373,6 +376,8 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
       name:                 users.name,
       dob:                  users.dob,
       gender:               users.gender,
+      height:               users.height,
+      weight:               users.weight,
       fitnessLevel:         users.fitnessLevel,
       desiredFitnessLevel:  users.desiredFitnessLevel,
       coachName:            users.coachName,
@@ -489,6 +494,15 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
     }
   }
 
+  // ── 6b. Physical build — BMI ──────────────────────────────────────────────
+  const heightCm = user.height ? parseFloat(user.height) : null;
+  const weightKg = user.weight ? parseFloat(user.weight) : null;
+  let bmi: number | null = null;
+  if (heightCm && weightKg && heightCm > 0) {
+    const hm = heightCm / 100;
+    bmi = Math.round((weightKg / (hm * hm)) * 10) / 10;
+  }
+
   // ── 7. PB formatting helper ───────────────────────────────────────────────
   const fmtPb = (ms: number | null | undefined, distKm: number): string | null => {
     if (!ms) return null;
@@ -509,6 +523,9 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
     name:                user.name,
     age,
     gender:              user.gender ?? null,
+    heightCm,
+    weightKg,
+    bmi,
     fitnessLevel:        user.fitnessLevel ?? null,
     desiredFitnessLevel: user.desiredFitnessLevel ?? null,
     coachName:           user.coachName ?? 'AI Coach',
@@ -626,10 +643,27 @@ ${obsLines}`;
   const isFirstProfile = !ctx.currentProfile || ctx.currentProfile.trim() === '';
   const hasNewObservations = ctx.coachingObservations.length > 0;
 
+  // Physical build summary for prompt
+  const physicalLine = (() => {
+    const parts: string[] = [];
+    if (ctx.heightCm) parts.push(`Height: ${ctx.heightCm}cm`);
+    if (ctx.weightKg) parts.push(`Weight: ${ctx.weightKg}kg`);
+    if (ctx.bmi) {
+      let bmiContext = '';
+      if (ctx.bmi < 18.5) bmiContext = ' (lean)';
+      else if (ctx.bmi < 25) bmiContext = ' (healthy)';
+      else if (ctx.bmi < 30) bmiContext = ' (above-average mass — higher cardiovascular load per km)';
+      else if (ctx.bmi < 35) bmiContext = ' (high mass — substantially elevated effort per km vs pace tables)';
+      else bmiContext = ' (very high mass — exceptional cardiovascular effort; pace benchmarks are not applicable)';
+      parts.push(`BMI: ${ctx.bmi}${bmiContext}`);
+    }
+    return parts.length > 0 ? `Physical: ${parts.join(', ')}` : '';
+  })();
+
   const userPrompt = `
 RUNNER DATA:
 Name: ${ctx.name}${ctx.age ? `, Age: ${ctx.age}` : ''}${ctx.gender ? `, Gender: ${ctx.gender}` : ''}
-Fitness level: ${ctx.fitnessLevel ?? 'not set'} → aiming for: ${ctx.desiredFitnessLevel ?? 'not set'}
+${physicalLine ? physicalLine + '\n' : ''}Fitness level: ${ctx.fitnessLevel ?? 'not set'} → aiming for: ${ctx.desiredFitnessLevel ?? 'not set'}
 ${injuryNote}
 
 TOTALS:
@@ -665,14 +699,16 @@ route suggestions, training plan generation, in-run coaching, post-run analysis 
 so it must be maximally useful to an AI reading it cold.
 
 INCLUDE (where data is available):
-- Name, rough fitness level, running experience
+- Name, rough fitness level, running experience (infer from data if not set — e.g. "appears to be a beginner" or "performing at an intermediate level based on pace and volume")
+- Age and how it should influence coaching: younger runners can handle directness; older runners (50+) need acknowledgement of effort over pace; senior runners (65+) should be coached on completion and health benefits, not pace gaps
+- Physical build context if BMI is provided: above-average or high BMI means substantially elevated effort per km — note this explicitly so in-run coaching doesn't treat their pace as simply "slow"
 - Current weekly volume and recent trend
 - Active plan / goal and where they are in it
 - Key personal bests and whether they are improving
 - Any recurring challenges, weaknesses, or injury notes
 - Last run context
-- The "type" of runner they are (e.g. speed-focused, endurance-builder, casual, competitive)
-- What to focus on / what to watch out for in coaching
+- The "type" of runner they are (e.g. speed-focused, endurance-builder, casual, competitive, comeback runner)
+- What to focus on / what to watch out for in coaching — derived from actual data
 
 TONE: Factual and concise. No fluff. Write as a coach would brief a colleague.
 FORMAT: Plain text only. No bullet points, headers, or markdown. One flowing paragraph or two short paragraphs.
@@ -690,6 +726,10 @@ Your goal is to produce an enriched 150–280 word plain-English briefing that:
 4. Calls out emerging patterns explicitly: "consistently goes out too fast", "cadence
    drops under fatigue", "responding well to Zone 2 work — HR trending down"
 5. Reads like a coach's evolving understanding of a specific athlete — not a data report
+6. If fitness level is still not set, infer it from run history and include it as an observation
+7. Always factor in age and physical build (BMI) if provided — a 58-year-old returning runner
+   or a runner with high BMI needs different coaching framing than a 25-year-old with low BMI;
+   note this explicitly so any AI reading the profile calibrates accordingly
 
 FORMAT: Plain text only. No bullet points, headers, or markdown. Third person ("Dan is...").
 One flowing paragraph or two short paragraphs. 150–280 words.
