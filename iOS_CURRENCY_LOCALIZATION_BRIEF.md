@@ -78,9 +78,9 @@ struct User: Codable {
 
 ---
 
-### Phase 2: Update Subscription Pricing (1 hr)
+### Phase 2: Update Subscription Pricing (30 min)
 
-Update the subscription tier pricing in your pricing/subscription model:
+**Important:** Don't hardcode all country pricing in the app. App Store Connect and Google Play Console manage pricing per country automatically. You only need to update the **default USD pricing**:
 
 ```swift
 struct SubscriptionTier {
@@ -89,17 +89,25 @@ struct SubscriptionTier {
     // ... existing fields
 }
 
-// Lite tier updates (find in your pricing constants):
+// Lite tier — only update USD defaults
+// (Store handles all country-specific pricing automatically)
 let liteTier = SubscriptionTier(
-    id: "lite_monthly",
-    monthlyPrice: 5.99,    // was 7.99
-    monthlyDisplay: "$5.99",
-    annualPrice: 59.99,    // was 79.99
+    id: "lite_annual",
+    name: "Lite",
+    // USD base prices (shown when user's currency isn't recognized)
+    annualPrice: 59.99,         // was 79.99 ↓ 25% lower
     annualDisplay: "$59.99",
-    annualDiscountText: "$5.00/month — save $11.89", // was "$6.67/month — save $15.89"
+    monthlyPrice: 5.99,         // reference only
+    annualDiscountText: "$5.00/month — save $11.89",  // was "$6.67/month — save $15.89"
     // ... other fields
 )
 ```
+
+**How it works:**
+- App Store Connect has Lite tier priced in USD ($59.99)
+- Store automatically converts to local pricing: EUR 64.99, GBP 53.99, JPY 10,700, etc.
+- User's store picks up their device locale and shows correct local price
+- App displays currency code inferred from timezone for context
 
 ---
 
@@ -217,6 +225,30 @@ Reference the server's mapping for testing:
 | `Pacific/Auckland` | NZD |
 
 See `server/utils/timezone-to-currency.ts` for the full list.
+
+---
+
+## Pricing Management (Important)
+
+The app doesn't manage per-country pricing. Here's how it actually works:
+
+1. **App Store Connect** has tiers priced in USD
+2. **App Store automatically converts** to all supported countries' currencies with VAT
+3. **User's device locale** determines what price they see at checkout
+4. **App displays currency code** inferred from timezone for context only
+
+**Reference pricing** for Lite tier annual (from Google Play/App Store):
+- **USD**: $59.99 (US, UK territories, etc.)
+- **EUR**: €64.99 (Europe)
+- **GBP**: £53.99 (UK)
+- **JPY**: ¥10,700 (Japan)
+- **CAD**: CA$84.99 (Canada)
+- **AUD**: A$94.99 (Australia)
+- **INR**: ₹6,800 (India)
+- **BRL**: R$309.99 (Brazil)
+- **And 60+ other countries with localized pricing**
+
+See `PRICING_REFERENCE.json` in the repo for the full pricing table.
 
 ---
 

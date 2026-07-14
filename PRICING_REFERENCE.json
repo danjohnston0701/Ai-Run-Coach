@@ -1,0 +1,184 @@
+{
+  "_comment": "Lite tier annual pricing by country/currency from Google Play Store. This is reference only — actual pricing is managed in Google Play Console. The app displays currency code inferred from timezone and references these values for context.",
+  "lite_annual": {
+    "default_usd": 59.99,
+    "by_currency": {
+      "USD": {
+        "countries": ["United States", "Bermuda", "British Virgin Islands", "Cayman Islands", "Ecuador", "El Salvador", "Kuwait", "Panama", "Turks & Caicos Islands", "Other USD regions"],
+        "price": 59.99,
+        "vat": "No VAT"
+      },
+      "EUR": {
+        "countries": ["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus", "Czechia", "Estonia", "Finland", "France", "Germany", "Greece", "Ireland", "Italy", "Latvia", "Lithuania", "Luxembourg", "Monaco", "Netherlands", "Portugal", "Slovakia", "Slovenia", "Spain"],
+        "price": 64.99,
+        "vat": "20-25%"
+      },
+      "GBP": {
+        "countries": ["United Kingdom", "Gibraltar"],
+        "price": 53.99,
+        "vat": "20%"
+      },
+      "JPY": {
+        "countries": ["Japan"],
+        "price": 10700,
+        "vat": "10%"
+      },
+      "CAD": {
+        "countries": ["Canada"],
+        "price": 84.99,
+        "vat": "No VAT"
+      },
+      "AUD": {
+        "countries": ["Australia"],
+        "price": 94.99,
+        "vat": "10%"
+      },
+      "NZD": {
+        "countries": ["New Zealand"],
+        "price": 99.99,
+        "vat": "15%"
+      },
+      "CHF": {
+        "countries": ["Switzerland", "Liechtenstein"],
+        "price": 49.00,
+        "vat": "No VAT / 8.1%"
+      },
+      "CNY": {
+        "countries": ["China"],
+        "price": null,
+        "note": "Not in data — use USD fallback"
+      },
+      "INR": {
+        "countries": ["India"],
+        "price": 6800,
+        "vat": "18%"
+      },
+      "MXN": {
+        "countries": ["Mexico"],
+        "price": 1199.00,
+        "vat": "16%"
+      },
+      "BRL": {
+        "countries": ["Brazil"],
+        "price": 309.99,
+        "vat": "No VAT"
+      },
+      "SGD": {
+        "countries": ["Singapore"],
+        "price": 84.98,
+        "vat": "9%"
+      },
+      "THB": {
+        "countries": ["Thailand"],
+        "price": 2150.00,
+        "vat": "7%"
+      },
+      "KRW": {
+        "countries": ["South Korea"],
+        "price": 99000,
+        "vat": "10%"
+      },
+      "AED": {
+        "countries": ["United Arab Emirates"],
+        "price": 229.99,
+        "vat": "5%"
+      },
+      "RUB": {
+        "countries": ["Russia"],
+        "price": 4599.00,
+        "vat": "No VAT"
+      },
+      "ZAR": {
+        "countries": ["South Africa"],
+        "price": 1149.99,
+        "vat": "15%"
+      },
+      "SEK": {
+        "countries": ["Sweden"],
+        "price": 729.00,
+        "vat": "25%"
+      },
+      "NOK": {
+        "countries": ["Norway"],
+        "price": 729.00,
+        "vat": "25%"
+      },
+      "DKK": {
+        "countries": ["Denmark"],
+        "price": 495.00,
+        "vat": "25%"
+      },
+      "PLN": {
+        "countries": ["Poland"],
+        "price": 279.99,
+        "vat": "23%"
+      },
+      "CZK": {
+        "countries": ["Czechia"],
+        "price": 1499.99,
+        "vat": "21%"
+      },
+      "HUF": {
+        "countries": ["Hungary"],
+        "price": 23999,
+        "vat": "27%"
+      },
+      "RON": {
+        "countries": ["Romania"],
+        "price": 334.99,
+        "vat": "21%"
+      },
+      "TRY": {
+        "countries": ["Turkey"],
+        "price": 3389.99,
+        "vat": "20%"
+      },
+      "UAH": {
+        "countries": ["Ukraine"],
+        "price": 3199.99,
+        "vat": "20%"
+      },
+      "IDR": {
+        "countries": ["Indonesia"],
+        "price": 1090000,
+        "vat": "No VAT"
+      },
+      "PHP": {
+        "countries": ["Philippines"],
+        "price": 4150.00,
+        "vat": "12%"
+      },
+      "VND": {
+        "countries": ["Vietnam"],
+        "price": 1550000,
+        "vat": "No VAT"
+      },
+      "THB": {
+        "countries": ["Thailand"],
+        "price": 2150.00,
+        "vat": "7%"
+      },
+      "MYR": {
+        "countries": ["Malaysia"],
+        "price": 264.99,
+        "vat": "8%"
+      },
+      "HKD": {
+        "countries": ["Hong Kong"],
+        "price": 469.00,
+        "vat": "No VAT"
+      },
+      "TWD": {
+        "countries": ["Taiwan"],
+        "price": 2030.00,
+        "vat": "5%"
+      }
+    }
+  },
+  "implementation_notes": {
+    "currency_display": "Show the inferred currency code (e.g., 'USD', 'EUR', 'GBP') based on user's timezone",
+    "price_display": "Google Play Store handles all pricing and checkout. The app doesn't display exact prices per currency — just the currency code for context.",
+    "vat_handling": "Google Play automatically applies VAT based on user's location. No app-side VAT calculation needed.",
+    "recommendation": "Focus on timezone → currency mapping for display. Let Google Play Store handle actual pricing, conversion, and tax."
+  }
+}
