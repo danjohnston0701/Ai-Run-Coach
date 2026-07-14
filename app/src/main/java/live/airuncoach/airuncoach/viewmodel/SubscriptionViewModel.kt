@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.billing.BillingManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.GooglePlayPricingResponse
 import java.time.LocalDate
 import javax.inject.Inject
 
@@ -53,6 +54,16 @@ class SubscriptionViewModel @Inject constructor(
     private val _lastBillingPeriod = MutableStateFlow<String?>(null)
     val lastBillingPeriod: StateFlow<String?> = _lastBillingPeriod.asStateFlow()
 
+    // ── Currency + localized pricing ─────────────────────────────────────────
+
+    /** The user's inferred currency code (e.g. "NZD", "GBP"). Defaults to "USD". */
+    private val _userCurrency = MutableStateFlow(getCachedUserCurrency())
+    val userCurrency: StateFlow<String> = _userCurrency.asStateFlow()
+
+    /** Full Google Play pricing table fetched from /api/googlePlayPricing. */
+    private val _pricingData = MutableStateFlow<GooglePlayPricingResponse?>(null)
+    val pricingData: StateFlow<GooglePlayPricingResponse?> = _pricingData.asStateFlow()
+
     // Usage data state
     private val _usageState = MutableStateFlow<UsageState>(UsageState.Loading)
     val usageState: StateFlow<UsageState> = _usageState.asStateFlow()
@@ -60,6 +71,16 @@ class SubscriptionViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             billingManager.initialize()
+        }
+
+        // Fetch localized pricing on startup so subscription tiles show correct amounts.
+        viewModelScope.launch {
+            try {
+                val pricing = apiService.getGooglePlayPricing()
+                _pricingData.value = pricing
+            } catch (_: Exception) {
+                // Non-fatal — falls back to default USD pricing in the UI
+            }
         }
 
         // React to purchase verification results from BillingManager.
@@ -160,6 +181,13 @@ class SubscriptionViewModel @Inject constructor(
     } catch (_: Exception) {
         null
     }
+
+    /**
+     * Reads the user's currency from the locally-cached user profile.
+     * Returns "USD" if not set (e.g. before first login or migration not run).
+     */
+    private fun getCachedUserCurrency(): String =
+        getCachedUser()?.currency?.takeIf { it.isNotBlank() } ?: "USD"
 
     fun getTrialExpiresAt(): LocalDate? {
         val user = getCachedUser() ?: return null

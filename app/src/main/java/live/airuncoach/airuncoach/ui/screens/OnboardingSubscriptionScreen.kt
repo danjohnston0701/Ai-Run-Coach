@@ -650,11 +650,11 @@ data class OnboardingPlanData(
 
         val STANDARD = OnboardingPlanData(
             name = "Standard",
-            monthlyPriceDisplay = "$14.99",
+            monthlyPriceDisplay = "$12.99",
             monthlyPriceSuffix = "/month",
-            annualPriceDisplay = "$149.99",
+            annualPriceDisplay = "$129.99",
             annualPriceSuffix = "/year",
-            annualMonthlyEquivalent = "$12.50/month — save $29.89",
+            annualMonthlyEquivalent = "$10.83/month — save $25.89",
             accentColor = Color(0xFFA78BFA),
             features = listOf(
                 OnboardingPlanFeature("Unlimited AI runs", true),

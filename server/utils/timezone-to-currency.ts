@@ -260,18 +260,18 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
  */
 export const SUPPORTED_CURRENCIES = [
   // Americas
-  { code: "USD", symbol: "$", name: "US Dollar" },
-  { code: "CAD", symbol: "CA$", name: "Canadian Dollar" },
-  { code: "MXN", symbol: "Mex$", name: "Mexican Peso" },
-  { code: "BRL", symbol: "R$", name: "Brazilian Real" },
-  { code: "ARS", symbol: "AR$", name: "Argentine Peso" },
-  { code: "COP", symbol: "CO$", name: "Colombian Peso" },
-  { code: "CLP", symbol: "CLP", name: "Chilean Peso" },
-  { code: "PEN", symbol: "S/", name: "Peruvian Nuevo Sol" },
-  { code: "BOB", symbol: "Bs.", name: "Bolivian Boliviano" },
-  { code: "CRC", symbol: "₡", name: "Costa Rican Colón" },
-  { code: "PYG", symbol: "Gs", name: "Paraguayan Guaraní" },
-  { code: "UYU", symbol: "$U", name: "Uruguayan Peso" },
+  { code: "USD", symbol: "USD$", name: "US Dollar" },
+  { code: "CAD", symbol: "CAD$", name: "Canadian Dollar" },
+  { code: "MXN", symbol: "MXN$", name: "Mexican Peso" },
+  { code: "BRL", symbol: "BRL$", name: "Brazilian Real" },
+  { code: "ARS", symbol: "ARS$", name: "Argentine Peso" },
+  { code: "COP", symbol: "COP$", name: "Colombian Peso" },
+  { code: "CLP", symbol: "CLP$", name: "Chilean Peso" },
+  { code: "PEN", symbol: "PEN$", name: "Peruvian Nuevo Sol" },
+  { code: "BOB", symbol: "BOB$", name: "Bolivian Boliviano" },
+  { code: "CRC", symbol: "CRC$", name: "Costa Rican Colón" },
+  { code: "PYG", symbol: "PYG$", name: "Paraguayan Guaraní" },
+  { code: "UYU", symbol: "UYU$", name: "Uruguayan Peso" },
 
   // Europe
   { code: "EUR", symbol: "€", name: "Euro" },
@@ -318,9 +318,9 @@ export const SUPPORTED_CURRENCIES = [
   { code: "GEL", symbol: "��", name: "Georgian Lari" },
 
   // Pacific & Oceania
-  { code: "AUD", symbol: "A$", name: "Australian Dollar" },
-  { code: "NZD", symbol: "NZ$", name: "New Zealand Dollar" },
-  { code: "FJD", symbol: "FJ$", name: "Fiji Dollar" },
+  { code: "AUD", symbol: "AUD$", name: "Australian Dollar" },
+  { code: "NZD", symbol: "NZD$", name: "New Zealand Dollar" },
+  { code: "FJD", symbol: "FJD$", name: "Fiji Dollar" },
 
   // Africa
   { code: "ZAR", symbol: "R", name: "South African Rand" },

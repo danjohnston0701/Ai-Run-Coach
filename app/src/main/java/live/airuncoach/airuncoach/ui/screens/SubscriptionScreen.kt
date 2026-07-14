@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.android.billingclient.api.ProductDetails
+import live.airuncoach.airuncoach.network.model.GooglePlayPricingResponse
+import live.airuncoach.airuncoach.network.model.PricingTierData
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
@@ -82,9 +84,10 @@ fun SubscriptionScreen(
 
     // Open directly to Plans tab
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Plans, 1 = Usage
-    
-    // Currency selection — defaults to inferred from user's timezone
-    var selectedCurrency by remember { mutableStateOf("USD") }
+
+    // Localized pricing — currency inferred from user's timezone, prices from server
+    val userCurrency by viewModel.userCurrency.collectAsState()
+    val pricingData  by viewModel.pricingData.collectAsState()
 
     Column(
         modifier = Modifier
@@ -175,11 +178,8 @@ fun SubscriptionScreen(
                 trialDaysRemaining = trialDaysRemaining,
                 trialExpiresAt = trialExpiresAt,
                 currentTier = currentTier,
-                selectedCurrency = selectedCurrency,
-                onCurrencyChange = { newCurrency ->
-                    selectedCurrency = newCurrency
-                    // TODO: Call API to update user's currency: viewModel.updateUserCurrency(newCurrency)
-                },
+                selectedCurrency = userCurrency,
+                pricingData = pricingData,
                 onNavigateToChangePassword = onNavigateToChangePassword,
                 onNavigateToGetSupport = onNavigateToGetSupport,
                 onNavigateToDeleteAccount = onNavigateToDeleteAccount
@@ -259,7 +259,7 @@ private fun PlansTabContent(
     trialExpiresAt: LocalDate? = null,
     currentTier: String = "free",
     selectedCurrency: String = "USD",
-    @Suppress("UNUSED_PARAMETER") onCurrencyChange: (String) -> Unit = {},
+    pricingData: GooglePlayPricingResponse? = null,
     onNavigateToChangePassword: () -> Unit = {},
     onNavigateToGetSupport: () -> Unit = {},
     onNavigateToDeleteAccount: () -> Unit = {}
@@ -318,10 +318,20 @@ private fun PlansTabContent(
             BillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
         }
 
-        // Plan Cards
+        // Plan Cards — localized using the user's inferred currency + server pricing data
         val freeTier = PlanData.FREE_TRIAL
-        val liteTier = PlanData.LITE
-        val standardTier = PlanData.STANDARD
+        val liteTier = PlanData.LITE.localizedFor(
+            currency    = selectedCurrency,
+            pricing     = pricingData,
+            monthlyTier = pricingData?.liteMonthly,
+            annualTier  = pricingData?.liteAnnual
+        )
+        val standardTier = PlanData.STANDARD.localizedFor(
+            currency    = selectedCurrency,
+            pricing     = pricingData,
+            monthlyTier = pricingData?.standardMonthly,
+            annualTier  = pricingData?.standardAnnual
+        )
 
         // Free trial card — only shown when the user is NOT already paid
         if (!isPremium) {
@@ -419,45 +429,33 @@ private fun PlansTabContent(
             }
         }
 
-        // Currency Selector
+        // Currency indicator
         item {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "Display Pricing In",
+                    text = "Prices shown in ",
                     fontSize = 12.sp,
-                    color = Colors.textSecondary,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(bottom = Spacing.sm)
+                    color = Colors.textMuted
                 )
-                
-                                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .border(1.dp, Colors.primary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                            .padding(Spacing.md),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = selectedCurrency,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Colors.primary
-                        )
-                    }
-                
-                // Currency dropdown (for future expansion)
                 Text(
-                    text = "Prices display in the currency inferred from your timezone. Change can be added in a future update.",
-                    fontSize = 11.sp,
-                    color = Colors.textMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(top = Spacing.xs)
+                    text = selectedCurrency,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Colors.primary
                 )
+                if (selectedCurrency != "USD") {
+                    Text(
+                        text = " · inferred from your timezone",
+                        fontSize = 12.sp,
+                        color = Colors.textMuted
+                    )
+                }
             }
         }
 
@@ -1563,11 +1561,11 @@ data class PlanData(
 
         val LITE = PlanData(
             name = "Lite",
-            monthlyPriceDisplay = "USD $5.99",
+            monthlyPriceDisplay = "USD 5.99",
             monthlyPriceSuffix = "/month",
-            annualPriceDisplay = "USD $59.99",
+            annualPriceDisplay = "USD 59.99",
             annualPriceSuffix = "/year",
-            annualMonthlyEquivalent = "USD $5.00/month — save $11.89",
+            annualMonthlyEquivalent = "USD 5.00/month — save USD 11.89",
             accentColor = Colors.primary,
             features = listOf(
                 PlanFeature("Unlimited AI Runs", true),
@@ -1580,11 +1578,11 @@ data class PlanData(
 
         val STANDARD = PlanData(
             name = "Standard",
-            monthlyPriceDisplay = "USD $14.99",
+            monthlyPriceDisplay = "USD 12.99",
             monthlyPriceSuffix = "/month",
-            annualPriceDisplay = "USD $149.99",
+            annualPriceDisplay = "USD 129.99",
             annualPriceSuffix = "/year",
-            annualMonthlyEquivalent = "USD $12.50/month — save $29.89",
+            annualMonthlyEquivalent = "USD 10.83/month — save USD 25.89",
             accentColor = Color(0xFFA78BFA),
             features = listOf(
                 PlanFeature("Unlimited AI Runs", true),
@@ -1596,3 +1594,52 @@ data class PlanData(
         )
     }
 }
+
+// ── Localized pricing utilities ───────────────────────────────────────────────
+
+/** Currencies that display no decimal places (e.g., JPY, KRW, HUF, VND). */
+private val ZERO_DECIMAL_CURRENCIES = setOf("JPY", "KRW", "HUF", "VND", "CLP", "DZD", "ISK", "PYG", "UGX")
+
+/** Format a price amount for display according to the currency code. */
+private fun formatPriceAmount(amount: Double, currency: String): String =
+    if (currency in ZERO_DECIMAL_CURRENCIES) {
+        amount.toLong().toString()
+    } else {
+        "%.2f".format(amount)
+    }
+
+/**
+ * Returns a localized copy of this [PlanData] with prices populated from
+ * [pricing] for [currency]. Falls back to the existing USD strings if the
+ * currency is not found in the pricing table.
+ */
+fun PlanData.localizedFor(
+    currency: String,
+    pricing: GooglePlayPricingResponse?,
+    monthlyTier: PricingTierData?,
+    annualTier: PricingTierData?
+): PlanData {
+    if (pricing == null) return this
+
+    val monthlyAmount = monthlyTier?.byCurrency?.get(currency)
+    val annualAmount  = annualTier?.byCurrency?.get(currency)
+
+    if (monthlyAmount == null && annualAmount == null) return this
+
+    val monthly = monthlyAmount ?: (monthlyPriceDisplay.substringAfterLast(" ").toDoubleOrNull() ?: 0.0)
+    val annual  = annualAmount  ?: (annualPriceDisplay.substringAfterLast(" ").toDoubleOrNull()  ?: 0.0)
+
+    val monthlyStr   = "$currency ${formatPriceAmount(monthly, currency)}"
+    val annualStr    = "$currency ${formatPriceAmount(annual, currency)}"
+    val annualMonthly = annual / 12.0
+    val annualSave    = (monthly * 12.0) - annual
+    val equivalentStr = "$currency ${formatPriceAmount(annualMonthly, currency)}/month — save $currency ${formatPriceAmount(annualSave, currency)}"
+
+    return copy(
+        monthlyPriceDisplay     = monthlyStr,
+        annualPriceDisplay      = if (annualAmount != null) annualStr else annualPriceDisplay,
+        annualMonthlyEquivalent = if (annualAmount != null) equivalentStr else annualMonthlyEquivalent
+    )
+}
+
+
