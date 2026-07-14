@@ -275,11 +275,30 @@ The BPM values above will be applied server-side — your job is to assign the c
   ${intervalInfo ? `Interval structure: ${intervalInfo}` : ""}`.trim();
   }).join("\n\n");
 
+  // Compute an approximate Zone 2 pace floor from the runner's average pace.
+  // Zone 2 is genuinely easy — significantly slower than an average training run.
+  // If avg pace is known, Zone 2 should be at least 90 seconds/km slower.
+  const avgPaceRuns = recentRuns
+    .filter(r => r.avgPace && typeof r.avgPace === "string")
+    .slice(0, 20);
+
+  let zone2PaceHint = "";
+  if (avgPaceRuns.length >= 3) {
+    const avgSecs = avgPaceRuns.reduce((sum, r) => {
+      const parts = (r.avgPace as string).split(":").map(Number);
+      return sum + (parts[0] * 60 + (parts[1] ?? 0));
+    }, 0) / avgPaceRuns.length;
+    const z2MinSecs = Math.round(avgSecs + 90);  // at least 1:30 slower than avg
+    const z2MaxSecs = Math.round(avgSecs + 210); // at most 3:30 slower than avg
+    const fmt = (secs: number) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+    zone2PaceHint = `\n- Runner's recent avg training pace: ${fmt(Math.round(avgSecs))}/km → Zone 2 for this runner should be approximately ${fmt(z2MinSecs)}–${fmt(z2MaxSecs)}/km (genuinely easy, conversational)`;
+  }
+
   const userPrompt = `You are enriching ${enrichableWorkouts.length} training session(s) with precise numeric targets for a specific runner.
 
 RUNNER DATA:
 - Fitness level: ${fitnessLevel}
-- Age: ${userAge}
+- Age: ${userAge}${zone2PaceHint}
 - ${hrContextBlock}
 
 WORKOUTS TO ENRICH:
@@ -287,14 +306,13 @@ ${workoutSummaries}
 
 ENRICHMENT RULES:
 1. Match pace to zone using THIS runner's actual data, not general coaching averages
-2. easy/aerobic/recovery sessions → Zone 1-2 pace for this runner
+2. easy/aerobic/recovery/long_run sessions → GENUINE Zone 1-2. Zone 2 is conversational — "could hold a full conversation". For most runners this is 90–210 seconds/km SLOWER than their average training pace
 3. tempo/threshold sessions → Zone 3-4 pace for this runner
-4. Interval work phases → Zone 4-5 pace. Recovery phases → Zone 1-2 (easy enough to actually recover)
-5. Long runs → Zone 2 pace unless the intent explicitly says otherwise
-6. If zone data is missing for a specific zone, extrapolate from adjacent known zones
-7. ALL assigned paces must be faster than 3:00/km and slower than 15:00/km
-8. HR ranges must be consistent with the pace assigned (don't assign Zone 2 HR to a Zone 4 pace)
-9. For any novel session type you haven't seen before: read the intent, apply appropriate physiology
+4. Interval work phases → Zone 4-5 pace. Recovery phases → Zone 1 (easy enough to actually recover, not Zone 2)
+5. ALL assigned paces must be faster than 3:00/km and slower than 15:00/km
+6. HR ranges must be consistent with the pace assigned — if you assign Zone 2, the BPMs must be Zone 2 BPMs (lower range), NOT Zone 3 or 4 BPMs
+7. CRITICAL: Zone 2 ≠ moderate effort. Zone 2 = easy aerobic, 60–70% of max HR, fully conversational. If you are assigning Zone 2, the pace MUST feel easy, not tempo
+8. For any novel session type: read the intent, apply appropriate physiology
 
 Return ONLY valid JSON matching this exact format:
 {
@@ -380,19 +398,34 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
             ? enrichment.restTargetPace
             : null;
 
-        // For Tier 2 (Tanaka): override BPM values with server-computed zone ranges —
-        // these are physiologically accurate from DOB and we don't want GPT guessing them.
-        // GPT still decides the zone NUMBER (coaching decision); server applies the right BPM range.
+        // BPM validation — always enforce Tanaka zone boundaries when DOB is known.
+        // GPT's zone NUMBER is the coaching decision (which zone this session targets).
+        // The SERVER owns the BPM values — GPT's BPM suggestions are only used as a fallback
+        // when we have no formula-based reference (Tier 3, no DOB).
+        //
+        // This prevents the common failure mode where GPT assigns Zone 2 label but Zone 3
+        // BPM values (e.g. 138-156 bpm for Zone 2 at max HR ≈ 197 — that's Zone 3).
         const zoneNum = enrichment.hrZoneNumber;
+        const tanakaRangesForValidation: Record<number, { min: number; max: number }> =
+          hasDOB
+            ? {
+                1: HeartRateZones.getZoneRange(1, maxHR),
+                2: HeartRateZones.getZoneRange(2, maxHR),
+                3: HeartRateZones.getZoneRange(3, maxHR),
+                4: HeartRateZones.getZoneRange(4, maxHR),
+                5: HeartRateZones.getZoneRange(5, maxHR),
+              }
+            : {};
+
         const finalHRMin =
-          hrTier === 2 && zoneNum && tanakaZoneRanges?.[zoneNum]
-            ? tanakaZoneRanges[zoneNum].min
+          hasDOB && zoneNum && tanakaRangesForValidation[zoneNum]
+            ? tanakaRangesForValidation[zoneNum].min
             : enrichment.hrZoneMinBpm && enrichment.hrZoneMinBpm > 50 && enrichment.hrZoneMinBpm < 220
             ? enrichment.hrZoneMinBpm
             : null;
         const finalHRMax =
-          hrTier === 2 && zoneNum && tanakaZoneRanges?.[zoneNum]
-            ? tanakaZoneRanges[zoneNum].max
+          hasDOB && zoneNum && tanakaRangesForValidation[zoneNum]
+            ? tanakaRangesForValidation[zoneNum].max
             : enrichment.hrZoneMaxBpm && enrichment.hrZoneMaxBpm > 50 && enrichment.hrZoneMaxBpm < 220
             ? enrichment.hrZoneMaxBpm
             : null;

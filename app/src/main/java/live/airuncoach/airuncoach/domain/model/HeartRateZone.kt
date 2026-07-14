@@ -41,8 +41,8 @@ object HeartRateZones {
                 name = "Zone 2: Endurance/Aerobic",
                 hrPercentMin = 60,
                 hrPercentMax = 70,
-                description = "Comfortable, sustainable pace. The \"talk test\" zone - you can hold a conversation. This is a normal or brisk walk, or an easy jog. You should feel like this is a 3 or 4 out of 10 effort.",
-                paceGuidance = "Normal to brisk walk, or easy jog — approximately 9-13 minutes per km. Easy conversational pace. Could hold a full conversation without gasping.",
+                description = "Comfortable, sustainable effort — 60–70% of your max heart rate. The \"talk test\" zone: you can hold a full conversation without gasping. Should feel like a 3–4 out of 10 effort. This is genuinely easy, not moderate.",
+                paceGuidance = "Easy, conversational pace — typically 1–3 minutes per km slower than your tempo pace, and 90+ seconds slower than your average training pace. Slower than you think. If you cannot speak in full sentences, you have gone too fast.",
                 benefits = "Builds aerobic base, improves fat burning, increases capillary density, foundation for all running, conditions the heart",
                 effort = "Easy"
             )

@@ -339,20 +339,38 @@ fun WorkoutDetailScreen(
                             
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("Pace guidance:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
-                            Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
-                            
-                            // Heart rate range — use AI-calculated BPMs from the workout if available,
-                            // otherwise fall back to zone-% formula with a conservative max HR estimate.
+                            // Use the session-specific target pace when set — it's more accurate for this
+                            // runner than the generic population-average text. Fall back to static
+                            // guidance only when no specific target has been assigned.
+                            if (!workout.targetPace.isNullOrBlank()) {
+                                Text(
+                                    "Your target pace for this session: ${workout.targetPace}/km",
+                                    style = AppTextStyles.small,
+                                    color = Colors.textSecondary
+                                )
+                            } else {
+                                Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
+                            }
+
+                            // Heart rate range — validate stored BPMs against the zone number before
+                            // displaying. Stored values can be wrong if enrichment assigned Zone 3 BPMs
+                            // to a Zone 2 session. If they're outside the correct zone range, fall back
+                            // to the Tanaka-formula zone range which is always physiologically correct.
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                             val hrMin = workout.hrZoneMinBpm
                             val hrMax = workout.hrZoneMaxBpm
-                            if (hrMin != null && hrMax != null) {
+                            val correctZoneRange = HeartRateZones.getTargetHRRange(zoneNumber, userMaxHR)
+                            // BPMs are valid if they sit within ±20 bpm of the Tanaka-computed zone range.
+                            val bpmsLookCorrect = hrMin != null && hrMax != null &&
+                                hrMin >= (correctZoneRange.first - 20) &&
+                                hrMax <= (correctZoneRange.last + 20) &&
+                                hrMin < hrMax
+                            if (bpmsLookCorrect) {
                                 Text("Keep your HR between $hrMin and $hrMax bpm", style = AppTextStyles.small, color = Colors.textSecondary)
                             } else {
-                                // Fallback: zone % applied to age-adjusted max HR (Tanaka formula)
-                                val hrRange = HeartRateZones.getTargetHRRange(zoneNumber, userMaxHR)
-                                Text("Keep your HR between ${hrRange.first} and ${hrRange.last} bpm (estimated)", style = AppTextStyles.small, color = Colors.textSecondary)
+                                // Fall back to Tanaka-computed zone range — always physiologically correct
+                                Text("Keep your HR between ${correctZoneRange.first} and ${correctZoneRange.last} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
                             }
                             
                             Spacer(modifier = Modifier.height(Spacing.sm))
