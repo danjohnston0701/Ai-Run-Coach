@@ -2839,9 +2839,25 @@ private fun ComprehensiveAnalysisFlagship(analysis: ComprehensiveRunAnalysis) {
             ParagraphListFlagship(analysis.improvementTips)
         }
 
-        if (!analysis.nextRunSuggestion.isNullOrBlank()) {
-            PillHeaderFlagship("Next Run", Colors.textSecondary)
-            Text(analysis.nextRunSuggestion, style = AppTextStyles.body, color = Colors.textSecondary)
+        // Next session — shows richer coaching plan context when available
+        if (!analysis.nextRunSuggestion.isNullOrBlank() || analysis.nextWorkoutCoaching != null) {
+            val nextCoaching = analysis.nextWorkoutCoaching
+            val headerLabel = if (nextCoaching != null) "Your Next Session" else "Next Run"
+            PillHeaderFlagship(headerLabel, Colors.primary)
+            if (!analysis.nextRunSuggestion.isNullOrBlank()) {
+                Text(analysis.nextRunSuggestion!!, style = AppTextStyles.body, color = Colors.textSecondary)
+            }
+            if (nextCoaching != null) {
+                if (!nextCoaching.reasonWhy.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(nextCoaching.reasonWhy, style = AppTextStyles.small, color = Colors.textSecondary)
+                }
+                if (!nextCoaching.focusPoints.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    PillHeaderFlagship("Focus Points", Colors.accent)
+                    BulletListFlagship(nextCoaching.focusPoints, bulletColor = Colors.accent)
+                }
+            }
         }
 
         if (!analysis.trainingLoadAssessment.isNullOrBlank()) {
@@ -6304,12 +6320,21 @@ private fun HRPaceScatterCard(run: RunSession, userAge: Int?) {
                         }
                     }
 
-                    // Y-axis gridlines + labels (4 ticks)
+                    // Y-axis gridlines + labels: Show zone thresholds (60%, 70%, 80%, 90% of maxHr)
                     val mutedArgb = Colors.textMuted.copy(alpha = 0.75f).toArgb()
                     val gridDash = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
-                    for (tick in 0..3) {
-                        val hrVal = yMin + tick * hrRange / 3
+                    
+                    // Zone thresholds to display on Y-axis
+                    val zoneThresholds = listOf(
+                        z2.toDouble(),  // 60% = Zone 1→2 boundary
+                        z3.toDouble(),  // 70% = Zone 2→3 boundary
+                        z4.toDouble(),  // 80% = Zone 3→4 boundary
+                        z5.toDouble()   // 90% = Zone 4→5 boundary
+                    ).filter { it in yMin..yMax }  // Only show thresholds within the visible range
+                    
+                    zoneThresholds.forEach { hrVal ->
                         val yp = yFor(hrVal)
+                        // Draw gridline
                         drawLine(
                             color = Colors.border.copy(alpha = 0.2f),
                             start  = androidx.compose.ui.geometry.Offset(leftPad, yp),
@@ -6317,6 +6342,7 @@ private fun HRPaceScatterCard(run: RunSession, userAge: Int?) {
                             strokeWidth = 0.5.dp.toPx(),
                             pathEffect = gridDash
                         )
+                        // Draw label
                         drawContext.canvas.nativeCanvas.drawText(
                             "${hrVal.roundToInt()}",
                             0f, yp + 4.dp.toPx(),

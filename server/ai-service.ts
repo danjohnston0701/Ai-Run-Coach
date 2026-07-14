@@ -3963,8 +3963,25 @@ export async function generateComprehensiveRunAnalysis(params: {
     description?: string;
     instructions?: string;
   } | null;
+  // Next planned workout from the coaching plan — for a specific, accurate next-session recommendation
+  nextPlannedWorkout?: {
+    workoutType: string;
+    distance?: number;
+    duration?: number;
+    targetPace?: string;
+    scheduledDate?: Date | string;
+    description?: string;
+    sessionGoal?: string;
+    sessionIntent?: string;
+    effortLabel?: string;
+    hrZoneNumber?: number;
+    hrZoneMinBpm?: number;
+    hrZoneMaxBpm?: number;
+    intervalCount?: number;
+    intensity?: string;
+  } | null;
 }): Promise<ComprehensiveRunAnalysis> {
-  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal, coachingInsight, plannedWorkout } = params;
+  const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal, coachingInsight, plannedWorkout, nextPlannedWorkout } = params;
 
   // ── Normalize units — DB rule: distance = km, duration = seconds.
   // Legacy rows from old Strava/Garmin importers may have been stored in meters/ms.
@@ -4314,6 +4331,42 @@ Make this feel like a natural part of the summary — not a separate section hea
 `;
   }
 
+  // ── Next coaching plan session context ───────────────────────────────────────
+  // When this run is part of a coaching plan and we know the next session,
+  // inject it so `nextRunSuggestion` and `nextWorkoutCoaching` reference the
+  // ACTUAL upcoming session rather than giving generic advice.
+  if (nextPlannedWorkout) {
+    const nextDistStr = nextPlannedWorkout.distance ? `${nextPlannedWorkout.distance.toFixed(1)}km` : null;
+    const nextDurStr = nextPlannedWorkout.duration ? `${Math.round(nextPlannedWorkout.duration / 60)} min` : null;
+    const nextPaceStr = nextPlannedWorkout.targetPace ?? null;
+    const nextHrStr = (nextPlannedWorkout.hrZoneMinBpm && nextPlannedWorkout.hrZoneMaxBpm)
+      ? `${nextPlannedWorkout.hrZoneMinBpm}–${nextPlannedWorkout.hrZoneMaxBpm} bpm`
+      : null;
+    const nextDateStr = nextPlannedWorkout.scheduledDate
+      ? new Date(nextPlannedWorkout.scheduledDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })
+      : null;
+    const nextLabel = nextPlannedWorkout.effortLabel || nextPlannedWorkout.workoutType;
+    const nextIntervalStr = nextPlannedWorkout.intervalCount
+      ? `${nextPlannedWorkout.intervalCount} intervals`
+      : null;
+
+    prompt += `
+## NEXT COACHING PLAN SESSION:
+The runner's actual next scheduled workout is:
+
+- **Type**: ${nextLabel}${nextDistStr ? ` — ${nextDistStr}` : ''}${nextDurStr ? ` (~${nextDurStr})` : ''}
+${nextPaceStr ? `- **Target Pace**: ${nextPaceStr}/km\n` : ''}\
+${nextHrStr ? `- **Heart Rate Zone**: ${nextHrStr}\n` : ''}\
+${nextIntervalStr ? `- **Structure**: ${nextIntervalStr}\n` : ''}\
+${nextPlannedWorkout.description ? `- **Session focus**: ${nextPlannedWorkout.description}\n` : ''}\
+${nextPlannedWorkout.sessionIntent ? `- **Intent**: ${nextPlannedWorkout.sessionIntent}\n` : ''}\
+${nextDateStr ? `- **Scheduled**: ${nextDateStr}\n` : ''}
+**CRITICAL INSTRUCTION**: Your \`nextRunSuggestion\` field MUST reference this specific upcoming session — its type, distance, and how it follows logically from this run. Do NOT give generic recovery or easy run advice. Tell the runner what they are actually doing next and why it makes sense in the plan.
+
+Your \`nextWorkoutCoaching\` recommendation and focusPoints should be specific preparation advice for THIS actual next session — what to focus on, what to watch out for, how today's run prepares them for it.
+`;
+  }
+
   // Add Garmin activity metrics if available
   // Only include this section if we have meaningful Garmin data
   const hasGarminMetrics = garminActivity && (
@@ -4543,7 +4596,7 @@ Based on ALL the data above, provide a comprehensive JSON coaching analysis. Alw
   "trainingLoadAssessment": "Did this build fitness, maintain, or aid recovery?",
   "recoveryAdvice": "Specific recovery recommendations based on effort and data",
   "coachMotivationalMessage": "Brief, personal motivation or recognition of their effort",
-  "nextRunSuggestion": "Specific type of run to do next (e.g., 'Easy 5km recovery run tomorrow' or 'Rest day - your body needs it')",
+  "nextRunSuggestion": "${nextPlannedWorkout ? 'Reference the actual next coaching plan session provided above — its type, distance, and why it logically follows this run' : 'Specific type of run to do next (e.g., Easy 5km recovery run tomorrow or Rest day — your body needs it)'}",
   
   "runPatternAnalysis": "Patterns you notice in how they run (negative splits, fade, consistent, etc.) based on this run and recent history",
   "comparisonToPreviousRuns": "How this run compares to their recent form (faster, slower, more consistent, harder effort, etc.)",
@@ -4570,9 +4623,9 @@ Based on ALL the data above, provide a comprehensive JSON coaching analysis. Alw
     "preventionStrategy": "How to avoid or manage these in future runs"
   },
   "nextWorkoutCoaching": {
-    "recommendation": "Specific type and intensity (e.g., '5km easy Z1 run')",
-    "reasonWhy": "Why this is the right next step for their recovery/progression",
-    "focusPoints": ["What to emphasize or monitor in the next run"]
+    "recommendation": "${nextPlannedWorkout ? 'Reference the actual scheduled next session from the coaching plan above' : 'Specific type and intensity (e.g., 5km easy Z1 run)'}",
+    "reasonWhy": "Why this is the right next step for their recovery/progression — connect it explicitly to this run",
+    "focusPoints": ["${nextPlannedWorkout ? 'Specific preparation tip for the actual next session' : 'What to emphasize or monitor in the next run'}"]
   }`;
 
   // Only include technical analysis if we have relevant Garmin data

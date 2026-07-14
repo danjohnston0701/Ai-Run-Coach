@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
-import { eq, and, or, gte, lt, desc, lte, count, isNull, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, or, gte, gt, lt, desc, asc, lte, count, isNull, isNotNull, inArray } from "drizzle-orm";
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
@@ -3181,6 +3181,8 @@ function transformRunForAndroid(run: any) {
       let expectedSessionGoal: string | undefined = undefined;
       let linkedPlannedWorkout: any = null;
       
+      let nextPlannedWorkout: any = null;
+
       if (run.linkedWorkoutId) {
         try {
           // Fetch the planned workout with all details for AI analysis context
@@ -3199,8 +3201,41 @@ function transformRunForAndroid(run: any) {
           coachingEvents = await db.query.coachingSessionEvents.findMany({
             where: eq(coachingSessionEvents.runId, runId),
           });
+
+          // Fetch the next planned workout in the same training plan so the post-run summary
+          // can reference the actual upcoming session rather than giving generic advice
+          if (linkedPlannedWorkout?.trainingPlanId && linkedPlannedWorkout?.scheduledDate) {
+            const nextWorkouts = await db
+              .select()
+              .from(plannedWorkouts)
+              .where(
+                and(
+                  eq(plannedWorkouts.trainingPlanId, linkedPlannedWorkout.trainingPlanId),
+                  eq(plannedWorkouts.isCompleted, false),
+                  gt(plannedWorkouts.scheduledDate, linkedPlannedWorkout.scheduledDate),
+                )
+              )
+              .orderBy(asc(plannedWorkouts.scheduledDate))
+              .limit(1);
+            nextPlannedWorkout = nextWorkouts[0] ?? null;
+          } else if (linkedPlannedWorkout?.trainingPlanId) {
+            // Fallback: no scheduledDate stored — find next incomplete workout by weekNumber/dayOfWeek
+            const allIncomplete = await db
+              .select()
+              .from(plannedWorkouts)
+              .where(
+                and(
+                  eq(plannedWorkouts.trainingPlanId, linkedPlannedWorkout.trainingPlanId),
+                  eq(plannedWorkouts.isCompleted, false),
+                )
+              )
+              .orderBy(asc(plannedWorkouts.weeklyPlanId), asc(plannedWorkouts.dayOfWeek))
+              .limit(2);
+            // Skip the current workout if it appears (edge case: just marked complete)
+            nextPlannedWorkout = allIncomplete.find(w => w.id !== linkedPlannedWorkout!.id) ?? null;
+          }
           
-          console.log(`[comprehensive-analysis] Loaded session context: workout=${!!linkedPlannedWorkout}, instructions=${!!sessionInstructions}, events=${coachingEvents.length}`);
+          console.log(`[comprehensive-analysis] Loaded session context: workout=${!!linkedPlannedWorkout}, instructions=${!!sessionInstructions}, events=${coachingEvents.length}, nextWorkout=${!!nextPlannedWorkout}`);
         } catch (sessionErr: any) {
           console.warn(`[comprehensive-analysis] Could not fetch session context: ${sessionErr?.message}`);
           // Proceed without session context - analysis still works
@@ -3307,6 +3342,23 @@ function transformRunForAndroid(run: any) {
         // Contains reason + recommendation from the AI coach's post-run training assessment.
         // May be null for users without a training plan (inline assessment handles this).
         coachingInsight: (run as any).coachingInsight ?? null,
+        // Next planned workout — so the post-run summary references the actual upcoming session
+        nextPlannedWorkout: nextPlannedWorkout ? {
+          workoutType: nextPlannedWorkout.workoutType,
+          distance: nextPlannedWorkout.distance,
+          duration: nextPlannedWorkout.duration,
+          targetPace: nextPlannedWorkout.targetPace,
+          scheduledDate: nextPlannedWorkout.scheduledDate,
+          description: nextPlannedWorkout.description,
+          sessionGoal: nextPlannedWorkout.sessionGoal,
+          sessionIntent: nextPlannedWorkout.sessionIntent,
+          effortLabel: (nextPlannedWorkout as any).effortLabel,
+          hrZoneNumber: nextPlannedWorkout.hrZoneNumber,
+          hrZoneMinBpm: nextPlannedWorkout.hrZoneMinBpm,
+          hrZoneMaxBpm: nextPlannedWorkout.hrZoneMaxBpm,
+          intervalCount: nextPlannedWorkout.intervalCount,
+          intensity: nextPlannedWorkout.intensity,
+        } : null,
         // NEW: Planned workout context for comparative analysis
         plannedWorkout: linkedPlannedWorkout ? {
           workoutType: linkedPlannedWorkout.workoutType,

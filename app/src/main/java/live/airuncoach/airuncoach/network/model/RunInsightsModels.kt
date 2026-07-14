@@ -24,6 +24,12 @@ data class BasicRunInsights(
  * added), Gson will set it to null regardless of any `= ""` default. Making fields
  * nullable lets the UI safely handle missing data with `.isNullOrBlank()` / `.orEmpty()`.
  */
+data class NextWorkoutCoaching(
+    @SerializedName("recommendation") val recommendation: String? = null,
+    @SerializedName("reasonWhy") val reasonWhy: String? = null,
+    @SerializedName("focusPoints") val focusPoints: List<String>? = null,
+)
+
 data class ComprehensiveRunAnalysis(
     @SerializedName("summary") val summary: String? = null,
     @SerializedName("performanceScore") val performanceScore: Int = 0,
@@ -34,6 +40,7 @@ data class ComprehensiveRunAnalysis(
     @SerializedName("trainingLoadAssessment") val trainingLoadAssessment: String? = null,
     @SerializedName("recoveryAdvice") val recoveryAdvice: String? = null,
     @SerializedName("nextRunSuggestion") val nextRunSuggestion: String? = null,
+    @SerializedName("nextWorkoutCoaching") val nextWorkoutCoaching: NextWorkoutCoaching? = null,
     @SerializedName("wellnessImpact") val wellnessImpact: String? = null,
     @SerializedName("weatherImpact") val weatherImpact: String? = null,
     @SerializedName("technicalAnalysis") val technicalAnalysis: TechnicalAnalysis? = null,
