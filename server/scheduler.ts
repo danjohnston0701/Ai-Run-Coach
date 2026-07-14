@@ -7,7 +7,7 @@ import { db } from './db';
 import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '@shared/schema';
 import { eq, and, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from './session-enrichment-service';
+import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek, correctImplausibleHRZoneBPMs } from './session-enrichment-service';
 
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
 // Stores the reminder send timestamp so we don't send twice in the same calendar day for a user
@@ -315,7 +315,34 @@ export function startScheduler(): void {
     }
   });
   console.log('[Scheduler] Session enrichment scheduled (daily at 6 AM UTC)');
-  
+
+  // BPM self-healing — corrects physiologically implausible HR zone BPMs on existing plans.
+  // Runs daily at 6:10 AM UTC (10 min after enrichment, giving it time to finish).
+  // Fixes sessions where GPT estimated wrong BPMs before the Tanaka enforcement was in place.
+  cron.schedule('10 6 * * *', async () => {
+    try {
+      const result = await correctImplausibleHRZoneBPMs();
+      if (result.corrected > 0) {
+        console.log(`[Scheduler] BPM self-heal: corrected ${result.corrected} workout(s)`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] BPM self-heal error:', err);
+    }
+  });
+  console.log('[Scheduler] BPM self-healing scheduled (daily at 6:10 AM UTC)');
+
+  // Run BPM self-heal once on startup to fix any existing wrong values immediately
+  setImmediate(async () => {
+    try {
+      const result = await correctImplausibleHRZoneBPMs();
+      if (result.corrected > 0) {
+        console.log(`[Scheduler] BPM self-heal on startup: corrected ${result.corrected} workout(s)`);
+      }
+    } catch (err) {
+      console.warn('[Scheduler] BPM self-heal startup error (non-blocking):', err);
+    }
+  });
+
   // Webhook failure queue processor (⚡ Optimized: 5m → 30m, still robust for retries)
   cron.schedule('*/30 * * * *', () => {
     console.log('[Scheduler] Running webhook failure queue processor...');

@@ -352,25 +352,23 @@ fun WorkoutDetailScreen(
                                 Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
                             }
 
-                            // Heart rate range — validate stored BPMs against the zone number before
-                            // displaying. Stored values can be wrong if enrichment assigned Zone 3 BPMs
-                            // to a Zone 2 session. If they're outside the correct zone range, fall back
-                            // to the Tanaka-formula zone range which is always physiologically correct.
-                            Spacer(modifier = Modifier.height(Spacing.sm))
-                            Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                            // Heart rate range — show stored BPMs from the server (server enforces
+                            // Tanaka zone ranges via enrichment). Only fall back to client-side
+                            // computation if the stored values are missing or clearly invalid.
                             val hrMin = workout.hrZoneMinBpm
                             val hrMax = workout.hrZoneMaxBpm
-                            val correctZoneRange = HeartRateZones.getTargetHRRange(zoneNumber, userMaxHR)
-                            // BPMs are valid if they sit within ±20 bpm of the Tanaka-computed zone range.
-                            val bpmsLookCorrect = hrMin != null && hrMax != null &&
-                                hrMin >= (correctZoneRange.first - 20) &&
-                                hrMax <= (correctZoneRange.last + 20) &&
-                                hrMin < hrMax
-                            if (bpmsLookCorrect) {
+                            val storedBpmsValid = hrMin != null && hrMax != null &&
+                                hrMin > 50 && hrMax < 230 && hrMin < hrMax
+                            if (storedBpmsValid) {
+                                Spacer(modifier = Modifier.height(Spacing.sm))
+                                Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                                 Text("Keep your HR between $hrMin and $hrMax bpm", style = AppTextStyles.small, color = Colors.textSecondary)
-                            } else {
-                                // Fall back to Tanaka-computed zone range — always physiologically correct
-                                Text("Keep your HR between ${correctZoneRange.first} and ${correctZoneRange.last} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
+                            } else if (userMaxHR > 0) {
+                                // Only show client-side fallback when stored values are truly missing
+                                val fallbackRange = HeartRateZones.getTargetHRRange(zoneNumber, userMaxHR)
+                                Spacer(modifier = Modifier.height(Spacing.sm))
+                                Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                                Text("Keep your HR between ${fallbackRange.first} and ${fallbackRange.last} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
                             }
                             
                             Spacer(modifier = Modifier.height(Spacing.sm))

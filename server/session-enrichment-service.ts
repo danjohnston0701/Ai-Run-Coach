@@ -184,9 +184,11 @@ export async function enrichWorkoutBlock(
     .limit(60);
 
   // ── Estimate max HR and build zone-pace correlation ──────────────────────────
-  const hasDOB = !!user.dateOfBirth;
+  // NOTE: The schema column is `dob` (not `dateOfBirth`). Must read the correct field.
+  const dobValue = (user as any).dob ?? (user as any).dateOfBirth ?? null;
+  const hasDOB = !!dobValue;
   const userAge = hasDOB
-    ? Math.floor((Date.now() - new Date(user.dateOfBirth as string).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+    ? Math.floor((Date.now() - new Date(dobValue as string).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
     : (user as any).age ?? 35;
 
   const { maxHR, source: maxHRSource } = estimateMaxHR(recentRuns, userAge);
@@ -198,7 +200,9 @@ export async function enrichWorkoutBlock(
   // Tier 2: Tanaka formula from DOB (physiologically grounded)
   // Tier 3: Estimate from fitness level only (least accurate — last resort)
   type HRTier = 1 | 2 | 3;
-  const hrTier: HRTier = zonePaceData.hasRealData ? 1 : hasDOB ? 2 : 3;
+  // Age is valid if it falls within 14–90 — guards against Unix timestamp / parse errors
+  const ageIsValid = userAge >= 14 && userAge <= 90;
+  const hrTier: HRTier = zonePaceData.hasRealData ? 1 : (hasDOB && ageIsValid) ? 2 : 3;
 
   // For Tier 2 — pre-compute all zone BPM ranges from Tanaka formula server-side.
   // These are passed explicitly to GPT so it doesn't guess. GPT decides WHICH zone
@@ -627,4 +631,105 @@ export async function markPlanEnrichedThroughWeek(
     .update(trainingPlans)
     .set({ enrichedThroughWeek: throughWeek })
     .where(eq(trainingPlans.id, planId));
+}
+
+/**
+ * Self-healing BPM correction.
+ *
+ * Scans all upcoming incomplete planned workouts and corrects any stored
+ * hrZoneMinBpm/hrZoneMaxBpm values that fall outside the physiologically
+ * expected Tanaka zone range for the assigned zone number.
+ *
+ * This runs daily via the scheduler and handles:
+ *  - Plans enriched before the DOB field-name bug was fixed (enriched with
+ *    GPT-guessed BPMs instead of Tanaka values)
+ *  - Any future drift where stored values diverge from the formula
+ *
+ * Only corrects workouts where:
+ *  - A hrZoneNumber is set (we know what zone it should be)
+ *  - The user's DOB is known (we can compute the correct range)
+ *  - The stored BPMs deviate by more than 15 bpm from the Tanaka range
+ */
+export async function correctImplausibleHRZoneBPMs(): Promise<{ corrected: number }> {
+  let corrected = 0;
+
+  // Find all upcoming incomplete workouts that have a zone number but suspicious BPMs
+  const workoutsToCheck = await db
+    .select({
+      id: plannedWorkouts.id,
+      trainingPlanId: plannedWorkouts.trainingPlanId,
+      hrZoneNumber: plannedWorkouts.hrZoneNumber,
+      hrZoneMinBpm: plannedWorkouts.hrZoneMinBpm,
+      hrZoneMaxBpm: plannedWorkouts.hrZoneMaxBpm,
+    })
+    .from(plannedWorkouts)
+    .where(
+      and(
+        eq(plannedWorkouts.isCompleted, false),
+        isNotNull(plannedWorkouts.hrZoneNumber),
+      )
+    )
+    .limit(500);
+
+  if (workoutsToCheck.length === 0) return { corrected: 0 };
+
+  // Group by trainingPlanId to minimise user lookups
+  const planIds = [...new Set(workoutsToCheck.map(w => w.trainingPlanId))];
+  const planUsers = await db
+    .select({ id: trainingPlans.id, userId: trainingPlans.userId })
+    .from(trainingPlans)
+    .where(inArray(trainingPlans.id, planIds));
+
+  const userIds = [...new Set(planUsers.map(p => p.userId))];
+  const usersData = await db
+    .select({ id: users.id, dob: users.dob } as any)
+    .from(users)
+    .where(inArray(users.id, userIds));
+
+  const userMap = new Map(usersData.map((u: any) => [u.id, u]));
+  const planUserMap = new Map(planUsers.map(p => [p.id, p.userId]));
+
+  const updates: Array<{ id: string; minBpm: number; maxBpm: number }> = [];
+
+  for (const workout of workoutsToCheck) {
+    const userId = planUserMap.get(workout.trainingPlanId);
+    const user = userId ? userMap.get(userId) : null;
+    if (!user?.dob) continue; // No DOB → can't compute Tanaka
+
+    const dobValue = user.dob as string;
+    const age = Math.floor((Date.now() - new Date(dobValue).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+    if (age < 14 || age > 90) continue; // Implausible age → skip
+
+    const maxHR = Math.round(208 - 0.7 * age);
+    const zoneNum = workout.hrZoneNumber!;
+    if (zoneNum < 1 || zoneNum > 5) continue;
+
+    const correctRange = HeartRateZones.getZoneRange(zoneNum, maxHR);
+    const correctMin = Math.round(correctRange.min);
+    const correctMax = Math.round(correctRange.max);
+
+    const storedMin = workout.hrZoneMinBpm;
+    const storedMax = workout.hrZoneMaxBpm;
+
+    // Only correct if stored values deviate by more than 15 bpm from the correct range
+    const minDeviation = storedMin !== null ? Math.abs(storedMin - correctMin) : 999;
+    const maxDeviation = storedMax !== null ? Math.abs(storedMax - correctMax) : 999;
+
+    if (minDeviation > 15 || maxDeviation > 15) {
+      updates.push({ id: workout.id, minBpm: correctMin, maxBpm: correctMax });
+    }
+  }
+
+  for (const update of updates) {
+    await db
+      .update(plannedWorkouts)
+      .set({ hrZoneMinBpm: update.minBpm, hrZoneMaxBpm: update.maxBpm })
+      .where(eq(plannedWorkouts.id, update.id));
+    corrected++;
+  }
+
+  if (corrected > 0) {
+    console.log(`[BPM Self-Heal] Corrected ${corrected} workout(s) with physiologically implausible HR zone BPMs`);
+  }
+  return { corrected };
 }
