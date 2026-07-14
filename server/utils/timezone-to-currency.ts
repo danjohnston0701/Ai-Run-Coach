@@ -34,9 +34,23 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
     // Chile
     if (tz.includes("santiago")) return "CLP";
     
-    // Peru/Bolivia
-    if (tz.includes("lima") || tz.includes("la_paz")) return "PEN";
+    // Peru
+    if (tz.includes("lima")) return "PEN";
     
+    // Bolivia
+    if (tz.includes("la_paz")) return "BOB";
+    
+    // Costa Rica
+    if (tz.includes("costa_rica")) return "CRC";
+    
+    // Guatemala, Honduras, El Salvador, Nicaragua, Panama (mostly USD already)
+    // Paraguay
+    if (tz.includes("asuncion")) return "PYG";
+    
+    // Uruguay
+    if (tz.includes("montevideo")) return "UYU";
+    
+    // Ecuador (uses USD)
     // Default US/USA
     return "USD";
   }
@@ -157,6 +171,16 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
     // LKR (Sri Lanka)
     if (tz.includes("colombo")) return "LKR";
 
+    // MMK (Myanmar/Burma)
+    if (tz.includes("yangon") || tz.includes("rangoon")) return "MMK";
+
+    // KZT (Kazakhstan)
+    if (tz.includes("almaty") || tz.includes("astana") || tz.includes("akmola")) return "KZT";
+
+    // KGZ (Kyrgyzstan) — mostly USD
+    // TJK (Tajikistan) — mostly USD
+    // UZB (Uzbekistan) — mostly USD
+
     // AED (UAE)
     if (tz.includes("dubai")) return "AED";
 
@@ -198,6 +222,18 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
     
     // GHS (Ghana)
     if (tz.includes("accra")) return "GHS";
+
+    // TZS (Tanzania)
+    if (tz.includes("dar_es_salaam")) return "TZS";
+
+    // XOF (West African CFA Franc) — Côte d'Ivoire, Senegal, Burkina Faso, Mali, Benin, etc.
+    if (tz.includes("abidjan") || tz.includes("dakar") || tz.includes("ouagadougou") || tz.includes("bamako") || tz.includes("cotonou")) return "XOF";
+
+    // XAF (Central African CFA Franc) — Cameroon, Chad, etc.
+    if (tz.includes("douala") || tz.includes("n_djamena")) return "XAF";
+
+    // MAD (Morocco)
+    if (tz.includes("casablanca")) return "MAD";
     
     // Default USD for most African countries
     return "USD";
@@ -232,6 +268,10 @@ export const SUPPORTED_CURRENCIES = [
   { code: "COP", symbol: "CO$", name: "Colombian Peso" },
   { code: "CLP", symbol: "CLP", name: "Chilean Peso" },
   { code: "PEN", symbol: "S/", name: "Peruvian Nuevo Sol" },
+  { code: "BOB", symbol: "Bs.", name: "Bolivian Boliviano" },
+  { code: "CRC", symbol: "₡", name: "Costa Rican Colón" },
+  { code: "PYG", symbol: "Gs", name: "Paraguayan Guaraní" },
+  { code: "UYU", symbol: "$U", name: "Uruguayan Peso" },
 
   // Europe
   { code: "EUR", symbol: "€", name: "Euro" },
@@ -265,9 +305,17 @@ export const SUPPORTED_CURRENCIES = [
   { code: "VND", symbol: "₫", name: "Vietnamese Dong" },
   { code: "PKR", symbol: "₨", name: "Pakistani Rupee" },
   { code: "LKR", symbol: "Rs", name: "Sri Lankan Rupee" },
+  { code: "MMK", symbol: "Ks", name: "Myanmar Kyat" },
+  { code: "KZT", symbol: "₸", name: "Kazakhstani Tenge" },
   { code: "AED", symbol: "د.إ", name: "UAE Dirham" },
   { code: "SAR", symbol: "﷼", name: "Saudi Riyal" },
   { code: "ILS", symbol: "₪", name: "Israeli Shekel" },
+  { code: "JOD", symbol: "د.ا", name: "Jordanian Dinar" },
+  { code: "IQD", symbol: "ع.د", name: "Iraqi Dinar" },
+  { code: "QAR", symbol: "ر.ق", name: "Qatari Riyal" },
+  { code: "MOP", symbol: "P", name: "Macanese Pataca" },
+  { code: "MNT", symbol: "₮", name: "Mongolian Tugrik" },
+  { code: "GEL", symbol: "��", name: "Georgian Lari" },
 
   // Pacific & Oceania
   { code: "AUD", symbol: "A$", name: "Australian Dollar" },
@@ -280,6 +328,10 @@ export const SUPPORTED_CURRENCIES = [
   { code: "NGN", symbol: "₦", name: "Nigerian Naira" },
   { code: "KES", symbol: "KSh", name: "Kenyan Shilling" },
   { code: "GHS", symbol: "₵", name: "Ghanaian Cedi" },
+  { code: "TZS", symbol: "TSh", name: "Tanzanian Shilling" },
+  { code: "MAD", symbol: "د.م.", name: "Moroccan Dirham" },
+  { code: "XOF", symbol: "CFA", name: "West African CFA Franc" },
+  { code: "XAF", symbol: "CFA", name: "Central African CFA Franc" },
 
   // Indian Ocean
   { code: "MUR", symbol: "₨", name: "Mauritian Rupee" },

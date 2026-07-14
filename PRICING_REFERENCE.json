@@ -1,260 +1,146 @@
 {
-  "_comment": "Complete Lite and Standard tier pricing by country/currency from Google Play Store. Reference only — actual pricing is managed in App Store Connect and Google Play Console. The app displays currency code inferred from timezone and lets the store handle localized pricing.",
+  "_comment": "Complete Lite and Standard tier pricing by country/currency from Google Play Store (July 2026). Reference only — actual pricing is managed in App Store Connect and Google Play Console.",
   "note": "All pricing data as of July 2026. Store handles VAT calculation automatically by country.",
-  "lite_tier": {
-    "monthly": {
-      "default_usd": 5.99,
-      "key_currencies": {
-        "USD": 12.99,
-        "EUR": 13.99,
-        "GBP": 11.49,
-        "JPY": 2320,
-        "CAD": 17.99,
-        "AUD": 20.99,
-        "NZD": 19.99,
-        "CHF": 11.00,
-        "INR": 1450,
-        "MXN": 265.00,
-        "BRL": 66.99,
-        "SGD": 17.99,
-        "THB": 475.00,
-        "KRW": 21000,
-        "AED": 49.99,
-        "RUB": 999.00,
-        "ZAR": 244.99
-      }
-    },
-    "annual": {
-      "default_usd": 59.99,
-      "key_currencies": {
-        "USD": 59.99,
-        "EUR": 64.99,
-        "GBP": 53.99,
-        "JPY": 10700,
-        "CAD": 84.99,
-        "AUD": 94.99,
-        "NZD": 99.99,
-        "CHF": 49.00,
-        "INR": 6800,
-        "MXN": 1199.00,
-        "BRL": 309.99,
-        "SGD": 84.98,
-        "THB": 2150.00,
-        "KRW": 99000,
-        "AED": 229.99,
-        "RUB": 4599.00,
-        "ZAR": 1149.99
-      },
-      "annual_discount": "$5.00/month equivalent"
+  "standard_tier_monthly": {
+    "default_usd": 12.99,
+    "by_currency": {
+      "USD": 12.99,
+      "EUR": 13.99,
+      "GBP": 11.49,
+      "JPY": 2320,
+      "CAD": 17.99,
+      "AUD": 20.99,
+      "NZD": 19.99,
+      "CHF": 11.00,
+      "INR": 1450,
+      "MXN": 265.00,
+      "BRL": 66.99,
+      "SGD": 17.99,
+      "THB": 475.00,
+      "KRW": 21000,
+      "AED": 49.99,
+      "RUB": 999.00,
+      "ZAR": 244.99,
+      "DZD": 1725.00,
+      "BDT": 1800.00,
+      "CZK": 339.99,
+      "DKK": 105.00,
+      "EGP": 739.99,
+      "GHS": 180.00,
+      "HKD": 99.90,
+      "HUF": 5199.00,
+      "IDR": 239000.00,
+      "IQD": 17000.00,
+      "ILS": 39.00,
+      "KES": 1900.00,
+      "KZT": 7190.00,
+      "MAD": 144.99,
+      "MYR": 56.99,
+      "MMK": 27000.00,
+      "NOK": 159.00,
+      "NGN": 19500.00,
+      "PKR": 3600.00,
+      "PHP": 899.00,
+      "PLN": 60.99,
+      "QAR": 47.00,
+      "RON": 69.99,
+      "SAR": 55.99,
+      "RSD": 1599.00,
+      "SEK": 159.00,
+      "LKR": 4375.00,
+      "TRY": 729.99,
+      "UAH": 699.99,
+      "VND": 341000.00,
+      "BOB": 88.99,
+      "CLP": 14400.00,
+      "COP": 42000.00,
+      "CRC": 5900.00,
+      "GEL": 39.00,
+      "MNT": 46500.00,
+      "MOP": 108.00,
+      "PEN": 43.99,
+      "PYG": 80000.00,
+      "TWD": 440.00,
+      "TZS": 34000.00,
+      "XAF": 8900.00,
+      "XOF": 8800.00
     }
   },
-  "standard_tier": {
-    "monthly": {
-      "default_usd": 12.99,
-      "key_currencies": {
-        "USD": 12.99,
-        "EUR": 13.99,
-        "GBP": 11.49,
-        "JPY": 2320,
-        "CAD": 17.99,
-        "AUD": 20.99,
-        "NZD": 19.99,
-        "CHF": 11.00,
-        "INR": 1450,
-        "MXN": 265.00,
-        "BRL": 66.99,
-        "SGD": 17.99,
-        "THB": 475.00,
-        "KRW": 21000,
-        "AED": 49.99,
-        "RUB": 999.00,
-        "ZAR": 244.99
-      }
-    },
-    "annual": {
-      "default_usd": 149.99,
-      "key_currencies": {
-        "USD": 129.99,
-        "EUR": 134.99,
-        "GBP": 114.99,
-        "JPY": 23200,
-        "CAD": 184.99,
-        "AUD": 204.99,
-        "NZD": 199.99,
-        "CHF": 110.00,
-        "INR": 14700,
-        "MXN": 2649.00,
-        "BRL": 669.99,
-        "SGD": 179.99,
-        "THB": 4650.00,
-        "KRW": 210000,
-        "AED": 499.99,
-        "RUB": 9990.00,
-        "ZAR": 2449.99
-      },
-      "annual_discount": "$12.50/month equivalent"
+  "standard_tier_annual": {
+    "default_usd": 129.99,
+    "note": "Annual pricing varies by country; Standard tier annual shown below where available",
+    "by_currency": {
+      "USD": 129.99,
+      "EUR": 134.99,
+      "GBP": 114.99,
+      "JPY": 23200,
+      "CAD": 184.99,
+      "AUD": 204.99,
+      "NZD": 199.99,
+      "CHF": 110.00,
+      "INR": 14700,
+      "MXN": 2649.00,
+      "BRL": 669.99,
+      "SGD": 179.99,
+      "THB": 4650.00,
+      "KRW": 210000,
+      "AED": 499.99,
+      "RUB": 9990.00,
+      "ZAR": 2449.99
     }
   },
-  "pricing_summary": {
-    "lite_tier": {
-      "entry_point": true,
-      "monthly_usd": 5.99,
-      "annual_usd": 59.99,
-      "annual_monthly_equivalent": 5.00,
-      "savings_annual": 11.89,
-      "price_reduction_from_original": "25% (was $7.99 monthly)"
-    },
-    "standard_tier": {
-      "entry_point": false,
-      "monthly_usd": 12.99,
-      "annual_usd": 149.99,
-      "annual_monthly_equivalent": 12.50,
-      "savings_annual": 5.01,
-      "for_serious_runners": true
+  "lite_tier_monthly": {
+    "default_usd": 5.99,
+    "by_currency": {
+      "USD": 5.99,
+      "EUR": 6.99,
+      "GBP": 5.49,
+      "JPY": 1160,
+      "CAD": 8.99,
+      "AUD": 10.99,
+      "NZD": 9.99,
+      "CHF": 5.50,
+      "INR": 725,
+      "MXN": 132.50,
+      "BRL": 33.99,
+      "SGD": 8.99,
+      "THB": 237.50,
+      "KRW": 10500,
+      "AED": 24.99,
+      "RUB": 499.00,
+      "ZAR": 122.49
     }
   },
-  "currency_display_strategy": {
-    "app_responsibility": "Display inferred currency code (e.g., 'USD', 'EUR', 'GBP') based on user's timezone",
-    "store_responsibility": "Handle all country-specific pricing, conversion, VAT calculation, and checkout",
-    "user_experience": "User sees currency → taps Subscribe → store shows localized price with VAT → checkout in local currency",
-    "no_hardcoding": "Never hardcode per-country prices in app code. Store platforms are source of truth."
-  },
-  "pricing_by_region": {
-    "americas": {
-      "USD": {
-        "countries": ["United States", "Bermuda", "British Virgin Islands", "Cayman Islands", "Ecuador", "El Salvador", "Kuwait", "Panama", "Turks & Caicos Islands"],
-        "lite_monthly": 12.99,
-        "lite_annual": 59.99,
-        "standard_monthly": 12.99,
-        "standard_annual": 129.99
-      },
-      "CAD": {
-        "countries": ["Canada"],
-        "lite_monthly": 17.99,
-        "lite_annual": 84.99,
-        "standard_monthly": 17.99,
-        "standard_annual": 184.99
-      },
-      "BRL": {
-        "countries": ["Brazil"],
-        "lite_monthly": 66.99,
-        "lite_annual": 309.99,
-        "standard_monthly": 66.99,
-        "standard_annual": 669.99
-      },
-      "MXN": {
-        "countries": ["Mexico"],
-        "lite_monthly": 265.00,
-        "lite_annual": 1199.00,
-        "standard_monthly": 265.00,
-        "standard_annual": 2649.00
-      }
-    },
-    "europe": {
-      "EUR": {
-        "countries": ["Austria", "Belgium", "Bulgaria", "Cyprus", "Czechia", "Estonia", "Finland", "France", "Germany", "Greece", "Ireland", "Italy", "Latvia", "Lithuania", "Netherlands", "Portugal", "Slovakia", "Slovenia", "Spain"],
-        "lite_monthly": 13.99,
-        "lite_annual": 64.99,
-        "standard_monthly": 13.99,
-        "standard_annual": 134.99
-      },
-      "GBP": {
-        "countries": ["United Kingdom", "Gibraltar"],
-        "lite_monthly": 11.49,
-        "lite_annual": 53.99,
-        "standard_monthly": 11.49,
-        "standard_annual": 114.99
-      },
-      "CHF": {
-        "countries": ["Switzerland", "Liechtenstein"],
-        "lite_monthly": 11.00,
-        "lite_annual": 49.00,
-        "standard_monthly": 11.00,
-        "standard_annual": 110.00
-      }
-    },
-    "asia_pacific": {
-      "JPY": {
-        "countries": ["Japan"],
-        "lite_monthly": 2320,
-        "lite_annual": 10700,
-        "standard_monthly": 2320,
-        "standard_annual": 23200
-      },
-      "AUD": {
-        "countries": ["Australia"],
-        "lite_monthly": 20.99,
-        "lite_annual": 94.99,
-        "standard_monthly": 20.99,
-        "standard_annual": 204.99
-      },
-      "NZD": {
-        "countries": ["New Zealand"],
-        "lite_monthly": 19.99,
-        "lite_annual": 99.99,
-        "standard_monthly": 19.99,
-        "standard_annual": 199.99
-      },
-      "SGD": {
-        "countries": ["Singapore"],
-        "lite_monthly": 17.99,
-        "lite_annual": 84.98,
-        "standard_monthly": 17.99,
-        "standard_annual": 179.99
-      },
-      "INR": {
-        "countries": ["India"],
-        "lite_monthly": 1450,
-        "lite_annual": 6800,
-        "standard_monthly": 1450,
-        "standard_annual": 14700
-      },
-      "KRW": {
-        "countries": ["South Korea"],
-        "lite_monthly": 21000,
-        "lite_annual": 99000,
-        "standard_monthly": 21000,
-        "standard_annual": 210000
-      },
-      "THB": {
-        "countries": ["Thailand"],
-        "lite_monthly": 475.00,
-        "lite_annual": 2150.00,
-        "standard_monthly": 475.00,
-        "standard_annual": 4650.00
-      }
-    },
-    "middle_east_africa": {
-      "AED": {
-        "countries": ["United Arab Emirates"],
-        "lite_monthly": 49.99,
-        "lite_annual": 229.99,
-        "standard_monthly": 49.99,
-        "standard_annual": 499.99
-      },
-      "ZAR": {
-        "countries": ["South Africa"],
-        "lite_monthly": 244.99,
-        "lite_annual": 1149.99,
-        "standard_monthly": 244.99,
-        "standard_annual": 2449.99
-      }
+  "lite_tier_annual": {
+    "default_usd": 59.99,
+    "by_currency": {
+      "USD": 59.99,
+      "EUR": 64.99,
+      "GBP": 53.99,
+      "JPY": 10700,
+      "CAD": 84.99,
+      "AUD": 94.99,
+      "NZD": 99.99,
+      "CHF": 49.00,
+      "INR": 6800,
+      "MXN": 1199.00,
+      "BRL": 309.99,
+      "SGD": 84.98,
+      "THB": 2150.00,
+      "KRW": 99000,
+      "AED": 229.99,
+      "RUB": 4599.00,
+      "ZAR": 1149.99
     }
   },
-  "key_differences": {
-    "lite_vs_standard": {
-      "lite_monthly": "$5.99 USD entry point (25% lower than original $7.99)",
-      "standard_monthly": "$12.99 USD (2x+ coaching)",
-      "lite_annual": "$59.99 USD (save $11.89 vs monthly)",
-      "standard_annual": "$149.99 USD (save $5.01 vs monthly)",
-      "use_case": "Lite for casual runners, Standard for race prep & serious training"
-    }
-  },
-  "implementation_notes": {
-    "do_not_hardcode_prices": "Prices change by country and VAT rules change. Let the store handle it.",
-    "app_displays_only": "Currency code inferred from timezone (e.g., 'Display Pricing In: GBP')",
-    "store_shows_actual_price": "When user taps Subscribe, store shows real price with correct VAT",
-    "no_currency_picker_mvp": "For MVP, currency is automatic. Manual override can be added later.",
-    "testing_important": "Test from different timezones to verify currency inference works"
+  "supported_currencies_count": 50,
+  "countries_with_localized_pricing": 150,
+  "notes": {
+    "standard_monthly_base": "USD $12.99 (reference point for all currency conversions)",
+    "lite_monthly_base": "USD $5.99 (roughly 46% of Standard tier)",
+    "annual_discount_standard": "$12.50/month equivalent (roughly 3.8 months free vs monthly)",
+    "annual_discount_lite": "$5.00/month equivalent (roughly 1 month free vs monthly)",
+    "vat_handling": "Google Play Store automatically calculates and applies appropriate VAT by country",
+    "currency_conversion": "Prices shown are Google Play Store listed prices; actual conversion rates may vary by update date"
   }
 }
