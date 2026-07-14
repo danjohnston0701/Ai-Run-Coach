@@ -1503,31 +1503,34 @@ App capabilities available in every session: real-time GPS pace/distance, live a
     console.log(`✅ Generated ${isRollingPlan ? `block 1 (weeks 1-${weeksToGenerate}) of ${weeksUntilTarget}` : `${weeksUntilTarget}`}-week training plan for user ${userId} (${pendingSessionInstructions.length} workouts queued for coaching instructions)${nextBlockAt ? `, next block scheduled at ${nextBlockAt.toDateString()}` : ''}`);
 
     // ── Enrichment: add runner-specific numeric targets to the first 2 weeks ──
-    // For returning users (any run history): enrich immediately — even without HR data the
-    // enrichment service uses their pace history + fitness level for reasonable estimates.
-    // For new users (no runs at all): weeks 1-2 stay with placeholders until orientation completes.
-    setImmediate(async () => {
-      try {
-        if (hasRunHistory) {
-          // Returning user — enrich weeks 1-2 immediately using available data
-          console.log(`[Plan] Enriching weeks 1-2 for returning user ${userId} (HR data: ${hasHRHistory ? 'yes' : 'no — pace-only estimate'}`);
-          const workoutIdsToEnrich = await getWorkoutIdsForPlanWeeks(planId, [1, 2]);
-          if (workoutIdsToEnrich.length > 0) {
-            await enrichWorkoutBlock(userId, workoutIdsToEnrich);
-            await markPlanEnrichedThroughWeek(planId, 2);
-            console.log(`[Plan] ✅ Weeks 1-2 enriched for plan ${planId}`);
-          }
-        } else {
-          // New user — mark plan as using enrichment architecture with week 0 (nothing enriched yet)
-          // Enrichment will fire after orientation session completes
-          await markPlanEnrichedThroughWeek(planId, 0);
-          console.log(`[Plan] New user ${userId} — enrichment will fire after orientation session completes`);
+    // IMPORTANT: Enrichment is run SYNCHRONOUSLY (awaited) before returning the planId.
+    // This ensures the plan is fully enriched with correct paces and HR zones BEFORE
+    // the API response is sent and the user sees the plan. Running it async caused users
+    // to see incorrect/placeholder values if they opened a session too quickly.
+    //
+    // For new users (no runs at all): weeks 1-2 stay with placeholders — enrichment fires
+    // after the orientation session completes (no data to enrich from yet).
+    try {
+      if (hasRunHistory) {
+        // Returning user — enrich weeks 1-2 synchronously before returning
+        console.log(`[Plan] Enriching weeks 1-2 synchronously for returning user ${userId} (HR data: ${hasHRHistory ? 'yes' : 'no — pace-only estimate'})`);
+        const workoutIdsToEnrich = await getWorkoutIdsForPlanWeeks(planId, [1, 2]);
+        if (workoutIdsToEnrich.length > 0) {
+          await enrichWorkoutBlock(userId, workoutIdsToEnrich);
+          await markPlanEnrichedThroughWeek(planId, 2);
+          console.log(`[Plan] ✅ Weeks 1-2 enriched (synchronous) for plan ${planId}`);
         }
-      } catch (enrichErr) {
-        console.error(`[Plan] Enrichment failed for plan ${planId}:`, enrichErr);
-        // Non-fatal — plan is still usable, just without numeric targets until enrichment retries
+      } else {
+        // New user — mark plan as using enrichment architecture with week 0 (nothing enriched yet)
+        // Enrichment will fire after orientation session completes
+        await markPlanEnrichedThroughWeek(planId, 0);
+        console.log(`[Plan] New user ${userId} — enrichment will fire after orientation session completes`);
       }
-    });
+    } catch (enrichErr) {
+      console.error(`[Plan] Enrichment failed for plan ${planId}:`, enrichErr);
+      // Non-fatal — plan is still usable with Tanaka-computed BPMs from plan generation,
+      // just without the pace-history-calibrated targets. Self-healing job will retry.
+    }
 
     // Fire-and-forget: generate session instructions in the background.
     // For enriched workouts this will be re-run after enrichment completes with better data.
@@ -1806,23 +1809,23 @@ STRUCTURAL CONSTRAINTS:
 
   console.log(`✅ [NextBlock] Generated block ${blockNumber} (weeks ${nextBlockStart}–${nextBlockEnd}) for plan ${planId}. Next block at: ${newNextBlockAt?.toDateString() ?? 'N/A (plan complete)'}`);
 
-  // Enrich the newly generated block immediately — user shouldn't wait for the daily scheduler job
-  setImmediate(async () => {
-    try {
-      console.log(`[NextBlock] Enriching weeks ${nextBlockStart}–${nextBlockEnd} for plan ${planId}`);
-      const weekNumbers: number[] = [];
-      for (let w = nextBlockStart; w <= nextBlockEnd; w++) weekNumbers.push(w);
-      const workoutIds = await getWorkoutIdsForPlanWeeks(planId, weekNumbers);
-      if (workoutIds.length > 0) {
-        await enrichWorkoutBlock(userId, workoutIds);
-        await markPlanEnrichedThroughWeek(planId, nextBlockEnd);
-        console.log(`[NextBlock] ✅ Enriched weeks ${nextBlockStart}–${nextBlockEnd} for plan ${planId}`);
-      }
-    } catch (err) {
-      console.error(`[NextBlock] Enrichment failed for weeks ${nextBlockStart}–${nextBlockEnd}:`, err);
-      // Non-fatal — scheduler will retry tomorrow
+  // Enrich the newly generated block synchronously before the function returns.
+  // The caller (next-block API route) awaits this function, so enrichment completes
+  // before the 200 response is sent and the app refreshes the plan display.
+  try {
+    console.log(`[NextBlock] Enriching weeks ${nextBlockStart}–${nextBlockEnd} synchronously for plan ${planId}`);
+    const weekNumbers: number[] = [];
+    for (let w = nextBlockStart; w <= nextBlockEnd; w++) weekNumbers.push(w);
+    const workoutIds = await getWorkoutIdsForPlanWeeks(planId, weekNumbers);
+    if (workoutIds.length > 0) {
+      await enrichWorkoutBlock(userId, workoutIds);
+      await markPlanEnrichedThroughWeek(planId, nextBlockEnd);
+      console.log(`[NextBlock] ✅ Enriched weeks ${nextBlockStart}–${nextBlockEnd} (synchronous) for plan ${planId}`);
     }
-  });
+  } catch (err) {
+    console.error(`[NextBlock] Enrichment failed for weeks ${nextBlockStart}–${nextBlockEnd}:`, err);
+    // Non-fatal — self-healing BPM job + daily scheduler will correct remaining issues
+  }
 
   // Background session instruction generation (enrichment regen fires after enrichment completes)
   setImmediate(() => {
