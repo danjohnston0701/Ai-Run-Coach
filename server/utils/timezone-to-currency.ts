@@ -28,6 +28,15 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
     // GBP countries
     if (tz.includes("london")) return "GBP";
 
+    // CHF (Switzerland)
+    if (tz.includes("zurich")) return "CHF";
+
+    // HUF (Hungary)
+    if (tz.includes("budapest")) return "HUF";
+
+    // Russia/Eastern Europe
+    if (tz.includes("moscow")) return "RUB";
+
     // EUR countries (majority of Europe)
     if (
       tz.includes("paris") ||
@@ -47,14 +56,8 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
       return "EUR";
     }
 
-    // CHF (Switzerland)
-    if (tz.includes("zurich")) return "CHF";
-
     // Scandinavia
     if (tz.includes("oslo") || tz.includes("stockholm") || tz.includes("copenhagen")) return "EUR"; // Most use EUR (Sweden, Norway, Denmark)
-
-    // Russia/Eastern Europe
-    if (tz.includes("moscow")) return "RUB";
 
     // Default EUR for other European zones
     return "EUR";
@@ -106,13 +109,14 @@ export const SUPPORTED_CURRENCIES = [
   { code: "JPY", symbol: "¥", name: "Japanese Yen" },
   { code: "CAD", symbol: "CA$", name: "Canadian Dollar" },
   { code: "AUD", symbol: "A$", name: "Australian Dollar" },
+  { code: "NZD", symbol: "NZ$", name: "New Zealand Dollar" },
   { code: "CHF", symbol: "CHF", name: "Swiss Franc" },
+  { code: "HUF", symbol: "Ft", name: "Hungarian Forint" },
   { code: "CNY", symbol: "¥", name: "Chinese Yuan" },
   { code: "INR", symbol: "₹", name: "Indian Rupee" },
   { code: "MXN", symbol: "Mex$", name: "Mexican Peso" },
   { code: "BRL", symbol: "R$", name: "Brazilian Real" },
   { code: "SGD", symbol: "S$", name: "Singapore Dollar" },
-  { code: "NZD", symbol: "NZ$", name: "New Zealand Dollar" },
   { code: "THB", symbol: "฿", name: "Thai Baht" },
   { code: "KRW", symbol: "₩", name: "South Korean Won" },
   { code: "AED", symbol: "د.إ", name: "UAE Dirham" },
