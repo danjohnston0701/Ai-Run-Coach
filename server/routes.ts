@@ -524,8 +524,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Set default currency from timezone if not already set (for localized pricing display)
-      if (timezone && !user.currency) {
+      // Set/update currency from timezone on every login.
+      // We always infer and update so users who moved country get the right currency,
+      // and so new users with the default "USD" get corrected immediately.
+      if (timezone) {
         try {
           const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
           const inferredCurrency = inferCurrencyFromTimezone(timezone);
