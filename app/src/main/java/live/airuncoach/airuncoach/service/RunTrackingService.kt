@@ -3398,7 +3398,7 @@ class RunTrackingService : Service(), SensorEventListener {
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
             startTime = runSession.startTime,
-            distance = runSession.distance,
+            distance = runSession.distance / 1000.0, // Convert meters to km
             duration = runSession.duration,
             avgPace = runSession.averagePace ?: "0:00",
             avgHeartRate = computedAvgHR,
