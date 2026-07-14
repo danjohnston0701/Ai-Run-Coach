@@ -77,6 +77,12 @@ export const users = pgTable("users", {
   emailVerified: boolean("email_verified").default(false),
   emailVerificationToken: text("email_verification_token"),     // Hashed OTP
   emailVerificationExpiry: timestamp("email_verification_expiry"), // OTP expiry (24h)
+
+  // ── Localized pricing ────────────────────────────────────────────────────
+  // ISO 4217 currency code inferred from the user's device timezone on login.
+  // Used to display the correct local price on the subscription screen.
+  // Run migration: ADD_CURRENCY_TO_USERS.sql
+  currency: text("currency").default("USD"),
 });
 
 // Friends table

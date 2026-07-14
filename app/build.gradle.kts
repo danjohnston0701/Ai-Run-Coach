@@ -159,6 +159,10 @@ dependencies {
     // --- Secure Storage: For saving the auth token ---
     implementation("androidx.security:security-crypto:1.1.0")
 
+    // --- Credential Manager: Samsung Pass, Google Password Manager, autofill ---
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+
     // --- Health Connect: For wellness data ---
     implementation("androidx.health.connect:connect-client:1.1.0")
 

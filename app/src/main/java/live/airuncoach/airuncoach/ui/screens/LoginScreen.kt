@@ -46,11 +46,12 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
 // import live.airuncoach.airuncoach.viewmodel.ObserverLoginViewModel  // TODO: Uncomment when Live Share is enabled
 import live.airuncoach.airuncoach.util.NotificationPermissionHelper
+import live.airuncoach.airuncoach.util.CredentialManagerHelper
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-// import kotlinx.coroutines.delay  // TODO: Uncomment when Live Share is enabled
+import androidx.activity.ComponentActivity
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -124,7 +125,18 @@ fun LoginScreen(
     LaunchedEffect(loginState.isLoginSuccessful) {
         if (loginState.isLoginSuccessful) {
             android.util.Log.d("LoginScreen", "Login successful, requesting notification permission")
-            
+
+            // Offer to save credentials to Samsung Pass / Google Password Manager.
+            // This shows the system "Save password?" bottom sheet before navigating away.
+            val activity = context as? ComponentActivity
+            if (activity != null) {
+                CredentialManagerHelper.saveCredential(
+                    activity = activity,
+                    email = loginState.email,
+                    password = loginState.password
+                )
+            }
+
             // Request notification permission after successful login
             if (NotificationPermissionHelper.shouldRequestPermission()) {
                 notificationPermissionLauncher.launch(NotificationPermissionHelper.getPermissionString())
@@ -133,6 +145,20 @@ fun LoginScreen(
             // After a brief delay, navigate to location permission screen
             kotlinx.coroutines.delay(500)
             onNavigateToLocationPermission()
+        }
+    }
+
+    // On screen load: try to retrieve saved credentials from Samsung Pass / Google PM
+    // If the user has saved credentials, pre-fill the fields automatically.
+    LaunchedEffect(isCheckingAuth) {
+        if (!isCheckingAuth) {
+            val activity = context as? ComponentActivity ?: return@LaunchedEffect
+            val saved = CredentialManagerHelper.getSavedCredential(activity)
+            if (saved != null) {
+                viewModel.onEmailChange(saved.first)
+                viewModel.onPasswordChange(saved.second)
+                android.util.Log.d("LoginScreen", "Pre-filled credentials from password manager")
+            }
         }
     }
 
