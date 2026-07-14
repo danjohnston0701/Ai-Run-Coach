@@ -67,18 +67,24 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
     if (tz.includes("delhi") || tz.includes("kolkata") || tz.includes("mumbai")) return "INR";
     if (tz.includes("bangkok")) return "THB";
     if (tz.includes("singapore")) return "SGD";
-    if (tz.includes("sydney") || tz.includes("melbourne") || tz.includes("brisbane")) return "AUD";
-    if (tz.includes("auckland")) return "NZD";
     if (tz.includes("seoul")) return "KRW";
     if (tz.includes("dubai")) return "AED";
+    // Note: Sydney/Melbourne/Brisbane would be in Australia timezone, not Asia
+    // Auckland is in Pacific timezone, not Asia
 
     // Default USD for other Asian zones
     return "USD";
   }
 
+  // Australia
+  if (tz.startsWith("australia/")) {
+    return "AUD";
+  }
+
   // Pacific
   if (tz.startsWith("pacific/")) {
-    return "AUD"; // Australia/NZ dollars are common in Pacific
+    if (tz.includes("auckland") || tz.includes("fiji") || tz.includes("tongatapu")) return "NZD";
+    return "AUD"; // Default to AUD for other Pacific zones (Australia, etc.)
   }
 
   // Africa
