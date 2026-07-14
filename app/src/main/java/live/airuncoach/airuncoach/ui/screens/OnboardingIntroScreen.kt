@@ -83,15 +83,15 @@ fun OnboardingIntroScreen(
         OnboardingStep(
             number = "1",
             title = "Personal details",
-            description = "Date of birth, weight, and weekly availability — used to calibrate your plan."
+            description = "Some basic info about you to help your AI coach know you better."
         )
 
         Spacer(modifier = Modifier.height(Spacing.lg))
 
         OnboardingStep(
             number = "2",
-            title = "Injuries and fitness",
-            description = "Any current injuries and your current fitness level — so we can start you in the right place."
+            title = "Fitness Level",
+            description = "Your current fitness level — so we can start you in the right place."
         )
 
         Spacer(modifier = Modifier.height(Spacing.lg))

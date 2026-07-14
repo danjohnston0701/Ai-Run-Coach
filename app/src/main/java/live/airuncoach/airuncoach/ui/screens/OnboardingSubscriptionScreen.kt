@@ -633,11 +633,11 @@ data class OnboardingPlanData(
     companion object {
         val LITE = OnboardingPlanData(
             name = "Lite",
-            monthlyPriceDisplay = "$7.99",
+            monthlyPriceDisplay = "$5.99",
             monthlyPriceSuffix = "/month",
-            annualPriceDisplay = "$79.99",
+            annualPriceDisplay = "$59.99",
             annualPriceSuffix = "/year",
-            annualMonthlyEquivalent = "$6.67/month — save $15.89",
+            annualMonthlyEquivalent = "$5.00/month — save $11.89",
             accentColor = Colors.primary,
             features = listOf(
                 OnboardingPlanFeature("Unlimited AI runs", true),

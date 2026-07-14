@@ -642,7 +642,7 @@ private fun PerformanceTrendsSection(
                 period = selectedPeriod,
                 invertColors = false,          // higher = better
                 usePerformanceGradient = true,
-                yFormatter = { v -> String.format(java.util.Locale.US, "%.1f", v) },
+                yFormatter = { v -> String.format(Locale.US, "%.1f", v) },
                 footerNote = "km/h at 100 bpm — higher = fitter. Rises as your aerobic base develops."
             )
         }
@@ -658,7 +658,23 @@ private fun PerformanceTrendsSection(
             )
         }
         if (hrTrend.isNotEmpty()) {
-            TrendBarChart(title = "❤️ Avg Heart Rate (bpm)", points = hrTrend, unit = " bpm", period = selectedPeriod)
+            // Calculate HR zone thresholds using observed max HR (with 185 bpm minimum as Tanaka default)
+            val maxObservedHr = hrTrend.maxOfOrNull { it.value }?.toInt() ?: 185
+            val effectiveMaxHr = maxObservedHr.coerceAtLeast(185)  // Use at least 185 bpm (Tanaka estimate)
+            
+            val z2Threshold = (0.60 * effectiveMaxHr).toInt()
+            val z3Threshold = (0.70 * effectiveMaxHr).toInt()
+            val z4Threshold = (0.80 * effectiveMaxHr).toInt()
+            val z5Threshold = (0.90 * effectiveMaxHr).toInt()
+            val zoneThresholds = listOf(z2Threshold, z3Threshold, z4Threshold, z5Threshold)
+            
+            TrendBarChart(
+                title = "❤️ Avg Heart Rate (bpm)",
+                points = hrTrend,
+                unit = " bpm",
+                period = selectedPeriod,
+                zoneThresholds = zoneThresholds
+            )
         }
         if (cadenceTrend.isNotEmpty()) {
             TrendBarChart(
@@ -696,7 +712,8 @@ private fun TrendBarChart(
     invertColors: Boolean = false,
     usePerformanceGradient: Boolean = false,
     yFormatter: ((Double) -> String)? = null,   // custom label formatter (default: value + unit)
-    footerNote: String? = null                  // optional explanatory note below chart
+    footerNote: String? = null,                 // optional explanatory note below chart
+    zoneThresholds: List<Int>? = null           // optional HR zone thresholds for Y-axis labels
 ) {
     if (points.isEmpty()) return
 
@@ -713,7 +730,24 @@ private fun TrendBarChart(
     val yAxisMax = (maxVal * 1.15).toInt()
     val yAxisMin = (minVal * 0.85).coerceAtLeast(0.0).toInt()
     val yAxisRange = yAxisMax - yAxisMin
-    val yAxisStep = (yAxisRange / 4).coerceAtLeast(1)
+    
+    // If zone thresholds provided (for HR charts), use them as Y-axis gridlines
+    // Otherwise use evenly-spaced steps
+    val yAxisStep: Int
+    val yAxisLabels: List<Int>
+    if (zoneThresholds != null) {
+        // Use zone thresholds that fall within visible range
+        yAxisLabels = zoneThresholds.filter { it in yAxisMin..yAxisMax }.sorted()
+        yAxisStep = if (yAxisLabels.isNotEmpty()) {
+            (yAxisLabels.maxOrNull() ?: yAxisMax) - (yAxisLabels.minOrNull() ?: yAxisMin)
+        } else {
+            (yAxisRange / 4).coerceAtLeast(1)
+        }
+    } else {
+        // Traditional evenly-spaced step calculation
+        yAxisStep = (yAxisRange / 4).coerceAtLeast(1)
+        yAxisLabels = emptyList()
+    }
 
     // Determine the primary line color based on trend
     val primaryColor = if (invertColors) {
@@ -765,7 +799,8 @@ private fun TrendBarChart(
             yAxisStep = yAxisStep,
             primaryColor = primaryColor,
             invertColors = invertColors,
-            usePerformanceGradient = usePerformanceGradient
+            usePerformanceGradient = usePerformanceGradient,
+            yAxisLabels = yAxisLabels
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -922,7 +957,8 @@ private fun SophisticatedLineChart(
     yAxisStep: Int,
     primaryColor: Color,
     invertColors: Boolean = false,
-    usePerformanceGradient: Boolean = false
+    usePerformanceGradient: Boolean = false,
+    yAxisLabels: List<Int> = emptyList()  // optional custom labels (e.g., HR zone thresholds)
 ) {
     if (data.isEmpty()) return
 
@@ -940,17 +976,33 @@ private fun SophisticatedLineChart(
             modifier = Modifier
                 .width(40.dp)
                 .fillMaxHeight(),
-            verticalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = if (yAxisLabels.isNotEmpty()) {
+                Arrangement.Bottom
+            } else {
+                Arrangement.SpaceBetween
+            },
             horizontalAlignment = Alignment.End
         ) {
-            repeat(5) { index ->
-                val yValue = yAxisMax - (index * yAxisStep)
-                Text(
-                    text = yValue.toInt().toString(),
-                    style = AppTextStyles.caption,
-                    color = Colors.textMuted,
-                    fontSize = 8.sp
-                )
+            // If custom labels provided (zone thresholds), use them; otherwise use step-based labels
+            if (yAxisLabels.isNotEmpty()) {
+                yAxisLabels.sorted().forEach { yValue ->
+                    Text(
+                        text = yValue.toString(),
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        fontSize = 8.sp
+                    )
+                }
+            } else {
+                repeat(5) { index ->
+                    val yValue = yAxisMax - (index * yAxisStep)
+                    Text(
+                        text = yValue.toInt().toString(),
+                        style = AppTextStyles.caption,
+                        color = Colors.textMuted,
+                        fontSize = 8.sp
+                    )
+                }
             }
         }
 
@@ -965,15 +1017,29 @@ private fun SophisticatedLineChart(
             val xStep = canvasWidth / (data.size - 1).coerceAtLeast(1)
 
             // Draw grid lines (horizontal)
-            repeat(5) { index ->
-                val yValue = yAxisMax - (index * yAxisStep)
-                val yPx = canvasHeight - ((yValue - yAxisMin) / yAxisRange * canvasHeight).toFloat()
-                drawLine(
-                    color = Colors.backgroundTertiary.copy(alpha = 0.5f),
-                    start = androidx.compose.ui.geometry.Offset(0f, yPx),
-                    end = androidx.compose.ui.geometry.Offset(canvasWidth, yPx),
-                    strokeWidth = 0.5f
-                )
+            if (yAxisLabels.isNotEmpty()) {
+                // Use custom labels (e.g., HR zone thresholds) for gridlines
+                yAxisLabels.forEach { yValue ->
+                    val yPx = canvasHeight - ((yValue.toDouble() - yAxisMin) / yAxisRange * canvasHeight).toFloat()
+                    drawLine(
+                        color = Colors.backgroundTertiary.copy(alpha = 0.5f),
+                        start = androidx.compose.ui.geometry.Offset(0f, yPx),
+                        end = androidx.compose.ui.geometry.Offset(canvasWidth, yPx),
+                        strokeWidth = 0.5f
+                    )
+                }
+            } else {
+                // Use evenly-spaced step-based gridlines
+                repeat(5) { index ->
+                    val yValue = yAxisMax - (index * yAxisStep)
+                    val yPx = canvasHeight - ((yValue - yAxisMin) / yAxisRange * canvasHeight).toFloat()
+                    drawLine(
+                        color = Colors.backgroundTertiary.copy(alpha = 0.5f),
+                        start = androidx.compose.ui.geometry.Offset(0f, yPx),
+                        end = androidx.compose.ui.geometry.Offset(canvasWidth, yPx),
+                        strokeWidth = 0.5f
+                    )
+                }
             }
 
             // Calculate point positions
@@ -1047,7 +1113,7 @@ private fun SophisticatedLineChart(
                         drawPath(
                             path = segmentFillPath,
                             brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                colorStops = *spectrumGradientStops(
+                                colorStops = spectrumGradientStops(
                                     g1, g2,
                                     startAlpha = 0.30f,
                                     endAlpha = 0.05f
@@ -1064,7 +1130,7 @@ private fun SophisticatedLineChart(
                         drawPath(
                             path = segmentPath,
                             brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                colorStops = *spectrumGradientStops(
+                                colorStops = spectrumGradientStops(
                                     g1, g2,
                                     startAlpha = 1f,
                                     endAlpha = 1f

@@ -471,6 +471,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Set default currency from timezone if not already set (for localized pricing display)
+      if (timezone && !user.currency) {
+        try {
+          const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
+          const inferredCurrency = inferCurrencyFromTimezone(timezone);
+          
+          await db
+            .update(users)
+            .set({ currency: inferredCurrency })
+            .where(eq(users.id, user.id));
+          
+          user.currency = inferredCurrency;
+          console.log(`[Login] Inferred currency for user ${user.id}: ${inferredCurrency} (from timezone ${timezone})`);
+        } catch (currencyError: any) {
+          console.warn(`Failed to infer currency for user ${user.id}: ${currencyError.message}`);
+        }
+      }
+
       const token = generateToken({ userId: user.id, email: user.email });
 
       const { password: _, ...userWithoutPassword } = user;

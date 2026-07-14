@@ -82,6 +82,9 @@ fun SubscriptionScreen(
 
     // Open directly to Plans tab
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Plans, 1 = Usage
+    
+    // Currency selection — defaults to inferred from user's timezone
+    var selectedCurrency by remember { mutableStateOf("USD") }
 
     Column(
         modifier = Modifier
@@ -172,6 +175,11 @@ fun SubscriptionScreen(
                 trialDaysRemaining = trialDaysRemaining,
                 trialExpiresAt = trialExpiresAt,
                 currentTier = currentTier,
+                selectedCurrency = selectedCurrency,
+                onCurrencyChange = { newCurrency ->
+                    selectedCurrency = newCurrency
+                    // TODO: Call API to update user's currency: viewModel.updateUserCurrency(newCurrency)
+                },
                 onNavigateToChangePassword = onNavigateToChangePassword,
                 onNavigateToGetSupport = onNavigateToGetSupport,
                 onNavigateToDeleteAccount = onNavigateToDeleteAccount
@@ -250,6 +258,8 @@ private fun PlansTabContent(
     trialDaysRemaining: Int = 0,
     trialExpiresAt: LocalDate? = null,
     currentTier: String = "free",
+    selectedCurrency: String = "USD",
+    @Suppress("UNUSED_PARAMETER") onCurrencyChange: (String) -> Unit = {},
     onNavigateToChangePassword: () -> Unit = {},
     onNavigateToGetSupport: () -> Unit = {},
     onNavigateToDeleteAccount: () -> Unit = {}
@@ -409,10 +419,52 @@ private fun PlansTabContent(
             }
         }
 
+        // Currency Selector
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = Spacing.md)
+            ) {
+                Text(
+                    text = "Display Pricing In",
+                    fontSize = 12.sp,
+                    color = Colors.textSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = Spacing.sm)
+                )
+                
+                                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, Colors.primary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(Spacing.md),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = selectedCurrency,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Colors.primary
+                        )
+                    }
+                
+                // Currency dropdown (for future expansion)
+                Text(
+                    text = "Prices display in the currency inferred from your timezone. Change can be added in a future update.",
+                    fontSize = 11.sp,
+                    color = Colors.textMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = Spacing.xs)
+                )
+            }
+        }
+
         // Footnotes
         item {
             Text(
-                text = "All prices in USD (US Dollars).",
+                text = "All prices in $selectedCurrency.",
                 fontSize = 12.sp,
                 color = Colors.textMuted,
                 textAlign = TextAlign.Center,
@@ -1511,11 +1563,11 @@ data class PlanData(
 
         val LITE = PlanData(
             name = "Lite",
-            monthlyPriceDisplay = "USD $7.99",
+            monthlyPriceDisplay = "USD $5.99",
             monthlyPriceSuffix = "/month",
-            annualPriceDisplay = "USD $79.99",
+            annualPriceDisplay = "USD $59.99",
             annualPriceSuffix = "/year",
-            annualMonthlyEquivalent = "USD $6.67/month — save $15.89",
+            annualMonthlyEquivalent = "USD $5.00/month — save $11.89",
             accentColor = Colors.primary,
             features = listOf(
                 PlanFeature("Unlimited AI Runs", true),
