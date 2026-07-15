@@ -388,14 +388,6 @@ export default function RunVideoShare() {
             maxzoom: 19,
             attribution: "Esri, Maxar, Earthstar Geographics",
           },
-          terrain: {
-            type: "raster-dem",
-            tiles: [TERRAIN_TILES],
-            encoding: "terrarium",
-            tileSize: 256,
-            maxzoom: 15,
-            attribution: "Mapzen / AWS Terrain Tiles",
-          },
         },
         layers: [
           { id: "bg", type: "background", paint: { "background-color": "#0a0a0f" } },
@@ -406,9 +398,11 @@ export default function RunVideoShare() {
     mapRef.current = map;
 
     map.on("load", () => {
-      try {
-        map.setTerrain({ source: "terrain", exaggeration: 2.4 });
-      } catch { /* terrain unsupported — continue flat */ }
+      // NOTE: terrain draping is intentionally disabled. MapLibre v5 drapes ALL line layers
+      // onto the DEM surface with no per-layer override (line-elevation-reference / line-z-offset
+      // do not exist in this build). DEM tiles have no knowledge of bridges, so bridge crossings
+      // appear to dive into the river valley. Removing terrain keeps the route geometrically
+      // correct while the pitched 3D camera + satellite imagery still gives a cinematic flyover.
 
       try {
         map.setSky({
