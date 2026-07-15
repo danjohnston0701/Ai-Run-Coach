@@ -39,6 +39,8 @@ data class User(
     val coachKmSplitIntervalKm: Int? = null,
     // User injuries for AI to consider in training plan design
     val injuries: List<Injury>? = null,
+    // Default session type (RUN or WALK) — used for run setup and AI coaching plan generation
+    val defaultSessionType: String? = "RUN",
     // ── Trial / Subscription lifecycle ───────────────────────────────────────
     // ISO-8601 date string set by the server on account creation (e.g. "2025-01-10").
     // Used client-side to compute trial countdown and enforce the hard paywall after 14 days.

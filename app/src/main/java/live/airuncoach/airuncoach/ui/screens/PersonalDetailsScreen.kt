@@ -101,6 +101,7 @@ fun PersonalDetailsScreen(
     val gender by viewModel.gender.collectAsState()
     val weight by viewModel.weight.collectAsState()
     val height by viewModel.height.collectAsState()
+    val defaultSessionType by viewModel.defaultSessionType.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     var showGenderMenu by remember { mutableStateOf(false) }
     var hasInjuries by remember { mutableStateOf(false) }  // Default to "No" for injuries
@@ -168,7 +169,7 @@ fun PersonalDetailsScreen(
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
                 
-                .padding(bottom = Spacing.lg) // Add bottom padding so content doesn't hide behind button
+                .padding(bottom = 120.dp) // Add bottom padding so content doesn't hide behind button and device navigation
         ) {
             item {
                 SectionTitle(title = "Full Name")
@@ -312,6 +313,49 @@ fun PersonalDetailsScreen(
                         unfocusedBorderColor = Colors.textMuted
                     )
                 )
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+            item {
+                SectionTitle(title = "Default Session Type")
+                Text(
+                    "What's your primary activity?",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    Button(
+                        onClick = { viewModel.onDefaultSessionTypeChanged("Run") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (defaultSessionType == "Run") Colors.primary else Colors.backgroundSecondary,
+                            contentColor = if (defaultSessionType == "Run") Colors.buttonText else Colors.textPrimary
+                        ),
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        border = if (defaultSessionType != "Run") androidx.compose.foundation.BorderStroke(1.dp, Colors.border) else null
+                    ) {
+                        Text("Run", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold))
+                    }
+                    Button(
+                        onClick = { viewModel.onDefaultSessionTypeChanged("Walk") },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (defaultSessionType == "Walk") Colors.primary else Colors.backgroundSecondary,
+                            contentColor = if (defaultSessionType == "Walk") Colors.buttonText else Colors.textPrimary
+                        ),
+                        shape = RoundedCornerShape(BorderRadius.md),
+                        border = if (defaultSessionType != "Walk") androidx.compose.foundation.BorderStroke(1.dp, Colors.border) else null
+                    ) {
+                        Text("Walk", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold))
+                    }
+                }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
             item {

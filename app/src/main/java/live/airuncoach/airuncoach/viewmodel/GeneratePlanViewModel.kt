@@ -326,6 +326,7 @@ class GeneratePlanViewModel @Inject constructor(
                     )
                 }
                 
+                val userSessionType = getUserSessionType()
                 val request = GeneratePlanRequest(
                     goalType = _goalType.value,
                     targetDistance = distKm,
@@ -355,7 +356,9 @@ class GeneratePlanViewModel @Inject constructor(
                     // User injuries for AI to design appropriate training
                     injuries = injuriesList,
                     // User's local timezone so the server assigns session dates correctly
-                    userTimezone = java.util.TimeZone.getDefault().id
+                    userTimezone = java.util.TimeZone.getDefault().id,
+                    // Activity type (run or walk) from user's default session type
+                    activityType = userSessionType
                 )
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)
@@ -420,6 +423,28 @@ class GeneratePlanViewModel @Inject constructor(
         val height: Double?,  // cm
         val weight: Double?   // kg
     )
+
+    /**
+     * Get user's default session type (run or walk) for plan generation.
+     * Defaults to "run" if not set.
+     */
+    private fun getUserSessionType(): String {
+        val userJson = sharedPrefs.getString("user", null)
+        if (userJson == null) {
+            return "run"
+        }
+        return try {
+            val user = gson.fromJson(userJson, User::class.java)
+            when {
+                user.defaultSessionType?.equals("walk", ignoreCase = true) == true -> "walk"
+                user.defaultSessionType?.equals("Walk", ignoreCase = true) == true -> "walk"
+                else -> "run"
+            }
+        } catch (e: Exception) {
+            Log.w("GeneratePlanVM", "Could not read user session type, defaulting to run", e)
+            "run"
+        }
+    }
 
     // ========== Injury Management ==========
     

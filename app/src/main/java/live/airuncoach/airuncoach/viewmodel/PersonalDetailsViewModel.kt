@@ -38,6 +38,9 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     private val _height = MutableStateFlow("")
     val height: StateFlow<String> = _height.asStateFlow()
 
+    private val _defaultSessionType = MutableStateFlow("RUN")
+    val defaultSessionType: StateFlow<String> = _defaultSessionType.asStateFlow()
+
 
     init {
         loadUserDetails()
@@ -53,6 +56,7 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
             _gender.value = user.gender ?: ""
             _weight.value = user.weight?.toString() ?: ""
             _height.value = user.height?.toString() ?: ""
+            _defaultSessionType.value = user.defaultSessionType ?: "RUN"
         }
     }
 
@@ -82,6 +86,10 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
         _height.value = height
     }
 
+    fun onDefaultSessionTypeChanged(sessionType: String) {
+        _defaultSessionType.value = sessionType
+    }
+
     suspend fun saveDetails() {
         val userJson = sharedPrefs.getString("user", null)
         if (userJson != null) {
@@ -94,7 +102,8 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 weight = _weight.value.toDoubleOrNull(),
                 height = _height.value.toDoubleOrNull(),
                 fitnessLevel = null,
-                distanceScale = null
+                distanceScale = null,
+                defaultSessionType = _defaultSessionType.value
             )
             try {
                 val updatedUser = apiService.updateUser(user.id, request)

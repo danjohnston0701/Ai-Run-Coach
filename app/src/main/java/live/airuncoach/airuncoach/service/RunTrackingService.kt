@@ -2625,7 +2625,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
                 // Feed the pace trend buffer whenever we have a valid smoothed pace
                 if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
-                    updatePaceTrendBuffer(smoothedPaceSeconds)
+                    updatePaceTrendBuffer(smoothedPaceSeconds.toDouble())
                 }
                 totalDistance += distanceIncrement
                 // Accumulate speed readings for speed-based avg pace (essential for simulation where wall-clock time is compressed)
@@ -3812,10 +3812,17 @@ class RunTrackingService : Service(), SensorEventListener {
                 return
             }
             
-            // Upload to Garmin in background
-            Log.d("GarminSync", "Auto-uploading run $runId to Garmin Connect...")
+            // Upload to Garmin in background.
+            // Pass linkedWorkoutId and linkedPlanId so the backend Garmin webhook handler
+            // can preserve the plan link if it creates or updates a run from the official
+            // Garmin activity — prevents the webhook from wiping planned_workout_id.
+            Log.d("GarminSync", "Auto-uploading run $runId to Garmin Connect (workout=$planWorkoutId)...")
             val response = apiService.uploadRunToGarmin(
-                GarminUploadRequest(runId)
+                GarminUploadRequest(
+                    runId = runId,
+                    linkedWorkoutId = planWorkoutId,
+                    linkedPlanId = planTrainingPlanId
+                )
             )
             
             if (response.success) {

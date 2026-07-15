@@ -109,6 +109,10 @@ class RunView extends Ui.View {
     private var _dispHR        = 0;
     private var _dispCadence   = 0;
 
+    // Screen layout: 0=Diamond, 1=Grid (data-dense/FR55)
+    private var _screenPage    = 0;
+    private var _isSmallScreen = false;
+
     // Running dynamics (read from Activity.Info each tick)
     private var _gct   = 0.0;   // Ground contact time (ms)
     private var _gcb   = 0.0;   // Ground contact balance (%, 50 = perfect)
@@ -178,6 +182,10 @@ class RunView extends Ui.View {
         _isAuthenticated = (tok != null && tok.length() > 0);
         _overlayState = _isAuthenticated ? OVERLAY_GPS_WAIT : OVERLAY_WAITING;
         _paceHistory = [];
+        // Detect small/MIP screens (FR55=208px) and default to grid
+        var ds = Sys.getDeviceSettings();
+        _isSmallScreen = (ds.screenWidth <= 218);
+        if (_isSmallScreen) { _screenPage = 1; }
         _initSimulatorMode();   // no-op in release, seeds preview data in simulator
     }
 
@@ -212,6 +220,11 @@ class RunView extends Ui.View {
     }
 
     function setPhoneControlled(v) { _phoneControlled = v; }
+
+    function toggleScreen() {
+        _screenPage = (_screenPage == 0) ? 1 : 0;
+        Ui.requestUpdate();
+    }
 
     function setStatusMessage(msg) {
         _statusMessage = msg;
@@ -539,7 +552,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.1.2");
+                _phoneLink.sendHello("3.1.7");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -1032,22 +1045,30 @@ class RunView extends Ui.View {
         if (_overlayState == OVERLAY_GPS_WAIT) { _drawGpsWait(dc, cx, cy, w, h); return; }
         if (_overlayState == OVERLAY_WAITING)  { _drawWaiting(dc, cx, cy, w, h); return; }
 
-        if (!_isRunning && !_isPaused) { _drawStartHint(dc, cx, cy, w); }
-        _drawTimeTop(dc, cx, w, h);
-        var ringR = (w * 0.255).toNumber();
-        var circR = (w * 0.168).toNumber();
-        _drawRing(dc, cx - ringR, cy, circR, 0x00BFA8, "KM",   (_dispDistance / 1000.0).format("%.2f"));
-        _drawRing(dc, cx + ringR, cy, circR, 0xFFDD00, "PACE", _fmtPaceDec(_dispPace));
-        _drawRing(dc, cx, cy + ringR, circR, 0xFF3355, "HR",   _dispHR > 0 ? _dispHR.format("%d") : "--");
-        _drawBattery(dc, cx, cy, ringR, circR);
-        _drawStatusBar(dc, cx, w, h);
+        // Route to the correct screen layout
+        if (_screenPage == 1) {
+            _drawGridScreen(dc, cx, cy, w, h);
+        } else {
+            if (!_isRunning && !_isPaused) { _drawStartHint(dc, cx, cy, w); }
+            _drawTimeTop(dc, cx, w, h);
+            var ringR = (w * 0.255).toNumber();
+            var circR = (w * 0.168).toNumber();
+            _drawRing(dc, cx - ringR, cy, circR, 0x00BFA8, "KM",   (_dispDistance / 1000.0).format("%.2f"));
+            _drawRing(dc, cx + ringR, cy, circR, 0xFFDD00, "PACE", _fmtPaceDec(_dispPace));
+            _drawRing(dc, cx, cy + ringR, circR, 0xFF3355, "HR",   _dispHR > 0 ? _dispHR.format("%d") : "--");
+            _drawBattery(dc, cx, cy, ringR, circR);
+            _drawStatusBar(dc, cx, w, h);
+        }
 
-        // ── Paused banner ──────────────────────────────────────────────────────
+        // Paused banner (both screens)
         if (_isPaused) {
             dc.setColor(0xFF6600, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, (h * 0.04).toNumber(), Gfx.FONT_TINY,
                 "PAUSED", Gfx.TEXT_JUSTIFY_CENTER);
         }
+
+        // Page indicator dots (shown while running or paused)
+        if (_isRunning || _isPaused) { _drawPageDots(dc, cx, w, h); }
     }
 
     private function _drawTimeTop(dc, cx, w, h) {
@@ -1062,6 +1083,100 @@ class RunView extends Ui.View {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, (h * 0.09).toNumber(), Gfx.FONT_LARGE, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
         }
+        // Cadence — always visible below the time/clock regardless of run state.
+        // Shows "--" when no reading yet so the metric slot is always present.
+        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.265).toNumber(), Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        var cadStr = _dispCadence > 0 ? _dispCadence.format("%d") : "--";
+        dc.drawText(cx, (h * 0.305).toNumber(), Gfx.FONT_SMALL, cadStr, Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    // =========================================================================
+    // GRID SCREEN — data-dense layout (also default for FR55)
+    // Layout: Timer (full-width top), then 2x2 grid: Dist|Pace / HR|Cadence
+    // =========================================================================
+    private function _drawGridScreen(dc, cx, cy, w, h) {
+        var metricFont = _isSmallScreen ? Gfx.FONT_SMALL  : Gfx.FONT_MEDIUM;
+        var timerFont  = _isSmallScreen ? Gfx.FONT_MEDIUM : Gfx.FONT_LARGE;
+        var lx = (w * 0.27).toNumber();   // left column centre
+        var rx = (w * 0.73).toNumber();   // right column centre
+
+        // -- Timer row --
+        if (_isRunning || _isPaused) {
+            dc.setColor(0x00CC66, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.13).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+        } else {
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.10).toNumber(), timerFont, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
+        }
+
+        // -- Divider 1 --
+        dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine((w * 0.08).toNumber(), (h * 0.31).toNumber(), (w * 0.92).toNumber(), (h * 0.31).toNumber());
+
+        // -- Row 1: Distance (left) | Pace (right) --
+        dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(lx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(lx, (h * 0.40).toNumber(), metricFont, (_dispDistance / 1000.0).format("%.2f"), Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "PACE", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.40).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Vertical divider
+        dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine(cx, (h * 0.32).toNumber(), cx, (h * 0.55).toNumber());
+
+        // -- Divider 2 --
+        dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine((w * 0.08).toNumber(), (h * 0.56).toNumber(), (w * 0.92).toNumber(), (h * 0.56).toNumber());
+
+        // -- Row 2: HR (left) | Cadence (right) --
+        dc.setColor(0xFF3355, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(lx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "HR", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(lx, (h * 0.65).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "spm", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.65).toNumber(), metricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Vertical divider row 2
+        dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine(cx, (h * 0.57).toNumber(), cx, (h * 0.80).toNumber());
+
+        // Battery under spm (right column, same style as screen 1)
+        _drawBatteryAt(dc, (rx - 11).toNumber(), (h * 0.80).toNumber());
+
+        _drawStatusBar(dc, cx, w, h);
+    }
+
+    // Two small dots at the bottom showing which screen is active
+    private function _drawPageDots(dc, cx, w, h) {
+        var dotY = (h * 0.91).toNumber();
+        var r    = 3;
+        // Page 0 dot (left)
+        if (_screenPage == 0) {
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.fillCircle(cx - 9, dotY, r);
+        } else {
+            dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
+            dc.drawCircle(cx - 9, dotY, r);
+        }
+        // Page 1 dot (right)
+        if (_screenPage == 1) {
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.fillCircle(cx + 9, dotY, r);
+        } else {
+            dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
+            dc.drawCircle(cx + 9, dotY, r);
+        }
     }
 
     private function _drawRing(dc, x, y, r, color, label, value) {
@@ -1075,42 +1190,39 @@ class RunView extends Ui.View {
     }
 
     private function _drawBattery(dc, cx, cy, ringR, circR) {
+        var bx = (cx + circR + 8).toNumber();
+        var by = (cy + ringR - 6).toNumber();
+        _drawBatteryAt(dc, bx, by);
+    }
+
+    private function _drawBatteryAt(dc, bx, by) {
         if (!(Sys has :getSystemStats)) { return; }
         var stats = Sys.getSystemStats();
         if (stats == null)         { return; }
-        if (stats.battery == null) { return; }  // Some firmware returns non-null stats but null battery
+        if (stats.battery == null) { return; }
         var bat = stats.battery.toNumber();
         if (bat < 0)   { bat = 0; }
         if (bat > 100) { bat = 100; }
 
-        // Position: right of bottom HR ring
-        var bx  = (cx + circR + 8).toNumber();
-        var by  = (cy + ringR - 6).toNumber();
-        var bw  = 22;   // body width
-        var bh  = 12;   // body height
-        var tw  = 3;    // terminal width
-        var th  = 6;    // terminal height
+        var bw  = 22;
+        var bh  = 12;
+        var tw  = 3;
+        var th  = 6;
 
-        // Colour: green normal, amber <50%, red <20%
         var col = 0x00CC66;
         if (bat < 50) { col = 0xFFAA00; }
         if (bat < 20) { col = 0xFF4444; }
 
-        // Battery body outline
         dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
         dc.drawRectangle(bx, by, bw, bh);
-
-        // Terminal nub (right side, centred vertically)
         dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
         dc.fillRectangle(bx + bw, by + (bh - th) / 2, tw, th);
 
-        // Charge fill
         var fillW = ((bw - 2) * bat / 100).toNumber();
         if (fillW > 0) {
             dc.setColor(col, Gfx.COLOR_TRANSPARENT);
             dc.fillRectangle(bx + 1, by + 1, fillW, bh - 2);
         }
-        // Percentage text below icon
         dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
         dc.drawText(bx + bw / 2, by + bh + 2, Gfx.FONT_XTINY, bat.format("%d") + "%", Gfx.TEXT_JUSTIFY_CENTER);
     }
@@ -1426,16 +1538,39 @@ class RunDelegate extends Ui.BehaviorDelegate {
     }
 
     // ── Swipe ─────────────────────────────────────────────────────────────────
-    // Consume swipes so they don't accidentally trigger any behavior.
+    // Left/right swipe toggles between Diamond and Grid screens.
+    // onNextPage/onPreviousPage catch firmware-level page-swipe gestures (Vivoactive 4 etc)
+    // so they never fall through to onBack() and accidentally pause the run.
     function onSwipe(swipeEvent) {
+        if (_view != null) {
+            var dir = swipeEvent.getDirection();
+            if (dir == Ui.SWIPE_LEFT || dir == Ui.SWIPE_RIGHT) {
+                _view.toggleScreen();
+            }
+        }
         return true;
     }
 
-    // ── BACK button ───────────────────────────────────────────────────────────
+    function onNextPage() {
+        if (_view != null) { _view.toggleScreen(); }
+        return true;
+    }
+
+    function onPreviousPage() {
+        if (_view != null) { _view.toggleScreen(); }
+        return true;
+    }
+
+    // ── BACK button (bottom-right) / left-to-right swipe back gesture ─────────
+    // Rules:
+    //   Running (not paused) → toggle screen only (safe for accidental swipe/button)
+    //   Paused               → show "Finish run?" (user paused intentionally via START)
+    //   Idle                 → show "Exit app?" confirmation (never instant-exit)
     function onBack() {
         if (_view == null) { return true; }
-        if (!_view.isRunning()) {
-            Sys.exit();
+        if (_view.isRunning() && !_view.isPaused()) {
+            // Just flip the screen — never pause or finish from a back gesture during a run
+            _view.toggleScreen();
         } else if (_view.isPaused()) {
             Ui.pushView(
                 new Ui.Confirmation("Finish run?"),
@@ -1443,7 +1578,12 @@ class RunDelegate extends Ui.BehaviorDelegate {
                 Ui.SLIDE_IMMEDIATE
             );
         } else {
-            _view.pauseRun();
+            // Idle: confirm before exiting so no accidental app close
+            Ui.pushView(
+                new Ui.Confirmation("Exit app?"),
+                new ExitConfirmDelegate(),
+                Ui.SLIDE_IMMEDIATE
+            );
         }
         return true;
     }
@@ -1455,6 +1595,15 @@ class FinishConfirmDelegate extends Ui.ConfirmationDelegate {
     function initialize(v) { ConfirmationDelegate.initialize(); _view = v; }
     function onResponse(r) {
         if (r == Ui.CONFIRM_YES && _view != null) { _view.finishRun(); }
+        return true;
+    }
+}
+
+(:gui)
+class ExitConfirmDelegate extends Ui.ConfirmationDelegate {
+    function initialize() { ConfirmationDelegate.initialize(); }
+    function onResponse(r) {
+        if (r == Ui.CONFIRM_YES) { Sys.exit(); }
         return true;
     }
 }

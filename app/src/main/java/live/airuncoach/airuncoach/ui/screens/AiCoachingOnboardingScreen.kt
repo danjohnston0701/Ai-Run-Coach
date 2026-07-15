@@ -44,7 +44,7 @@ fun AiCoachingOnboardingScreen(
             .background(Colors.backgroundRoot)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = Spacing.xxxl)
-            .padding(top = 56.dp, bottom = 32.dp),
+            .padding(top = 56.dp, bottom = 120.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
 

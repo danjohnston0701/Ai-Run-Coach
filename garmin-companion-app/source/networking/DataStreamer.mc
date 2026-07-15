@@ -245,6 +245,13 @@ class DataStreamer {
                 "vo2MaxEstimate"         => summary.get("vo2Max")
             }
         };
+        // Re-send plannedWorkoutId at session end so the backend can re-apply the link
+        // if the Garmin Connect webhook creates or updates the run record later.
+        var plannedWorkoutId = App.Storage.getValue("plannedWorkoutId");
+        if (plannedWorkoutId != null) {
+            payload.put("plannedWorkoutId", plannedWorkoutId);
+            Sys.println("DataStreamer.endSession: plannedWorkoutId=" + plannedWorkoutId);
+        }
 
         var url = _baseUrl + "/api/garmin-companion/session/end";
         var options = {
@@ -299,6 +306,13 @@ class DataStreamer {
             "durationSec" => (durationSec != null) ? durationSec : 0,
             "totalAscent" => (totalAscent != null) ? totalAscent : 0.0
         };
+        // Include plannedWorkoutId so the backend can link this run to a coaching plan
+        // even when uploaded via the offline batch path (watch ran without phone).
+        var plannedWorkoutId = App.Storage.getValue("plannedWorkoutId");
+        if (plannedWorkoutId != null) {
+            payload.put("plannedWorkoutId", plannedWorkoutId);
+            Sys.println("DataStreamer.uploadOfflineBatch: plannedWorkoutId=" + plannedWorkoutId);
+        }
         var url = _baseUrl + "/api/garmin-companion/session/" + sessionId + "/upload-batch";
         var options = {
             :method => Comm.HTTP_REQUEST_METHOD_POST,

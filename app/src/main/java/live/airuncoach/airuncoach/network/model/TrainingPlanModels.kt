@@ -48,7 +48,9 @@ data class GeneratePlanRequest(
     @SerializedName("userTimezone") val userTimezone: String? = null,
     // When true, the runner is already capable of the event distance and wants a pre-race sharpening
     // block rather than a build-up plan. Flips the AI prompt away from "start conservatively".
-    @SerializedName("isPreEventPlan") val isPreEventPlan: Boolean = false
+    @SerializedName("isPreEventPlan") val isPreEventPlan: Boolean = false,
+    // Default activity type for the user — used to specify if this plan is for running or walking
+    @SerializedName("activityType") val activityType: String = "run" // "run" or "walk"
 )
 
 /** Response from generate */

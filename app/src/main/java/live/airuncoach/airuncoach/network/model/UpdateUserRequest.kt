@@ -10,5 +10,6 @@ data class UpdateUserRequest(
     val fitnessLevel: String? = null,
     val distanceScale: String? = null,
     val subscriptionTier: String? = null,
-    val subscriptionStatus: String? = null
+    val subscriptionStatus: String? = null,
+    val defaultSessionType: String? = null
 )

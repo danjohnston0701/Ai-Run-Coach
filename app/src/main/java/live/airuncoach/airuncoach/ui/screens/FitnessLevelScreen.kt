@@ -1,7 +1,6 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,6 +64,7 @@ fun FitnessLevelScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(Spacing.lg)
+                .padding(bottom = 120.dp) // Ensure content doesn't hide behind button and device navigation
         ) {
             item {
                 if (isOnboarding) {
@@ -122,18 +122,7 @@ fun FitnessLevelScreen(
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
                     )
                 }
-                if (isOnboarding) {
-                    Spacer(modifier = Modifier.height(Spacing.sm))
-                    androidx.compose.material3.TextButton(
-                        onClick = {
-                            // Allow skipping — profile remains blank, plan screen will surface a reminder
-                            if (onNavigateNext != null) onNavigateNext() else onNavigateBack()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Skip for now", style = AppTextStyles.body, color = Colors.textMuted)
-                    }
-                }
+
             }
         }
     }
