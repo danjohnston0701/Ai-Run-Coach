@@ -388,6 +388,14 @@ export default function RunVideoShare() {
             maxzoom: 19,
             attribution: "Esri, Maxar, Earthstar Geographics",
           },
+          terrain: {
+            type: "raster-dem",
+            tiles: [TERRAIN_TILES],
+            encoding: "terrarium",
+            tileSize: 256,
+            maxzoom: 15,
+            attribution: "Mapzen / AWS Terrain Tiles",
+          },
         },
         layers: [
           { id: "bg", type: "background", paint: { "background-color": "#0a0a0f" } },
@@ -398,11 +406,9 @@ export default function RunVideoShare() {
     mapRef.current = map;
 
     map.on("load", () => {
-      // NOTE: terrain draping is intentionally disabled. MapLibre v5 drapes ALL line layers
-      // onto the DEM surface with no per-layer override (line-elevation-reference / line-z-offset
-      // do not exist in this build). DEM tiles have no knowledge of bridges, so bridge crossings
-      // appear to dive into the river valley. Removing terrain keeps the route geometrically
-      // correct while the pitched 3D camera + satellite imagery still gives a cinematic flyover.
+      try {
+        map.setTerrain({ source: "terrain", exaggeration: 2.4 });
+      } catch { /* terrain unsupported — continue flat */ }
 
       try {
         map.setSky({
@@ -422,22 +428,18 @@ export default function RunVideoShare() {
       map.addSource("routeProgress", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString", coordinates: [start3d, start3d] }, properties: {} } as any });
       map.addSource("head",          { type: "geojson", data: { type: "Feature", geometry: { type: "Point", coordinates: start }, properties: {} } as any });
 
-      // line-elevation-reference: "sea" makes the route render at its recorded GPS altitude
-      // (Z coordinate) rather than following the terrain DEM surface. This correctly handles
-      // bridges, suspension bridges, overpasses and any elevated path over a valley/river.
-      const elevRef = { "line-elevation-reference": "sea" } as any;
       map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
-        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
       // Aurora ribbon: a wide soft glow, a teal body, and a bright white-hot core.
       map.addLayer({ id: "routeProgressGlow", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": TEAL, "line-width": 34, "line-blur": 26, "line-opacity": 0.5 } });
       map.addLayer({ id: "routeProgress", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": TEAL, "line-width": 12 } });
       map.addLayer({ id: "routeCore", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#eaffff", "line-width": 4, "line-opacity": 0.9 } });
       // Signature marker: two expanding energy rings + soft glow + white-hot core.
       map.addLayer({ id: "headPulse1", type: "circle", source: "head",
