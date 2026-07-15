@@ -254,6 +254,7 @@ fun DashboardScreen(
             val activeRun = activeRunSession
             val hasActiveRun = activeRun != null && activeRun.isActive
             ActionButtons(
+                sessionType = user?.defaultSessionType ?: "RUN",
                 onMapMyRun = onNavigateToRouteGeneration,
                 onRunWithoutRoute = onNavigateToFreeRunSetup,
                 isEnabled = hasLocationPermission && !hasActiveRun
@@ -815,9 +816,17 @@ fun LocationPermissionWarning(onNavigateToLocationPermission: () -> Unit = {}) {
 }
 
 @Composable
-fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabled: Boolean = true) {
+fun ActionButtons(
+    sessionType: String = "RUN",
+    onMapMyRun: () -> Unit,
+    onRunWithoutRoute: () -> Unit,
+    isEnabled: Boolean = true
+) {
+    // Derive display text from sessionType (used in both buttons)
+    val sessionTypeLabel = if (sessionType.equals("walk", ignoreCase = true)) "WALK" else "RUN"
+    
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
-        // PLAN RUN button - blue with play icon (moved to top, swapped with Map My Run)
+        // WITHOUT ROUTE button - blue with activity icon (moved to top)
         Button(
             onClick = { if (isEnabled) onRunWithoutRoute() },
             enabled = isEnabled,
@@ -830,23 +839,23 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabl
                 contentColor = Colors.buttonText
             )
         ) {
-
+            // Use appropriate icon based on session type
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.DirectionsRun,
-                contentDescription = "Run Icon",
+                contentDescription = "$sessionTypeLabel Icon",
                 tint = Colors.buttonText,
                 modifier = Modifier.size(24.dp)
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Text(
-                text = "RUN WITHOUT ROUTE",
+                text = "$sessionTypeLabel WITHOUT ROUTE",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
             )
         }
 
         Spacer(modifier = Modifier.height(Spacing.md))
 
-        // PREPARE RUN ROUTE button - dark gray with location icon (moved to bottom, uses old Run Without Route colors)
+        // WITH ROUTE button - dark gray with location icon (moved to bottom)
         Button(
             onClick = { if (isEnabled) onMapMyRun() },
             enabled = isEnabled,
@@ -867,7 +876,7 @@ fun ActionButtons(onMapMyRun: () -> Unit, onRunWithoutRoute: () -> Unit, isEnabl
             )
             Spacer(modifier = Modifier.width(Spacing.sm))
             Text(
-                text = "RUN WITH ROUTE",
+                text = "$sessionTypeLabel WITH ROUTE",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
             )
         }

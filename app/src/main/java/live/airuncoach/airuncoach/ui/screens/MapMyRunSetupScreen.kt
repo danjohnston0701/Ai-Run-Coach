@@ -440,7 +440,7 @@ fun MapMyRunSetupScreen(
                                         !hasLocationPermission -> "GRANT"
                                         isGettingLocation -> "GPS…"
                                         currentLocation == null -> "WAITING"
-                                        else -> "Prepare for Phone"
+                                        else -> "Prepare ${if (activityMode == ActivityMode.WALK) "Walk" else "Run"}"
                                     },
                                     leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                                         R.drawable.icon_navigation_vector else null,
@@ -497,7 +497,7 @@ fun MapMyRunSetupScreen(
                                 !hasLocationPermission -> "GRANT LOCATION"
                                 isGettingLocation -> "ACQUIRING GPS…"
                                 currentLocation == null -> "WAITING FOR GPS SIGNAL"
-                                else -> "PREPARE RUN"
+                                else -> "PREPARE ${if (activityMode == ActivityMode.WALK) "WALK" else "RUN"}"
                             },
                             leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                                 R.drawable.icon_navigation_vector else null,
