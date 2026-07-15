@@ -178,10 +178,12 @@ export default function RunVideoShare() {
 
   // Route geometry
   const coordsRef  = useRef<LngLat[]>([]);
+  const coords3dRef = useRef<number[][]>([]); // [lng, lat, alt?][] for GeoJSON sources
   const cumRef     = useRef<number[]>([]);
   const totalRef   = useRef<number>(0);
   const timeFracRef = useRef<number[] | null>(null); // real elapsed-time fraction per point (0..1)
   const altRef = useRef<number[] | null>(null); // real per-point altitude (metres), smoothed
+  const rawAltRef  = useRef<number[] | null>(null); // raw GPS altitude per point (for 3D line rendering)
   const dispBearingRef = useRef<number>(0);
   const dispCenterRef  = useRef<LngLat>([0, 0]); // smoothed (chase) camera centre
   const lastCamRef = useRef<{ center: LngLat; zoom: number; pitch: number; bearing: number } | null>(null);
@@ -283,6 +285,18 @@ export default function RunVideoShare() {
     }
     altRef.current = altSmooth;
 
+    // Store raw altitude for 3D line rendering (bridges, overpasses, etc.)
+    const rawAlts = (alt.length === coords.length && alt.length > 0 && alt.every(Number.isFinite)) ? alt : null;
+    rawAltRef.current = rawAlts;
+
+    // Build 3D coords [lng, lat, alt] — used for all GeoJSON map sources so the route
+    // renders at its true GPS altitude rather than following the terrain DEM surface.
+    // This correctly handles bridges, overpasses, and elevated paths.
+    coords3dRef.current = coords.map((c, i) => {
+      const a = rawAlts?.[i];
+      return Number.isFinite(a!) ? [c[0], c[1], a!] : [c[0], c[1]];
+    });
+
     dispBearingRef.current = coords.length >= 2 ? bearing(coords[0], coords[1]) : 0;
     // Need at least a couple of points AND some real distance — a cluster of
     // duplicate GPS fixes would otherwise produce a frozen, pointless flyover.
@@ -312,17 +326,25 @@ export default function RunVideoShare() {
   }, []);
 
   const buildProgressLine = useCallback((dist: number) => {
-    const coords = coordsRef.current;
-    const cum    = cumRef.current;
+    const coords  = coordsRef.current;
+    const coords3d = coords3dRef.current;
+    const cum     = cumRef.current;
     const d = Math.max(0, Math.min(dist, totalRef.current));
-    const line: LngLat[] = [];
+    const line: number[][] = [];
     for (let i = 0; i < coords.length; i++) {
-      if (cum[i] <= d) line.push(coords[i]);
+      if (cum[i] <= d) line.push(coords3d[i] ?? [coords[i][0], coords[i][1]]);
       else break;
     }
     const head = interpAt(d).pos;
-    if (line.length === 0) line.push(coords[0] ?? head);
-    line.push(head);
+    if (line.length === 0) line.push(coords3d[0] ?? [coords[0]?.[0] ?? head[0], coords[0]?.[1] ?? head[1]]);
+    // Interpolate altitude for the fractional head position
+    const rawAlts = rawAltRef.current;
+    const headCoord: number[] = [head[0], head[1]];
+    if (rawAlts && line.length > 0) {
+      const lastPt = line[line.length - 1];
+      if (lastPt.length === 3) headCoord.push(lastPt[2]); // inherit altitude of last known point
+    }
+    line.push(headCoord);
     return line;
   }, [interpAt]);
 
@@ -399,23 +421,29 @@ export default function RunVideoShare() {
         });
       } catch { /* sky unsupported on this build — ignore */ }
 
-      const fullLine = { type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} };
+      const coords3d = coords3dRef.current;
+      const start3d  = coords3d[0] ?? [start[0], start[1]];
+      const fullLine = { type: "Feature", geometry: { type: "LineString", coordinates: coords3d }, properties: {} };
       map.addSource("routeFull",     { type: "geojson", data: fullLine as any });
-      map.addSource("routeProgress", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString", coordinates: [start, start] }, properties: {} } as any });
+      map.addSource("routeProgress", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString", coordinates: [start3d, start3d] }, properties: {} } as any });
       map.addSource("head",          { type: "geojson", data: { type: "Feature", geometry: { type: "Point", coordinates: start }, properties: {} } as any });
 
+      // line-elevation-reference: "sea" makes the route render at its recorded GPS altitude
+      // (Z coordinate) rather than following the terrain DEM surface. This correctly handles
+      // bridges, suspension bridges, overpasses and any elevated path over a valley/river.
+      const elevRef = { "line-elevation-reference": "sea" } as any;
       map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
-        layout: { "line-cap": "round", "line-join": "round" },
+        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
         paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
       // Aurora ribbon: a wide soft glow, a teal body, and a bright white-hot core.
       map.addLayer({ id: "routeProgressGlow", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round" },
+        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
         paint: { "line-color": TEAL, "line-width": 34, "line-blur": 26, "line-opacity": 0.5 } });
       map.addLayer({ id: "routeProgress", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round" },
+        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
         paint: { "line-color": TEAL, "line-width": 12 } });
       map.addLayer({ id: "routeCore", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round" },
+        layout: { "line-cap": "round", "line-join": "round", ...elevRef },
         paint: { "line-color": "#eaffff", "line-width": 4, "line-opacity": 0.9 } });
       // Signature marker: two expanding energy rings + soft glow + white-hot core.
       map.addLayer({ id: "headPulse1", type: "circle", source: "head",
@@ -912,7 +940,7 @@ export default function RunVideoShare() {
         // ── Outro: pull up and out to reveal the whole route ──
         routeProgress = 1;
         (map.getSource("routeProgress") as any)?.setData({
-          type: "Feature", geometry: { type: "LineString", coordinates: coordsRef.current }, properties: {},
+          type: "Feature", geometry: { type: "LineString", coordinates: coords3dRef.current.length ? coords3dRef.current : coordsRef.current }, properties: {},
         });
         const end = interpAt(total).pos;
         (map.getSource("head") as any)?.setData({
@@ -993,7 +1021,9 @@ export default function RunVideoShare() {
     const map = mapRef.current;
     const coords = coordsRef.current;
     if (map && coords.length >= 2) {
-      (map.getSource("routeProgress") as any)?.setData({ type: "Feature", geometry: { type: "LineString", coordinates: [coords[0], coords[0]] }, properties: {} });
+      const c3d = coords3dRef.current;
+      const s3d = c3d[0] ?? [coords[0][0], coords[0][1]];
+      (map.getSource("routeProgress") as any)?.setData({ type: "Feature", geometry: { type: "LineString", coordinates: [s3d, s3d] }, properties: {} });
       (map.getSource("head") as any)?.setData({ type: "Feature", geometry: { type: "Point", coordinates: coords[0] }, properties: {} });
       dispBearingRef.current = bearing(coords[0], coords[1]);
       const ahead = interpAt(LOOKAHEAD_M).pos;
