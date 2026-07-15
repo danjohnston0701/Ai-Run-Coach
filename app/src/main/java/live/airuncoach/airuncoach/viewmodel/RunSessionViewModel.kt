@@ -39,9 +39,9 @@ import live.airuncoach.airuncoach.network.model.IntervalCoachingRequest
 import live.airuncoach.airuncoach.network.model.IntervalCoachingResponse
 import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
 import live.airuncoach.airuncoach.network.model.PrepareCoachingRequest
-import live.airuncoach.airuncoach.network.model.SessionInstructionsResponse
+// SessionInstructionsResponse import removed — legacy path retired
 import live.airuncoach.airuncoach.service.GarminWatchManager
-import live.airuncoach.airuncoach.service.SessionCoachingHelper
+// SessionCoachingHelper import retained for future logCoachingEvent usage
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.utils.CoachingAudioQueue
@@ -562,13 +562,7 @@ class RunSessionViewModel @Inject constructor(
                     cfg.planWeekNumber?.let { w  -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
                     cfg.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
                 }
-                sessionInstructions?.let { instructions ->
-                    try {
-                        putExtra(RunTrackingService.EXTRA_SESSION_INSTRUCTIONS_JSON, gson.toJson(instructions))
-                    } catch (e: Exception) {
-                        Log.w("RunSessionViewModel", "prepareServiceForWatch: could not serialize session instructions")
-                    }
-                }
+                // Legacy session-instructions JSON not passed (retired) — only the rich dynamic plan is used.
                 activeSessionCoachingPlan?.let { plan ->
                     try {
                         putExtra(RunTrackingService.EXTRA_DYNAMIC_COACHING_PLAN_JSON, gson.toJson(plan))
@@ -789,7 +783,7 @@ class RunSessionViewModel @Inject constructor(
         }
     }
     private val weatherRepository = WeatherRepository(context)
-    private val sessionCoachingHelper = SessionCoachingHelper(apiService)  // NEW: Session coaching
+    // SessionCoachingHelper retained for future logCoachingEvent usage (currently unused after legacy path retirement)
 
     private val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
@@ -800,7 +794,7 @@ class RunSessionViewModel @Inject constructor(
     // Protects against the watch + service both firing onWakeWordDetected() for one tap.
     private var lastWakeWordTriggerMs: Long = 0L
     private val WAKE_WORD_DEBOUNCE_MS = 3_000L
-    private var sessionInstructions: SessionInstructionsResponse? = null  // NEW: Store session context
+    // sessionInstructions removed — legacy path retired in favour of activeSessionCoachingPlan only
 
     // ── Interval Training State ──────────────────────────────────────────────
     // Tracks the current interval phase (work vs recovery) and position within it
@@ -962,29 +956,11 @@ class RunSessionViewModel @Inject constructor(
                 // Add timeout to prevent hanging
                 withTimeout(30000) { // 30 second timeout (audio endpoint generates LLM text + OpenAI TTS)
                     
-                    // ========== NEW: Fetch session instructions pre-run ==========
-                    if (runConfig?.workoutId != null) {
-                        try {
-                            Log.d("RunSessionViewModel", "Fetching session instructions for workout: ${runConfig?.workoutId}")
-                            sessionInstructions = sessionCoachingHelper.fetchSessionInstructions(runConfig!!.workoutId!!)
-                            
-                            if (sessionInstructions != null) {
-                                Log.d("RunSessionViewModel", "Session instructions fetched - tone: ${sessionInstructions?.aiDeterminedTone}")
-                                // Update the stored config with session context
-                                runConfig = runConfig?.copy(
-                                    sessionInstructions = sessionInstructions,
-                                    sessionCoachingTone = sessionInstructions?.aiDeterminedTone,
-                                    sessionCoachingIntensity = sessionInstructions?.aiDeterminedIntensity
-                                )
-                            } else {
-                                Log.d("RunSessionViewModel", "Session instructions returned null - continuing without context")
-                            }
-                        } catch (e: Exception) {
-                            Log.w("RunSessionViewModel", "Failed to fetch session instructions: ${e.message}")
-                            // Continue without session context - graceful degradation
-                        }
-                    }
-                    // ========== END: Session instructions fetching ==========
+                    // Legacy session-instructions fetch has been retired.
+                    // The rich dynamic coaching plan (prepare-coaching) is the ONLY
+                    // pre-run coaching source. It is generated when the user opens the
+                    // workout detail screen via generateCoachingForWorkout(), stored in
+                    // activeSessionCoachingPlan, and passed to RunTrackingService below.
                     
                     // Get route data from runConfig if available
                     val route = runConfig?.route
@@ -1518,16 +1494,8 @@ class RunSessionViewModel @Inject constructor(
                 }
                 // Pass group run context if present
                 groupRunId?.let { grId -> putExtra(RunTrackingService.EXTRA_GROUP_RUN_ID, grId) }
-                // Pass AI session instructions as JSON so RunTrackingService can use them (legacy plan)
-                sessionInstructions?.let { instructions ->
-                    try {
-                        val instructionsJson = gson.toJson(instructions)
-                        putExtra(RunTrackingService.EXTRA_SESSION_INSTRUCTIONS_JSON, instructionsJson)
-                        Log.d("RunSessionViewModel", "Passed session instructions to service (tone=${instructions.aiDeterminedTone})")
-                    } catch (e: Exception) {
-                        Log.w("RunSessionViewModel", "Failed to serialize session instructions: ${e.message}")
-                    }
-                }
+                // Legacy session-instructions JSON is no longer passed — retired in favour of
+                // the rich dynamic coaching plan (prepare-coaching) only.
                 // Pass rich dynamic coaching plan (prepare-coaching) — enables reactive trigger evaluation
                 activeSessionCoachingPlan?.let { plan ->
                     try {

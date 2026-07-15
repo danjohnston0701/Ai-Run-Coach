@@ -164,6 +164,36 @@ class RunTrackingService : Service(), SensorEventListener {
     private var maxHeartRate: Int = 0         // Peak HR seen during this run
     private var heartRateSum: Long = 0        // Running sum for true average calculation
     private var heartRateSampleCount: Int = 0 // Number of HR samples taken
+
+    // ── HR sensor confidence filter ────────────────────────────────────────────
+    // Circular buffer of the last HR_CONFIDENCE_WINDOW timestamped readings.
+    // Used to detect wrist-sensor contact-loss (a sudden drop of >30 bpm in
+    // under 10 seconds is almost certainly noise, not a real physiological event).
+    // A reading is only "confident" once the buffer has enough samples AND the
+    // candidate reading is within HR_MAX_SUDDEN_CHANGE_BPM of the rolling average.
+    private val recentHrReadings: ArrayDeque<Pair<Long, Int>> = ArrayDeque() // (timestamp ms, bpm)
+    private var lastConfidentHr: Int = 0   // Last validated HR reading (used as reference)
+
+    // ── HR trend tracking (for smart coaching: "are they already responding?") ──
+    // A ring buffer of the last HR_TREND_WINDOW confident readings (no timestamps needed here;
+    // we update this only when validateAndUpdateHRBuffer accepts the reading).
+    // Used before firing hr_zone_high triggers to detect whether the athlete's HR is
+    // already falling — in which case the AI should acknowledge, not direct.
+    private val hrTrendBuffer: ArrayDeque<Int> = ArrayDeque()   // bpm values (max HR_TREND_WINDOW)
+
+    // ── HR recovery acknowledgement state ──────────────────────────────────────
+    // When an HR-zone-high trigger fires, we note the zone max it fired against.
+    // When HR subsequently returns INTO zone AND is trending downward, we fire a
+    // single recovery acknowledgement ("Good — heart rate settling back down").
+    // hrZoneExceededMax stores the phaseHRMax that caused the zone-high trigger.
+    // Reset to 0 after the acknowledgement fires or at run start.
+    private var hrZoneExceededMax: Int = 0
+    private var lastHrRecoveryAcknowledgedAtKm: Double = -5.0  // Distance when last ack fired
+
+    // ── Rolling pace buffer (for trend detection) ──────────────────────────────
+    // The last PACE_TREND_WINDOW pace readings (sec/km) from GPS updates.
+    // Used to detect whether the athlete is already slowing when HR zone high fires.
+    private val recentPaceSecPerKm: ArrayDeque<Double> = ArrayDeque()   // sec/km (max PACE_TREND_WINDOW)
     private var initialStepCount: Int = -1
     private var lastStepTimestamp: Long = 0
     // Step detector cadence tracking (fallback)
@@ -479,6 +509,30 @@ class RunTrackingService : Service(), SensorEventListener {
         // shifts the optimal cadence by ~5-8 spm, warranting fresh advice.
         private const val CADENCE_REFIRE_SPEED_DELTA_MS = 0.5
 
+        // ── HR sensor confidence filter constants ──────────────────────────────
+        // Minimum number of readings needed before we trust the rolling average.
+        private const val HR_CONFIDENCE_WINDOW = 5
+        // Maximum bpm change allowed between two consecutive readings (2-second gap)
+        // without flagging the reading as a suspected sensor dropout.
+        // Physiologically, HR can change ~1-2 bpm/second during normal running.
+        // A 30 bpm drop in 2 seconds = ~15 bpm/s — only possible with sensor loss.
+        private const val HR_MAX_SUDDEN_CHANGE_BPM = 30
+        // Maximum time window we keep in the rolling buffer (60 seconds).
+        // Readings older than this are expired, ensuring the average reflects recent effort.
+        private const val HR_ROLLING_WINDOW_MS = 60_000L
+
+        // ── HR & pace trend detection constants ───────────────────────────────
+        // Number of readings kept in the trend buffers.
+        // At ~5-second GPS intervals → 8 readings = ~40 seconds of trend data.
+        private const val HR_TREND_WINDOW = 8
+        private const val PACE_TREND_WINDOW = 8
+        // Minimum bpm delta to declare a trend (avoids declaring noise as "falling/rising")
+        private const val HR_TREND_MIN_DELTA_BPM = 3
+        // Minimum sec/km delta to declare a pace trend (5 sec/km = about 30s difference at 5min/km)
+        private const val PACE_TREND_MIN_DELTA_SEC = 5.0
+        // Minimum km between HR recovery acknowledgement cues (avoid spamming)
+        private const val HR_RECOVERY_ACK_MIN_KM = 0.5
+
         // ELEVATION NOISE FILTER — two thresholds because the GPS sources have very different
         // update rates and accuracy profiles:
         //
@@ -680,9 +734,15 @@ class RunTrackingService : Service(), SensorEventListener {
 
         /** Session types where sustained consistent effort makes free-run prompts (km splits,
          *  struggle coaching) useful and relevant. Add new continuous-effort types here.
-         *  Everything NOT in this list is treated as Tier 1 (fully managed by the coaching plan). */
+         *  Everything NOT in this list is treated as Tier 1 (fully managed by the coaching plan).
+         *
+         *  NOTE: "easy" and "recovery" are intentionally excluded.  Those session types are
+         *  HR-led — the coaching plan's milestone triggers own the check-ins and the runner
+         *  needs effort-based guidance, not pace-split interruptions.  Km-split cues on an
+         *  easy run distract from the real goal (heart-rate control) and often reference pace
+         *  numbers that are irrelevant when effort is the primary target. */
         val TIER_2_SESSION_TYPES = setOf(
-            "tempo", "long_run", "easy", "recovery", "threshold", "race_pace"
+            "tempo", "long_run", "threshold", "race_pace"
         )
     }
 
@@ -1146,8 +1206,14 @@ class RunTrackingService : Service(), SensorEventListener {
         maxCadenceValue = 0
         currentHeartRate = 0
         maxHeartRate = 0
+        recentHrReadings.clear()
+        lastConfidentHr = 0
         heartRateSum = 0L
         heartRateSampleCount = 0
+        hrTrendBuffer.clear()
+        hrZoneExceededMax = 0
+        lastHrRecoveryAcknowledgedAtKm = -5.0
+        recentPaceSecPerKm.clear()
         // Reset watch dynamics accumulators
         watchGctSum = 0f;    watchGctCount = 0
         watchGcbSum = 0f;    watchGcbCount = 0
@@ -2292,13 +2358,18 @@ class RunTrackingService : Service(), SensorEventListener {
         // ── Heart Rate ────────────────────────────────────────────────────────
         if (frame.heartRate > 20) {
             val prevHr = currentHeartRate
-            currentHeartRate = frame.heartRate
-            heartRateSum += frame.heartRate
-            heartRateSampleCount++
-            maxHeartRate = maxOf(maxHeartRate, frame.heartRate)
-            if (kotlin.math.abs(frame.heartRate - prevHr) > 10) {
-                Log.d("RunTrackingService", "HR change: $prevHr → ${frame.heartRate} bpm")
+            val validatedHr = validateAndUpdateHRBuffer(frame.heartRate)
+            if (validatedHr != null) {
+                currentHeartRate = validatedHr
+                heartRateSum += validatedHr
+                heartRateSampleCount++
+                maxHeartRate = maxOf(maxHeartRate, validatedHr)
+                if (kotlin.math.abs(validatedHr - prevHr) > 10) {
+                    Log.d("RunTrackingService", "HR change: $prevHr → $validatedHr bpm")
+                }
             }
+            // If validatedHr is null, the reading was a suspected dropout — currentHeartRate
+            // retains its last confident value so the UI doesn't flash to 0.
         }
 
         // ── Cadence ───────────────────────────────────────────────────────────
@@ -2551,6 +2622,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     String.format("%d:%02d", minutes, seconds)
                 } else {
                     "0:00"
+                }
+                // Feed the pace trend buffer whenever we have a valid smoothed pace
+                if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
+                    updatePaceTrendBuffer(smoothedPaceSeconds)
                 }
                 totalDistance += distanceIncrement
                 // Accumulate speed readings for speed-based avg pace (essential for simulation where wall-clock time is compressed)
@@ -4284,6 +4359,17 @@ class RunTrackingService : Service(), SensorEventListener {
                 else -> {
                     // Require 2 min elapsed for reactive triggers — prevents premature firing at run start
                     if (getActiveRunDuration() < 120_000L) false
+                    // HR confidence guard: when the session policy requires validated HR, suppress
+                    // any HR-based trigger until we have a confident, stable reading.
+                    // This silences false "HR too high" cues caused by sensor contact-loss dropouts.
+                    else if (plan.coachingPolicy?.hrValidationRequired == true &&
+                        trigger.condition.contains("hr", ignoreCase = true) &&
+                        !isHRReadingConfident()
+                    ) {
+                        Log.d("RunTrackingService",
+                            "HR trigger '${trigger.id}' suppressed — waiting for confident HR reading")
+                        false
+                    }
                     else evaluateConditionExpression(
                         trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName
                     )
@@ -4299,6 +4385,17 @@ class RunTrackingService : Service(), SensorEventListener {
             // Mark fired BEFORE async call to prevent duplicate triggers this tick
             hasCoachingFiredThisTick = true
 
+            // Track whether this is an HR-zone-high trigger so we can fire a recovery
+            // acknowledgement later when HR returns to zone.
+            if (trigger.type.contains("hr_zone_high") ||
+                trigger.type.contains("hr_high") ||
+                trigger.type.contains("heart_rate_high") ||
+                (trigger.type.contains("hr") && trigger.condition.contains(">") &&
+                 trigger.condition.contains("targetHRMax", ignoreCase = true))) {
+                hrZoneExceededMax = phaseHRMax ?: 0
+                Log.d("RunTrackingService", "💓 HR zone exceeded (max=$hrZoneExceededMax) — will fire recovery ack when HR returns")
+            }
+
             // Detect session completion — stop all further trigger evaluation after this fires
             if (trigger.type.contains("session_complete") || trigger.type.contains("session_end")) {
                 sessionCoachingPlanComplete = true
@@ -4307,6 +4404,46 @@ class RunTrackingService : Service(), SensorEventListener {
 
             fireLiveTriggerMessage(
                 trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
+                phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+                phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
+                currentDistanceKm = currentDistanceKm, plan = plan,
+                currentPhase = currentPhase,
+            )
+        }
+
+        // ── HR recovery acknowledgement ─────────────────────────────────────────
+        // After all condition triggers have been evaluated, check if the athlete's
+        // HR has returned to zone after previously exceeding it.  Fire a single
+        // positive acknowledgement — but only if:
+        //  • A zone-high trigger previously fired (hrZoneExceededMax > 0)
+        //  • Current HR is back below (or at) the zone max
+        //  • HR trend is "falling" or "stable" (not rising again)
+        //  • We haven't already acknowledged this recovery within HR_RECOVERY_ACK_MIN_KM
+        //  • No other coaching fired this tick (don't pile on)
+        if (!hasCoachingFiredThisTick &&
+            hrZoneExceededMax > 0 &&
+            currentHeartRate > 0 &&
+            currentHeartRate <= hrZoneExceededMax &&
+            computeHRTrend() != "rising" &&
+            (currentDistanceKm - lastHrRecoveryAcknowledgedAtKm) >= HR_RECOVERY_ACK_MIN_KM &&
+            isHRReadingConfident()) {
+
+            val recoveryTrigger = live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger(
+                id = "hr_recovery_ack",
+                type = "hr_recovery_acknowledgement",
+                condition = "hr <= targetHRMax",
+                message = "Heart rate back in zone — good response.",
+                frequency = "on_condition",
+                alternativeMessages = null,
+                alertType = null,
+                suppressWhenIntensity = null,
+            )
+            lastHrRecoveryAcknowledgedAtKm = currentDistanceKm
+            hrZoneExceededMax = 0   // Reset — will be set again if HR exceeds zone again
+            Log.d("RunTrackingService", "💚 HR recovery — firing acknowledgement cue")
+            hasCoachingFiredThisTick = true
+            fireLiveTriggerMessage(
+                trigger = recoveryTrigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
                 phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
                 phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
                 currentDistanceKm = currentDistanceKm, plan = plan,
@@ -4355,6 +4492,17 @@ class RunTrackingService : Service(), SensorEventListener {
         val recentSplits = kmSplits.takeLast(3).map { split ->
             live.airuncoach.airuncoach.network.model.RecentSplit(km = split.km, pace = split.pace)
         }
+
+        // ── Trend context — computed from rolling buffers ──────────────────────
+        val hrTrend = computeHRTrend()
+        val paceTrend = computePaceTrend()
+        // True when this is an HR-zone-high trigger AND the athlete is already self-correcting.
+        // The AI should ACKNOWLEDGE rather than DIRECT in this case.
+        val isAlreadyResponding = (trigger.type.contains("hr_zone_high") ||
+            trigger.type.contains("hr_high") ||
+            trigger.type.contains("heart_rate_high") ||
+            trigger.type == "hr_recovery_acknowledgement") &&
+            hrTrend == "falling" && paceTrend == "slowing"
 
         // Pre-written fallback — resolved with live data, used if API fails or times out
         val fallbackMessage = pickTriggerMessage(
@@ -4436,6 +4584,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     elevationGainM = snapshotElevGain,
                     recentCoachingMessages = recentMessages.ifEmpty { null },
                     recentSplits = recentSplits.ifEmpty { null },
+                    // Trend context — tells the AI whether the athlete is already self-correcting
+                    hrTrendDirection = hrTrend,
+                    paceTrendDirection = paceTrend,
+                    isAthleteAlreadyResponding = isAlreadyResponding.takeIf { isAlreadyResponding },
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
@@ -5397,9 +5549,123 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
+    /**
+     * Updates the rolling HR buffer with a new reading and returns the validated HR
+     * value if the reading is physiologically plausible, or null if it looks like
+     * sensor contact loss.
+     *
+     * A reading is suspect when:
+     *   1. It drops more than HR_MAX_SUDDEN_CHANGE_BPM bpm below the recent rolling
+     *      average in a single update (classic wrist-sensor dropout pattern).
+     *   2. It is outside the physiological range 35–220 bpm.
+     *
+     * If rejected, the current `currentHeartRate` is LEFT UNCHANGED (we keep the last
+     * confident value).  The rejected sample is not added to the buffer so that a
+     * brief sensor glitch doesn't corrupt the rolling average.
+     *
+     * @return the validated HR bpm, or null if this reading was rejected.
+     */
+    private fun validateAndUpdateHRBuffer(rawHr: Int): Int? {
+        val now = System.currentTimeMillis()
+
+        // Basic physiological range gate
+        if (rawHr < 35 || rawHr > 220) return null
+
+        // Expire readings older than HR_ROLLING_WINDOW_MS
+        while (recentHrReadings.isNotEmpty() &&
+            (now - recentHrReadings.first().first) > HR_ROLLING_WINDOW_MS) {
+            recentHrReadings.removeFirst()
+        }
+
+        // Once we have a confident baseline, check for sudden large drops
+        if (recentHrReadings.size >= HR_CONFIDENCE_WINDOW) {
+            val rollingAvg = recentHrReadings.map { it.second }.average().toInt()
+            val drop = rollingAvg - rawHr
+            if (drop > HR_MAX_SUDDEN_CHANGE_BPM) {
+                // Suspected sensor dropout — reject this reading
+                Log.w("RunTrackingService",
+                    "HR reading $rawHr rejected as suspected sensor dropout " +
+                    "(rolling avg=$rollingAvg, drop=${drop}bpm > ${HR_MAX_SUDDEN_CHANGE_BPM}bpm threshold)")
+                return null
+            }
+        }
+
+        // Reading accepted — add to buffer
+        recentHrReadings.addLast(Pair(now, rawHr))
+        lastConfidentHr = rawHr
+
+        // Also add to the trend buffer (capped at HR_TREND_WINDOW entries)
+        hrTrendBuffer.addLast(rawHr)
+        while (hrTrendBuffer.size > HR_TREND_WINDOW) hrTrendBuffer.removeFirst()
+
+        return rawHr
+    }
+
+    /**
+     * Returns true when we have enough confident HR samples and the current reading
+     * is not flagged as a sensor anomaly.  Use this before firing any HR-based coaching
+     * cue to avoid reacting to contact-loss artifacts.
+     */
+    private fun isHRReadingConfident(): Boolean {
+        return recentHrReadings.size >= HR_CONFIDENCE_WINDOW && currentHeartRate > 0
+    }
+
+    /**
+     * Computes the current HR trend direction from [hrTrendBuffer].
+     * Returns "rising", "stable", or "falling".
+     * Requires at least 5 readings; returns "stable" otherwise.
+     *
+     * Algorithm: compare the average of the first-half readings vs. the average
+     * of the second-half readings.  A delta > HR_TREND_MIN_DELTA_BPM in either
+     * direction declares a trend.
+     */
+    private fun computeHRTrend(): String {
+        val readings = hrTrendBuffer.toList()
+        if (readings.size < 5) return "stable"
+        val half = readings.size / 2
+        val firstHalf = readings.take(half).average()
+        val secondHalf = readings.takeLast(half).average()
+        val delta = secondHalf - firstHalf
+        return when {
+            delta < -HR_TREND_MIN_DELTA_BPM -> "falling"
+            delta > HR_TREND_MIN_DELTA_BPM  -> "rising"
+            else                             -> "stable"
+        }
+    }
+
+    /**
+     * Computes the current pace trend direction from [recentPaceSecPerKm].
+     * Returns "speeding_up", "stable", or "slowing".
+     * Higher sec/km value = slower pace.
+     */
+    private fun computePaceTrend(): String {
+        val readings = recentPaceSecPerKm.toList()
+        if (readings.size < 5) return "stable"
+        val half = readings.size / 2
+        val firstHalf = readings.take(half).average()
+        val secondHalf = readings.takeLast(half).average()
+        val delta = secondHalf - firstHalf
+        return when {
+            delta > PACE_TREND_MIN_DELTA_SEC  -> "slowing"        // higher sec/km = slower
+            delta < -PACE_TREND_MIN_DELTA_SEC -> "speeding_up"
+            else                               -> "stable"
+        }
+    }
+
+    /**
+     * Updates [recentPaceSecPerKm] with a new pace reading.
+     * Called on every GPS update where a valid pace is available.
+     */
+    private fun updatePaceTrendBuffer(paceSecPerKm: Double) {
+        if (paceSecPerKm <= 0 || paceSecPerKm > 1200) return  // Ignore invalid/stopped readings
+        recentPaceSecPerKm.addLast(paceSecPerKm)
+        while (recentPaceSecPerKm.size > PACE_TREND_WINDOW) recentPaceSecPerKm.removeFirst()
+    }
+
     private fun maybeTriggerHeartRateCoaching() {
         if (!coachingFeaturePrefs.heartRateCoachingEnabled) return
         if (currentHeartRate <= 0) return
+        if (!isHRReadingConfident()) return  // Don't fire on unvalidated/sparse HR data
         val now = System.currentTimeMillis()
         val elapsedMinutes = (getActiveRunDuration() / 60000).toInt()
         if (elapsedMinutes <= 0) return
@@ -6730,14 +6996,18 @@ class RunTrackingService : Service(), SensorEventListener {
             Sensor.TYPE_HEART_RATE -> {
                 val hr = event.values[0].toInt()
                 if (hr > 0) {
-                    currentHeartRate = hr
-                    hrSum += hr
-                    hrCount += 1
-                    if (hr > maxHr) maxHr = hr
-                    // Class-level tracking for run-end summary
-                    heartRateSum += hr
-                    heartRateSampleCount++
-                    if (hr > maxHeartRate) maxHeartRate = hr
+                    val validatedHr = validateAndUpdateHRBuffer(hr)
+                    if (validatedHr != null) {
+                        currentHeartRate = validatedHr
+                        hrSum += validatedHr
+                        hrCount += 1
+                        if (validatedHr > maxHr) maxHr = validatedHr
+                        // Class-level tracking for run-end summary
+                        heartRateSum += validatedHr
+                        heartRateSampleCount++
+                        if (validatedHr > maxHeartRate) maxHeartRate = validatedHr
+                    }
+                    // Rejected readings: currentHeartRate keeps its last confident value
                 }
             }
         }

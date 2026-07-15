@@ -399,7 +399,7 @@ fun WorkoutDetailScreen(
                                     Text("Zone 1", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.success)
                                     Text("Recovery", style = AppTextStyles.small, color = Colors.textMuted)
                                 }
-                                Text("Resting walk", style = AppTextStyles.small, color = Colors.textSecondary)
+                                Text(calculateZonePaceRange(1, workout.targetPace), style = AppTextStyles.small, color = Colors.textSecondary)
                             }
                             
                             Spacer(modifier = Modifier.height(Spacing.md))
@@ -418,7 +418,7 @@ fun WorkoutDetailScreen(
                                     Text("Zone 2 (YOUR SESSION)", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
                                     Text("Aerobic/Endurance", style = AppTextStyles.small, color = Colors.textMuted)
                                 }
-                                Text("9–13 min/km", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.primary)
+                                Text(calculateZonePaceRange(2, workout.targetPace), style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.primary)
                             }
                             
                             Spacer(modifier = Modifier.height(Spacing.md))
@@ -431,7 +431,7 @@ fun WorkoutDetailScreen(
                                     Text("Zone 3", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.warning)
                                     Text("Tempo", style = AppTextStyles.small, color = Colors.textMuted)
                                 }
-                                Text("Light jog", style = AppTextStyles.small, color = Colors.textSecondary)
+                                Text(calculateZonePaceRange(3, workout.targetPace), style = AppTextStyles.small, color = Colors.textSecondary)
                             }
                         }
                     }
@@ -932,6 +932,64 @@ fun resolveZoneNumber(workout: WorkoutDetails): Int {
         "intervals", "hill_repeats"    -> 4
         else                           -> 2
     }
+}
+
+/**
+ * Calculate dynamic pace range for a given zone based on target pace.
+ * 
+ * When a workout has a specific target pace (from enrichment), we calculate the range
+ * by applying zone-specific offsets:
+ * - Zone 1: ~40-50% slower than target pace
+ * - Zone 2: ±10-15% of target pace (e.g., 8:30 target → 7:30–9:45)
+ * - Zone 3: ~10-20% faster than target pace
+ * 
+ * Falls back to hardcoded ranges if no target pace is available.
+ */
+fun calculateZonePaceRange(zoneNumber: Int, targetPace: String?): String {
+    if (targetPace.isNullOrBlank()) {
+        // Fallback to generic zone ranges (population average)
+        return when (zoneNumber) {
+            1 -> "6–8 min/km"           // Very easy recovery walk
+            2 -> "7:30–9:45 min/km"     // Default Zone 2 range
+            3 -> "6:00–8:00 min/km"     // Tempo pace
+            4 -> "4:30–6:00 min/km"     // Interval pace
+            5 -> "3:00–5:00 min/km"     // Sprint pace
+            else -> "7:30–9:45 min/km"
+        }
+    }
+
+    // Parse target pace (format: "M:SS/km")
+    val parts = targetPace.split(":")
+    if (parts.size < 2) return "7:30–9:45 min/km" // Fallback if parsing fails
+
+    val minutes = parts[0].toIntOrNull() ?: return "7:30–9:45 min/km"
+    val seconds = parts[1].split("/")[0].toIntOrNull() ?: return "7:30–9:45 min/km"
+    val totalSeconds = minutes * 60 + seconds
+
+    // Calculate range based on zone
+    val (slowerPercent, fasterPercent) = when (zoneNumber) {
+        1 -> Pair(1.4, 1.6)           // 40-60% slower than Zone 2 target
+        2 -> Pair(0.85, 1.15)         // ±15% around target pace
+        3 -> Pair(0.75, 0.90)         // 10-25% faster than target
+        4 -> Pair(0.65, 0.75)         // 25-35% faster than target
+        5 -> Pair(0.55, 0.70)         // 30-45% faster than target
+        else -> Pair(0.85, 1.15)      // Default to Zone 2 range
+    }
+
+    val slowerSeconds = (totalSeconds * slowerPercent).toInt()
+    val fasterSeconds = (totalSeconds * fasterPercent).toInt()
+
+    // Format back to "M:SS–M:SS min/km"
+    val slowerMin = slowerSeconds / 60
+    val slowerSec = slowerSeconds % 60
+    val fasterMin = fasterSeconds / 60
+    val fasterSec = fasterSeconds % 60
+
+    return String.format(
+        "%d:%02d–%d:%02d min/km",
+        slowerMin, slowerSec,
+        fasterMin, fasterSec
+    )
 }
 
 fun workoutWhyText(type: String) = when (type) {

@@ -5531,6 +5531,123 @@ Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// buildSessionCoachingPolicy
+//
+// Deterministically derives the coaching governance rules from the session type.
+// This is computed entirely in code — the AI does NOT decide these rules.
+// The policy governs which cue categories are allowed during a live run and
+// whether HR sensor validation is required before firing HR-based triggers.
+//
+// Decision logic:
+//   HR-led sessions (easy, recovery, long_run, walk_run and any Zone 1-2 session):
+//     • primaryMetric = "hr"
+//     • cadenceTriggersAllowed = false   (irrelevant when effort, not pace, is the goal)
+//     • elevationTriggersAllowed = false  (terrain coaching conflicts with effort-first intent)
+//     • hrValidationRequired = true       (sensor quality must be confirmed before cueing)
+//
+//   Pace-led sessions (tempo, threshold, intervals, hill_repeats, race_pace):
+//     • primaryMetric = "pace"
+//     • cadenceTriggersAllowed = true    (cadence directly affects pace efficiency)
+//     • elevationTriggersAllowed = true   (hills directly affect pace targets)
+//     • hrValidationRequired = false
+//
+//   Unknown session types default to the conservative HR-led policy so that
+//   a newly added session type never accidentally fires irrelevant cues.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildSessionCoachingPolicy(
+  sessionType: string,
+  targetHRMin?: number,
+  targetHRMax?: number
+): SessionCoachingPolicy {
+  const type = (sessionType ?? "").toLowerCase();
+
+  // Pace-led session types — cadence and elevation coaching are relevant and valuable
+  const PACE_LED_TYPES = new Set([
+    "tempo", "threshold", "intervals", "hill_repeats", "hills",
+    "race_pace", "race", "progression_run", "speed",
+  ]);
+
+  const isPaceLed = PACE_LED_TYPES.has(type);
+
+  // HR-led sessions — effort control is the goal, not pace optimisation
+  // Any session with explicit HR targets AND not in the pace-led list is also HR-led.
+  // Unknown types default to HR-led (conservative).
+  const isHRLed =
+    !isPaceLed &&
+    (type === "easy" ||
+      type === "recovery" ||
+      type === "long_run" ||
+      type === "walk_run" ||
+      type === "z1" ||
+      type === "z2" ||
+      (targetHRMin != null && targetHRMax != null) ||
+      !PACE_LED_TYPES.has(type));
+
+  if (isPaceLed) {
+    return {
+      primaryMetric: "pace",
+      cadenceTriggersAllowed: true,
+      elevationTriggersAllowed: true,
+      hrValidationRequired: false,
+    };
+  }
+
+  // Default: HR-led / conservative
+  return {
+    primaryMetric: isHRLed ? "hr" : "effort",
+    cadenceTriggersAllowed: false,
+    elevationTriggersAllowed: false,
+    hrValidationRequired: true,
+  };
+}
+
+// ──────────────────────────────────────────────────────────────��──────────────
+// stripInappropriateTriggers
+//
+// Post-processing guard: removes triggers that are incompatible with the
+// session's coaching policy. This is a safety net — the AI prompt already
+// instructs the model not to generate these, but we enforce it deterministically
+// here so that a model regression or policy change can never slip past.
+// ─────────────────────────────────────────────────────────────────────────────
+function stripInappropriateTriggers(
+  triggers: SessionCoachingTrigger[],
+  policy: SessionCoachingPolicy
+): SessionCoachingTrigger[] {
+  // Cadence-related trigger types/ids to strip when cadence is not allowed
+  const CADENCE_TRIGGER_KEYWORDS = ["cadence", "stride", "turnover", "spm"];
+  // Elevation/terrain trigger types/ids to strip when elevation is not allowed
+  const ELEVATION_TRIGGER_KEYWORDS = ["elevation", "hill", "terrain", "grade", "uphill", "downhill", "slope", "rolling"];
+
+  return triggers.filter(trigger => {
+    const idAndType = `${trigger.id} ${trigger.type}`.toLowerCase();
+    const conditionLower = trigger.condition.toLowerCase();
+
+    if (!policy.cadenceTriggersAllowed) {
+      const isCadenceTrigger =
+        CADENCE_TRIGGER_KEYWORDS.some(kw => idAndType.includes(kw)) ||
+        conditionLower.includes("cadence");
+      if (isCadenceTrigger) {
+        console.log(`[stripInappropriateTriggers] Removing cadence trigger '${trigger.id}' from HR-led session plan`);
+        return false;
+      }
+    }
+
+    if (!policy.elevationTriggersAllowed) {
+      const isElevationTrigger =
+        ELEVATION_TRIGGER_KEYWORDS.some(kw => idAndType.includes(kw)) ||
+        conditionLower.includes("grade") ||
+        conditionLower.includes("elevation_gain");
+      if (isElevationTrigger) {
+        console.log(`[stripInappropriateTriggers] Removing elevation trigger '${trigger.id}' from HR-led session plan`);
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // generateSessionCoaching
 //
 // Unified AI function that generates a complete, bespoke coaching plan for ANY
@@ -5603,6 +5720,32 @@ export interface GenerateSessionCoachingParams {
   primaryConstraint: "distance" | "duration" | "intervals";
 }
 
+export interface SessionCoachingPolicy {
+  /** What the session is primarily organised around. */
+  primaryMetric: "hr" | "pace" | "effort";
+  /**
+   * Whether cadence triggers are appropriate for this session type.
+   * FALSE for HR-led sessions (easy, recovery, Zone 2, long run) — cadence
+   * coaching is irrelevant when the primary goal is heart-rate control.
+   * TRUE for pace-led sessions (tempo, threshold, intervals, race pace).
+   */
+  cadenceTriggersAllowed: boolean;
+  /**
+   * Whether standalone elevation/terrain triggers are appropriate.
+   * FALSE for HR-led sessions — terrain coaching ("pace uphill, recover descents")
+   * is distracting and conflicts with the effort-first instruction.
+   * TRUE for all other session types where terrain affects pace targets.
+   */
+  elevationTriggersAllowed: boolean;
+  /**
+   * When true, the live engine must validate HR readings before firing any
+   * HR-based trigger.  A sudden drop of >30 bpm in under 10 seconds is almost
+   * certainly wrist sensor contact loss and must be silently suppressed.
+   * Always true when primaryMetric is "hr".
+   */
+  hrValidationRequired: boolean;
+}
+
 export interface SessionCoachingPlan {
   sessionType: string;
   sessionGoal: string;
@@ -5627,6 +5770,12 @@ export interface SessionCoachingPlan {
     isStrengthWork: boolean;
     isRecovery: boolean;
   };
+  /**
+   * Deterministic coaching governance rules — computed from session type in code,
+   * NOT by the AI.  The live engine uses these to suppress inappropriate generic
+   * cues regardless of what triggers the AI designed.
+   */
+  coachingPolicy: SessionCoachingPolicy;
 }
 
 export interface SessionCoachingPhase {
@@ -5718,6 +5867,16 @@ export async function generateSessionTriggerMessage(params: {
   triggerType: string;
   triggerCondition: string;
 
+  // ── Trend context from rolling sensor buffers ───────────────────────────────
+  // Tells the AI whether the athlete is already self-correcting.
+  // hrTrendDirection:      "rising" | "stable" | "falling"
+  // paceTrendDirection:    "speeding_up" | "stable" | "slowing"
+  // isAthleteAlreadyResponding: true when HR is falling AND pace is slowing when the trigger fires.
+  //   If true the AI should ACKNOWLEDGE the response, not issue a directive.
+  hrTrendDirection?: string;
+  paceTrendDirection?: string;
+  isAthleteAlreadyResponding?: boolean;
+
   // ── Full session context — everything GPT needs to know about what the session IS ──
   preRunBrief?: string;          // What the athlete was briefed before starting
   whyThisSession?: string;       // Why this session is in the plan
@@ -5779,6 +5938,10 @@ export async function generateSessionTriggerMessage(params: {
     coachName, coachTone, coachAccent,
     runnerName, runnerProfile,
   } = params;
+
+  const hrTrendDirection   = params.hrTrendDirection;
+  const paceTrendDirection = params.paceTrendDirection;
+  const isAthleteAlreadyResponding = params.isAthleteAlreadyResponding ?? false;
 
   // ── Format current metrics ─────���───────────────────────────────────────────
   const paceFormatted = currentPaceSecPerKm ? formatPaceForPrompt(currentPaceSecPerKm) : "unknown";
@@ -5879,9 +6042,16 @@ Phase targets: ${[
 ].filter(Boolean).join(', ') || 'none specified'}
 ${recentMessagesBlock}
 
+━━ TREND CONTEXT (last ~40 seconds) ━━━━━━━━━━━━━━━━━━━━
+${hrTrendDirection ? `Heart rate trend: ${hrTrendDirection.toUpperCase()} — ${hrTrendDirection === 'falling' ? 'moving toward target' : hrTrendDirection === 'rising' ? 'moving away from target' : 'holding steady'}` : ''}
+${paceTrendDirection ? `Pace trend: ${paceTrendDirection.toUpperCase()} — ${paceTrendDirection === 'slowing' ? 'athlete is easing off' : paceTrendDirection === 'speeding_up' ? 'athlete is pushing harder' : 'pace is steady'}` : ''}
+${isAthleteAlreadyResponding ? `⚠️ ATHLETE IS ALREADY SELF-CORRECTING — heart rate is falling AND pace is easing back. Do NOT issue a directive. ACKNOWLEDGE the response instead: "Good — you're already easing back" or similar. The corrective coaching is NOT needed; positive acknowledgement IS.` : ''}
+${triggerType === 'hr_recovery_acknowledgement' ? `This trigger fires because heart rate has returned to zone after being above it. The athlete did the right thing — acknowledge positively and concisely.` : ''}
+
 ━━ YOUR COACHING MESSAGE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Deliver ONE message (max 20 words, spoken aloud) that reacts to what is ACTUALLY happening above.
-- If the athlete is off target: be honest, give a specific corrective cue using the exact numbers
+- If the athlete is off target AND NOT already self-correcting: be honest, give a specific corrective cue using the exact numbers
+- If the athlete is already self-correcting (see TREND CONTEXT above): acknowledge and encourage — never repeat a cue they are already executing
 - If the athlete is on target: give a genuine observation tied to their actual data, not generic praise
 - Reference the session context — this is a ${sessionType.replace(/_/g, ' ')} session with specific objectives, not a free run
 - Write "heart rate" never "HR"
@@ -6116,7 +6286,8 @@ MESSAGE VARIABLES — substituted live at trigger time:
 VOICE: messages are read aloud — keep under 18 words. Write "heart rate" not "HR".
 PACE FORMAT IN preRunBrief: NEVER write pace as "6:57/km" — TTS reads colons as clock time. Say "6 minutes 57 per kilometre" instead.
 HR ZONE TRIGGERS: Every hr_zone trigger message MUST state the athlete's actual heart rate number and the zone boundary. Example: "Heart rate's at {hr} — ease back below {targetHRMax}." NEVER say just "heart rate high" without numbers.
-CADENCE TRIGGERS: For tempo, threshold, and interval sessions, ALWAYS include at least 2 cadence triggers (condition: "cadence < 170 AND elapsed_min > 5", frequencySeconds 180). Optimal tempo cadence is 170–180 spm.
+HR-LED SESSIONS (easy, recovery, long_run, Zone 2): Do NOT include cadence triggers or elevation/terrain triggers. These sessions are about EFFORT CONTROL — cadence and terrain coaching are irrelevant and distracting. Focus ONLY on: hr_zone triggers, distance/time milestones, effort check-ins, and completion cues.
+CADENCE TRIGGERS: ONLY for tempo, threshold, and interval sessions. Include at least 2 cadence triggers (e.g. condition: "cadence < 170 AND elapsed_min > 5", frequencySeconds 180). Optimal cadence for tempo/threshold is 170–180 spm. NEVER add cadence triggers to easy, recovery, or long_run sessions.
 
 COACHING PRINCIPLES:
 - Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
@@ -6267,6 +6438,13 @@ For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely d
       parsed.phases ?? []
     );
 
+    // ── Deterministic coaching policy — computed from session type, NOT by the AI ──
+    const coachingPolicy = buildSessionCoachingPolicy(sessionType, targetHRMin, targetHRMax);
+
+    // ── Post-processing: strip triggers that violate the session policy ──────
+    const rawTriggers: SessionCoachingTrigger[] = parsed.triggers ?? [];
+    const filteredTriggers = stripInappropriateTriggers(rawTriggers, coachingPolicy);
+
     const plan: SessionCoachingPlan = {
       sessionType:   parsed.sessionType   ?? sessionType,
       sessionGoal:   parsed.sessionGoal   ?? sessionGoal,
@@ -6275,7 +6453,7 @@ For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely d
       preRunBrief:   parsed.preRunBrief   ?? `Get ready for your ${sessionType.replace(/_/g, " ")} session.`,
       whyThisSession: parsed.whyThisSession ?? "Building your running fitness.",
       phases:   parsed.phases   ?? [],
-      triggers: parsed.triggers ?? [],
+      triggers: filteredTriggers,
       targetMetrics: {
         totalDurationMinutes: parsed.targetMetrics?.totalDurationMinutes ?? targetDurationMinutes,
         totalDistanceKm:      parsed.targetMetrics?.totalDistanceKm      ?? targetDistanceKm,
@@ -6291,12 +6469,14 @@ For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely d
         isStrengthWork:       parsed.targetMetrics?.isStrengthWork       ?? false,
         isRecovery:           parsed.targetMetrics?.isRecovery           ?? false,
       },
+      coachingPolicy,
     };
 
     console.log(
       `[generateSessionCoaching] Generated plan for ${sessionType}:`,
-      `${plan.phases.length} phases, ${plan.triggers.length} triggers,`,
-      `strategy=${plan.cueingStrategy}, tone=${plan.coachingTone}`
+      `${plan.phases.length} phases, ${plan.triggers.length} triggers (${rawTriggers.length - filteredTriggers.length} stripped by policy),`,
+      `strategy=${plan.cueingStrategy}, tone=${plan.coachingTone},`,
+      `policy=primaryMetric:${coachingPolicy.primaryMetric} cadence:${coachingPolicy.cadenceTriggersAllowed} elev:${coachingPolicy.elevationTriggersAllowed}`
     );
 
     return plan;
@@ -6426,6 +6606,7 @@ function buildFallbackSessionCoaching(
         isSpeedWork: false, isEnduranceWork: true,
         isStrengthWork: false, isRecovery: false,
       },
+      coachingPolicy: buildSessionCoachingPolicy(sessionType, targetHRMin, targetHRMax),
     };
   }
 
@@ -6485,6 +6666,8 @@ function buildFallbackSessionCoaching(
     },
   ];
 
+  const isLongRun = sessionType === "long_run";
+
   return {
     sessionType, sessionGoal,
     coachingTone: tone,
@@ -6509,5 +6692,6 @@ function buildFallbackSessionCoaching(
       isStrengthWork:       sessionType === "hill_repeats",
       isRecovery:           isRecovery,
     },
+    coachingPolicy: buildSessionCoachingPolicy(sessionType, targetHRMin, targetHRMax),
   };
 }

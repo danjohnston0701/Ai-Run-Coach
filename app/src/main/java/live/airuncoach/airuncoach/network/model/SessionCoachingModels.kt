@@ -150,6 +150,40 @@ data class CoachingPlanResponse(
 )
 
 /**
+ * Deterministic coaching governance rules attached to every session plan.
+ *
+ * Computed server-side from the session type — NOT by OpenAI.
+ * The live run engine uses these to suppress inappropriate cue categories
+ * regardless of what trigger types the AI designed.
+ */
+data class SessionCoachingPolicy(
+    /**
+     * What the session is primarily organised around.
+     * "hr" = heart-rate-led (easy, recovery, Zone 2)
+     * "pace" = pace-led (tempo, threshold, intervals)
+     * "effort" = RPE-led (unknown or generic types)
+     */
+    val primaryMetric: String,
+    /**
+     * When false, the live engine must never fire cadence coaching from ANY
+     * source during this session. Cadence is irrelevant when effort, not pace,
+     * is the primary goal — and it conflicts with the HR-first instruction.
+     */
+    val cadenceTriggersAllowed: Boolean,
+    /**
+     * When false, standalone elevation/terrain coaching cues are suppressed.
+     * On HR-led sessions, terrain context belongs in kilometre check-ins only.
+     */
+    val elevationTriggersAllowed: Boolean,
+    /**
+     * When true, the engine must validate HR sensor readings before firing any
+     * HR-based trigger.  A sudden drop of >30 bpm in <10 seconds almost always
+     * indicates wrist-sensor contact loss and must be silently ignored.
+     */
+    val hrValidationRequired: Boolean
+)
+
+/**
  * The full dynamic coaching plan — works for ANY session type.
  * Contains phases, triggers, and metadata needed by the live run engine.
  */
@@ -162,7 +196,12 @@ data class DynamicSessionCoachingPlan(
     val whyThisSession: String,
     val phases: List<DynamicCoachingPhase>,
     val triggers: List<DynamicCoachingTrigger>,
-    val targetMetrics: DynamicTargetMetrics
+    val targetMetrics: DynamicTargetMetrics,
+    /**
+     * Coaching governance policy — present on all plans generated after this
+     * change. Null for old cached plans (legacy fallback: allow all cues).
+     */
+    val coachingPolicy: SessionCoachingPolicy? = null
 )
 
 /**
@@ -304,6 +343,23 @@ data class SessionTriggerLiveRequest(
     @com.google.gson.annotations.SerializedName("recentCoachingMessages") val recentCoachingMessages: List<String>? = null,
     @com.google.gson.annotations.SerializedName("recentSplits") val recentSplits: List<RecentSplit>? = null,
 
+    // ── Trend context — computed from rolling sensor buffers on the device ──────────────────
+    // Tells the AI whether the athlete is already self-correcting before the message fires.
+    // This prevents the coach from issuing a directive the athlete is already executing.
+    //
+    //  hrTrendDirection:   "rising" | "stable" | "falling"
+    //                      Computed over the last 8 HR readings (≈40 sec). "falling" means
+    //                      the athlete's heart rate is already moving toward target.
+    //  paceTrendDirection: "speeding_up" | "stable" | "slowing"
+    //                      Computed over the last 8 GPS pace readings.  "slowing" means the
+    //                      athlete is already backing off their pace.
+    //  isAthleteAlreadyResponding: true when the trigger is HR-zone-high AND BOTH HR is
+    //                      falling AND pace is slowing — athlete has already self-corrected
+    //                      before the cue fired.  The AI should acknowledge, not direct.
+    @com.google.gson.annotations.SerializedName("hrTrendDirection") val hrTrendDirection: String? = null,
+    @com.google.gson.annotations.SerializedName("paceTrendDirection") val paceTrendDirection: String? = null,
+    @com.google.gson.annotations.SerializedName("isAthleteAlreadyResponding") val isAthleteAlreadyResponding: Boolean? = null,
+
     // Coach profile
     @com.google.gson.annotations.SerializedName("coachName") val coachName: String? = null,
     @com.google.gson.annotations.SerializedName("coachTone") val coachTone: String? = null,
@@ -346,3 +402,5 @@ data class DynamicTargetMetrics(
     val isStrengthWork: Boolean,
     val isRecovery: Boolean
 )
+
+// CompleteWorkoutRequest and CompleteWorkoutResponse are defined in TrainingPlanModels.kt

@@ -193,9 +193,10 @@ class RunSummaryViewModel @Inject constructor(
                 // Check if this run sets any new personal bests
                 checkPersonalBests(resolvedId)
                 
-                // Auto-complete workout if this run was linked to a planned workout
-                if (session.linkedWorkoutId != null && session.linkedPlanId != null) {
-                    completeLinkedWorkout(session.linkedWorkoutId!!, resolvedId, session.linkedPlanId!!)
+                // Auto-complete workout if this run was linked to a planned workout.
+                // Only workoutId is required — planId is optional (used for logging only).
+                if (session.linkedWorkoutId != null) {
+                    completeLinkedWorkout(session.linkedWorkoutId!!, resolvedId, session.linkedPlanId)
                 }
 
                 // Check if this run is part of a group run — load leaderboard if so
@@ -218,8 +219,8 @@ class RunSummaryViewModel @Inject constructor(
                     _analysisState.value = AiAnalysisState.Idle
                     
                     // Auto-complete workout for local session too
-                    if (localSession.linkedWorkoutId != null && localSession.linkedPlanId != null) {
-                        completeLinkedWorkout(localSession.linkedWorkoutId!!, resolvedId, localSession.linkedPlanId!!)
+                    if (localSession.linkedWorkoutId != null) {
+                        completeLinkedWorkout(localSession.linkedWorkoutId!!, resolvedId, localSession.linkedPlanId)
                     }
                     
                     _isLoadingRun.value = false
@@ -256,7 +257,7 @@ class RunSummaryViewModel @Inject constructor(
      * Auto-complete the linked workout after the run is saved.
      * This happens silently in the background - no UI interaction needed.
      */
-    private fun completeLinkedWorkout(workoutId: String, runId: String, planId: String) {
+    private fun completeLinkedWorkout(workoutId: String, runId: String, planId: String?) {
         viewModelScope.launch {
             try {
                 val response = apiService.completeWorkout(workoutId, CompleteWorkoutRequest(runId))
