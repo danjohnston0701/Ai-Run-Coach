@@ -165,7 +165,7 @@ fun WorkoutDetailScreen(
         }
     }
 
-    // "Start This Workout" is only enabled once GPS is confirmed AND coaching is ready
+    // "Start on Phone" is only enabled once GPS is confirmed AND coaching is ready
     val canStart = hasLocationPermission && gpsReady && !isGettingLocation && isCoachingReady
 
     Scaffold(
@@ -500,8 +500,8 @@ fun WorkoutDetailScreen(
 
                 // ── Watch vs Phone primary action ─────────────────────────────────
                 // When a watch is connected: "Prepare for Watch" = primary filled teal,
-                //   "Start This Workout" = secondary outlined button below.
-                // When no watch connected: "Start This Workout" = primary filled teal (original).
+                //   "Start on Phone" = secondary outlined button below.
+                // When no watch connected: "Start on Phone" = primary filled teal (original).
                 val watchReady = companionInstalled && isCoachingReady
                 val onPrepareWatch = {
                     runSessionViewModel.prepareRunOnWatchWithCoaching(
@@ -529,7 +529,7 @@ fun WorkoutDetailScreen(
                     modifier = Modifier.padding(bottom = Spacing.sm)
                 )
 
-                // "Start This Workout" — primary when no watch, outlined when watch connected
+                // "Start on Phone" — primary when no watch, outlined when watch connected
                 if (watchReady) {
                     OutlinedButton(
                         onClick = { onStartWorkout(workout) },
@@ -539,7 +539,7 @@ fun WorkoutDetailScreen(
                     ) {
                         Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text("Start This Workout", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                        Text("Start on Phone", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
                     }
                 } else {
                     Button(
@@ -567,7 +567,7 @@ fun WorkoutDetailScreen(
                         } else {
                             Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(Spacing.sm))
-                            Text("Start This Workout", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
+                            Text("Start on Phone", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
                         }
                     }
                 }
