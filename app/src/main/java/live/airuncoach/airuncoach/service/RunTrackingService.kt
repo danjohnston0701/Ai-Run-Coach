@@ -104,6 +104,14 @@ class RunTrackingService : Service(), SensorEventListener {
     private lateinit var textToSpeechHelper: TextToSpeechHelper
     private lateinit var audioPlayerHelper: AudioPlayerHelper
     private var currentUser: User? = null
+    /**
+     * Activity type derived from the user's defaultSessionType profile setting.
+     * "run" (default) or "walk" — sent to every OpenAI coaching request so the AI
+     * uses correct vocabulary and terminology for the session (e.g. "walking pace"
+     * vs "running pace", "step rate" vs "cadence cues", etc.).
+     * Updated whenever currentUser is loaded from the API.
+     */
+    private var currentActivityType: String = "run"
     private var runHistoryStats: live.airuncoach.airuncoach.network.model.RunHistoryStats? = null
     private var activeGoals: List<ActiveGoalInfo> = emptyList()  // Goals for AI coaching context
     private var lastPhase: CoachingPhase? = null
@@ -792,7 +800,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 val userId = sessionManager.getUserId()
                 if (userId != null) {
                     currentUser = apiService.getUser(userId)
-                    Log.d("RunTrackingService", "Loaded user profile: ${currentUser?.coachName}")
+                    // Derive activity type from user's default session preference.
+                    // Normalise to lowercase "run" or "walk" regardless of how it was stored.
+                    currentActivityType = when (currentUser?.defaultSessionType?.lowercase()) {
+                        "walk" -> "walk"
+                        else  -> "run"
+                    }
+                    Log.d("RunTrackingService", "Loaded user profile: ${currentUser?.coachName}, activityType=$currentActivityType")
                     // Load run history stats (will be refreshed at run-start with the target distance)
                     try {
                         runHistoryStats = apiService.getRunHistoryStats(userId)
@@ -1703,7 +1717,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachAccent = currentUser?.coachAccent,
                     fitnessLevel = currentUser?.fitnessLevel,
                     runnerName = currentUser?.name,
-                    activityType = "run",
+                    activityType = currentActivityType,
                     hasRoute = true,
                     triggerType = "navigation_turn",
                     navigationInstruction = navigationText,
@@ -2017,7 +2031,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerAge = currentUser?.age,
                     runnerWeight = currentUser?.weight,
                     runnerHeight = currentUser?.height,
-                    activityType = "run",
+                    activityType = currentActivityType,
                     hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                     targetTime = (tTime / 1000).toInt(),
                     targetPace = formatPace(targetPaceSecondsPerKm),
@@ -4048,7 +4062,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         runnerAge = currentUser?.age,
                     runnerWeight = currentUser?.weight,
                     runnerHeight = currentUser?.height,
-                        activityType = "run",
+                        activityType = currentActivityType,
                         hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = targetPaceStr,
@@ -5366,7 +5380,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         runnerAge = currentUser?.age,
                     runnerWeight = currentUser?.weight,
                     runnerHeight = currentUser?.height,
-                        activityType = "run",
+                        activityType = currentActivityType,
                         hasRoute = hasGpsElevation || hasRoute,  // True when GPS altitude available, not just when planned route loaded
                         targetTime = targetTime?.let { (it / 1000).toInt() },
                         targetPace = phaseTargetPaceStr,
@@ -6919,7 +6933,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
                     coachAccent = currentUser?.coachAccent,
-                    activityType = "run",
+                    activityType = currentActivityType,
                     currentPace = currentPace,
                     averagePace = calculatePace(avgSpeed * 3.6f),
                     heartRate = currentHeartRate.takeIf { it > 0 },
