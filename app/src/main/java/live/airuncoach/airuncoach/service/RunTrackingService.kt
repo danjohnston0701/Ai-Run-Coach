@@ -121,6 +121,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastCoachingTime: Long = 0 // Cooldown between coaching events
     private val COACHING_COOLDOWN_MS = 30_000L // 30 second minimum gap between coaching
     private var hasCoachingFiredThisTick = false // Only one coaching trigger per location update
+    /** 2% buffer applied to HR upper-bound trigger conditions ("hr > X") to prevent brief spikes from
+     *  firing zone-high alerts. E.g. a 131 bpm ceiling won't alert until ~134 bpm (131 × 1.02). */
+    private val HR_ZONE_BUFFER_MULTIPLIER = 1.02
     /** Set to true when the session_complete trigger fires — stops all further coaching plan triggers */
     private var sessionCoachingPlanComplete = false
 
@@ -4759,9 +4762,20 @@ class RunTrackingService : Service(), SensorEventListener {
             valueExpr.trim(), phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax
         ) ?: return false
 
+        // ── HR upper-bound buffer ─────────────────────────────────────────────
+        // When evaluating "hr > X" or "hr >= X" (i.e. HR-too-high checks), apply a 2%
+        // buffer to the threshold so brief momentary spikes don't instantly trigger a
+        // coaching intervention. A runner at 131 bpm target won't hear a zone-high alert
+        // until their HR genuinely sustains above ~134 bpm (131 × 1.02 ≈ 133.6).
+        //
+        // The buffer only applies to HR comparisons in the upward direction (">", ">=").
+        // HR low-bound checks ("hr < X", "hr <= X") are NOT buffered.
+        val isHrUpwardCheck = metricToken.lowercase() == "hr" && (op == ">" || op == ">=")
+        val effectiveRhs = if (isHrUpwardCheck) rhsValue * HR_ZONE_BUFFER_MULTIPLIER else rhsValue
+
         return when (op) {
-            ">"  -> lhsValue > rhsValue
-            ">=" -> lhsValue >= rhsValue
+            ">"  -> lhsValue > effectiveRhs
+            ">=" -> lhsValue >= effectiveRhs
             "<"  -> lhsValue < rhsValue
             "<=" -> lhsValue <= rhsValue
             "==" -> lhsValue == rhsValue

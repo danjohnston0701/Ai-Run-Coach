@@ -584,7 +584,15 @@ export async function getOrGenerateSessionCoaching(
   //         Walk-run sessions now REQUIRE mid-rep periodic triggers (jog_midpoint_checkin + walk_recovery_checkin)
   //         so the athlete hears real feedback during intervals, not just at phase transitions.
   //         rep_start messages must NOT include {repNum}/{totalReps} — the engine prepends "Rep N of M" automatically.
-  const CURRENT_PLAN_VERSION = "2.6";
+  // v2.7 — Mandatory session_complete trigger added to every plan (spoken end-of-session summary).
+  //         Multi-phase effort sessions now require per-phase targetHRMin/targetHRMax so the live engine
+  //         automatically adjusts HR zone alerts when the athlete transitions from (e.g.) Zone 2 to Zone 3.
+  //         Phase_start triggers for higher-effort phases must state the new BPM target explicitly.
+  //         HR zone names ("Zone 2", "Zone 3") without BPM numbers are prohibited in trigger messages
+  //         and the preRunBrief — always specify actual bpm ranges.
+  //         Android engine now applies a 2% buffer to all "hr > X" condition checks so brief spikes
+  //         do not fire zone-high alerts — the athlete must genuinely sustain above the ceiling.
+  const CURRENT_PLAN_VERSION = "2.7";
 
   // Semver-aware comparison: parse "major.minor" strings to numeric values for correct ordering.
   // String comparison fails for versions like "2.10" vs "2.4" ("2.10" < "2.4" lexicographically).

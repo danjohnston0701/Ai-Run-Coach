@@ -6222,6 +6222,7 @@ The session is organised around reaching ${targetDistanceKm} km — this is the 
 - Design km-split feedback triggers that fire every 1 km with a short pace or effort summary (e.g. "1 km done, feeling good — keep that rhythm going").
 - Design distance milestone triggers: the 50% point (${halfKm} km) and the last 500 m.
 - The session ends when the athlete reaches ${targetDistanceKm} km. Use condition: "distance >= ${targetDistanceKm}".
+- MANDATORY: Include a session_complete trigger (type: "session_complete", frequency: "once", condition: "distance >= ${targetDistanceKm}") as the LAST trigger. This is the spoken end-of-session summary — make it feel like a real coach wrapping up a session, not a generic "well done". Mention the distance completed and acknowledge the effort.
 - Duration (${targetDurationMinutes} min) is an ESTIMATE only. Mention it in the preRunBrief as "should take around ${targetDurationMinutes} minutes" but DO NOT build time-based end triggers.
 - preRunBrief MUST lead with the target distance (${targetDistanceKm} km) as the primary goal, then mention the estimated time, the target pace or effort${targetHRMin ? `, and HR zone (${targetHRMin}–${targetHRMax} bpm)` : ""}.
   Example framing: "We're heading out for a ${targetDistanceKm} km easy run — should take around ${targetDurationMinutes} minutes at a relaxed jog${paceHint}. Keep it comfortable the whole way."`;
@@ -6233,6 +6234,7 @@ PRIMARY SESSION STRUCTURE: TIME-BASED
 The session is organised around running for ${targetDurationMinutes} minutes — there is no fixed distance end point.
 - Design time milestone triggers every 10 minutes, at the halfway point (${halfMin} min), and with 5 minutes remaining.
 - The session ends when elapsed_min >= ${targetDurationMinutes}. Use condition: "elapsed_min >= ${targetDurationMinutes}".
+- MANDATORY: Include a session_complete trigger (type: "session_complete", frequency: "once", condition: "elapsed_min >= ${targetDurationMinutes}") as the LAST trigger. This is the spoken end-of-session summary — make it personal and specific, not just "well done". Acknowledge the time completed and the effort.
 - Do NOT build distance-based end triggers.
 - preRunBrief MUST lead with the target duration (${targetDurationMinutes} minutes) as the primary goal, then mention the target effort/pace${targetHRMin ? ` and HR zone (${targetHRMin}–${targetHRMax} bpm)` : ""}.
   Example framing: "Today is a ${targetDurationMinutes}-minute easy run — no fixed distance, just keep moving at a comfortable pace the whole time."`;
@@ -6288,6 +6290,22 @@ PACE FORMAT IN preRunBrief: NEVER write pace as "6:57/km" — TTS reads colons a
 HR ZONE TRIGGERS: Every hr_zone trigger message MUST state the athlete's actual heart rate number and the zone boundary. Example: "Heart rate's at {hr} — ease back below {targetHRMax}." NEVER say just "heart rate high" without numbers.
 HR-LED SESSIONS (easy, recovery, long_run, Zone 2): Do NOT include cadence triggers or elevation/terrain triggers. These sessions are about EFFORT CONTROL — cadence and terrain coaching are irrelevant and distracting. Focus ONLY on: hr_zone triggers, distance/time milestones, effort check-ins, and completion cues.
 CADENCE TRIGGERS: ONLY for tempo, threshold, and interval sessions. Include at least 2 cadence triggers (e.g. condition: "cadence < 170 AND elapsed_min > 5", frequencySeconds 180). Optimal cadence for tempo/threshold is 170–180 spm. NEVER add cadence triggers to easy, recovery, or long_run sessions.
+
+MULTI-PHASE EFFORT SESSIONS (sessions that change HR zone or intensity mid-run):
+If the session instructions describe a progression (e.g. "steady Zone 2 for first 2.5 km then push into Zone 3 for the last 1.5 km"), you MUST:
+1. Create SEPARATE PHASES for each effort level — each with its own targetHRMin and targetHRMax set to the correct BPM values for that phase.
+2. The phase_start trigger for the higher-effort phase MUST tell the athlete: what to do, the new effort level, and the specific new heart rate target (e.g. "Now push the effort — target heart rate 132 to 145 for this final push.").
+3. HR zone alert triggers should automatically use the current phase's targetHRMax — so once the runner is in the higher-effort phase, the old Zone 2 ceiling no longer applies.
+4. NEVER use zone names like "Zone 2" or "Zone 3" alone in the preRunBrief or trigger messages — ALWAYS state the actual BPM range so athletes with different HR monitors or zone calibrations know exactly what to aim for.
+
+MANDATORY SESSION COMPLETE TRIGGER — REQUIRED IN EVERY PLAN:
+Every plan MUST include exactly ONE session_complete trigger as the FINAL trigger in the list. This fires when the athlete finishes the session and delivers a spoken end-of-session summary.
+- type: "session_complete"
+- frequency: "once"
+- condition: for distance-based sessions: "distance >= {targetDistanceKm}"; for time-based: "elapsed_min >= {targetDurationMinutes}"
+- message: A meaningful, personalised 2–3 sentence spoken summary. Must NOT just say "well done" — it should briefly acknowledge what the athlete achieved (e.g. "That's your {targetDistanceKm} km done — great controlled effort today. You kept your heart rate disciplined and built well into the final push. Rest up and we'll go again.").
+- Do NOT set alternativeMessages on session_complete — it fires once and must feel like a proper session close.
+- This trigger MUST be the last item in the triggers array and must NOT be skipped.
 
 COACHING PRINCIPLES:
 - Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
@@ -6413,7 +6431,12 @@ MESSAGE QUALITY RULES — every trigger message must pass these tests:
 
 TRIGGER ids must be unique. Format: "{phase_name}_{trigger_type}".
 For rep triggers: include 4-5 alternativeMessages with varied language — the athlete will hear these across multiple reps.
-For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely different wording.`;
+For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely different wording.
+
+FINAL REMINDER — NON-NEGOTIABLE:
+1. Every plan MUST end with a "session_complete" trigger (type: "session_complete", frequency: "once") that fires when the session distance or time target is reached. This is the end-of-session spoken summary.
+2. If this session has multiple distinct effort phases (e.g. Zone 2 base then a Zone 3 push), each phase MUST have its own targetHRMin and targetHRMax values, and the phase_start trigger for the harder phase MUST clearly state the new BPM target.
+3. NEVER refer to zones by name only (Zone 2, Zone 3) — ALWAYS include the actual BPM range in the same message so the athlete knows exactly what the target is regardless of their HR monitor's zone calibration.`;
 
   try {
     const completion = await openai.chat.completions.create({

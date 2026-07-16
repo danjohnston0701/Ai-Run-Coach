@@ -3355,11 +3355,23 @@ private fun RouteMapCardFlagship(
                 position = CameraPosition.fromLatLngZoom(latLng.first(), 14f)
             }
 
-            LaunchedEffect(latLng) {
-                val builder = LatLngBounds.builder()
-                latLng.forEach { builder.include(it) }
-                val bounds = builder.build()
-                cameraState.move(CameraUpdateFactory.newLatLngBounds(bounds, 80))
+            // ── Camera bounds — MUST wait for map layout to complete ──────────────
+            // CameraUpdateFactory.newLatLngBounds() throws IllegalStateException when called
+            // before the GoogleMap view has a non-zero size (i.e. before onMapLoaded fires).
+            // The silent failure leaves the camera at zoom-14 on the first GPS point with no
+            // route shown.  Gating on mapLoaded ensures the bounds call always succeeds.
+            var mapLoaded by remember { mutableStateOf(false) }
+            LaunchedEffect(latLng, mapLoaded) {
+                if (!mapLoaded) return@LaunchedEffect
+                try {
+                    val builder = LatLngBounds.builder()
+                    latLng.forEach { builder.include(it) }
+                    val bounds = builder.build()
+                    cameraState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 80))
+                } catch (_: Exception) {
+                    // Safety net: if bounds still fail (e.g. single unique point),
+                    // just leave the camera at the initial first-point position.
+                }
             }
 
             GoogleMap(
@@ -3375,7 +3387,8 @@ private fun RouteMapCardFlagship(
                     zoomGesturesEnabled = true,
                     tiltGesturesEnabled = false,
                     rotationGesturesEnabled = false,
-                )
+                ),
+                onMapLoaded = { mapLoaded = true },
             ) {
                 // Draw pace-colored polyline segments
                 if (paceSegments.isNotEmpty()) {
