@@ -12784,6 +12784,110 @@ function transformRunForAndroid(run: any) {
   });
 
   /**
+   * POST /api/admin/garmin-watch-app/send-to-device
+   *
+   * Sends a Garmin watch app update notification to a single device (by FCM token).
+   * Useful for testing before broadcasting to all users.
+   *
+   * Security: requires ADMIN_API_KEY via X-Admin-Key header.
+   *
+   * Body:
+   *   fcmToken     (required) the FCM token of the device
+   *   version      (required) e.g. "2.4.1"
+   *   releaseNote  (optional) what's new in this version
+   *   storeUrl     (optional) defaults to the Connect IQ listing URL
+   */
+  app.post("/api/admin/garmin-watch-app/send-to-device", async (req: Request, res: Response) => {
+    try {
+      // ── Admin authentication ─────────────────────────────────────────────────
+      const adminKey = process.env.ADMIN_API_KEY;
+      if (!adminKey) {
+        return res.status(503).json({ error: "Admin API not configured on this server" });
+      }
+
+      const providedKey =
+        req.headers["x-admin-key"] ||
+        req.query["admin_key"] ||
+        req.body?.adminKey;
+
+      if (providedKey !== adminKey) {
+        console.warn("[Admin] Unauthorized send-to-device attempt from", req.ip);
+        return res.status(401).json({ error: "Unauthorized — invalid admin key" });
+      }
+
+      // ── Payload ──────────────────────────────────────────────────────────────
+      const {
+        fcmToken,
+        version,
+        releaseNote,
+        storeUrl = "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017",
+      } = req.body;
+
+      if (!fcmToken || !fcmToken.trim()) {
+        return res.status(400).json({ error: "fcmToken is required" });
+      }
+
+      if (!version || !version.trim()) {
+        return res.status(400).json({ error: "version is required (e.g. '2.4.1')" });
+      }
+
+      // ── Send via Firebase ────────────────────────────────────────────────────
+      const app = await getFirebaseApp();
+      if (!app) {
+        return res.status(503).json({ error: "Firebase not configured" });
+      }
+
+      const title = `⌚ Garmin Watch App v${version} Available`;
+      const body = releaseNote || `A new version of the AI Run Coach watch app is ready. Tap to update on your Garmin.`;
+      const notificationData: Record<string, string> = {
+        type: "garmin_watch_update",
+        version,
+        releaseNote: body,
+        storeUrl,
+        action: "open_connect_iq_store",
+        timestamp: new Date().toISOString(),
+      };
+
+      try {
+        const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
+        const messageId = await messaging.send({
+          token: fcmToken,
+          data: {
+            ...notificationData,
+            title,
+            body,
+          },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "garmin_watch_updates",
+            },
+          },
+        });
+
+        console.log(`[Admin] Garmin watch app v${version} sent to device: ${messageId}`);
+
+        res.json({
+          success: true,
+          version,
+          storeUrl,
+          messageId,
+          message: `Notification sent to device (v${version})`,
+        });
+      } catch (firebaseErr: any) {
+        console.error("[Admin] Firebase send error:", firebaseErr);
+        res.status(400).json({
+          error: "Failed to send notification",
+          details: firebaseErr?.message || "Firebase error",
+        });
+      }
+    } catch (error: any) {
+      console.error("[Admin] Send-to-device error:", error);
+      res.status(500).json({ error: "Request failed", details: error?.message });
+    }
+  });
+
+  /**
    * GET /api/admin/garmin-watch-app/users
    * Returns all users who have the Garmin watch app installed.
    */
