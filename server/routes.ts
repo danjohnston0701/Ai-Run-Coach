@@ -12832,37 +12832,19 @@ function transformRunForAndroid(run: any) {
       }
 
       // ── Send via Firebase ────────────────────────────────────────────────────
-      const app = await getFirebaseApp();
-      if (!app) {
-        return res.status(503).json({ error: "Firebase not configured" });
-      }
+      const { sendFirebasePushToToken } = await import("./notification-service");
 
       const title = `⌚ Garmin Watch App v${version} Available`;
       const body = releaseNote || `A new version of the AI Run Coach watch app is ready. Tap to update on your Garmin.`;
-      const notificationData: Record<string, string> = {
-        type: "garmin_watch_update",
-        version,
-        releaseNote: body,
-        storeUrl,
-        action: "open_connect_iq_store",
-        timestamp: new Date().toISOString(),
-      };
 
       try {
-        const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
-        const messageId = await messaging.send({
-          token: fcmToken,
-          data: {
-            ...notificationData,
-            title,
-            body,
-          },
-          android: {
-            priority: "high",
-            notification: {
-              channelId: "garmin_watch_updates",
-            },
-          },
+        const messageId = await sendFirebasePushToToken(fcmToken, title, body, {
+          type: "garmin_watch_update",
+          version,
+          releaseNote: body,
+          storeUrl,
+          action: "open_connect_iq_store",
+          timestamp: new Date().toISOString(),
         });
 
         console.log(`[Admin] Garmin watch app v${version} sent to device: ${messageId}`);

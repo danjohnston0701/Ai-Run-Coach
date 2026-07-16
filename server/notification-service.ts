@@ -210,6 +210,28 @@ export async function sendFirebasePush(
   }
 }
 
+export async function sendFirebasePushToToken(
+  fcmToken: string,
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<string> {
+  const app = await getFirebaseApp();
+  if (!app) throw new Error("Firebase not configured — set FIREBASE_SERVICE_ACCOUNT_JSON");
+
+  const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
+  const messageId = await messaging.send({
+    token: fcmToken,
+    notification: { title, body },
+    data: data ?? {},
+    android: {
+      priority: "high",
+      notification: { channelId: "garmin_watch_updates" },
+    },
+  });
+  return messageId;
+}
+
 // ── Bulk / utility helpers ────────────────────────────────────────────────────
 
 export async function sendBulkNotifications(
