@@ -552,7 +552,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.1.7");
+                _phoneLink.sendHello("3.1.8");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -1085,11 +1085,12 @@ class RunView extends Ui.View {
         }
         // Cadence — always visible below the time/clock regardless of run state.
         // Shows "--" when no reading yet so the metric slot is always present.
-        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.265).toNumber(), Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
+        // Value: doubled size (FONT_SMALL → FONT_LARGE). SPM label: below value, 50% larger (FONT_XTINY → FONT_TINY).
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         var cadStr = _dispCadence > 0 ? _dispCadence.format("%d") : "--";
-        dc.drawText(cx, (h * 0.305).toNumber(), Gfx.FONT_SMALL, cadStr, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, (h * 0.265).toNumber(), Gfx.FONT_LARGE, cadStr, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, (h * 0.335).toNumber(), Gfx.FONT_TINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
     // =========================================================================
@@ -1142,10 +1143,12 @@ class RunView extends Ui.View {
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.65).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
-        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "spm", Gfx.TEXT_JUSTIFY_CENTER);
+        // Cadence cell: value doubled (metricFont → FONT_LARGE), SPM label below at FONT_TINY.
+        var cadMetricFont = _isSmallScreen ? Gfx.FONT_MEDIUM : Gfx.FONT_LARGE;
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.65).toNumber(), metricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.59).toNumber(), cadMetricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.69).toNumber(), Gfx.FONT_TINY, "spm", Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider row 2
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
