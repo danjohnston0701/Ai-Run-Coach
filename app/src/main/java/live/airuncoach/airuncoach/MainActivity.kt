@@ -121,8 +121,24 @@ class MainActivity : ComponentActivity() {
         // Observer invite token (email link for non-registered observers)
         val observerInviteToken = intent?.getStringExtra("observer_invite_token")
 
-        // Garmin watch update notification
+        // Garmin watch update notification — open the Connect IQ store URL directly in browser.
+        // We route through MainActivity (rather than a direct PendingIntent from the FCM service)
+        // because Garmin Connect registers as an Android App Link for apps.garmin.com and silently
+        // drops direct browser intents fired from a Service context. Launching our own Activity
+        // first avoids interception; we then immediately fire the browser intent from here.
         val isGarminUpdateNotification = intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE
+        if (isGarminUpdateNotification) {
+            val storeUrl = intent?.getStringExtra(AiRunCoachMessagingService.EXTRA_STORE_URL)
+                ?: AiRunCoachMessagingService.CONNECT_IQ_STORE_URL
+            Log.d("MainActivity", "Garmin update notification — opening store URL: $storeUrl")
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(storeUrl)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to open Connect IQ store URL", e)
+            }
+        }
         val garminUpdateVersion     = if (isGarminUpdateNotification) intent?.getStringExtra("version")     ?: "" else null
         val garminUpdateReleaseNote = if (isGarminUpdateNotification) intent?.getStringExtra("releaseNote") ?: "" else null
 
@@ -269,12 +285,18 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleNotificationIntent(intent: Intent?) {
         when {
-            // Garmin watch update → root nav screen
+            // Garmin watch update → open Connect IQ store URL directly in browser
             intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE -> {
-                val version     = intent.getStringExtra("version") ?: ""
-                val releaseNote = intent.getStringExtra("releaseNote") ?: ""
-                Log.d("MainActivity", "Warm launch: Garmin watch update v$version")
-                _pendingGarminUpdate.value = Pair(version, releaseNote)
+                val storeUrl = intent.getStringExtra(AiRunCoachMessagingService.EXTRA_STORE_URL)
+                    ?: AiRunCoachMessagingService.CONNECT_IQ_STORE_URL
+                Log.d("MainActivity", "Warm launch: Garmin update — opening store URL: $storeUrl")
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(storeUrl)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    })
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Failed to open Connect IQ store URL (warm launch)", e)
+                }
             }
             // Observer session invitation → inner nav observer_session.
             // Handle both foreground-tap path (deeplink_observer_session_id) and
