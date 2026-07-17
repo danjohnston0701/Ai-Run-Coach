@@ -203,25 +203,23 @@ export async function sendFirebasePushToToken(
     ? "garmin_watch_updates"
     : "general";
 
-  // DATA-ONLY message — no top-level "notification" payload.
+  // DATA-ONLY message — no top-level "notification" payload, no android.notification block.
   //
-  // When a message has a top-level "notification" payload, the FCM SDK displays
-  // the notification automatically whenever the app is in the background, completely
-  // bypassing onMessageReceived(). It then fires the android.notification.clickAction
-  // value as a raw Android Intent action. Since no Activity in our app has an
+  // When a message has a top-level "notification" payload (or even an android.notification
+  // block on some SDK versions), the FCM SDK auto-displays the notification whenever the
+  // app is in the background, completely bypassing onMessageReceived(). It then fires the
+  // clickAction value as a raw Android Intent action. Since no Activity in our app has an
   // intent-filter for "OPEN_CONNECT_IQ_STORE", Android returns result -91
   // (ActivityNotFoundException) and the Connect IQ store never opens.
   //
-  // With a data-only message, onMessageReceived() is ALWAYS called regardless of
-  // app state. Our messaging service builds the notification with the correct
-  // PendingIntent (MainActivity → ACTION_OPEN_CONNECT_IQ_STORE → browser → store).
+  // A pure data-only message (data + android.priority only) guarantees onMessageReceived()
+  // is ALWAYS called regardless of app state. Our AiRunCoachMessagingService then builds
+  // the notification with the correct PendingIntent:
+  //   MainActivity (ACTION_OPEN_CONNECT_IQ_STORE) → opens Connect IQ store URL in browser.
   const messageId = await messaging.send({
     token: fcmToken,
     data: { title, body, ...(data ?? {}) },
-    android: {
-      priority: "high",
-      notification: { channelId },
-    },
+    android: { priority: "high" },
   });
   return messageId;
 }
