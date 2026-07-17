@@ -185,7 +185,8 @@ fun PersonalDetailsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
-                .padding(bottom = Spacing.xl) // Safe bottom padding (24.dp) instead of massive 120.dp
+                .imePadding(), // Allow content to scroll up when keyboard appears
+            contentPadding = PaddingValues(bottom = Spacing.xl) // Bottom spacing for button clearance
         ) {
             item {
                 SectionTitle(title = "Full Name")
