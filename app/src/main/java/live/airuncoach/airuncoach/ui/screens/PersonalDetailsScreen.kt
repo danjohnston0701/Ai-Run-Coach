@@ -50,38 +50,56 @@ class DateOfBirthTransformation : VisualTransformation {
 
         return TransformedText(
             text = androidx.compose.ui.text.AnnotatedString(formatted),
-            offsetMapping = DateOffsetMapping(digitsOnly)
+            offsetMapping = DateOffsetMapping(digitsOnly, formatted)
         )
     }
 }
 
 /**
  * Maps cursor positions from formatted text (with slashes) to original text (digits only)
+ * 
+ * Handles edge cases:
+ * - Empty strings (returns 0)
+ * - Cursor at end of string (handled with length checks)
+ * - Samsung keyboard batch edits (clamped to valid ranges)
+ * - Never returns index > formatted/original string length
  */
-private class DateOffsetMapping(private val digitsOnly: String) : OffsetMapping {
+private class DateOffsetMapping(private val digitsOnly: String, private val formatted: String) : OffsetMapping {
     override fun originalToTransformed(offset: Int): Int {
+        // Handle empty string case
+        if (digitsOnly.isEmpty()) return 0
+        
         // Map cursor position from digits-only to formatted
         // offset is the position in the digits-only string
         val clampedOffset = minOf(offset, digitsOnly.length)
         
-        return when {
+        // Calculate transformed position based on how many digits we're showing
+        val transformedPos = when {
             clampedOffset <= 2 -> clampedOffset
             clampedOffset <= 4 -> clampedOffset + 1 // Add 1 for the first "/"
             else -> clampedOffset + 2 // Add 2 for both "/" characters
         }
+        
+        // CRITICAL: Ensure we never return an index larger than the formatted string
+        return minOf(transformedPos, formatted.length)
     }
 
     override fun transformedToOriginal(offset: Int): Int {
+        // Handle empty string case
+        if (formatted.isEmpty()) return 0
+        
         // Map cursor position from formatted to digits-only
         // offset is the position in the formatted string (with slashes)
         var digitCount = 0
-        for (i in 0 until minOf(offset, 10)) { // Max length of "dd/mm/yyyy" is 10
+        for (i in 0 until minOf(offset, formatted.length)) {
             when (i) {
                 2, 5 -> {} // Skip slashes
                 else -> digitCount++
             }
         }
-        return digitCount
+        
+        // CRITICAL: Ensure we never return an index larger than the digits-only string
+        return minOf(digitCount, digitsOnly.length)
     }
 }
 
