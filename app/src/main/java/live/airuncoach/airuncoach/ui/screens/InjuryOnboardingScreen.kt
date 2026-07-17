@@ -101,8 +101,7 @@ fun InjuryOnboardingScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
-                .imePadding(),
-            contentPadding = PaddingValues(bottom = Spacing.xl)
+                .imePadding()
         ) {
             item {
                 Text(
