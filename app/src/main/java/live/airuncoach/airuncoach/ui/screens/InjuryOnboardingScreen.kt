@@ -101,7 +101,8 @@ fun InjuryOnboardingScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
-                .imePadding()
+                .imePadding(),
+            contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {
                 Text(
@@ -276,6 +277,7 @@ private fun InjuryOnboardingDialog(
     var selectedSide by remember { mutableStateOf("") }
     var selectedStatus by remember { mutableStateOf(InjuryStatus.RECOVERING) }
     var selectedSeverity by remember { mutableStateOf(InjurySeverity.MODERATE) }
+    var injuryDate by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var recoveryWeeks by remember { mutableStateOf("") }
 
@@ -340,19 +342,20 @@ private fun InjuryOnboardingDialog(
                 // Status Selection
                 item {
                     Text("Status", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                         InjuryStatus.entries.forEach { status ->
                             Button(
                                 onClick = { selectedStatus = status },
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .height(40.dp),
+                                    .fillMaxWidth()
+                                    .height(44.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (selectedStatus == status) Colors.primary else Colors.backgroundRoot
                                 ),
-                                border = if (selectedStatus == status) null else androidx.compose.foundation.BorderStroke(1.dp, Colors.border)
+                                border = if (selectedStatus == status) null else androidx.compose.foundation.BorderStroke(1.dp, Colors.border),
+                                shape = RoundedCornerShape(BorderRadius.md)
                             ) {
-                                Text(status.name, color = if (selectedStatus == status) Colors.buttonText else Colors.textPrimary, style = AppTextStyles.small)
+                                Text(status.name, color = if (selectedStatus == status) Colors.buttonText else Colors.textPrimary, style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold))
                             }
                         }
                     }
@@ -361,22 +364,42 @@ private fun InjuryOnboardingDialog(
                 // Severity Selection
                 item {
                     Text("Severity", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                         InjurySeverity.entries.forEach { severity ->
                             Button(
                                 onClick = { selectedSeverity = severity },
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .height(40.dp),
+                                    .fillMaxWidth()
+                                    .height(44.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = if (selectedSeverity == severity) Colors.primary else Colors.backgroundRoot
                                 ),
-                                border = if (selectedSeverity == severity) null else androidx.compose.foundation.BorderStroke(1.dp, Colors.border)
+                                border = if (selectedSeverity == severity) null else androidx.compose.foundation.BorderStroke(1.dp, Colors.border),
+                                shape = RoundedCornerShape(BorderRadius.md)
                             ) {
-                                Text(severity.name, color = if (selectedSeverity == severity) Colors.buttonText else Colors.textPrimary, style = AppTextStyles.small)
+                                Text(severity.name, color = if (selectedSeverity == severity) Colors.buttonText else Colors.textPrimary, style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold))
                             }
                         }
                     }
+                }
+
+                // Date of Injury (optional)
+                item {
+                    Text("Date of Injury (optional)", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                    OutlinedTextField(
+                        value = injuryDate,
+                        onValueChange = { injuryDate = it },
+                        label = { Text("yyyy-mm-dd") },
+                        placeholder = { Text("2026-07-17") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Colors.textPrimary,
+                            unfocusedTextColor = Colors.textPrimary,
+                            focusedBorderColor = Colors.primary,
+                            unfocusedBorderColor = Colors.textMuted
+                        )
+                    )
                 }
 
                 // Notes
@@ -428,6 +451,7 @@ private fun InjuryOnboardingDialog(
                             injurySide = if (isBilateral && selectedSide.isNotEmpty()) selectedSide else null,
                             status = selectedStatus,
                             severity = selectedSeverity,
+                            injuryDate = injuryDate.ifBlank { null },
                             notes = notes.ifEmpty { null },
                             estimatedRecoveryWeeks = if (recoveryWeeks.isNotEmpty()) recoveryWeeks.toIntOrNull() else null
                         )
