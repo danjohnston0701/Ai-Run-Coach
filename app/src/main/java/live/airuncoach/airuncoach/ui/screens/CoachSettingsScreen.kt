@@ -131,6 +131,8 @@ fun CoachSettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
+                .imePadding(),
+            contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {
                 SectionTitle(title = "Coach Name")

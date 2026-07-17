@@ -64,7 +64,8 @@ fun FitnessLevelScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(Spacing.lg)
-                .padding(bottom = Spacing.xl) // Safe bottom padding (24.dp) instead of excessive 120.dp
+                .imePadding(),
+            contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {
                 if (isOnboarding) {
