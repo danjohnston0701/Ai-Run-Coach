@@ -121,6 +121,12 @@
                     android:pathPrefix="/share/" />
             </intent-filter>
 
+            <!-- Garmin Watch App Update Notification — open Connect IQ store -->
+            <intent-filter>
+                <action android:name="live.airuncoach.action.OPEN_CONNECT_IQ_STORE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
         </activity>
 
         <!-- Run Tracking Foreground Service -->
