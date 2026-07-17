@@ -78,11 +78,21 @@ export const users = pgTable("users", {
   emailVerificationToken: text("email_verification_token"),     // Hashed OTP
   emailVerificationExpiry: timestamp("email_verification_expiry"), // OTP expiry (24h)
 
-  // ── Localized pricing ────────────────────────────────────────────────────
+  // ── Localization & Timezone ──────────────────────────────────────────────
   // ISO 4217 currency code inferred from the user's device timezone on login.
   // Used to display the correct local price on the subscription screen.
   // Run migration: ADD_CURRENCY_TO_USERS.sql
   currency: text("currency").default("USD"),
+  
+  // IANA timezone identifier (e.g., "America/Los_Angeles", "Europe/London")
+  // Inferred from device timezone at signup/login.
+  // Used for scheduling, session timing, and future localization features.
+  timezone: text("timezone").default("UTC"),
+  
+  // ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "CA")
+  // Inferred from device timezone at signup/login.
+  // Used for regulatory compliance, content localization, and feature availability.
+  country: text("country").default("US"),
 });
 
 // Friends table

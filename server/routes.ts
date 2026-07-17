@@ -245,7 +245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
-      const { email, password, name } = req.body;
+      const { email, password, name, timezone } = req.body;
       
       if (!email || !password || !name) {
         return res.status(400).json({ error: "Email, password, and name are required" });
@@ -277,6 +277,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const otpHash = cryptoMod.createHash("sha256").update(otp).digest("hex");
       const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
+      // Resolve timezone and country from device timezone (if provided)
+      let resolvedTimezone = "UTC";
+      let resolvedCountry = "US";
+      if (timezone) {
+        try {
+          const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
+          const resolved = resolveTimezoneAndCountry(timezone);
+          resolvedTimezone = resolved.timezone;
+          resolvedCountry = resolved.country;
+          console.log(`[Register] Inferred timezone: ${resolvedTimezone}, country: ${resolvedCountry}`);
+        } catch (tzError: any) {
+          console.warn(`[Register] Failed to resolve timezone/country from "${timezone}": ${tzError.message}`);
+        }
+      }
+
+      // Also infer currency from timezone
+      let inferredCurrency = "USD";
+      if (resolvedTimezone && resolvedTimezone !== "UTC") {
+        try {
+          const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
+          inferredCurrency = inferCurrencyFromTimezone(resolvedTimezone);
+          console.log(`[Register] Inferred currency: ${inferredCurrency}`);
+        } catch (currencyError: any) {
+          console.warn(`[Register] Failed to infer currency: ${currencyError.message}`);
+        }
+      }
+
       const user = await storage.createUser({
         email,
         password: hashedPassword,
@@ -284,6 +311,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userCode,
         shortUserId,
         trialExpiresAt,
+        timezone: resolvedTimezone,
+        country: resolvedCountry,
+        currency: inferredCurrency,
         emailVerified: false,
         emailVerificationToken: otpHash,
         emailVerificationExpiry: otpExpiry,
@@ -522,23 +552,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Set/update currency from timezone on every login.
-      // We always infer and update so users who moved country get the right currency,
-      // and so new users with the default "USD" get corrected immediately.
+      // Set/update timezone, country, and currency from device timezone on every login.
+      // We always infer and update so users who moved country get the right currency/timezone,
+      // and so new users with the defaults get corrected immediately.
       if (timezone) {
         try {
+          const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
+          const { timezone: resolvedTz, country: resolvedCountry } = resolveTimezoneAndCountry(timezone);
+          
           const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
-          const inferredCurrency = inferCurrencyFromTimezone(timezone);
+          const inferredCurrency = inferCurrencyFromTimezone(resolvedTz);
           
           await db
             .update(users)
-            .set({ currency: inferredCurrency })
+            .set({ 
+              timezone: resolvedTz,
+              country: resolvedCountry,
+              currency: inferredCurrency 
+            })
             .where(eq(users.id, user.id));
           
+          user.timezone = resolvedTz;
+          user.country = resolvedCountry;
           user.currency = inferredCurrency;
-          console.log(`[Login] Inferred currency for user ${user.id}: ${inferredCurrency} (from timezone ${timezone})`);
-        } catch (currencyError: any) {
-          console.warn(`Failed to infer currency for user ${user.id}: ${currencyError.message}`);
+          console.log(`[Login] Updated user ${user.id}: timezone=${resolvedTz}, country=${resolvedCountry}, currency=${inferredCurrency}`);
+        } catch (error: any) {
+          console.warn(`[Login] Failed to update timezone/country/currency for user ${user.id}: ${error.message}`);
         }
       }
 
