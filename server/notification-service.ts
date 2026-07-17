@@ -210,6 +210,69 @@ export async function sendFirebasePush(
   }
 }
 
+// ── Watch session start FCM fallback ─────────────────────────────────────────
+/**
+ * Send a silent, high-priority FCM data message to the user's Android phone when
+ * their Garmin watch starts a session via the companion HTTP relay.
+ *
+ * ConnectIQ Comm.transmit() is fire-and-forget — if the BT "start" command is
+ * dropped (phone in Doze, RunTrackingService killed by Android battery optimisation,
+ * BT timing issue on FR55), the phone never starts coaching. This FCM push is the
+ * guaranteed fallback: it piggybacks on the reliable Garmin Connect HTTP relay and
+ * wakes the phone app even when it is completely background-restricted.
+ *
+ * TTL = 20 s: discard if not delivered quickly — stale past that point.
+ */
+export async function sendWatchSessionStartedPush(
+  userId: string,
+  sessionId: string
+): Promise<boolean> {
+  const app = await getFirebaseApp();
+  if (!app) return false;
+
+  try {
+    const [user] = await db
+      .select({ fcmToken: users.fcmToken })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user?.fcmToken) {
+      console.log(`[WatchSessionFCM] No FCM token for user ${userId} — BT path only`);
+      return false;
+    }
+
+    // Data-only (no notification block) so onMessageReceived fires in ALL app states.
+    // High-priority grants a foreground-service exemption on Android 12+.
+    const message: any = {
+      token: user.fcmToken,
+      data: {
+        type: "watchSessionStarted",
+        sessionId,
+      },
+      android: {
+        priority: "high",
+        ttl: 20000,
+      },
+    };
+
+    const messaging = adminSDK.messaging
+      ? adminSDK.messaging(app)
+      : adminSDK.default?.messaging(app);
+    await messaging.send(message);
+    console.log(`[WatchSessionFCM] ✅ Sent watchSessionStarted to user ${userId} (session ${sessionId})`);
+    return true;
+  } catch (err: any) {
+    if (err?.code === "messaging/registration-token-not-registered") {
+      await db.update(users).set({ fcmToken: null }).where(eq(users.id, userId));
+      console.warn(`[WatchSessionFCM] Stale FCM token cleared for user ${userId}`);
+    } else {
+      console.warn(`[WatchSessionFCM] Push failed for user ${userId}: ${err?.message}`);
+    }
+    return false;
+  }
+}
+
 // ── Bulk / utility helpers ────────────────────────────────────────────────────
 
 export async function sendBulkNotifications(

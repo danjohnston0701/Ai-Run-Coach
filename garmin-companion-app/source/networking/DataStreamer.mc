@@ -33,7 +33,15 @@ class DataStreamer {
     // Safe to call at run-time; Comm subsystem is guaranteed ready by this point.
     function prepareSession() {
         _sessionId = generateSessionId();
-        App.Storage.setValue("sessionId", _sessionId);
+        try {
+            App.Storage.setValue("sessionId", _sessionId);
+        } catch (ex instanceof Lang.StorageFullException) {
+            // Non-fatal — _sessionId stays in memory; the offline-batch fallback
+            // in RunView will still have access to it from the in-memory field.
+            Sys.println("DataStreamer: StorageFull writing sessionId — continuing in memory");
+        } catch (ex) {
+            Sys.println("DataStreamer: storage error writing sessionId: " + ex.getErrorMessage());
+        }
         startSession();
         Sys.println("DataStreamer: session prepared — " + _sessionId);
     }

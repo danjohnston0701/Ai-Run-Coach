@@ -11637,7 +11637,26 @@ function transformRunForAndroid(run: any) {
       }).returning();
       
       console.log(`[Companion] Session ${sessionId} started for user ${userId} (${activityType || "running"})`);
-      
+
+      // ── Phase 2 FCM fallback: wake phone even if BT "start" was dropped ──────
+      // ConnectIQ Comm.transmit() is fire-and-forget. On constrained devices like
+      // the FR55, or when the phone screen is locked with Android Doze active, the
+      // "start" BT command may be silently lost and RunTrackingService never starts.
+      // The watch's DataStreamer ALWAYS posts to this endpoint via Garmin Connect's
+      // HTTP relay — a system-level channel that survives Doze and app backgrounding.
+      // We piggyback a high-priority FCM data message so the phone is woken up and
+      // RunTrackingService is guaranteed to start, even if the BT path failed.
+      // Sent after the 200 response so it never delays the watch.
+      setImmediate(async () => {
+        try {
+          const { sendWatchSessionStartedPush } = await import("./notification-service");
+          await sendWatchSessionStartedPush(userId, sessionId);
+        } catch (fcmErr) {
+          // Non-blocking — BT + retry path already covers the common case
+          console.warn(`[Companion] FCM watchSessionStarted push failed (non-critical):`, fcmErr);
+        }
+      });
+
       res.json({
         success: true,
         session,

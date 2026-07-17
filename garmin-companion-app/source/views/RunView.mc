@@ -79,6 +79,16 @@ class RunView extends Ui.View {
     // (in-flight before the service stops) restoring _isRunning=true on the watch.
     private var _isFinishing = false;
 
+    // ── Start-command retry ───────────────────────────────────────────────────
+    // After the watch sends "command:start" to the phone, it retries if no
+    // confirmation arrives. This recovers from BT message drops (fire-and-forget
+    // transmit), especially on FR55 where the BT stack is more constrained.
+    // Retry is cancelled when the phone sends startAck, startRun, or runUpdate.
+    private var _startRetryCount    = 0;
+    private var _startRetryTick     = 0;
+    private const START_RETRY_MAX      = 3;   // max 3 retries
+    private const START_RETRY_INTERVAL = 20;  // 20 x 250ms = 5s between retries
+
     // Watch GPS cache
     private var _lastGpsLat    = null;
     private var _lastGpsLng    = null;
@@ -165,6 +175,11 @@ class RunView extends Ui.View {
     private var _offlineBufferFull      = false;
     private const OFFLINE_TICK_INTERVAL = 60;   // 60 x 250ms = 15 s
     private const OFFLINE_MAX_POINTS    = 360;  // 360 x 15s  = 90 min
+
+    // Set to true when App.Storage.setValue("offlineBatchPoints") fails due to
+    // storage full.  The buffer is kept in memory so it can be uploaded via BT
+    // the moment the phone reconnects, without needing persistent storage at all.
+    private var _storageWriteFailed = false;
 
     // ── HTTP health tracking (offline-buffer activation) ─────────────────────
     // If 5 consecutive HTTP sends fail (relay unavailable = no phone), switch to
@@ -352,6 +367,7 @@ class RunView extends Ui.View {
         _offlineBuffer          = [];
         _offlineTicks           = 0;
         _offlineBufferFull      = false;
+        _storageWriteFailed     = false;
         _httpConsecutiveFails   = 0;
         // Don't show "No phone" at start — HTTP may still work via Garmin Connect
         // relay even when the phone app hasn't opened. We show the notice only once
@@ -375,6 +391,11 @@ class RunView extends Ui.View {
         _startSession();
         Sys.println(">>> startRun() — about to sendCommand start");
         _phoneLink.sendCommand("start");
+        // Arm retry: if the phone doesn't acknowledge within START_RETRY_INTERVAL ticks,
+        // re-send the command. This recovers from BT message drops on constrained devices
+        // (e.g. FR55) where Comm.transmit() is fire-and-forget with no delivery guarantee.
+        _startRetryCount = START_RETRY_MAX;
+        _startRetryTick  = 0;
         Sys.println(">>> startRun() — complete, session live");
         _vibeShort();
         Ui.requestUpdate();
@@ -416,9 +437,10 @@ class RunView extends Ui.View {
     }
 
     function finishRun() {
-        _isFinishing     = true;   // Block stale runUpdates from phone during shutdown
-        _isRunning       = false;
-        _isPaused        = false;
+        _isFinishing      = true;   // Block stale runUpdates from phone during shutdown
+        _isRunning        = false;
+        _isPaused         = false;
+        _startRetryCount  = 0;      // Cancel any pending start-command retry
         _sessionReadySent = false;  // Reset so next session notifies phone again
         _overlayState = OVERLAY_READY;
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
@@ -433,27 +455,68 @@ class RunView extends Ui.View {
         // Guard is now !_phoneControlled (not !_isConnected) because _isConnected stays
         // TRUE after any auth.  We save the batch for ALL non-phone-controlled runs as a
         // backup — the backend upload-batch endpoint deduplicates against phone runs.
+        //
+        // STORAGE-FULL RESILIENCE — 4-tier cascade, never crashes the app:
+        //   Tier 1: save full buffer (up to 360 pts, ~10 KB)
+        //   Tier 2: clear old batch to free space, retry full buffer
+        //   Tier 3: save compact buffer (every 2nd point = ~5 KB, ~45 min)
+        //   Tier 4: save metadata only (no GPS pts, 4 small values)
+        //   Fallback: keep in-memory — uploaded via BT on next phone reconnect
+        //   All tiers: app continues running, user sees a status message not a crash.
         if (!_phoneControlled && _offlineBuffer.size() > 0) {
             var sid = App.Storage.getValue("sessionId");
             if (sid != null) {
-                App.Storage.setValue("offlineBatchSessionId", sid);
-                App.Storage.setValue("offlineBatchPoints",    _offlineBuffer);
-                App.Storage.setValue("offlineBatchDistance",  _distance);
-                App.Storage.setValue("offlineBatchDuration",  _elapsedTime);
-                App.Storage.setValue("offlineBatchAscent",    _totalAscent);
-                Sys.println("Offline batch saved: " + _offlineBuffer.size() + " pts, session=" + sid);
-                // Notify phone immediately — even with no active relay the Garmin
-                // Connect BT stack may deliver this, letting the phone banner show
-                // without waiting for the 20-minute background service trigger.
+                _storageWriteFailed = false;
+
+                // Write the session ID + scalar metadata first (tiny, almost always fits).
+                _safeStorageSet("offlineBatchSessionId", sid);
+                _safeStorageSet("offlineBatchDistance",  _distance);
+                _safeStorageSet("offlineBatchDuration",  _elapsedTime);
+                _safeStorageSet("offlineBatchAscent",    _totalAscent);
+
+                // Tier 1: try the full GPS point array.
+                var ptsSaved = _safeStorageSet("offlineBatchPoints", _offlineBuffer);
+
+                if (!ptsSaved) {
+                    // Tier 2: clear any stale previous batch to free quota, then retry.
+                    Sys.println("Storage full (tier1) — clearing old batch, retrying");
+                    App.Storage.deleteValue("offlineBatchPoints");
+                    ptsSaved = _safeStorageSet("offlineBatchPoints", _offlineBuffer);
+                }
+
+                if (!ptsSaved) {
+                    // Tier 3: compact — keep only every 2nd point (halves storage cost).
+                    Sys.println("Storage full (tier2) — saving compact buffer");
+                    var compact = [];
+                    for (var i = 0; i < _offlineBuffer.size(); i += 2) {
+                        compact.add(_offlineBuffer[i]);
+                    }
+                    ptsSaved = _safeStorageSet("offlineBatchPoints", compact);
+                }
+
+                if (!ptsSaved) {
+                    // Tier 4: metadata only — user keeps their stats even without GPS.
+                    Sys.println("Storage full (tier3) — GPS points lost, metadata only");
+                    App.Storage.deleteValue("offlineBatchPoints");
+                    _storageWriteFailed = true;
+                    setStatusMessage("Storage full - sync now");
+                } else {
+                    Sys.println("Offline batch saved: " + _offlineBuffer.size() + " pts, session=" + sid);
+                }
+
+                // Notify phone immediately so the sync banner appears without waiting
+                // for the 20-minute background service retry.
                 try { _phoneLink.sendPendingSync(); } catch (ex) {}
             }
         }
 
         // Only call DataStreamer.endSession() for STANDALONE watch runs (no phone connection).
-        // When the phone is connected (_isConnected), the phone owns the run session and saves
-        // it to the backend itself.  Calling endSession() here would create a duplicate run record
-        // AND can crash the watch app (IQ error) if ConnectIQ was already shut down on the phone side.
-        if (!_isConnected && _dataStreamer != null && _sampleN > 0) {
+        // Call endSession() for ALL watch-initiated runs (!_phoneControlled), regardless of
+        // whether auth was received (_isConnected). Previously guarded by !_isConnected, which
+        // was wrong: _isConnected stays true after ANY auth, so a watch-started run where the phone
+        // "start" command was dropped (BT failure) would silently skip endSession and lose the run.
+        // The backend deduplicates against any phone-side record — this is always safe to call.
+        if (!_phoneControlled && _dataStreamer != null && _sampleN > 0) {
             var n = _sampleN.toFloat();
             _dataStreamer.endSession({
                 "distance"    => _distance,
@@ -552,7 +615,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.1.8");
+                _phoneLink.sendHello("3.2.1");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -582,11 +645,36 @@ class RunView extends Ui.View {
                     Sys.println("Discarded corrupt offline batch (wrong type) — keys cleared");
                     _clearOfflineBatchStorage();
                 }
+
+                // ── In-memory fallback: storage-full runs ────────────────────
+                // If the batch save in finishRun() hit the storage quota, the GPS
+                // points were kept in _offlineBuffer (in memory) rather than being
+                // written to App.Storage.  The phone is now connected, so we upload
+                // the buffer via BT immediately — no persistent storage required.
+                // This covers the common pattern: run finishes → watch stays on →
+                // user walks to phone → reconnects within a few minutes.
+                if (_storageWriteFailed && !_isRunning && _offlineBuffer.size() > 0) {
+                    var memSid = App.Storage.getValue("offlineBatchSessionId");
+                    if (memSid != null) {
+                        Sys.println("Storage-full fallback: uploading " + _offlineBuffer.size() + " pts from memory");
+                        var memDist = App.Storage.getValue("offlineBatchDistance");
+                        var memDur  = App.Storage.getValue("offlineBatchDuration");
+                        var memAsc  = App.Storage.getValue("offlineBatchAscent");
+                        _dataStreamer.uploadOfflineBatch(memSid, _offlineBuffer, memDist, memDur, memAsc);
+                        _storageWriteFailed = false;
+                    }
+                }
             Ui.requestUpdate();
+
+        } else if (t.equals("startAck")) {
+            // Phone confirmed it received the watch's "start" command — cancel retry.
+            _startRetryCount = 0;
+            Sys.println("Phone startAck received — retry cancelled");
 
         } else if (t.equals("startRun")) {
             // Scenario A: phone initiates the run — watch acts as companion display.
             // Phone owns the backend session + GPS; watch just mirrors the metrics.
+            _startRetryCount = 0;      // Cancel any start-retry (phone confirmed)
             _isFinishing     = false;  // Clean slate for the new session
             _phoneControlled = true;
             _isRunning       = true;
@@ -630,6 +718,11 @@ class RunView extends Ui.View {
             // updates from the phone — they would restore _isRunning=true and trap the
             // watch in a pause/start loop.
             if (_isFinishing) { return; }
+            // Phone is active — cancel any pending start-command retry
+            if (_startRetryCount > 0) {
+                _startRetryCount = 0;
+                Sys.println("runUpdate received — start retry cancelled");
+            }
             // When the PHONE started the run (_phoneControlled), mirror all phone metrics.
             // When the WATCH started the run (!_phoneControlled), the watch own Activity.Info
             // data (actInfo.timerTime, actInfo.elapsedDistance, etc.) is authoritative — do NOT
@@ -690,6 +783,20 @@ class RunView extends Ui.View {
         _dotCount = (_dotCount + 1) % 4;
         // Grace period: count up for first 8s so UI does not flash OFFLINE before auth arrives
         if (_connectWaitTicks < CONNECT_WAIT_MAX) { _connectWaitTicks += 1; }
+
+        // ── Start-command retry (BT drop recovery) ─────────────────────────────
+        // If the watch-issued "start" command was dropped (common on FR55 when the
+        // phone screen is locked), retry every START_RETRY_INTERVAL ticks.
+        // Cancelled by startAck / startRun / runUpdate from the phone.
+        if (_isRunning && !_phoneControlled && _startRetryCount > 0) {
+            _startRetryTick += 1;
+            if (_startRetryTick >= START_RETRY_INTERVAL) {
+                _startRetryTick  = 0;
+                _startRetryCount -= 1;
+                _phoneLink.sendCommand("start");
+                Sys.println(">>> startRun retry — " + _startRetryCount + " remaining");
+            }
+        }
 
         // ── Read native Garmin Activity metrics (standalone mode) ──────────────
         // Activity.getActivityInfo() returns the same values the Garmin native Run
@@ -1072,25 +1179,38 @@ class RunView extends Ui.View {
     }
 
     private function _drawTimeTop(dc, cx, w, h) {
+        // Timer uses the primary device font. Cadence is a secondary metric drawn
+        // immediately below the timer — using FONT_SMALL on all screen sizes so it
+        // is clearly subordinate to the elapsed time without competing with the rings.
+        //
+        // Spacing is tuned to match the label→value gap used inside the run rings
+        // (14px between label top and value top in _drawRing), keeping the cadence
+        // block visually consistent with the KM / PACE / HR ring metrics.
+        var timerFont = _isSmallScreen ? Gfx.FONT_MEDIUM : Gfx.FONT_LARGE;
+
+        // cadY sits ~6px below the timer baseline; spmY is 14px below cadence baseline
+        // (ring-equivalent spacing), keeping value above and label below.
+        var cadY = (h * 0.26).toNumber();
+        var spmY = _isSmallScreen ? (h * 0.38).toNumber() : (h * 0.37).toNumber();
+
         if (_isRunning || _isPaused) {
             // Active run: show DURATION label + elapsed time
             dc.setColor(0x00CC66, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, (h * 0.08).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, (h * 0.14).toNumber(), Gfx.FONT_LARGE, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, (h * 0.14).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
             // Idle: show current clock time (24h), no label
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, (h * 0.09).toNumber(), Gfx.FONT_LARGE, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, (h * 0.09).toNumber(), timerFont, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
         }
-        // Cadence — always visible below the time/clock regardless of run state.
-        // Shows "--" when no reading yet so the metric slot is always present.
-        // Value: doubled size (FONT_SMALL → FONT_LARGE). SPM label: below value, 50% larger (FONT_XTINY → FONT_TINY).
+        // Cadence metric (value) above SPM label — FONT_SMALL on all device sizes.
+        // Shows "--" until cadence sensor data arrives.
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         var cadStr = _dispCadence > 0 ? _dispCadence.format("%d") : "--";
-        dc.drawText(cx, (h * 0.265).toNumber(), Gfx.FONT_LARGE, cadStr, Gfx.TEXT_JUSTIFY_CENTER);
-        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.335).toNumber(), Gfx.FONT_TINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cadY, Gfx.FONT_SMALL, cadStr, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, spmY, Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
     // =========================================================================
@@ -1122,12 +1242,12 @@ class RunView extends Ui.View {
         dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, (h * 0.40).toNumber(), metricFont, (_dispDistance / 1000.0).format("%.2f"), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(lx, (h * 0.43).toNumber(), metricFont, (_dispDistance / 1000.0).format("%.2f"), Gfx.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
         dc.drawText(rx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "PACE", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.40).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.43).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
@@ -1141,21 +1261,22 @@ class RunView extends Ui.View {
         dc.setColor(0xFF3355, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "HR", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, (h * 0.65).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(lx, (h * 0.68).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Cadence cell: value doubled (metricFont → FONT_LARGE), SPM label below at FONT_TINY.
-        var cadMetricFont = _isSmallScreen ? Gfx.FONT_MEDIUM : Gfx.FONT_LARGE;
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.59).toNumber(), cadMetricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+        // Cadence cell: label above value — consistent with KM, PACE, HR layout.
         dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.69).toNumber(), Gfx.FONT_TINY, "spm", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.68).toNumber(), metricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider row 2
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
         dc.drawLine(cx, (h * 0.57).toNumber(), cx, (h * 0.80).toNumber());
 
-        // Battery under spm (right column, same style as screen 1)
-        _drawBatteryAt(dc, (rx - 11).toNumber(), (h * 0.80).toNumber());
+        // Battery sits in the right column but is horizontally centered at rx so it
+        // doesn't create a visual cluster that makes the SPM value look larger.
+        // All four metric values use metricFont identically — consistent on all devices.
+        _drawBatteryIcon(dc, (rx - 11).toNumber(), (h * 0.80).toNumber());
 
         _drawStatusBar(dc, cx, w, h);
     }
@@ -1198,7 +1319,10 @@ class RunView extends Ui.View {
         _drawBatteryAt(dc, bx, by);
     }
 
-    private function _drawBatteryAt(dc, bx, by) {
+    // Draw just the battery icon outline+fill, no percentage text.
+    // Used in the grid screen so the right column doesn't appear visually heavier
+    // than the left column (which has no sub-metric below HR).
+    private function _drawBatteryIcon(dc, bx, by) {
         if (!(Sys has :getSystemStats)) { return; }
         var stats = Sys.getSystemStats();
         if (stats == null)         { return; }
@@ -1226,6 +1350,20 @@ class RunView extends Ui.View {
             dc.setColor(col, Gfx.COLOR_TRANSPARENT);
             dc.fillRectangle(bx + 1, by + 1, fillW, bh - 2);
         }
+    }
+
+    // Draw battery icon + percentage text. Used on the rings screen where there
+    // is dedicated space below the bottom ring for the battery status block.
+    private function _drawBatteryAt(dc, bx, by) {
+        _drawBatteryIcon(dc, bx, by);
+        if (!(Sys has :getSystemStats)) { return; }
+        var stats = Sys.getSystemStats();
+        if (stats == null || stats.battery == null) { return; }
+        var bat = stats.battery.toNumber();
+        if (bat < 0)   { bat = 0; }
+        if (bat > 100) { bat = 100; }
+        var bw = 22;
+        var bh = 12;
         dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
         dc.drawText(bx + bw / 2, by + bh + 2, Gfx.FONT_XTINY, bat.format("%d") + "%", Gfx.TEXT_JUSTIFY_CENTER);
     }
@@ -1340,6 +1478,21 @@ class RunView extends Ui.View {
     // ==========================================================================
     // HELPERS
     // ==========================================================================
+
+    // ── Safe storage write helper ─────────────────────────────────────────────
+    // App.Storage.setValue() throws Lang.StorageFullException (and on some
+    // older SDK builds a generic Lang.Exception) when the device storage quota is
+    // exhausted.  Every persistent write goes through this helper so that a full
+    // device NEVER crashes the app.  Returns true on success, false on failure.
+    private function _safeStorageSet(key, value) {
+        try {
+            App.Storage.setValue(key, value);
+            return true;
+        } catch (ex) {
+            Sys.println("WARN: Storage full — could not write key='" + key + "': " + ex.getErrorMessage());
+            return false;
+        }
+    }
 
     // Returns true when App.Storage contains a buffered offline run batch.
     // Used by sendWatchReady() so the phone can show a sync indicator.
