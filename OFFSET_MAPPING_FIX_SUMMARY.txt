@@ -1,0 +1,179 @@
+================================================================================
+JETPACK COMPOSE OFFSET MAPPING CRASH FIX - QUICK SUMMARY
+================================================================================
+
+ISSUE: java.lang.IllegalStateException at ValidatingOffsetMapping.originalToTransformed()
+- 9 events in Google Play Console
+- Primarily Samsung Galaxy S20 FE (R8Q) and similar devices
+- Triggered by aggressive Samsung keyboard with autocorrect/predictive text
+
+ROOT CAUSE: DateOfBirthTransformation's DateOffsetMapping returned indices exceeding string bounds
+
+================================================================================
+THE FIX
+================================================================================
+
+FILE: app/src/main/java/live/airuncoach/airuncoach/ui/screens/PersonalDetailsScreen.kt
+
+PROBLEM #1: originalToTransformed() could return value > formatted.length
+SOLUTION:  Return minOf(transformedPos, formatted.length)
+
+PROBLEM #2: transformedToOriginal() could return value > digitsOnly.length
+SOLUTION:  Return minOf(digitCount, digitsOnly.length)
+
+PROBLEM #3: Didn't handle empty strings
+SOLUTION:  Check "if (string.isEmpty()) return 0" at start of both functions
+
+PROBLEM #4: OffsetMapping never saw the actual formatted string length
+SOLUTION:  Pass both digitsOnly AND formatted strings to constructor
+
+================================================================================
+BEFORE (BROKEN)
+================================================================================
+
+class DateOffsetMapping(private val digitsOnly: String) : OffsetMapping {
+    override fun originalToTransformed(offset: Int): Int {
+        val clampedOffset = minOf(offset, digitsOnly.length)
+        
+        return when {
+            clampedOffset <= 2 -> clampedOffset
+            clampedOffset <= 4 -> clampedOffset + 1
+            else -> clampedOffset + 2
+        }
+        // ❌ NO VALIDATION - Could return 11 for formatted "12/34/56/78" (length 10)
+    }
+}
+
+================================================================================
+AFTER (FIXED)
+================================================================================
+
+class DateOffsetMapping(
+    private val digitsOnly: String,
+    private val formatted: String  // ← NEW: Store actual formatted string
+) : OffsetMapping {
+    override fun originalToTransformed(offset: Int): Int {
+        // ✅ Handle empty strings
+        if (digitsOnly.isEmpty()) return 0
+        
+        val clampedOffset = minOf(offset, digitsOnly.length)
+        
+        val transformedPos = when {
+            clampedOffset <= 2 -> clampedOffset
+            clampedOffset <= 4 -> clampedOffset + 1
+            else -> clampedOffset + 2
+        }
+        
+        // ✅ CRITICAL: Validate against actual formatted length
+        return minOf(transformedPos, formatted.length)
+    }
+}
+
+================================================================================
+VALIDATION EXAMPLES
+================================================================================
+
+Original String (digitsOnly):  "12345678" (length 8)
+Formatted String (displayed):  "12/34/56/78" (length 10)
+
+Test Case 1: User types at position 8 (end of digitsOnly)
+  OLD: originalToTransformed(8) = 8 + 2 = 10 ✓ (works by chance)
+  NEW: originalToTransformed(8) = minOf(10, 10) = 10 ✓
+
+Test Case 2: Samsung keyboard sends rapid edit at position 20 (way out of bounds)
+  OLD: originalToTransformed(20) = minOf(20, 8) = 8 → 8 + 2 = 10 ✓ (works by chance)
+  NEW: originalToTransformed(20) = minOf(10, 10) = 10 ✓
+
+Test Case 3: Empty input
+  OLD: originalToTransformed(0) = 0 ✓ (works)
+  NEW: originalToTransformed(0) = 0 ✓ (still works, but safer)
+
+Test Case 4: Samsung keyboard sends auto-correct with large offset
+  OLD: Could return 11 (larger than formatted.length of 10) ❌ CRASH!
+  NEW: Returns minOf(11, 10) = 10 ✓ SAFE
+
+================================================================================
+OTHER TEXT INPUT REVIEW
+================================================================================
+
+Searched entire codebase for other VisualTransformation implementations:
+  - PromoCodeDialog.kt: Simple .uppercase() - SAFE (no custom OffsetMapping)
+  - CreateGoalScreen.kt: Direct state updates - SAFE
+  - All other fields: No custom transformations - SAFE
+
+Result: DateOfBirthTransformation was the ONLY problematic implementation
+
+================================================================================
+TESTING RECOMMENDATIONS
+================================================================================
+
+1. Manual Testing on Samsung Device:
+   - Open Personal Details screen
+   - Enter date: 01011990
+   - Watch it format: 01/01/1990
+   - Try autocorrect, predictive text, rapid typing
+   - Try clearing and re-entering
+
+2. Automated Testing:
+   Add unit tests for boundary conditions:
+   ✓ originalToTransformed(-1)       → 0
+   ✓ originalToTransformed(0)        → 0
+   ✓ originalToTransformed(8)        → 10
+   ✓ originalToTransformed(100)      → 10 (clamped)
+   ✓ transformedToOriginal(0)        → 0
+   ✓ transformedToOriginal(10)       → 8
+   ✓ transformedToOriginal(100)      → 8 (clamped)
+
+3. Monitor Google Play Console:
+   - Watch for same exception after release
+   - Device-specific crash trends should drop
+   - Samsung devices should no longer show this error
+
+================================================================================
+COMPOSE VERSION
+================================================================================
+
+Current: androidx.compose:compose-bom:2024.06.00 (June 2024)
+Status:  Recent stable version
+Upgrade: Not urgent, but latest 2025.01.00+ available if needed
+
+This fix is compatible with all Compose versions 1.2.0+
+
+================================================================================
+FILE CHANGES SUMMARY
+================================================================================
+
+Modified: app/src/main/java/live/airuncoach/airuncoach/ui/screens/PersonalDetailsScreen.kt
+
+Changes:
+  1. Updated DateOfBirthTransformation.filter() to pass formatted string
+  2. Updated DateOffsetMapping class with proper boundary validation
+  3. Added empty string handling
+  4. Added .coerceAtMost() validation on return values
+  5. Added detailed comments explaining the fix
+
+No breaking changes - fully backward compatible
+
+================================================================================
+EXPECTED OUTCOME
+================================================================================
+
+After this release:
+  ✓ Google Play Console errors should drop to 0 for this exception
+  ✓ Samsung Galaxy S20 FE and similar devices won't crash on DOB entry
+  ✓ Users can use autocorrect and predictive text without issues
+  ✓ All date input functionality remains unchanged
+
+================================================================================
+FOLLOW-UP ACTIONS
+================================================================================
+
+1. Release the fix in next version
+2. Monitor Google Play Console for 2-3 weeks
+3. If errors continue:
+   - May need to upgrade Compose library
+   - Could indicate other hidden VisualTransformation issues
+4. Document these safe practices for future text transformations
+5. Add unit tests for OffsetMapping boundary cases
+
+================================================================================

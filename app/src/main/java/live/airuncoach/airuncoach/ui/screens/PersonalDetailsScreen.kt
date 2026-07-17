@@ -186,8 +186,7 @@ fun PersonalDetailsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = Spacing.lg)
-                
-                .padding(bottom = 120.dp) // Add bottom padding so content doesn't hide behind button and device navigation
+                .padding(bottom = Spacing.xl) // Safe bottom padding (24.dp) instead of massive 120.dp
         ) {
             item {
                 SectionTitle(title = "Full Name")
@@ -244,7 +243,7 @@ fun PersonalDetailsScreen(
             }
             item {
                 SectionTitle(title = "Gender")
-                Box {
+                Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = gender,
                         onValueChange = {},
@@ -276,9 +275,7 @@ fun PersonalDetailsScreen(
                     DropdownMenu(
                         expanded = showGenderMenu,
                         onDismissRequest = { showGenderMenu = false },
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .background(Colors.backgroundSecondary)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         genderOptions.forEach { option ->
                             DropdownMenuItem(

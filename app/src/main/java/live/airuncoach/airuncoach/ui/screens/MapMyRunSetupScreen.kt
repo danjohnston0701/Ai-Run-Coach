@@ -208,7 +208,7 @@ fun MapMyRunSetupScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = 104.dp) // space for bottom CTA
+                .padding(bottom = Spacing.lg) // Safe padding instead of massive 104.dp
         ) {
 
             item {
