@@ -197,13 +197,26 @@ export async function sendFirebasePushToToken(
   if (!app) throw new Error("Firebase not configured — set FIREBASE_SERVICE_ACCOUNT_JSON");
 
   const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
+  
+  // Determine channel and click action based on notification type
+  const notificationType = data?.type;
+  const channelId = notificationType === "garmin_watch_update"
+    ? "garmin_watch_updates"
+    : "general";
+  const clickAction = notificationType === "garmin_watch_update"
+    ? "OPEN_CONNECT_IQ_STORE"
+    : undefined;
+
   const messageId = await messaging.send({
     token: fcmToken,
     notification: { title, body },
     data: data ?? {},
     android: {
       priority: "high",
-      notification: { channelId: "garmin_watch_updates" },
+      notification: {
+        channelId,
+        ...(clickAction && { clickAction }),
+      },
     },
   });
   return messageId;
