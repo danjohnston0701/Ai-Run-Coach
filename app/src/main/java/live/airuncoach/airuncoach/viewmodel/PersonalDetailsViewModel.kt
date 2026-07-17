@@ -38,7 +38,7 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     private val _height = MutableStateFlow("")
     val height: StateFlow<String> = _height.asStateFlow()
 
-    private val _defaultSessionType = MutableStateFlow("RUN")
+    private val _defaultSessionType = MutableStateFlow("Run")
     val defaultSessionType: StateFlow<String> = _defaultSessionType.asStateFlow()
 
 
@@ -56,7 +56,7 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
             _gender.value = user.gender ?: ""
             _weight.value = user.weight?.toString() ?: ""
             _height.value = user.height?.toString() ?: ""
-            _defaultSessionType.value = user.defaultSessionType ?: "RUN"
+            _defaultSessionType.value = user.defaultSessionType ?: "Run"
         }
     }
 
