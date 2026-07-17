@@ -126,7 +126,11 @@ class MainActivity : ComponentActivity() {
         // because Garmin Connect registers as an Android App Link for apps.garmin.com and silently
         // drops direct browser intents fired from a Service context. Launching our own Activity
         // first avoids interception; we then immediately fire the browser intent from here.
+        // Match both our namespaced action (from AiRunCoachMessagingService PendingIntent when
+        // onMessageReceived fires) AND the bare "OPEN_CONNECT_IQ_STORE" action that the FCM SDK
+        // uses in clickAction when it auto-displays the notification (app in background).
         val isGarminUpdateNotification = intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE
+            || intent?.action == "OPEN_CONNECT_IQ_STORE"
         if (isGarminUpdateNotification) {
             val storeUrl = intent?.getStringExtra(AiRunCoachMessagingService.EXTRA_STORE_URL)
                 ?: AiRunCoachMessagingService.CONNECT_IQ_STORE_URL
@@ -285,8 +289,11 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleNotificationIntent(intent: Intent?) {
         when {
-            // Garmin watch update → open Connect IQ store URL directly in browser
-            intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE -> {
+            // Garmin watch update → open Connect IQ store URL directly in browser.
+            // Handle both the namespaced action (foreground path via our PendingIntent)
+            // and the bare action (background path via FCM auto-display clickAction).
+            intent?.action == AiRunCoachMessagingService.ACTION_OPEN_CONNECT_IQ_STORE
+            || intent?.action == "OPEN_CONNECT_IQ_STORE" -> {
                 val storeUrl = intent.getStringExtra(AiRunCoachMessagingService.EXTRA_STORE_URL)
                     ?: AiRunCoachMessagingService.CONNECT_IQ_STORE_URL
                 Log.d("MainActivity", "Warm launch: Garmin update — opening store URL: $storeUrl")
