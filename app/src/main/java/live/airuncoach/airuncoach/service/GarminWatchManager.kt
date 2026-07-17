@@ -458,6 +458,17 @@ class GarminWatchManager(
     }
 
     /**
+     * Send a lightweight acknowledgment back to the watch when a "start" command is received.
+     * This cancels the watch's start-command retry timer (FR55 BT-drop recovery).
+     * Called immediately from handleWatchMessage() before onWatchCommand is invoked,
+     * so the ack is always sent regardless of whether a ViewModel or Service is listening.
+     */
+    fun sendStartAck() {
+        sendToWatch(mapOf("type" to "startAck"))
+        Log.d(TAG, "Sent startAck to watch")
+    }
+
+    /**
      * Push a prepared run configuration to the watch.
      *
      * The watch StartView receives this as a "preparedRun" message and switches
@@ -718,6 +729,9 @@ class GarminWatchManager(
                             dismissPendingSyncNotification()
                         }
                         Log.d(TAG, "Watch START received — cleared cached preparedRun payload")
+                        // Immediately ack the start so the watch cancels its retry timer.
+                        // This prevents duplicate start commands from FR55 (BT-drop recovery).
+                        sendStartAck()
                     }
 
                     // For all other commands: if no ViewModel or service is listening,

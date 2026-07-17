@@ -75,14 +75,57 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         super.onMessageReceived(message)
         Log.d(TAG, "FCM message received: ${message.data}")
 
-        val type     = message.data["type"]
-        val runId    = message.data["runId"]?.takeIf { it.isNotBlank() }
+        val type      = message.data["type"]
+        val runId     = message.data["runId"]?.takeIf { it.isNotBlank() }
         val sessionId = message.data["sessionId"]?.takeIf { it.isNotBlank() }
-        val storeUrl = message.data["storeUrl"]?.takeIf { it.isNotBlank() }
-        val title    = message.notification?.title ?: message.data["title"] ?: "AI Run Coach"
-        val body     = message.notification?.body  ?: message.data["body"]  ?: ""
+        val storeUrl  = message.data["storeUrl"]?.takeIf { it.isNotBlank() }
+        val title     = message.notification?.title ?: message.data["title"] ?: "AI Run Coach"
+        val body      = message.notification?.body  ?: message.data["body"]  ?: ""
+
+        // ── Phase 2 FCM fallback: guaranteed watch session start ──────────────
+        // This message is sent by the backend the moment the Garmin watch POSTs
+        // /api/garmin-companion/session/start via the Garmin Connect HTTP relay.
+        // It arrives even when the phone screen is locked, RunTrackingService has
+        // been killed by Android battery optimisation, or the BT "start" command
+        // was silently dropped (FR55 / Doze mode). FCM high-priority messages are
+        // granted a temporary foreground-service exemption on Android 12+, so we
+        // can start RunTrackingService here regardless of background restrictions.
+        if (type == "watchSessionStarted") {
+            Log.d(TAG, "FCM watchSessionStarted — starting RunTrackingService via FCM fallback")
+            startWatchSessionFromFcm(sessionId)
+            return  // Silent — no notification shown to user
+        }
 
         showNotification(title, body, type, runId, sessionId, storeUrl, message.data)
+    }
+
+    /**
+     * FCM fallback: start RunTrackingService when the watch starts a session.
+     *
+     * Called from onMessageReceived() when type == "watchSessionStarted".
+     * RunTrackingService.startTracking() already guards against double-start
+     * (if (isTracking) return), so this is always safe to call — it's a no-op
+     * if the BT "start" command already arrived and coaching is already active.
+     *
+     * The service picks up coaching context from:
+     *   1. Its own in-memory state (if still alive from ACTION_PREPARE_FOR_WATCH), OR
+     *   2. GarminWatchManager.cachedPreparedRunPayload (Hilt singleton, survives longer), OR
+     *   3. Basic watch-initiated tracking mode (guaranteed session save, no coaching context)
+     */
+    private fun startWatchSessionFromFcm(sessionId: String?) {
+        try {
+            val intent = Intent(this, RunTrackingService::class.java).apply {
+                action = RunTrackingService.ACTION_START_TRACKING_FROM_WATCH
+                sessionId?.let { putExtra("watchSessionId", it) }
+            }
+            // SDK_INT is always >= 26 in this project's minSdk — always use startForegroundService
+            startForegroundService(intent)
+            Log.d(TAG, "FCM watchSessionStarted: RunTrackingService started ✅")
+        } catch (e: Exception) {
+            // Should not happen — FCM high-priority grants foreground-service exemption,
+            // but log so we can diagnose if it ever occurs on an unusual OEM build.
+            Log.e(TAG, "FCM watchSessionStarted: failed to start RunTrackingService: ${e.message}")
+        }
     }
 
     private fun showNotification(

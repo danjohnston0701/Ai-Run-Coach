@@ -28,6 +28,14 @@ class PhoneLink {
     // Comm.registerForPhoneAppMessages() only needs to be called once.
     private var _registered = false;
 
+    // Pending transmit counter — tracks how many Comm.transmit() calls have been
+    // issued but not yet acknowledged (onComplete / onError not yet called).
+    // Used to prevent BT queue + heap exhaustion on low-memory devices (FR55).
+    // High-frequency GPS frames (sendRunData) are dropped when this exceeds the
+    // cap; control commands (start/stop/pause) always go through.
+    private var _pendingTransmits = 0;
+    private const MAX_DATA_PENDING = 2;   // max queued watchData frames
+
     function initialize() {}
 
     // ── Register ──────────────────────────────────────────────────────────────
@@ -47,6 +55,7 @@ class PhoneLink {
 
     // ── Send command to phone ─────────────────────────────────────────────────
     // action: "start" | "pause" | "resume" | "stop"
+    // Control commands always bypass the pending-transmit cap so they are never dropped.
     function sendCommand(action) {
         var msg = {
             "type"   => "command",
@@ -106,7 +115,21 @@ class PhoneLink {
 
     // ── Send run data to phone (Scenario B — watch streams GPS + biometrics) ──
     // Builds a new dictionary so the caller's data dict is never mutated.
+    //
+    // CRASH GUARD (FR55 / low-memory devices):
+    // If too many watchData frames are already in the BT queue (phone not reading,
+    // screen locked, Doze mode), each pending Comm.transmit() holds heap-allocated
+    // objects (msg Dictionary + TransmitListener). On FR55 (~64 KB heap) these
+    // accumulate rapidly at 1 frame / 2 s, causing OOM after ~5-10 min.
+    // Drop this frame silently if the pending count is over the cap.
+    // Control commands (sendCommand, sendWatchReady, etc.) always go through.
     function sendRunData(data) {
+        if (_pendingTransmits >= MAX_DATA_PENDING) {
+            // Phone isn't draining the queue — skip this high-frequency frame.
+            // Control messages are unaffected (they call _transmit() directly).
+            Sys.println("PhoneLink.sendRunData: dropped (pending=" + _pendingTransmits + ")");
+            return;
+        }
         var msg = { "type" => "watchData" };
         var keys = data.keys();
         for (var i = 0; i < keys.size(); i++) {
@@ -116,14 +139,16 @@ class PhoneLink {
         _transmit(msg);
     }
 
-    // ── Internal ──────────────────────────────────────────────────────────────
+    // ── Internal ──────────────────────────────────────────��───────────────────
 
     function _transmit(payload) {
         // Comm.transmit() throws (e.g. BLE_ERROR, CONNECTION_UNAVAILABLE) when the
         // companion phone app is not running — catch so the watch never crashes.
+        _pendingTransmits += 1;
         try {
             Comm.transmit(payload, null, new TransmitListener(method(:_onTransmitDone)));
         } catch (e) {
+            _pendingTransmits -= 1;
             _lastSendOk = false;
             Sys.println("PhoneLink: transmit exception (no phone?) — " + e.toString());
         }
@@ -138,6 +163,7 @@ class PhoneLink {
     }
 
     function _onTransmitDone(success) {
+        if (_pendingTransmits > 0) { _pendingTransmits -= 1; }
         _lastSendOk = success;
         if (!success) {
             Sys.println("PhoneLink: transmit failed");
@@ -145,6 +171,7 @@ class PhoneLink {
     }
 
     function lastSendOk() { return _lastSendOk; }
+    function pendingTransmits() { return _pendingTransmits; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
