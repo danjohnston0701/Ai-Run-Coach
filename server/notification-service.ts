@@ -4,8 +4,6 @@ import { eq } from "drizzle-orm";
 import { users } from "@shared/schema";
 
 // ── Firebase Admin SDK initialisation ───────────────────────────────────────
-// Set FIREBASE_SERVICE_ACCOUNT_JSON as an env var containing the full JSON
-// service account key from the Firebase Console (Project Settings > Service Accounts).
 let firebaseApp: any = null;
 let adminSDK: any = null;
 let adminCredential: any = null;
@@ -20,7 +18,6 @@ async function getFirebaseApp(): Promise<any> {
   }
 
   try {
-    // Dynamically import firebase-admin to handle bundling issues
     if (!adminSDK) {
       const admin = await import("firebase-admin");
       adminSDK = admin.default || admin;
@@ -42,15 +39,6 @@ async function getFirebaseApp(): Promise<any> {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Send activity notification to user (push + in-app).
- *
- * @param userId        - User to notify
- * @param activity      - Garmin activity data
- * @param type          - 'new_activity' | 'run_enriched'
- * @param runId         - Optional: linked AiRunCoach run ID
- * @param matchScore    - Optional: fuzzy-match confidence (0-100)
- */
 export async function sendActivityNotification(
   userId: string,
   activity: any,
@@ -61,7 +49,6 @@ export async function sendActivityNotification(
   const results = { inAppSent: false, pushSent: false };
 
   try {
-    // Build human-readable strings
     const distanceKm = (activity.distanceInMeters || 0) / 1000;
     const distanceStr = distanceKm > 0 ? `${distanceKm.toFixed(1)}km` : "";
     const durationMin = Math.round((activity.durationInSeconds || 0) / 60);
@@ -96,7 +83,6 @@ export async function sendActivityNotification(
           ? `Your ${activityName} on Garmin — Duration: ${durationStr}`
           : `Your ${activityName} on Garmin was recorded!`;
     } else {
-      // run_enriched
       title = "✨ Run Enriched with Garmin Data";
       const enriched: string[] = [];
       if (activity.averageHeartRateInBeatsPerMinute) enriched.push("HR");
@@ -109,11 +95,10 @@ export async function sendActivityNotification(
       if (matchScore) notificationData.matchScore = String(matchScore);
     }
 
-    // 1. In-app notification (always)
     await storage.createNotification({
       userId,
       title,
-      message: body,   // schema field is 'message', not 'body'
+      message: body,
       type: "garmin_activity",
       data: notificationData,
       read: false,
@@ -121,7 +106,6 @@ export async function sendActivityNotification(
     results.inAppSent = true;
     console.log(`[Notification] In-app notification created for user ${userId}: "${title}"`);
 
-    // 2. Firebase push notification
     const pushSent = await sendFirebasePush(userId, title, body, notificationData);
     results.pushSent = pushSent;
 
@@ -132,10 +116,6 @@ export async function sendActivityNotification(
   }
 }
 
-/**
- * Send a Firebase Cloud Messaging push notification to a specific user.
- * Looks up the user's FCM token stored in the users table.
- */
 export async function sendFirebasePush(
   userId: string,
   title: string,
@@ -150,7 +130,6 @@ export async function sendFirebasePush(
   }
 
   try {
-    // Fetch the user's FCM token
     const [user] = await db
       .select({ fcmToken: users.fcmToken })
       .from(users)
@@ -171,7 +150,6 @@ export async function sendFirebasePush(
 
     const message: any = dataOnly
       ? {
-          // Data-only — no `notification` field so onMessageReceived fires in all states
           token: user.fcmToken,
           data: { title, body, ...data },
           android: { priority: "high" },
@@ -196,7 +174,6 @@ export async function sendFirebasePush(
     return true;
   } catch (err: any) {
     if (err?.code === "messaging/registration-token-not-registered") {
-      // Token is stale — clear it so we don't keep trying
       console.warn(`[Firebase Push] Stale FCM token for user ${userId} — clearing`);
       await db.update(users).set({ fcmToken: null }).where(eq(users.id, userId));
     } else {
@@ -232,6 +209,48 @@ export async function sendFirebasePushToToken(
   return messageId;
 }
 
+export async function sendWatchSessionStartedPush(
+  userId: string,
+  sessionId: string
+): Promise<boolean> {
+  const app = await getFirebaseApp();
+  if (!app) return false;
+
+  try {
+    const [user] = await db
+      .select({ fcmToken: users.fcmToken })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user?.fcmToken) {
+      console.log(`[WatchSessionFCM] No FCM token for user ${userId} — BT path only`);
+      return false;
+    }
+
+    const message: any = {
+      token: user.fcmToken,
+      data: { type: "watchSessionStarted", sessionId },
+      android: { priority: "high", ttl: 20000 },
+    };
+
+    const messaging = adminSDK.messaging
+      ? adminSDK.messaging(app)
+      : adminSDK.default?.messaging(app);
+    await messaging.send(message);
+    console.log(`[WatchSessionFCM] ✅ Sent watchSessionStarted to user ${userId} (session ${sessionId})`);
+    return true;
+  } catch (err: any) {
+    if (err?.code === "messaging/registration-token-not-registered") {
+      await db.update(users).set({ fcmToken: null }).where(eq(users.id, userId));
+      console.warn(`[WatchSessionFCM] Stale FCM token cleared for user ${userId}`);
+    } else {
+      console.warn(`[WatchSessionFCM] Push failed for user ${userId}: ${err?.message}`);
+    }
+    return false;
+  }
+}
+
 // ── Bulk / utility helpers ────────────────────────────────────────────────────
 
 export async function sendBulkNotifications(
@@ -246,7 +265,7 @@ export async function sendBulkNotifications(
       await storage.createNotification({
         userId,
         title,
-        message: body,  // schema field is 'message'
+        message: body,
         type: "system",
         data,
         read: false,
@@ -288,15 +307,6 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
 
 // ── Garmin Watch App Update Broadcast ────────────────────────────────────────
 
-/**
- * Broadcast a "new Garmin companion app version available" push notification to
- * every user who has authenticated from the Garmin IQ watch app.
- *
- * @param version    - New version string (e.g. "2.4.0")
- * @param releaseNote - Short plain-English description of what's new
- * @param storeUrl   - Full Connect IQ store URL for the app listing
- * @returns Summary of sent/failed counts and the list of targeted user IDs
- */
 export async function broadcastGarminWatchAppUpdate(
   version: string,
   releaseNote: string,
@@ -304,7 +314,6 @@ export async function broadcastGarminWatchAppUpdate(
 ): Promise<{ targeted: number; pushSent: number; pushFailed: number; inAppSent: number; userIds: string[] }> {
   const results = { targeted: 0, pushSent: 0, pushFailed: 0, inAppSent: 0, userIds: [] as string[] };
 
-  // Fetch all users who have the Garmin watch app installed
   const watchAppUsers = await db
     .select({ id: users.id, fcmToken: users.fcmToken })
     .from(users)
@@ -323,7 +332,7 @@ export async function broadcastGarminWatchAppUpdate(
   const notificationData: Record<string, string> = {
     type: "garmin_watch_update",
     version,
-    releaseNote: body,  // Pass the full release note/body to the app
+    releaseNote: body,
     storeUrl,
     action: "open_connect_iq_store",
     timestamp: new Date().toISOString(),
@@ -333,7 +342,6 @@ export async function broadcastGarminWatchAppUpdate(
 
   for (const user of watchAppUsers) {
     try {
-      // In-app notification (always, even without FCM token)
       await storage.createNotification({
         userId: user.id,
         title,
@@ -344,32 +352,16 @@ export async function broadcastGarminWatchAppUpdate(
       });
       results.inAppSent++;
 
-      // Firebase push (only if FCM token is present)
       if (user.fcmToken) {
         const app = await getFirebaseApp();
         if (app) {
           try {
-            // DATA-ONLY message — no `notification` field.
-            // This forces Firebase to always call onMessageReceived() on Android
-            // regardless of whether the app is in foreground, background, or killed.
-            // Our onMessageReceived() builds the notification with a PendingIntent
-            // that opens the Connect IQ store URL on tap.
-            // If we included a `notification` field, Firebase would show the notification
-            // automatically when the app is backgrounded/killed and tapping it would
-            // just open MainActivity instead of the store URL.
             const message: any = {
               token: user.fcmToken,
-              data: {
-                ...notificationData,
-                title,   // read by onMessageReceived via message.data["title"]
-                body,    // read by onMessageReceived via message.data["body"]
-              },
+              data: { ...notificationData, title, body },
               android: {
                 priority: "high",
-                // Channel used by onMessageReceived when building the notification
-                notification: {
-                  channelId: "garmin_watch_updates",
-                },
+                notification: { channelId: "garmin_watch_updates" },
               },
             };
             const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
@@ -396,15 +388,6 @@ export async function broadcastGarminWatchAppUpdate(
   return results;
 }
 
-/**
- * Send coaching plan session reminder notification at 8am.
- * Called by scheduler for users who have a workout scheduled for today.
- *
- * @param userId        - User ID
- * @param workoutName   - Workout description (e.g., "6x400m Intervals")
- * @param distance      - Workout distance in km
- * @param intensity     - Intensity zone (e.g., "z4")
- */
 export async function sendCoachingPlanReminder(
   userId: string,
   workoutName: string,
@@ -425,19 +408,16 @@ export async function sendCoachingPlanReminder(
       timestamp: new Date().toISOString(),
     };
 
-    // 1. In-app notification
     await storage.createNotification({
       userId,
       title,
-      message: body,  // schema field is 'message'
+      message: body,
       type: "coaching_plan_reminder",
       data: notificationData,
       read: false,
     });
     results.inAppSent = true;
-    console.log(`[Notification] In-app coaching plan reminder created for user ${userId}: "${workoutName}"`);
 
-    // 2. Firebase push notification
     const pushSent = await sendFirebasePush(userId, title, body, notificationData);
     results.pushSent = pushSent;
 
@@ -450,15 +430,6 @@ export async function sendCoachingPlanReminder(
 
 // ── Android App Update Broadcast ─────────────────────────────────────────────
 
-/**
- * Broadcast an Android app update notification to all users.
- * Uses Firebase Cloud Messaging to deliver the notification.
- *
- * @param version       - New version string (e.g. "1.4.3")
- * @param title         - Notification title (e.g. "Critical Update")
- * @param releaseNote   - Short description of what's new or why they should update
- * @returns Summary of sent/failed counts
- */
 export async function broadcastAndroidAppUpdate(
   version: string,
   title: string,
@@ -466,7 +437,6 @@ export async function broadcastAndroidAppUpdate(
 ): Promise<{ targeted: number; inAppSent: number; pushSent: number; pushFailed: number }> {
   const results = { targeted: 0, inAppSent: 0, pushSent: 0, pushFailed: 0 };
 
-  // Fetch all users
   const allUsers = await db
     .select({ id: users.id, fcmToken: users.fcmToken })
     .from(users);
@@ -492,7 +462,6 @@ export async function broadcastAndroidAppUpdate(
 
   for (const user of allUsers) {
     try {
-      // In-app notification (always)
       await storage.createNotification({
         userId: user.id,
         title: notificationTitle,
@@ -503,18 +472,13 @@ export async function broadcastAndroidAppUpdate(
       });
       results.inAppSent++;
 
-      // Firebase push (only if FCM token exists)
       if (user.fcmToken) {
         const app = await getFirebaseApp();
         if (app) {
           try {
             const message: any = {
               token: user.fcmToken,
-              data: {
-                ...notificationData,
-                title: notificationTitle,
-                body: notificationBody,
-              },
+              data: { ...notificationData, title: notificationTitle, body: notificationBody },
               android: {
                 priority: "high",
                 notification: {
