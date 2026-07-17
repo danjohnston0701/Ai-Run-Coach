@@ -141,50 +141,13 @@ fun PersonalDetailsScreen(
         },
         containerColor = Colors.backgroundRoot,
         contentWindowInsets = WindowInsets(0),
-        bottomBar = {
-            // Sticky save button — no navigationBarsPadding() here because the outer
-            // MainScreen Scaffold already consumed nav bar insets via innerPadding
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Colors.backgroundRoot,
-                shadowElevation = 8.dp
-            ) {
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            viewModel.saveDetails()
-                            // If user has injuries, go to injury logging
-                            if (hasInjuries == true) {
-                                onNavigateToInjuries()
-                            } else {
-                                // Clear profile setup flag and navigate accordingly
-                                sessionManager.setNeedsProfileSetup(false)
-                                if (sessionManager.needsCoachSetup()) {
-                                    onNavigateToCoachSettings()
-                                } else {
-                                    onNavigateBack()
-                                }
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = Spacing.md)
-                        .height(50.dp),
-                    shape = RoundedCornerShape(BorderRadius.lg),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
-                    // hasInjuries defaults to false ("No"), so button is always enabled
-                ) {
-                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
-                }
-            }
-        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Spacing.lg),
+                .padding(horizontal = Spacing.lg)
+                .imePadding(),
             contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {
@@ -414,6 +377,33 @@ fun PersonalDetailsScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+            item {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            viewModel.saveDetails()
+                            if (hasInjuries) {
+                                onNavigateToInjuries()
+                            } else {
+                                sessionManager.setNeedsProfileSetup(false)
+                                if (sessionManager.needsCoachSetup()) {
+                                    onNavigateToCoachSettings()
+                                } else {
+                                    onNavigateBack()
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(BorderRadius.lg),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                ) {
+                    Text("Save Changes", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold))
+                }
             }
         }
     }

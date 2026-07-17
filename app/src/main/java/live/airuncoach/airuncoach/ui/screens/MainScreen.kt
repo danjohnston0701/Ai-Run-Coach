@@ -303,7 +303,7 @@ fun MainScreen(
         // When the trial has expired, cover the entire content area with the paywall.
         // Only "Upgrade" (→ subscription screen inside NavHost) and "Sign Out" are exposed.
         // The NavHost still runs beneath so the subscription screen can be navigated into.
-        Box(modifier = Modifier.padding(innerPadding).imePadding()) {
+        Box(modifier = Modifier.padding(innerPadding)) {
 
         NavHost(
             navController,

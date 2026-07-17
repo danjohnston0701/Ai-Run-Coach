@@ -96,39 +96,13 @@ fun CoachSettingsScreen(
             )
         },
         containerColor = Colors.backgroundRoot,
-        bottomBar = {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Colors.backgroundRoot,
-                shadowElevation = 8.dp
-            ) {
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            viewModel.saveSettings()
-                            onNavigateToDashboard()
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = Spacing.md)
-                        .height(50.dp),
-                    shape = RoundedCornerShape(BorderRadius.lg),
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
-                ) {
-                    Text(
-                        if (isOnboarding) "Continue" else "Save Changes",
-                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
-            }
-        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Spacing.lg),
+                .padding(horizontal = Spacing.lg)
+                .imePadding(),
             contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {
@@ -248,6 +222,26 @@ fun CoachSettingsScreen(
                     onToggle = viewModel::onMasterAiToggled
                 )
                 Spacer(modifier = Modifier.height(Spacing.xl))
+            }
+            item {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            viewModel.saveSettings()
+                            onNavigateToDashboard()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(BorderRadius.lg),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Text(
+                        if (isOnboarding) "Continue" else "Save Changes",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
             }
         }
     }
