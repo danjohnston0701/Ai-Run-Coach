@@ -98,9 +98,7 @@ fun CoachSettingsScreen(
         containerColor = Colors.backgroundRoot,
         bottomBar = {
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding(),
+                modifier = Modifier.fillMaxWidth(),
                 color = Colors.backgroundRoot,
                 shadowElevation = 8.dp
             ) {

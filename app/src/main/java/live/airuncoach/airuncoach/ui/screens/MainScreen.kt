@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
@@ -302,7 +303,7 @@ fun MainScreen(
         // When the trial has expired, cover the entire content area with the paywall.
         // Only "Upgrade" (→ subscription screen inside NavHost) and "Sign Out" are exposed.
         // The NavHost still runs beneath so the subscription screen can be navigated into.
-        Box(modifier = Modifier.padding(innerPadding)) {
+        Box(modifier = Modifier.padding(innerPadding).imePadding()) {
 
         NavHost(
             navController,
