@@ -63,8 +63,7 @@ fun FitnessLevelScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(Spacing.lg)
-                .imePadding(),
+                .padding(Spacing.lg),
             contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {

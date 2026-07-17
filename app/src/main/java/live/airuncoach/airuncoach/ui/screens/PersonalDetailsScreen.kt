@@ -184,9 +184,8 @@ fun PersonalDetailsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Spacing.lg)
-                .imePadding(), // Allow content to scroll up when keyboard appears
-            contentPadding = PaddingValues(bottom = Spacing.xl) // Bottom spacing for button clearance
+                .padding(horizontal = Spacing.lg),
+            contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {
                 SectionTitle(title = "Full Name")

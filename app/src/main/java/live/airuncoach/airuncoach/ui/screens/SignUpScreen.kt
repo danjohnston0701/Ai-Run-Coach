@@ -92,7 +92,6 @@ fun SignUpScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
-            .imePadding()
     ) {
         Column(
             modifier = Modifier

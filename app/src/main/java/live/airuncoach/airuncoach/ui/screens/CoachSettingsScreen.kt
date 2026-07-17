@@ -130,8 +130,7 @@ fun CoachSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Spacing.lg)
-                .imePadding(),
+                .padding(horizontal = Spacing.lg),
             contentPadding = PaddingValues(bottom = Spacing.xl)
         ) {
             item {
