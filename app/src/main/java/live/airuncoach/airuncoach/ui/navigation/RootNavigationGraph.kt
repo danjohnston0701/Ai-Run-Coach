@@ -1,9 +1,23 @@
 package live.airuncoach.airuncoach.ui.navigation
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import live.airuncoach.airuncoach.AppRoutes
@@ -28,17 +42,97 @@ import live.airuncoach.airuncoach.ui.screens.MainScreen
 import live.airuncoach.airuncoach.ui.screens.PersonalDetailsScreen
 import live.airuncoach.airuncoach.ui.screens.CoachSettingsScreen
 import live.airuncoach.airuncoach.ui.screens.OnboardingSubscriptionScreen
+import live.airuncoach.airuncoach.ui.theme.AppTextStyles
+import live.airuncoach.airuncoach.ui.theme.Colors
+import live.airuncoach.airuncoach.viewmodel.VersionCheckViewModel
 
 @Composable
 fun RootNavigationGraph(navController: NavHostController) {
     val context = LocalContext.current
     val consentManager = remember { AiConsentManager(context) }
+    val versionCheckViewModel: VersionCheckViewModel = hiltViewModel()
+    val androidUpdate = versionCheckViewModel.androidUpdateAvailable.collectAsState().value
+    val appContext = context
 
-    // Always start at LOGIN and let the screen handle navigation if already logged in
+    // Check before login navigation so stale installs cannot enter the app.
+    LaunchedEffect(Unit) {
+        versionCheckViewModel.checkVersions()
+    }
+
     NavHost(
         navController = navController,
         startDestination = AppRoutes.LOGIN
     ) {
+        rootNavigationDestinations(navController, consentManager, appContext)
+    }
+
+    if (androidUpdate?.isForced == true) {
+        val update = androidUpdate
+        AlertDialog(
+            onDismissRequest = {},
+            containerColor = Colors.backgroundSecondary,
+            title = {
+                Text(
+                    text = "Update Required",
+                    style = AppTextStyles.h3,
+                    color = Colors.textPrimary
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Please update AI Run Coach to continue.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary
+                    )
+                    if (update.releaseNote.isNotBlank()) {
+                        Spacer(modifier = androidx.compose.ui.Modifier.height(8.dp))
+                        Text(
+                            text = update.releaseNote,
+                            style = AppTextStyles.small,
+                            color = Colors.textSecondary
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val marketIntent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("market://details?id=${context.packageName}")
+                        )
+                        try {
+                            context.startActivity(marketIntent)
+                        } catch (_: Exception) {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse(
+                                        update.playStoreUrl.ifBlank {
+                                            "https://play.google.com/store/apps/details?id=${context.packageName}"
+                                        }
+                                    )
+                                )
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Text("Update Now", color = Colors.buttonText)
+                }
+            }
+        )
+    }
+}
+
+private fun NavGraphBuilder.rootNavigationDestinations(
+    navController: NavHostController,
+    consentManager: AiConsentManager,
+    appContext: android.content.Context
+) {
+
+    // Always start at LOGIN and let the screen handle navigation if already logged in
         composable(AppRoutes.LOGIN) {
             LoginScreen(
                 onNavigateToLocationPermission = {
@@ -89,12 +183,12 @@ fun RootNavigationGraph(navController: NavHostController) {
                     navController.popBackStack()
                 },
                 onNavigateToProfile = {
-                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                    navController.navigate("onboarding_intro") {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 },
                 onNavigateToCoachSettings = {
-                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                    navController.navigate("ai_coaching_onboarding") {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 },
@@ -115,7 +209,7 @@ fun RootNavigationGraph(navController: NavHostController) {
                 email = email,
                 onNavigateBack = { navController.popBackStack() },
                 onVerificationSuccess = {
-                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
+                    navController.navigate("onboarding_intro") {
                         popUpTo("sign_up") { inclusive = true }
                     }
                 }
@@ -134,7 +228,7 @@ fun RootNavigationGraph(navController: NavHostController) {
         }
 
         composable(AppRoutes.LOCATION_PERMISSION) {
-            val sessionManager = remember { SessionManager(context) }
+            val sessionManager = remember { SessionManager(appContext) }
             LocationPermissionScreen(
                 onPermissionGranted = {
                     when {
@@ -189,7 +283,7 @@ fun RootNavigationGraph(navController: NavHostController) {
         }
 
         composable(AppRoutes.MAIN) {
-            val sessionManager = remember { SessionManager(context) }
+            val sessionManager = remember { SessionManager(appContext) }
             
             // Check if user needs to complete onboarding on app restart
             if (sessionManager.needsProfileSetup()) {
@@ -220,11 +314,6 @@ fun RootNavigationGraph(navController: NavHostController) {
         composable("personal_details") {
             PersonalDetailsScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToInjuries = {
-                    navController.navigate("injury_onboarding") {
-                        popUpTo("personal_details") { inclusive = true }
-                    }
-                },
                 onNavigateToCoachSettings = {
                     // No injuries — proceed to fitness level first
                     navController.navigate("fitness_level_onboarding") {
@@ -299,8 +388,8 @@ fun RootNavigationGraph(navController: NavHostController) {
 
         composable("onboarding_subscription") {
             OnboardingSubscriptionScreen(
-                onNavigateToMain = {
-                    navController.navigate(AppRoutes.MAIN) {
+                onNavigateToPermissions = {
+                    navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("onboarding_subscription") { inclusive = true }
                     }
                 }
@@ -328,5 +417,4 @@ fun RootNavigationGraph(navController: NavHostController) {
                 onBack = { navController.popBackStack() }
             )
         }
-    }
 }

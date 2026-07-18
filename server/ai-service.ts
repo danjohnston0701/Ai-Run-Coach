@@ -959,15 +959,17 @@ ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}${runnerProfileB
 }
 
 export async function generateRunSummary(runData: any, runnerProfile?: string | null, userId?: string | null): Promise<any> {
+  const sessionType = runData.sessionType === "walk" ? "walk" : "run";
   const prompt = `Analyze this run and provide a brief summary with highlights, struggles, and tips:
 Run Data:
 - Distance: ${runData.distance}km
 - Duration: ${runData.duration} minutes
 - Average Pace: ${runData.avgPace}
 - Elevation Gain: ${runData.elevationGain || 0}m
-- Activity Type: ${runData.activityType || 'run'}
+- Session Type: ${sessionType}
 - Weather: ${JSON.stringify(runData.weather || {})}
 
+Use ${sessionType} terminology throughout. For a walk, say walking/walker/walking pace rather than running/runner/running pace.
 Provide response as JSON with fields: highlights (array), struggles (array), tips (array), overallScore (1-10), summary (string)`;
 
   const completion = await openai.chat.completions.create({
@@ -4017,6 +4019,8 @@ function buildElevationConsistencyContext(params: {
 
 export async function generateComprehensiveRunAnalysis(params: {
   runData: any;
+  // User-selected activity for this session — "run" or "walk".
+  sessionType?: string;
   
   // NEW: Rich Garmin watch data from client (Android app sends this)
   garminDataFromWatch?: any;  // { hasGarminData, deviceName, avgGCT, avgVO, etc. }
@@ -4109,6 +4113,7 @@ export async function generateComprehensiveRunAnalysis(params: {
   } | null;
 }): Promise<ComprehensiveRunAnalysis> {
   const { runData, garminDataFromWatch, userProfileContext, garminActivity, wellness, weatherImpactAnalysis, previousRuns, userProfile, coachName, coachTone, coachAccent, linkedPlanId, planGoalType, planProgressWeek, planProgressWeeks, workoutType, workoutIntensity, workoutDescription, sessionInstructions, coachingEvents, expectedSessionGoal, coachingInsight, plannedWorkout, nextPlannedWorkout } = params;
+  const sessionType = params.sessionType === "walk" || runData.sessionType === "walk" ? "walk" : "run";
 
   // ── Normalize units — DB rule: distance = km, duration = seconds.
   // Legacy rows from old Strava/Garmin importers may have been stored in meters/ms.
@@ -4121,7 +4126,13 @@ export async function generateComprehensiveRunAnalysis(params: {
   const effectiveDurationSec = garminActivity?.durationInSeconds ?? runDurationSec;
 
   // Build comprehensive prompt with all available data
-  let prompt = `You are ${coachName}, an expert running coach with a ${coachTone} coaching style.
+  let prompt = `You are ${coachName}, an expert ${sessionType} coach with a ${coachTone} coaching style.
+
+The completed session is a ${sessionType}. Use ${sessionType} terminology throughout this analysis. ${
+    sessionType === "walk"
+      ? "Say walking, walker, walking pace, and walking effort; do not call the user a runner or describe this as a run."
+      : "Say running, runner, running pace, and running effort."
+  }
 
 ## YOUR COACHING APPROACH:
 Your role is to analyze this run and provide professional coaching feedback that:
@@ -4138,7 +4149,8 @@ Think of yourself analyzing a training session you coached in person - you'd und
 - Distance: ${effectiveDistanceKm > 0 ? formatDistanceForCoaching(effectiveDistanceKm) : '?'}
 - Duration: ${effectiveDurationSec > 0 ? Math.floor(effectiveDurationSec / 60) : '?'} minutes
 - Average Pace: ${runData.avgPace || (garminActivity?.averagePace ? `${Math.floor(garminActivity.averagePace)}:${Math.floor((garminActivity.averagePace % 1) * 60).toString().padStart(2, '0')}` : 'N/A')}/km
-- Activity Type: ${runData.activityType || garminActivity?.activityType || 'Running'}
+- Session Type: ${sessionType}
+- Device Activity Classification: ${runData.activityType || garminActivity?.activityType || 'Not provided'}
 - Elevation Gain: ${runData.elevationGain || garminActivity?.elevationGain || 0}m
 - Elevation Loss: ${runData.elevationLoss || garminActivity?.elevationLoss || 0}m
 `;

@@ -39,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -73,7 +74,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DashboardScreen(
     onNavigateToRouteGeneration: () -> Unit = {},
@@ -107,6 +108,13 @@ fun DashboardScreen(
     val trainingLoad by viewModel.trainingLoad.collectAsState()
     val hasPendingWatchSync by viewModel.hasPendingWatchSync.collectAsState()
     val todayActivePlans by viewModel.todayActivePlans.collectAsState()
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val density = LocalDensity.current
+    val bottomContentPadding = if (isKeyboardVisible) {
+        with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    } else {
+        Spacing.lg
+    }
 
     // Optimize: Only load data once when screen is first shown
     LaunchedEffect(Unit) {
@@ -126,7 +134,8 @@ fun DashboardScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
-            .padding(vertical = Spacing.lg)
+            .padding(top = Spacing.lg),
+        contentPadding = PaddingValues(bottom = bottomContentPadding)
     ) {
         // Active Run Banner (if run is in progress)
         val activeRun = activeRunSession

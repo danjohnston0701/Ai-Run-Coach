@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -29,7 +30,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CreateGroupRunScreen(
     onNavigateBack: () -> Unit,
@@ -50,6 +51,13 @@ fun CreateGroupRunScreen(
     val createState by viewModel.createState.collectAsState()
 
     val context = LocalContext.current
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val density = LocalDensity.current
+    val bottomContentPadding = if (isKeyboardVisible) {
+        with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    } else {
+        Spacing.xl
+    }
 
     // Navigate away on success
     LaunchedEffect(createState) {
@@ -308,8 +316,7 @@ fun CreateGroupRunScreen(
                 }
             }
 
-            // Bottom padding for scrolling
-            Spacer(modifier = Modifier.height(Spacing.xl))
+            Spacer(modifier = Modifier.height(bottomContentPadding))
         }
     }
 }

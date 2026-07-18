@@ -2,6 +2,8 @@ package live.airuncoach.airuncoach.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -11,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -27,7 +30,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.GroupRunDetailState
 import live.airuncoach.airuncoach.viewmodel.GroupRunDetailViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun GroupRunDetailScreenEnhanced(
     groupRunId: String,
@@ -852,6 +855,7 @@ fun InviteFriendsDialogEnhanced(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditGroupRunDialog(
     groupRun: GroupRun,
@@ -863,6 +867,13 @@ fun EditGroupRunDialog(
     var meetingPoint by remember { mutableStateOf(groupRun.meetingPoint ?: "") }
     var distance by remember { mutableStateOf(groupRun.distance?.toString() ?: "") }
     var maxParticipants by remember { mutableStateOf(groupRun.maxParticipants?.toString() ?: "10") }
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val density = LocalDensity.current
+    val bottomContentPadding = if (isKeyboardVisible) {
+        with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    } else {
+        0.dp
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -871,7 +882,12 @@ fun EditGroupRunDialog(
             Text("Edit Group Run", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -906,6 +922,7 @@ fun EditGroupRunDialog(
                         modifier = Modifier.weight(1f)
                     )
                 }
+                Spacer(modifier = Modifier.height(bottomContentPadding))
             }
         },
         confirmButton = {
@@ -936,5 +953,3 @@ fun EditGroupRunDialog(
         }
     )
 }
-
-

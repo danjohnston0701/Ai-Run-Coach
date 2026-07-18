@@ -1027,11 +1027,17 @@ class RunView extends Ui.View {
                     "speed" => _lastGpsSpeed,
                     "bear"  => _lastGpsBearing,
                     "acc"   => _gpsQuality,
+                    // Authoritative session totals from Garmin firmware.
+                    // "dist" is Activity.Info.elapsedDistance (metres, Kalman-filtered GPS).
+                    // "elap" is Activity.Info.timerTime / 1000 (seconds, pauses with session).
+                    // The phone uses these as the source of truth for distance + duration on
+                    // watch-initiated runs, eliminating dual-GPS distance divergence.
+                    "dist"  => _distance,
+                    "elap"  => _elapsedTime,
                     // Core biometrics
                     "hr"    => _heartRate,
                     "hrz"   => _heartRateZone,
                     "cad"   => _cadence,
-                    "elap"  => _elapsedTime,
                     // Running dynamics
                     "gct"   => _gct,
                     "gcb"   => _gcb,

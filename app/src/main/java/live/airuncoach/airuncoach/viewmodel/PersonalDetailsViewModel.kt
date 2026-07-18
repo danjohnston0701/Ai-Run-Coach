@@ -52,11 +52,18 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
             val user = gson.fromJson(userJson, User::class.java)
             _name.value = user.name
             _email.value = user.email
-            _dateOfBirth.value = user.dob ?: ""
-            _gender.value = user.gender ?: ""
+            _dateOfBirth.value = user.dob?.let(::toDigitsOnlyDob) ?: ""
+            _gender.value = if (user.gender == "Non-binary") {
+                "Prefer not to say"
+            } else {
+                user.gender ?: ""
+            }
             _weight.value = user.weight?.toString() ?: ""
             _height.value = user.height?.toString() ?: ""
-            _defaultSessionType.value = user.defaultSessionType ?: "Run"
+            _defaultSessionType.value = when (user.defaultSessionType?.lowercase()) {
+                "walk" -> "Walk"
+                else -> "Run"
+            }
         }
     }
 
@@ -124,6 +131,15 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
             return null
         }
         return "${digitsOnly.take(2)}/${digitsOnly.drop(2).take(2)}/${digitsOnly.drop(4)}"
+    }
+
+    private fun toDigitsOnlyDob(value: String): String {
+        val parts = value.replace('-', '/').split('/')
+        return if (parts.size == 3 && parts[0].length == 4) {
+            "${parts[2].padStart(2, '0')}${parts[1].padStart(2, '0')}${parts[0]}"
+        } else {
+            value.filter { it.isDigit() }.take(8)
+        }
     }
 }
 

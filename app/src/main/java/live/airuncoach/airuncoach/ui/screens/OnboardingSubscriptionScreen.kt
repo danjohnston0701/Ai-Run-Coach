@@ -15,7 +15,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,26 +27,25 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 /**
  * Onboarding-specific subscription screen shown after AI Coach Settings.
- * Emphasizes the 14-day free trial with limited features and a clear upgrade CTA.
+ * Explains the free trial clearly and offers the same localized Google Play plans
+ * as the subscription screen.
  * Users can dismiss to continue to the app with trial access.
  */
 @Composable
 fun OnboardingSubscriptionScreen(
     viewModel: SubscriptionViewModel = hiltViewModel(),
-    onNavigateToMain: () -> Unit = {}
+    onNavigateToPermissions: () -> Unit = {}
 ) {
     val subscriptions by viewModel.subscriptions.collectAsState()
     val billingConnectionState by viewModel.billingConnectionState.collectAsState()
     val context = LocalContext.current
     val activity = context as? Activity
     val sessionManager = remember { SessionManager(context) }
-    val trialDaysRemaining = viewModel.trialDaysRemaining()
-    val trialExpiresAt = viewModel.getTrialExpiresAt()
+    val userCurrency by viewModel.userCurrency.collectAsState()
+    val pricingData by viewModel.pricingData.collectAsState()
     
     var isAnnual by remember { mutableStateOf(false) }
 
@@ -56,15 +54,11 @@ fun OnboardingSubscriptionScreen(
             .fillMaxSize()
             .background(Colors.backgroundRoot)
     ) {
-        // Header: Welcome to your 14-day trial
+        // Warm welcome header — avoid implying the trial has already counted down.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(Colors.primary, Colors.primary.copy(alpha = 0.8f))
-                    )
-                )
+                .background(Colors.backgroundSecondary)
                 .padding(vertical = Spacing.xxxl)
         ) {
             Column(
@@ -74,17 +68,17 @@ fun OnboardingSubscriptionScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "🎉 Your 14-Day Trial Starts Today",
-                    fontSize = 24.sp,
+                    text = "Your Ai Run Coach trial starts here",
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = Colors.textPrimary,
                     textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Text(
-                    text = "Limited access to explore AI Run Coach",
+                    text = "Experience smarter runs, meaningful insights, and realtime feedback as you run.",
                     fontSize = 14.sp,
-                    color = Color.White.copy(alpha = 0.9f),
+                    color = Colors.textSecondary,
                     textAlign = TextAlign.Center
                 )
             }
@@ -100,7 +94,7 @@ fun OnboardingSubscriptionScreen(
             ) {
                 // Trial limitations banner
                 item {
-                    TrialLimitationsBanner(trialDaysRemaining, trialExpiresAt)
+                    TrialWelcomeCard()
                 }
 
                 // Features during trial
@@ -135,7 +129,12 @@ fun OnboardingSubscriptionScreen(
                 // Lite Plan
                 item {
                     OnboardingPlanCard(
-                        plan = OnboardingPlanData.LITE,
+                        plan = PlanData.LITE.localizedFor(
+                            currency = userCurrency,
+                            pricing = pricingData,
+                            monthlyTier = pricingData?.liteMonthly,
+                            annualTier = pricingData?.liteAnnual
+                        ),
                         isAnnual = isAnnual,
                         onUpgradeClick = {
                             activity?.let {
@@ -153,7 +152,12 @@ fun OnboardingSubscriptionScreen(
                 // Standard Plan - Recommended
                 item {
                     OnboardingPlanCard(
-                        plan = OnboardingPlanData.STANDARD,
+                        plan = PlanData.STANDARD.localizedFor(
+                            currency = userCurrency,
+                            pricing = pricingData,
+                            monthlyTier = pricingData?.standardMonthly,
+                            annualTier = pricingData?.standardAnnual
+                        ),
                         isPopular = true,
                         isAnnual = isAnnual,
                         onUpgradeClick = {
@@ -174,7 +178,7 @@ fun OnboardingSubscriptionScreen(
                     Button(
                         onClick = {
                             sessionManager.clearOnboardingFlags()
-                            onNavigateToMain()
+                        onNavigateToPermissions()
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -211,7 +215,7 @@ fun OnboardingSubscriptionScreen(
 
                 item {
                     Text(
-                        text = "All prices in USD. Auto-renew can be cancelled anytime.",
+                        text = "Prices shown in $userCurrency. Subscriptions renew automatically and can be cancelled in Google Play.",
                         fontSize = 12.sp,
                         color = Colors.textMuted,
                         textAlign = TextAlign.Center,
@@ -240,15 +244,13 @@ fun OnboardingSubscriptionScreen(
  * Prominent banner showing trial limitations
  */
 @Composable
-private fun TrialLimitationsBanner(daysRemaining: Int, expiresAt: LocalDate?) {
-    val expiryText = expiresAt?.format(DateTimeFormatter.ofPattern("MMM d")) ?: "soon"
-    
+private fun TrialWelcomeCard() {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.lg)
             .padding(bottom = Spacing.lg),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(
@@ -261,50 +263,30 @@ private fun TrialLimitationsBanner(daysRemaining: Int, expiresAt: LocalDate?) {
                 horizontalArrangement = Arrangement.spacedBy(Spacing.md),
                 verticalAlignment = Alignment.Top
             ) {
-                Text("⏱️", fontSize = 24.sp)
+                Text("✨", fontSize = 24.sp)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Your Free Trial: $daysRemaining days remaining",
+                        text = "Explore the full power of your AI coach",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF92400E)
+                        color = Colors.textPrimary
                     )
                     Spacer(modifier = Modifier.height(Spacing.xs))
                     Text(
-                        text = "Expires on $expiryText",
+                        text = "Your trial includes:",
                         fontSize = 13.sp,
-                        color = Color(0xB3744210)
+                        color = Colors.textSecondary
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            // Trial limitations
-            Text(
-                text = "🚫 Limited Features During Trial:",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF92400E)
-            )
-            Spacer(modifier = Modifier.height(Spacing.xs))
-
-            LimitationItem("❌ Cannot generate AI-powered run routes")
-            LimitationItem("❌ Cannot generate AI coaching training plans")
-            LimitationItem("⚠️ Limited in-run AI coaching features")
-            LimitationItem("⚠️ Limited route analysis and suggestions")
+            FeatureItem("15 km of realtime AI coaching and run insights")
+            FeatureItem("3 post-run AI summaries")
+            FeatureItem("Garmin watch compatibility for enhanced insights and reporting")
         }
     }
-}
-
-@Composable
-private fun LimitationItem(text: String) {
-    Text(
-        text = text,
-        fontSize = 13.sp,
-        color = Color(0xFF744210),
-        modifier = Modifier.padding(start = Spacing.md, bottom = Spacing.xs)
-    )
 }
 
 /**
@@ -334,9 +316,9 @@ private fun FeaturesAvailableDuringTrial() {
             Spacer(modifier = Modifier.height(Spacing.md))
 
             FeatureItem("Record and track your runs")
-            FeatureItem("View basic run stats and metrics")
-            FeatureItem("Try core AI coaching features")
-            FeatureItem("Explore the app experience")
+            FeatureItem("Get detailed AI insights from eligible runs")
+            FeatureItem("Receive post-run summaries within your trial allowance")
+            FeatureItem("Use Ai Run Coach Garmin watch app - download from Garmin IQ")
         }
     }
 }
@@ -367,11 +349,9 @@ private fun WhatsIncludedInPaidPlans() {
             )
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            FeatureItem("Generate unlimited AI-powered routes")
-            FeatureItem("Create personalized training plans")
-            FeatureItem("Full AI in-run coaching features")
-            FeatureItem("Unlimited route analysis")
-            FeatureItem("Advanced performance insights")
+            FeatureItem("Unlock AI route generation")
+            FeatureItem("Create personalized AI coaching plans")
+            FeatureItem("Continue AI coaching and insights beyond the trial allowance")
         }
     }
 }
@@ -467,7 +447,7 @@ private fun OnboardingBillingPeriodToggle(
  */
 @Composable
 private fun OnboardingPlanCard(
-    plan: OnboardingPlanData,
+    plan: PlanData,
     isPopular: Boolean = false,
     isAnnual: Boolean = false,
     onUpgradeClick: () -> Unit = {}
@@ -566,7 +546,7 @@ private fun OnboardingPlanCard(
             // Features list
             Column(modifier = Modifier.fillMaxWidth()) {
                 plan.features.forEach { feature ->
-                    OnboardingFeatureItem(feature)
+                    PlanFeatureItem(feature)
                 }
             }
 
@@ -595,7 +575,7 @@ private fun OnboardingPlanCard(
 }
 
 @Composable
-private fun OnboardingFeatureItem(feature: OnboardingPlanFeature) {
+private fun PlanFeatureItem(feature: PlanFeature) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -616,58 +596,3 @@ private fun OnboardingFeatureItem(feature: OnboardingPlanFeature) {
         )
     }
 }
-
-/**
- * Plan data for onboarding
- */
-data class OnboardingPlanData(
-    val name: String,
-    val monthlyPriceDisplay: String,
-    val monthlyPriceSuffix: String = "/month",
-    val annualPriceDisplay: String = "",
-    val annualPriceSuffix: String = "/year",
-    val annualMonthlyEquivalent: String = "",
-    val accentColor: Color,
-    val features: List<OnboardingPlanFeature>
-) {
-    companion object {
-        val LITE = OnboardingPlanData(
-            name = "Lite",
-            monthlyPriceDisplay = "$5.99",
-            monthlyPriceSuffix = "/month",
-            annualPriceDisplay = "$59.99",
-            annualPriceSuffix = "/year",
-            annualMonthlyEquivalent = "$5.00/month — save $11.89",
-            accentColor = Colors.primary,
-            features = listOf(
-                OnboardingPlanFeature("Unlimited AI runs", true),
-                OnboardingPlanFeature("50km AI coaching/month", true),
-                OnboardingPlanFeature("15 post-run summaries/month", true),
-                OnboardingPlanFeature("10 AI route generations/month", true),
-                OnboardingPlanFeature("1 AI training plan/month", true)
-            )
-        )
-
-        val STANDARD = OnboardingPlanData(
-            name = "Standard",
-            monthlyPriceDisplay = "$12.99",
-            monthlyPriceSuffix = "/month",
-            annualPriceDisplay = "$129.99",
-            annualPriceSuffix = "/year",
-            annualMonthlyEquivalent = "$10.83/month — save $25.89",
-            accentColor = Color(0xFFA78BFA),
-            features = listOf(
-                OnboardingPlanFeature("Unlimited AI runs", true),
-                OnboardingPlanFeature("200km AI coaching/month", true),
-                OnboardingPlanFeature("50 post-run summaries/month", true),
-                OnboardingPlanFeature("30 AI route generations/month", true),
-                OnboardingPlanFeature("3 AI training plans/month", true)
-            )
-        )
-    }
-}
-
-data class OnboardingPlanFeature(
-    val text: String,
-    val included: Boolean
-)

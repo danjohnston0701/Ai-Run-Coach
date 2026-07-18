@@ -86,6 +86,11 @@ data class WatchBiometricFrame(
     // altimeter (more accurate than GPS altitude for elevation graphs).  Sent as "baroAlt" key.
     // Falls back to GPS altMetres when not available (0f = not present).
     val baroAltitude: Float = 0f,     // metres, barometric
+
+    // Authoritative cumulative distance from the watch firmware (Activity.Info.elapsedDistance).
+    // Garmin's Kalman-filtered GPS accumulation is the source of truth for distance in
+    // watch-initiated sessions.  Null when the watch build predates this field.
+    val cumulativeDistanceM: Float? = null,  // metres
 )
 
 class GarminWatchManager(
@@ -817,8 +822,11 @@ class GarminWatchManager(
                     val elap    = (map["elap"]    as? Number)?.toInt() ?: 0
                     // Barometric altitude (Activity.Info.altitude on Fenix — more accurate than GPS)
                     val baroAlt = (map["baroAlt"] as? Number)?.toFloat() ?: 0f
+                    // Authoritative cumulative distance from watch firmware (Activity.Info.elapsedDistance)
+                    // Null when sent by an older watch build that predates this field.
+                    val dist    = (map["dist"]    as? Number)?.toFloat()
 
-                    Log.d(TAG, "Watch frame: hr=$hr cad=$cad gct=$gct vo=$vo stride=$sl te=$te pwr=$pwr resp=$resp")
+                    Log.d(TAG, "Watch frame: hr=$hr cad=$cad gct=$gct vo=$vo stride=$sl te=$te pwr=$pwr resp=$resp dist=${dist}m elap=${elap}s")
 
                     val frame = WatchBiometricFrame(
                         elapsedSeconds          = elap,
@@ -844,6 +852,7 @@ class GarminWatchManager(
                         respirationRate         = resp,
                         ambientPressure         = pres,
                         baroAltitude            = baroAlt,
+                        cumulativeDistanceM     = dist,
                     )
 
                     // GPS callback for location tracking

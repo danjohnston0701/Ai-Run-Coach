@@ -14,6 +14,11 @@ export async function runAutoMigrations(): Promise<void> {
   console.log("[AutoMigrate] Running schema auto-migrations...");
 
   const migrations: { name: string; sql: string }[] = [
+    // ── runs ───────────────────────────────────────────────────────────────────
+    {
+      name: "runs.session_type",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS session_type TEXT NOT NULL DEFAULT 'run'",
+    },
     // ── session_instructions ─────────────────────────────────────────────────
     // These columns were added to the schema after the table was first created.
     // Required for AI Coaching Plan generation.
@@ -207,6 +212,14 @@ export async function runAutoMigrations(): Promise<void> {
     {
       name: "users.default_session_type",
       sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS default_session_type TEXT DEFAULT 'run'",
+    },
+    {
+      name: "users.timezone",
+      sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'UTC'",
+    },
+    {
+      name: "users.country",
+      sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'US'",
     },
 
     // ── user_stats — PB, achievement, and AI profile columns ─────────────────

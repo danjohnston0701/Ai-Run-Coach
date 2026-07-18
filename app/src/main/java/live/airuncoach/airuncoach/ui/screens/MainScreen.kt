@@ -10,7 +10,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
@@ -95,17 +94,9 @@ fun MainScreen(
     var showPromoCodeDialog by remember { mutableStateOf(false) }
     var promoCodeLoading by remember { mutableStateOf(false) }
 
-    // ── Version checking ───────────────────────────────────────────────────
     val versionCheckVm: VersionCheckViewModel = hiltViewModel()
-    val androidUpdate by versionCheckVm.androidUpdateAvailable.collectAsState()
     val garminUpdate  by versionCheckVm.garminUpdateAvailable.collectAsState()
     val context = LocalContext.current
-
-    // Trigger version check once on entry
-    LaunchedEffect(Unit) {
-        delay(2_000L) // give auth + initial loads time to settle before checking
-        versionCheckVm.checkVersions()
-    }
 
     // When a Garmin companion update is detected, navigate to the update screen
     // (same destination as the push notification path)
@@ -114,73 +105,6 @@ fun MainScreen(
         delay(500L) // let the main UI render first
         onNavigateToGarminUpdate(update.latestVersion, update.releaseNote)
         versionCheckVm.dismissGarminUpdate()
-    }
-
-    // Android update dialog — shown inline rather than navigating away
-    if (androidUpdate != null) {
-        val update = androidUpdate!!
-        AlertDialog(
-            onDismissRequest = {
-                if (!update.isForced) versionCheckVm.dismissAndroidUpdate()
-                // Forced updates cannot be dismissed
-            },
-            containerColor = Colors.backgroundSecondary,
-            title = {
-                Text(
-                    text = if (update.isForced) "Update Required" else "Update Available",
-                    style = AppTextStyles.h3,
-                    color = Colors.textPrimary
-                )
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Version ${update.latestVersionName} is available on the Play Store.",
-                        style = AppTextStyles.body,
-                        color = Colors.textSecondary
-                    )
-                    if (update.releaseNote.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = update.releaseNote,
-                            style = AppTextStyles.small,
-                            color = Colors.textSecondary
-                        )
-                    }
-                    if (update.isForced) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "This update is required to continue using AI Run Coach.",
-                            style = AppTextStyles.small,
-                            color = Colors.warning
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        try {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(update.playStoreUrl))
-                            )
-                        } catch (e: Exception) {
-                            Log.w("MainScreen", "Could not open Play Store: ${e.message}")
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
-                ) {
-                    Text("Update Now", color = Colors.buttonText, style = AppTextStyles.body)
-                }
-            },
-            dismissButton = {
-                if (!update.isForced) {
-                    TextButton(onClick = { versionCheckVm.dismissAndroidUpdate() }) {
-                        Text("Later", color = Colors.textSecondary, style = AppTextStyles.body)
-                    }
-                }
-            }
-        )
     }
 
     // ── Trial expiry gate ──────────────────────────────────────────────────
@@ -1327,12 +1251,6 @@ fun MainScreen(
             composable("personal_details") {
                 PersonalDetailsScreen(
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToInjuries = {
-                        // User has injuries - navigate to injury onboarding
-                        navController.navigate("injury_onboarding") {
-                            popUpTo("personal_details") { inclusive = true }
-                        }
-                    },
                     onNavigateToCoachSettings = {
                         // During onboarding, insert fitness level step before coach settings
                         navController.navigate("fitness_level_onboarding") {

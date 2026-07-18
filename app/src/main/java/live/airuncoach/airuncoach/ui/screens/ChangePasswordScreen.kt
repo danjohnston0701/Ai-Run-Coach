@@ -29,6 +29,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ChangePasswordViewModel
 import android.widget.Toast
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChangePasswordScreen(
     viewModel: ChangePasswordViewModel = hiltViewModel(),
@@ -37,6 +38,7 @@ fun ChangePasswordScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+    val isKeyboardVisible = WindowInsets.isImeVisible
 
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
@@ -90,7 +92,12 @@ fun ChangePasswordScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Colors.backgroundDefault),
-            contentPadding = PaddingValues(Spacing.lg),
+            contentPadding = PaddingValues(
+                start = Spacing.lg,
+                top = Spacing.lg,
+                end = Spacing.lg,
+                bottom = if (isKeyboardVisible) 0.dp else Spacing.lg
+            ),
             verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
             // Description

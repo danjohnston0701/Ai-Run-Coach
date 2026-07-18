@@ -23,6 +23,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 /**
  * Dialog for entering and redeeming promo codes
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PromoCodeDialog(
     isVisible: Boolean,
@@ -51,6 +52,7 @@ fun PromoCodeDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.85f)
+                .windowInsetsPadding(WindowInsets.ime)
                 .background(Colors.backgroundRoot),
             colors = CardDefaults.cardColors(containerColor = Colors.backgroundRoot),
             shape = RoundedCornerShape(16.dp)

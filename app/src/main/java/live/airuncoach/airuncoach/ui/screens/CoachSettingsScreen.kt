@@ -7,6 +7,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,7 +36,7 @@ import live.airuncoach.airuncoach.viewmodel.CoachSettingsViewModelFactory
 import live.airuncoach.airuncoach.viewmodel.CoachingTone
 import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CoachSettingsScreen(
     onNavigateBack: () -> Unit = {},
@@ -48,6 +50,13 @@ fun CoachSettingsScreen(
     val accent by viewModel.accent.collectAsState()
     val coachingTone by viewModel.coachingTone.collectAsState()
     val coroutineScope = rememberCoroutineScope()
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val density = LocalDensity.current
+    val bottomContentPadding = if (isKeyboardVisible) {
+        with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    } else {
+        Spacing.xl
+    }
 
     // Notification permission launcher
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -101,9 +110,8 @@ fun CoachSettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Spacing.lg)
-                .imePadding(),
-            contentPadding = PaddingValues(bottom = Spacing.xl)
+                .padding(horizontal = Spacing.lg),
+            contentPadding = PaddingValues(bottom = bottomContentPadding)
         ) {
             item {
                 SectionTitle(title = "Coach Name")

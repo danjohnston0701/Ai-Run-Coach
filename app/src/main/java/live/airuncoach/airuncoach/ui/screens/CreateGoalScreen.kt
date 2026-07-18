@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -35,7 +36,7 @@ enum class GoalType {
     EVENT, DISTANCE_TIME, HEALTH_WELLBEING, CONSISTENCY
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CreateGoalScreen(
     onDismiss: () -> Unit = {},
@@ -176,10 +177,18 @@ fun CreateGoalScreen(
             .fillMaxSize()
             .background(Colors.backgroundRoot.copy(alpha = 0.98f))
     ) {
+        val isKeyboardVisible = WindowInsets.isImeVisible
+        val density = LocalDensity.current
+        val bottomContentPadding = if (isKeyboardVisible) {
+            with(density) { WindowInsets.ime.getBottom(this).toDp() }
+        } else {
+            Spacing.xl
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = Spacing.lg, vertical = Spacing.xl)
+                .padding(horizontal = Spacing.lg, vertical = Spacing.xl),
+            contentPadding = PaddingValues(bottom = bottomContentPadding)
         ) {
             item {
                 // Header

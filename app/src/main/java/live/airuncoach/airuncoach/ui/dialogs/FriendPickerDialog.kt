@@ -34,7 +34,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
  * - Show selected count
  * - Handle no friends scenario
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FriendPickerDialog(
     friends: List<Friend>,
@@ -57,7 +57,8 @@ fun FriendPickerDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.85f),
+                .fillMaxHeight(0.85f)
+                .windowInsetsPadding(WindowInsets.ime),
             shape = RoundedCornerShape(12.dp),
             color = Colors.backgroundSecondary
         ) {

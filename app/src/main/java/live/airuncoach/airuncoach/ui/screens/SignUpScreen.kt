@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -37,7 +38,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
 import androidx.compose.foundation.ExperimentalFoundationApi
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun SignUpScreen(
     onNavigateToLocationPermission: () -> Unit = {},
@@ -58,6 +59,14 @@ fun SignUpScreen(
     val passwordBringIntoView = remember { BringIntoViewRequester() }
     val confirmPasswordBringIntoView = remember { BringIntoViewRequester() }
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val bottomContentPadding = with(density) {
+        maxOf(
+            if (isKeyboardVisible) WindowInsets.ime.getBottom(this) else 0,
+            WindowInsets.navigationBars.getBottom(this)
+        ).toDp() + Spacing.xxxl
+    }
 
     // Navigate to email verification when server requires it
     LaunchedEffect(loginState.requiresEmailVerification) {
@@ -99,8 +108,7 @@ fun SignUpScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.xxxl)
                 .padding(top = 60.dp)
-                .navigationBarsPadding()
-                .padding(bottom = Spacing.xxxl),
+                .padding(bottom = 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Logo
@@ -487,6 +495,7 @@ fun SignUpScreen(
                         }
                 }
             )
+            Spacer(modifier = Modifier.height(bottomContentPadding))
         }
     }
 }

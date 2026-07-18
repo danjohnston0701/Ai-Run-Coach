@@ -495,7 +495,7 @@ fun InjuryCard(
 
 // ── Add / Edit Dialog ──────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddEditInjuryDialog(
     injury: Injury? = null,
@@ -529,6 +529,7 @@ fun AddEditInjuryDialog(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.9f)
+                .windowInsetsPadding(WindowInsets.ime)
                 .clip(RoundedCornerShape(20.dp))
                 .background(Colors.backgroundSecondary)
         ) {
@@ -575,7 +576,7 @@ fun AddEditInjuryDialog(
                     item {
                         FormSectionLabel("Body Part")
                         Spacer(modifier = Modifier.height(Spacing.sm))
-                        Box(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             OutlinedTextField(
                                 value = bodyPart,
                                 onValueChange = { v ->
@@ -597,21 +598,31 @@ fun AddEditInjuryDialog(
                                 shape = RoundedCornerShape(10.dp)
                             )
                             if (bodyPartSuggestions.isNotEmpty()) {
-                                DropdownMenu(
-                                    expanded = true,
-                                    onDismissRequest = { bodyPartSuggestions = emptyList() },
+                                Surface(
                                     modifier = Modifier
-                                        .fillMaxWidth(0.88f)
-                                        .background(Colors.backgroundTertiary)
+                                        .fillMaxWidth()
+                                        .padding(top = Spacing.xs),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Colors.backgroundTertiary,
+                                    tonalElevation = 2.dp
                                 ) {
-                                    bodyPartSuggestions.take(6).forEach { part ->
-                                        DropdownMenuItem(
-                                            text = { Text(part, color = Colors.textPrimary) },
-                                            onClick = {
-                                                bodyPart = part
-                                                bodyPartSuggestions = emptyList()
-                                            }
-                                        )
+                                    Column {
+                                        bodyPartSuggestions.take(6).forEach { part ->
+                                            Text(
+                                                text = part,
+                                                color = Colors.textPrimary,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        bodyPart = part
+                                                        bodyPartSuggestions = emptyList()
+                                                    }
+                                                    .padding(
+                                                        horizontal = Spacing.md,
+                                                        vertical = Spacing.sm
+                                                    )
+                                            )
+                                        }
                                     }
                                 }
                             }

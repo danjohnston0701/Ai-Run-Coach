@@ -66,12 +66,14 @@ class LoginViewModel @Inject constructor(
                 
                 // Get device timezone
                 val deviceTimezone = java.util.TimeZone.getDefault().id
+                val deviceCountry = java.util.Locale.getDefault().country.ifBlank { null }
                 
                 val response = apiService.login(
                     LoginRequest(
                         email,
                         password,
-                        timezone = deviceTimezone
+                        timezone = deviceTimezone,
+                        country = deviceCountry
                     )
                 )
                 
@@ -260,7 +262,9 @@ class LoginViewModel @Inject constructor(
                     RegisterRequest(
                         name = _loginState.value.name,
                         email = _loginState.value.email,
-                        password = _loginState.value.password
+                        password = _loginState.value.password,
+                        timezone = java.util.TimeZone.getDefault().id,
+                        country = java.util.Locale.getDefault().country.ifBlank { null }
                     )
                 )
 

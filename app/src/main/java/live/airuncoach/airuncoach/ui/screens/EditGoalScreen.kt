@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -30,7 +31,7 @@ import live.airuncoach.airuncoach.viewmodel.GoalsViewModelFactory
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun EditGoalScreen(
     goal: Goal,
@@ -147,10 +148,18 @@ fun EditGoalScreen(
             .fillMaxSize()
             .background(Colors.backgroundRoot.copy(alpha = 0.98f))
     ) {
+        val isKeyboardVisible = WindowInsets.isImeVisible
+        val density = LocalDensity.current
+        val bottomContentPadding = if (isKeyboardVisible) {
+            with(density) { WindowInsets.ime.getBottom(this).toDp() }
+        } else {
+            Spacing.xl
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = Spacing.lg, vertical = Spacing.xl)
+                .padding(horizontal = Spacing.lg, vertical = Spacing.xl),
+            contentPadding = PaddingValues(bottom = bottomContentPadding)
         ) {
             item {
                 // Header

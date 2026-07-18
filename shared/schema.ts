@@ -356,6 +356,9 @@ export const runs = pgTable("runs", {
   totalEnergy: integer("total_energy"),                       // kcal burned
 
   // ── Metadata ─────────────────────────────────────────────────────────────────
+  // User-selected activity for this session — normalized to "run" or "walk".
+  // Kept separate from Garmin's activityType classification.
+  sessionType: text("session_type").notNull().default("run"),
   activityType: text("activity_type"),                        // "running", "trail_running"
   sportName: text("sport_name"),                              // Garmin sport classification
   subSportName: text("sub_sport_name"),                       // "trail_run", "fell_running"

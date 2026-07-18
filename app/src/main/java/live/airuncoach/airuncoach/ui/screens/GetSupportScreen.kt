@@ -26,11 +26,13 @@ import androidx.compose.ui.unit.sp
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GetSupportScreen(
     onNavigateBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val isKeyboardVisible = WindowInsets.isImeVisible
     
     var subject by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
@@ -105,7 +107,12 @@ fun GetSupportScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Colors.backgroundDefault),
-            contentPadding = PaddingValues(Spacing.lg),
+            contentPadding = PaddingValues(
+                start = Spacing.lg,
+                top = Spacing.lg,
+                end = Spacing.lg,
+                bottom = if (isKeyboardVisible) 0.dp else Spacing.lg
+            ),
             verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
             // Description
@@ -276,5 +283,3 @@ fun GetSupportScreen(
         }
     }
 }
-
-

@@ -287,7 +287,10 @@ private fun InjuryOnboardingDialog(
         title = { Text("Add Injury or Condition", style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary) },
         containerColor = Colors.backgroundSecondary,
         text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            LazyColumn(
+                modifier = Modifier.windowInsetsPadding(WindowInsets.ime),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
                 // Body Part Selection
                 item {
                     Text("Body Part", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)

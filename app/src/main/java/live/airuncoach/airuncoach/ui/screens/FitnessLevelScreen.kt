@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
@@ -33,7 +34,7 @@ import live.airuncoach.airuncoach.viewmodel.FitnessLevelViewModelFactory
  * @param isOnboarding    When true the screen shows an onboarding header and a "Continue" CTA
  *                        instead of "Save Changes", and calls [onNavigateNext] on confirm.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FitnessLevelScreen(
     onNavigateBack: () -> Unit,
@@ -43,6 +44,14 @@ fun FitnessLevelScreen(
     val context = LocalContext.current
     val viewModel: FitnessLevelViewModel = viewModel(factory = FitnessLevelViewModelFactory(context))
     val fitnessLevel by viewModel.fitnessLevel.collectAsState()
+    val density = LocalDensity.current
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val bottomContentPadding = with(density) {
+        maxOf(
+            if (isKeyboardVisible) WindowInsets.ime.getBottom(this) else 0,
+            WindowInsets.navigationBars.getBottom(this)
+        ).toDp() + Spacing.xl
+    }
 
     Scaffold(
         topBar = {
@@ -64,16 +73,10 @@ fun FitnessLevelScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(Spacing.lg),
-            contentPadding = PaddingValues(bottom = Spacing.xl)
+            contentPadding = PaddingValues(bottom = bottomContentPadding)
         ) {
             item {
                 if (isOnboarding) {
-                    Text(
-                        "Almost there!",
-                        style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.xs))
                     Text(
                         "This is one of the most important inputs for your AI coach. " +
                         "Knowing your current fitness level helps us set realistic training " +

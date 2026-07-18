@@ -47,6 +47,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
     val pendingRequestsState by viewModel.pendingRequestsState.collectAsState()
     @Suppress("UNUSED_VARIABLE") val addedFriendIds by viewModel.addedFriendIds.collectAsState()
     val isActionInProgress by viewModel.isActionInProgress.collectAsState()
+    val friendRequestActionsInProgress by viewModel.friendRequestActionsInProgress.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
 
     Scaffold(
@@ -207,6 +208,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                         items(state.users) { user ->
                             SearchUserCard(
                                 user = user,
+                                isLoading = user.id in friendRequestActionsInProgress,
                                 onAddClick = { viewModel.sendFriendRequest(user.id) },
                                 onWithdrawClick = { requestId -> viewModel.cancelSentRequest(requestId) }
                             )
@@ -509,6 +511,7 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
 @Composable
 fun SearchUserCard(
     user: Friend,
+    isLoading: Boolean = false,
     onAddClick: () -> Unit,
     onWithdrawClick: (requestId: String) -> Unit
 ) {
@@ -603,10 +606,19 @@ fun SearchUserCard(
                     // No request, or previously declined/withdrawn — show Add Friend
                     Button(
                         onClick = onAddClick,
+                        enabled = !isLoading,
                         colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Text("Add Friend", fontSize = 13.sp)
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Colors.buttonText,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Add Friend", fontSize = 13.sp)
+                        }
                     }
                 }
             }

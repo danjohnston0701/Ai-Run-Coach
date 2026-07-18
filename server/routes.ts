@@ -245,7 +245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
-      const { email, password, name, timezone } = req.body;
+      const { email, password, name, timezone, country } = req.body;
       
       if (!email || !password || !name) {
         return res.status(400).json({ error: "Email, password, and name are required" });
@@ -290,6 +290,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (tzError: any) {
           console.warn(`[Register] Failed to resolve timezone/country from "${timezone}": ${tzError.message}`);
         }
+      }
+      if (country && /^[A-Za-z]{2}$/.test(country)) {
+        resolvedCountry = country.toUpperCase();
       }
 
       // Also infer currency from timezone
@@ -478,7 +481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { email, password, timezone } = req.body;
+      const { email, password, timezone, country } = req.body;
 
       if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required" });
@@ -555,10 +558,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set/update timezone, country, and currency from device timezone on every login.
       // We always infer and update so users who moved country get the right currency/timezone,
       // and so new users with the defaults get corrected immediately.
-      if (timezone) {
+      if (timezone || country) {
         try {
           const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
-          const { timezone: resolvedTz, country: resolvedCountry } = resolveTimezoneAndCountry(timezone);
+          const resolved = timezone
+            ? resolveTimezoneAndCountry(timezone)
+            : { timezone: user.timezone || "UTC", country: user.country || "US" };
+          const resolvedTz = resolved.timezone;
+          const resolvedCountry = country && /^[A-Za-z]{2}$/.test(country)
+            ? country.toUpperCase()
+            : resolved.country;
           
           const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
           const inferredCurrency = inferCurrencyFromTimezone(resolvedTz);
@@ -1031,7 +1040,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: "Not authorized" });
       }
       
-      const updated = await storage.updateUser(req.params.id, req.body);
+      const updateData = { ...req.body };
+      if (typeof updateData.dob === "string") {
+        const match = updateData.dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (match) {
+          const [, day, month, year] = match;
+          updateData.dob = `${year}-${month}-${day}`;
+        }
+      }
+
+      const updated = await storage.updateUser(req.params.id, updateData);
       if (!updated) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -1819,6 +1837,7 @@ function transformRunForAndroid(run: any) {
       routeName: run.name || null,
       externalSource: run.externalSource || null,
       externalId: run.externalId || null,
+      sessionType: run.sessionType === "walk" ? "walk" : "run",
       uploadedToGarmin: run.uploadedToGarmin || false,
       garminActivityId: run.garminActivityId || null,
       targetDistance: run.targetDistance || null,
@@ -2309,6 +2328,12 @@ function transformRunForAndroid(run: any) {
     try {
       const userId = req.user!.userId;
       const runData = req.body;
+      // Persist only the two supported coaching activities. Older clients and
+      // Garmin imports default to run; Garmin's separate activityType remains
+      // available for device classification.
+      const sessionType = String(runData.sessionType ?? runData.activityType ?? "")
+        .trim()
+        .toLowerCase() === "walk" ? "walk" : "run";
       
       // Validate required fields before processing
       // Support both iOS (distance_meters) and Android (distance in km) formats
@@ -2411,6 +2436,7 @@ function transformRunForAndroid(run: any) {
       // Convert timestamp fields from numbers to Date objects for database compatibility
       const processedRunData = {
         ...runData,
+        sessionType,
         distance, // Use the validated/converted distance
         duration: durationInSeconds,
         totalSteps, // Use calculated or provided value
@@ -2522,6 +2548,12 @@ function transformRunForAndroid(run: any) {
             // Rather than silently discarding the richer upload, merge any non-null fields
             // that the existing record is missing into the surviving record.
             const mergeFields: Record<string, any> = {};
+
+            // The phone upload carries the user-selected activity. Preserve it on
+            // Garmin-first records so post-run analysis uses walk/run correctly.
+            if ((existingByExternalId as any).sessionType !== sessionType) {
+              mergeFields.sessionType = sessionType;
+            }
 
             // Coaching notes — the most important: the watch never has these
             const incomingNotes = runData.aiCoachingNotes;
@@ -2668,6 +2700,10 @@ function transformRunForAndroid(run: any) {
           // Previously this returned immediately, silently discarding coaching notes,
           // weatherData, linkedWorkoutId, and GPS track from the phone's upload.
           const c1Merge: Record<string, any> = {};
+
+          if ((rapidDup as any).sessionType !== sessionType) {
+            c1Merge.sessionType = sessionType;
+          }
 
           // Coaching notes
           const c1IncomingNotes = runData.aiCoachingNotes;
@@ -3358,6 +3394,7 @@ function transformRunForAndroid(run: any) {
       const analysisStartTime = Date.now();
       const analysis = await aiService.generateComprehensiveRunAnalysis({
         runData: run,
+        sessionType: (run as any).sessionType === "walk" ? "walk" : "run",
         
         // NEW: Rich Garmin watch data from client (from ComprehensiveAnalysisRequest)
         garminDataFromWatch: garminDataSummary,
@@ -5108,7 +5145,8 @@ function transformRunForAndroid(run: any) {
       const aiService = await import("./ai-service");
       const insights = await aiService.generateRunSummary({
         ...run,
-        ...req.body
+        ...req.body,
+        sessionType: (run as any).sessionType === "walk" ? "walk" : "run",
       }, null, run.userId);
       await storage.updateRun(req.params.id, { aiInsights: JSON.stringify(insights) });
       res.json(insights);
@@ -14242,6 +14280,9 @@ function transformRunForAndroid(run: any) {
         strugglePoints: relevantStrugglePoints,
         // Overall post-run comment from the user
         userComments: body.userPostRunComments || run.userComments,
+        // Keep the persisted user-selected activity authoritative over any
+        // Garmin/device classification included in the request body.
+        sessionType: (run as any).sessionType === "walk" ? "walk" : "run",
       };
 
       let ai: any = null;
@@ -14249,6 +14290,7 @@ function transformRunForAndroid(run: any) {
         const aiService = await import("./ai-service");
         ai = await aiService.generateComprehensiveRunAnalysis({
           runData: runDataForAi,
+          sessionType: runDataForAi.sessionType,
           previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 10),
           weatherImpactAnalysis: weatherImpactAnalysis || undefined,
           userProfile: body.userProfile || (user ? {
@@ -16399,12 +16441,13 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     try {
       res.json({
         android: {
-          latestVersionCode: parseInt(process.env.ANDROID_LATEST_VERSION_CODE || "12"),
-          latestVersionName: process.env.ANDROID_LATEST_VERSION_NAME || "1.5.0",
-          minVersionCode:    parseInt(process.env.ANDROID_MIN_VERSION_CODE    || "1"),
+          latestVersionCode: parseInt(process.env.ANDROID_LATEST_VERSION_CODE || "29"),
+          latestVersionName: process.env.ANDROID_LATEST_VERSION_NAME || "1.9.0",
+          minVersionCode:    parseInt(process.env.ANDROID_MIN_VERSION_CODE    || "29"),
           playStoreUrl:      process.env.ANDROID_PLAY_STORE_URL ||
                              "https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach",
-          releaseNote:       process.env.ANDROID_RELEASE_NOTE || "",
+          releaseNote:       process.env.ANDROID_RELEASE_NOTE ||
+                             "Major user experience improvements, smoother forms, and improved keyboard handling.",
         },
         garmin: {
           latestVersion:    process.env.GARMIN_LATEST_VERSION     || "1.4.0",

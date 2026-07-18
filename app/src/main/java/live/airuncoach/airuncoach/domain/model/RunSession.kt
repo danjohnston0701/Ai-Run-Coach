@@ -42,6 +42,9 @@ data class RunSession(
     // External sync source (e.g., "garmin", "strava", null for native runs)
     val externalSource: String? = null,
     val externalId: String? = null,
+
+    // User-selected activity for this session: "run" or "walk".
+    val sessionType: String = "run",
     
     // Garmin upload tracking (for AI Run Coach runs uploaded TO Garmin)
     val uploadedToGarmin: Boolean? = null,

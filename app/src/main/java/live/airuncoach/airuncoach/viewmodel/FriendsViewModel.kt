@@ -65,6 +65,10 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     private val _isActionInProgress = MutableStateFlow(false)
     val isActionInProgress: StateFlow<Boolean> = _isActionInProgress.asStateFlow()
 
+    private val _friendRequestActionsInProgress = MutableStateFlow<Set<String>>(emptySet())
+    val friendRequestActionsInProgress: StateFlow<Set<String>> =
+        _friendRequestActionsInProgress.asStateFlow()
+
     init {
         loadUser()
     }
@@ -150,35 +154,24 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
     fun sendFriendRequest(friendId: String) {
         viewModelScope.launch {
             val userId = _user.value?.id ?: return@launch
+            _friendRequestActionsInProgress.update { it + friendId }
             _isActionInProgress.value = true
             try {
                 apiService.sendFriendRequest(mapOf("addresseeId" to friendId))
                 _addedFriendIds.update { it + friendId }
 
-                // Optimistically flip the button in the search list immediately —
-                // mark as "pending" so the Withdraw button shows right away.
-                // The background searchUsers() call will fill in the real requestId.
-                val currentSearch = _searchState.value
-                if (currentSearch is SearchUiState.Success) {
-                    val updated = currentSearch.users.map { u ->
-                        // Set both status AND a temporary requestId ("pending") so the
-                        // Withdraw button renders immediately. The real requestId is filled
-                        // in when the background searchUsers() refresh completes.
-                        if (u.id == friendId) u.copy(
-                            friendRequestStatus = "pending",
-                            friendRequestId = u.friendRequestId ?: "pending"
-                        ) else u
-                    }
-                    _searchState.value = SearchUiState.Success(updated)
-                }
-
-                // Background refresh for accurate server state + pending section
+                // Refresh search results in this coroutine so the spinner remains
+                // visible until the server returns the confirmed request state.
                 val query = lastSearchQuery.value
-                if (query.isNotBlank()) searchUsers(query)
+                if (query.isNotBlank()) {
+                    _searchState.value = SearchUiState.Loading
+                    _searchState.value = SearchUiState.Success(apiService.searchUsers(query))
+                }
                 loadPendingRequests()
             } catch (e: Exception) {
                 Log.e("FriendsViewModel", "Failed to send friend request", e)
             } finally {
+                _friendRequestActionsInProgress.update { it - friendId }
                 _isActionInProgress.value = false
             }
         }

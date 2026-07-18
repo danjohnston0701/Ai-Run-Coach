@@ -10,6 +10,7 @@ import com.google.gson.annotations.SerializedName
 data class UploadRunRequest(
     val routeId: String?,
     val startTime: Long,
+    val sessionType: String = "run",
     val distance: Double,
     val duration: Long,
     val avgPace: String,

@@ -9,11 +9,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -37,29 +35,10 @@ fun OnboardingIntroScreen(
             .background(Colors.backgroundRoot)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = Spacing.xxxl)
-            .padding(top = 56.dp, bottom = 32.dp),
+            .navigationBarsPadding()
+            .padding(top = 32.dp, bottom = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-
-        // App icon
-        Box(
-            modifier = Modifier
-                .size(72.dp)
-                .background(
-                    Colors.primary.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(BorderRadius.full)
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.icon_trending_vector),
-                contentDescription = null,
-                tint = Colors.primary,
-                modifier = Modifier.size(36.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(Spacing.xxxl))
 
         Text(
             text = "Let's get you set up",

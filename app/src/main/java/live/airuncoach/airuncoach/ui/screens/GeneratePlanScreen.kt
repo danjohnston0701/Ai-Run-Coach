@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
@@ -46,7 +47,7 @@ import live.airuncoach.airuncoach.viewmodel.FITNESS_LEVELS
 import live.airuncoach.airuncoach.viewmodel.GeneratePlanState
 import live.airuncoach.airuncoach.viewmodel.GeneratePlanViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun GeneratePlanScreen(
     prefilledGoal: Goal? = null,
@@ -76,6 +77,13 @@ fun GeneratePlanScreen(
     val injuries by viewModel.injuries.collectAsState()
     val fitnessLevelFromProfile by viewModel.fitnessLevelFromProfile.collectAsState()
     val isPreEventPlan by viewModel.isPreEventPlan.collectAsState()
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val density = LocalDensity.current
+    val bottomContentPadding = if (isKeyboardVisible) {
+        with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    } else {
+        Spacing.xl
+    }
 
     // Dialog state for adding a regular session
     var showAddSessionDialog by remember { mutableStateOf(false) }
@@ -198,7 +206,7 @@ fun GeneratePlanScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(Spacing.xl))
+                    Spacer(modifier = Modifier.height(bottomContentPadding))
 
                     // ── Calculate distance categories early for use throughout the form ─────
                     // (Used for distance events nudge, training duration bounds, etc.)
@@ -1685,4 +1693,3 @@ private fun DateOfInjuryPickerDialog(
         }
     }
 }
-

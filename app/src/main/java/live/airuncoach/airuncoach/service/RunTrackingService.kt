@@ -166,6 +166,13 @@ class RunTrackingService : Service(), SensorEventListener {
     // How many watch GPS updates have arrived in this session.  GPS lock isn't stable in
     // the first ~8 seconds so we show "–" until the signal settles.
     private var watchGpsUpdateCount: Int = 0
+    // Authoritative elapsed time (seconds) from the watch firmware (Activity.Info.timerTime).
+    // Used as session duration when wasRunStartedByWatch so the phone clock divergence is eliminated.
+    private var watchElapsedSeconds: Int = 0
+    // Last accepted Garmin distance. Kept separately from totalDistance because a
+    // transient phone-GPS update must not prevent a later valid Garmin total from
+    // correcting it.
+    private var watchDistanceM: Float = 0f
     // Pause tracking — ensures paused time is excluded from all duration/pace calculations
     private var totalPausedMs: Long = 0          // Accumulated paused milliseconds
     private var pauseStartTime: Long = 0         // When the current pause started (0 = not paused)
@@ -663,6 +670,7 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_TARGET_DISTANCE = "EXTRA_TARGET_DISTANCE"
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
+        const val EXTRA_SESSION_TYPE = "EXTRA_SESSION_TYPE"
         const val EXTRA_ACTIVE_RUN = "extra_active_run"
         // Coaching programme context
         const val EXTRA_TRAINING_PLAN_ID = "EXTRA_TRAINING_PLAN_ID"
@@ -1024,6 +1032,9 @@ class RunTrackingService : Service(), SensorEventListener {
             }
             targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
             hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
+            intent?.getStringExtra(EXTRA_SESSION_TYPE)?.let { requestedType ->
+                currentActivityType = if (requestedType.equals("walk", ignoreCase = true)) "walk" else "run"
+            }
             navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
             // Coaching programme context — only overwrite if the intent carries plan extras.
             // ACTION_START_TRACKING_FROM_WATCH and ACTION_START_TRACKING (from ViewModel's
@@ -1205,10 +1216,19 @@ class RunTrackingService : Service(), SensorEventListener {
         lastPhase = null        // Reset for new run - allow first phase change to trigger
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
-        lastWatchGpsMs = 0L  // Reset watch GPS timestamp so phone GPS is not skipped for phone-only runs
+        // Only reset the watch-GPS suppression window for phone-only runs.
+        // For watch-initiated runs, wasRunStartedByWatch is set TRUE before startTracking() is called,
+        // and lastWatchGpsMs was stamped at that moment.  Resetting it here would reopen the phone-GPS
+        // contamination window for the first 15 s, allowing early phone GPS fixes to inflate totalDistance
+        // before the first watch frame arrives — the root cause of the 600m+ discrepancy.
+        if (!wasRunStartedByWatch) {
+            lastWatchGpsMs = 0L
+        }
         maxSpeed = 0f
         smoothedWatchSpeedMs = 0f    // Reset EMA smoother for clean pace display on new run
         watchGpsUpdateCount = 0      // Reset warm-up counter
+        watchElapsedSeconds = 0      // Reset authoritative watch timer
+        watchDistanceM = 0f          // Reset authoritative Garmin distance
         totalElevationGain = 0.0
         hasGpsElevation = false
         currentSmoothedGrade = 0.0
@@ -2483,6 +2503,46 @@ class RunTrackingService : Service(), SensorEventListener {
             maxRunningPower         = if (watchMaxPwr > 0) watchMaxPwr else null,
             avgRespirationRate      = if (watchRespCount > 0) watchRespSum / watchRespCount else null,
         )
+
+        // ── Authoritative watch metrics (watch-initiated sessions only) ────────────────
+        // The Garmin firmware's Kalman-filtered GPS accumulation is significantly more
+        // accurate than independent phone-GPS accumulation.  Using it as the source of
+        // truth eliminates the 600m+ distance divergence observed in testing.
+        //
+        // Distance: override phone's totalDistance with the watch's actInfo.elapsedDistance.
+        //   - Only applied when the watch has confirmed at least 5m (noise floor) to avoid
+        //     a premature override from a 0-value frame at session start.
+        //
+        // Timer: override with watch's actInfo.timerTime (pauses automatically with the session).
+        //   - Eliminates clock-start divergence caused by BT latency between watch-press and
+        //     the phone's startTime being stamped (observed as ~70s offset in Nino's session).
+        if (wasRunStartedByWatch) {
+            frame.cumulativeDistanceM
+                ?.takeIf { it.isFinite() && it > 5f }
+                ?.let { watchDistanceM ->
+                    // Connect IQ may deliver queued Bluetooth frames out of order.
+                    // Garmin distance must never make the persisted session move backwards.
+                    if (watchDistanceM >= this.watchDistanceM) {
+                        Log.d(
+                            "RunTrackingService",
+                            "⌚ Authoritative distance: ${totalDistance.toInt()}m → ${watchDistanceM.toInt()}m"
+                        )
+                        this.watchDistanceM = watchDistanceM
+                        totalDistance = watchDistanceM.toDouble()
+                    } else {
+                        Log.d(
+                            "RunTrackingService",
+                            "Ignoring stale Garmin distance ${watchDistanceM.toInt()}m; accepted=${this.watchDistanceM.toInt()}m"
+                        )
+                    }
+                }
+
+            // Same monotonic rule for the paused Garmin activity timer: an older
+            // queued frame must not make duration or average pace regress.
+            if (frame.elapsedSeconds > watchElapsedSeconds) {
+                watchElapsedSeconds = frame.elapsedSeconds
+            }
+        }
     }
 
     private fun requestLocationUpdates() {
@@ -2920,7 +2980,17 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun updateRunSession() {
-        val duration = getActiveRunDuration()
+        // Use the watch's actInfo.timerTime when this is a watch-initiated session.
+        // The watch timer starts exactly when the user presses START on the watch, pauses
+        // automatically when the session is paused, and is never affected by BT latency.
+        // The phone's own clock (getActiveRunDuration) stamps startTime when the "start"
+        // BT command arrives — which can be 30–90s later due to screen-lock / BT delivery
+        // delay, causing the visible timer gap Nino reported (01:01:17 vs 1:00:06).
+        val duration = if (wasRunStartedByWatch && watchElapsedSeconds > 0) {
+            watchElapsedSeconds * 1000L
+        } else {
+            getActiveRunDuration()
+        }
         
         // Only show distance/pace after user has moved at least 5 meters (filters GPS drift)
         val minDistanceMeters = 5.0
@@ -3036,6 +3106,7 @@ class RunTrackingService : Service(), SensorEventListener {
             routeName = null,
             externalSource = null, // Not synced from external source
             externalId = null,
+            sessionType = currentActivityType,
             isActive = true,
             aiCoachingNotes = coachingHistory.toList(),
             strugglePoints = strugglePointsList.toList(),
@@ -3286,7 +3357,33 @@ class RunTrackingService : Service(), SensorEventListener {
         return results
     }
 
-    private fun updateNotification() { val s = _currentRunSession.value; notificationManager.notify(NOTIFICATION_ID, createNotification("Run in progress", String.format("D: %.2f km | P: %s/km | T: %s", s?.getDistanceInKm()?:0.0, s?.averagePace?:"0:00", s?.getFormattedDuration()?:"00:00"))) }
+    private fun updateNotification() {
+        val s = _currentRunSession.value
+        // Title respects the user's chosen activity type (walk vs run)
+        val title = if (currentActivityType == "walk") "Walk in progress" else "Run in progress"
+        // Keep current and average pace explicitly separate: current pace can be
+        // unavailable while stopped or while GPS is settling, whereas average pace
+        // remains valid once the session has distance and elapsed time.
+        val livePace = s?.currentPace
+        val currentPace = if (!livePace.isNullOrBlank() && livePace != "0:00" && livePace != "–") {
+            livePace
+        } else {
+            "--"
+        }
+        val averagePace = s?.averagePace?.takeUnless { it == "0:00" } ?: "--"
+        notificationManager.notify(
+            NOTIFICATION_ID,
+            createNotification(
+                title,
+                String.format("D: %.2f km | P: %s/km | Avg: %s/km | T: %s",
+                    s?.getDistanceInKm() ?: 0.0,
+                    currentPace,
+                    averagePace,
+                    s?.getFormattedDuration() ?: "00:00:00"
+                )
+            )
+        )
+    }
 
     private fun calculateWasTargetAchieved(): Boolean? {
         if (targetDistance == null && targetTime == null) return null
@@ -3492,6 +3589,7 @@ class RunTrackingService : Service(), SensorEventListener {
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
             startTime = runSession.startTime,
+            sessionType = currentActivityType,
             distance = runSession.distance / 1000.0, // Convert meters to km
             duration = runSession.duration,
             avgPace = runSession.averagePace ?: "0:00",

@@ -23,6 +23,7 @@ import androidx.compose.ui.focus.onFocusEvent
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -53,7 +54,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.activity.ComponentActivity
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun LoginScreen(
     onNavigateToLocationPermission: () -> Unit = {},
@@ -73,6 +74,14 @@ fun LoginScreen(
     val emailBringIntoView = remember { BringIntoViewRequester() }
     val passwordBringIntoView = remember { BringIntoViewRequester() }
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val bottomContentPadding = with(density) {
+        maxOf(
+            if (isKeyboardVisible) WindowInsets.ime.getBottom(this) else 0,
+            WindowInsets.navigationBars.getBottom(this)
+        ).toDp() + Spacing.xxxl
+    }
     
     // Notification permission launcher
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -186,8 +195,7 @@ fun LoginScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.xxxl)
                 .padding(top = 80.dp)
-                .navigationBarsPadding()
-                .padding(bottom = Spacing.xxxl),
+                .padding(bottom = 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Logo
@@ -490,6 +498,7 @@ fun LoginScreen(
                         }
                 }
             )
+            Spacer(modifier = Modifier.height(bottomContentPadding))
         }
     }
 }

@@ -553,6 +553,7 @@ class RunSessionViewModel @Inject constructor(
                         putExtra(RunTrackingService.EXTRA_TARGET_TIME, targetTimeMs)
                     }
                     putExtra(RunTrackingService.EXTRA_HAS_ROUTE, cfg.route != null)
+                    putExtra(RunTrackingService.EXTRA_SESSION_TYPE, cfg.activityType.name.lowercase())
                     cfg.trainingPlanId?.let { id -> putExtra(RunTrackingService.EXTRA_TRAINING_PLAN_ID, id) }
                     cfg.workoutId?.let      { id -> putExtra(RunTrackingService.EXTRA_WORKOUT_ID, id) }
                     cfg.workoutType?.let    { t  -> putExtra(RunTrackingService.EXTRA_WORKOUT_TYPE, t) }

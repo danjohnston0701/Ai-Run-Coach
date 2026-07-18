@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -16,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -32,7 +35,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
 import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun EmailVerificationScreen(
     email: String,
@@ -45,6 +48,14 @@ fun EmailVerificationScreen(
     var resendCooldown by remember { mutableIntStateOf(0) }
     var showChangeEmailDialog by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val density = LocalDensity.current
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val bottomContentPadding = with(density) {
+        maxOf(
+            if (isKeyboardVisible) WindowInsets.ime.getBottom(this) else 0,
+            WindowInsets.navigationBars.getBottom(this)
+        ).toDp() + Spacing.xl
+    }
 
     // The displayed email — updates if user changes it
     val displayEmail = loginState.pendingVerificationEmail.ifBlank { email }
@@ -111,7 +122,8 @@ fun EmailVerificationScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = Spacing.xxxl),
+                .padding(horizontal = Spacing.lg)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(40.dp))
@@ -175,60 +187,64 @@ fun EmailVerificationScreen(
 
             Spacer(modifier = Modifier.height(Spacing.xxxl))
 
-            // Hidden text field for keyboard input
+            // Visible BasicTextField keeps Android's native paste action available.
             BasicTextField(
                 value = otp,
                 onValueChange = { new ->
-                    if (new.length <= 6 && new.all { it.isDigit() }) {
-                        otp = new
-                    }
+                    otp = new.filter(Char::isDigit).take(6)
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                 modifier = Modifier
                     .focusRequester(focusRequester)
-                    .size(1.dp)
-                    .background(Colors.backgroundRoot),
+                    .fillMaxWidth()
+                    .clickable { focusRequester.requestFocus() },
                 cursorBrush = SolidColor(Colors.primary),
-                textStyle = TextStyle(color = Colors.backgroundRoot)
-            )
-
-            // OTP digit boxes
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.clickable { focusRequester.requestFocus() }
-            ) {
-                repeat(6) { index ->
-                    val char = otp.getOrNull(index)
-                    val isFocused = index == otp.length && otp.length < 6
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .background(
-                                color = if (char != null) Colors.primary.copy(alpha = 0.08f)
-                                else Colors.backgroundSecondary,
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            .border(
-                                width = if (isFocused) 2.dp else 1.dp,
-                                color = if (isFocused) Colors.primary
-                                else if (char != null) Colors.primary.copy(alpha = 0.4f)
-                                else Colors.backgroundSecondary,
-                                shape = RoundedCornerShape(10.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = char?.toString() ?: if (isFocused) "|" else "",
-                            style = TextStyle(
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                color = if (char != null) Colors.textPrimary else Colors.primary
-                            )
-                        )
+                textStyle = TextStyle(color = Colors.backgroundRoot),
+                decorationBox = { innerTextField ->
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            repeat(6) { index ->
+                                val char = otp.getOrNull(index)
+                                val isFocused = index == otp.length && otp.length < 6
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(0.9f)
+                                        .background(
+                                            color = if (char != null) Colors.primary.copy(alpha = 0.08f)
+                                            else Colors.backgroundSecondary,
+                                            shape = RoundedCornerShape(10.dp)
+                                        )
+                                        .border(
+                                            width = if (isFocused) 2.dp else 1.dp,
+                                            color = if (isFocused) Colors.primary
+                                            else if (char != null) Colors.primary.copy(alpha = 0.4f)
+                                            else Colors.backgroundSecondary,
+                                            shape = RoundedCornerShape(10.dp)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = char?.toString() ?: if (isFocused) "|" else "",
+                                        style = TextStyle(
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = if (char != null) Colors.textPrimary else Colors.primary
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        Box(modifier = Modifier.size(1.dp)) {
+                            innerTextField()
+                        }
                     }
                 }
-            }
+            )
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
@@ -316,6 +332,8 @@ fun EmailVerificationScreen(
                 color = Colors.textMuted,
                 textAlign = TextAlign.Center
             )
+
+            Spacer(modifier = Modifier.height(bottomContentPadding))
         }
     }
 
@@ -334,6 +352,7 @@ fun EmailVerificationScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChangeVerificationEmailDialog(
     currentEmail: String,
@@ -350,7 +369,9 @@ private fun ChangeVerificationEmailDialog(
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.ime)
         ) {
             Column(
                 modifier = Modifier.padding(Spacing.xl),

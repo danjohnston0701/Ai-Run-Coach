@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -47,7 +48,7 @@ import live.airuncoach.airuncoach.viewmodel.FriendsViewModelFactory
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MapMyRunSetupScreen(
     mode: String = "route", // "route" or "no_route"
@@ -198,6 +199,13 @@ fun MapMyRunSetupScreen(
     val hoursInt = targetHours.toIntOrNull() ?: 0
     val minutesInt = targetMinutes.toIntOrNull() ?: 0
     val secondsInt = targetSeconds.toIntOrNull() ?: 0
+    val isKeyboardVisible = WindowInsets.isImeVisible
+    val density = LocalDensity.current
+    val bottomContentPadding = if (isKeyboardVisible) {
+        with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    } else {
+        Spacing.lg
+    }
 
     Box(
         modifier = Modifier
@@ -208,7 +216,8 @@ fun MapMyRunSetupScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = Spacing.lg) // Safe padding instead of massive 104.dp
+                .padding(bottom = 0.dp),
+            contentPadding = PaddingValues(bottom = bottomContentPadding)
         ) {
 
             item {

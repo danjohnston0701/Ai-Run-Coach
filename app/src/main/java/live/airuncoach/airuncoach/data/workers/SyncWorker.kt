@@ -200,6 +200,7 @@ class SyncWorker(
             return UploadRunRequest(
                 routeId = null, // routeHash is a GPS similarity hash, NOT a routes-table FK — sending it as routeId caused FK violations
                 startTime = run.startTime,
+                sessionType = run.sessionType,
                 distance = run.distance,
                 duration = run.duration,
                 avgPace = run.averagePace ?: "0:00",
