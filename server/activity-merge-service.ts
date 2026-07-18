@@ -243,9 +243,11 @@ export async function mergeGarminActivityWithAiRunCoachRun(
       garminSummaryId: garminActivity.summaryId,
       hasGarminData: true,
 
-      // Garmin wearable metrics are more accurate — always overwrite these scalars
-      distance: garminDistanceKm,
-      duration: garminDurationSec,
+      // Preserve the app's canonical workout totals and summary inputs. Garmin
+      // supplements missing values only; fuzzy matching is not strong enough to
+      // safely replace distance, duration, pace, GPS, or km-boundary splits.
+      distance: (existingRun as any)?.distance ?? garminDistanceKm,
+      duration: (existingRun as any)?.duration ?? garminDurationSec,
       avgHeartRate: garminActivity.averageHeartRateInBeatsPerMinute ?? (existingRun as any)?.avgHeartRate,
       maxHeartRate: garminActivity.maxHeartRateInBeatsPerMinute ?? (existingRun as any)?.maxHeartRate,
       calories: garminActivity.activeKilocalories ?? (existingRun as any)?.calories,
@@ -255,7 +257,7 @@ export async function mergeGarminActivityWithAiRunCoachRun(
       deviceName: garminActivity.deviceName ?? (existingRun as any)?.deviceName,
 
       // avgPace — use the computed "mm:ss" string; fall back to whatever the run already has
-      avgPace: computedAvgPace ?? (existingRun as any)?.avgPace,
+      avgPace: (existingRun as any)?.avgPace ?? computedAvgPace,
 
       // Merge tracking
       mergeScore: mergeCandidate.matchScore,
@@ -265,7 +267,8 @@ export async function mergeGarminActivityWithAiRunCoachRun(
     // ── Time-series / detail fields — ONLY overwrite if Garmin has real data ──
     // Empty Garmin objects ({ avg:0, samples:[] }) must NOT replace phone's rich arrays.
 
-    // paceData: prefer Garmin if it has actual samples
+    // Preserve phone pace data. Garmin samples are only a fallback for runs that
+    // have no series, preventing graph/post-run-summary corruption.
     const garminPaceSamples = detailedMetrics.paceData?.samples;
     if (Array.isArray(garminPaceSamples) && garminPaceSamples.length > 0) {
       enrichedData.paceData = detailedMetrics.paceData;
@@ -288,8 +291,8 @@ export async function mergeGarminActivityWithAiRunCoachRun(
       enrichedData.kmSplits = detailedMetrics.kmSplits;
     }
 
-    // GPS track: only replace if Garmin actually provided GPS samples (already established logic)
-    if (detailedMetrics.gpsTrack != null) {
+    // Preserve the canonical phone GPS track; only fill it for Garmin-only runs.
+    if (detailedMetrics.gpsTrack != null && !(existingRun as any)?.gpsTrack) {
       enrichedData.gpsTrack = detailedMetrics.gpsTrack;
     }
 

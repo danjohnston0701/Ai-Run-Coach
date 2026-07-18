@@ -13,6 +13,7 @@ data class RunSetupConfig(
     val targetHours: Int = 0,
     val targetMinutes: Int = 0,
     val targetSeconds: Int = 0,
+    val aiCoachEnabled: Boolean = true,
     val liveTrackingEnabled: Boolean = false,
     val liveTrackingObservers: List<String> = emptyList(), // User IDs
     val isGroupRun: Boolean = false,

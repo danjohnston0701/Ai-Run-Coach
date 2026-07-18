@@ -1221,7 +1221,7 @@ class RunView extends Ui.View {
 
     // =========================================================================
     // GRID SCREEN — data-dense layout (also default for FR55)
-    // Layout: Timer (full-width top), then 2x2 grid: Dist|Pace / HR|Cadence
+    // Layout: Duration|Pace / Distance|Cadence / HR|Avg Pace
     // =========================================================================
     private function _drawGridScreen(dc, cx, cy, w, h) {
         var metricFont = _isSmallScreen ? Gfx.FONT_SMALL  : Gfx.FONT_MEDIUM;
@@ -1229,31 +1229,40 @@ class RunView extends Ui.View {
         var lx = (w * 0.27).toNumber();   // left column centre
         var rx = (w * 0.73).toNumber();   // right column centre
 
-        // -- Timer row --
+        // -- Top row: Duration (left) | Pace (right) --
         if (_isRunning || _isPaused) {
             dc.setColor(0x00CC66, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, (h * 0.13).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.13).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, (h * 0.10).toNumber(), timerFont, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.10).toNumber(), timerFont, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
         }
+
+        dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "PACE", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.13).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
+
+        // Vertical divider top row
+        dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
+        dc.drawLine(cx, (h * 0.05).toNumber(), cx, (h * 0.30).toNumber());
 
         // -- Divider 1 --
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
         dc.drawLine((w * 0.08).toNumber(), (h * 0.31).toNumber(), (w * 0.92).toNumber(), (h * 0.31).toNumber());
 
-        // -- Row 1: Distance (left) | Pace (right) --
+        // -- Middle row: Distance (left) | Cadence (right) --
         dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.43).toNumber(), metricFont, (_dispDistance / 1000.0).format("%.2f"), Gfx.TEXT_JUSTIFY_CENTER);
 
-        dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "PACE", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.43).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.43).toNumber(), metricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
@@ -1263,17 +1272,17 @@ class RunView extends Ui.View {
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
         dc.drawLine((w * 0.08).toNumber(), (h * 0.56).toNumber(), (w * 0.92).toNumber(), (h * 0.56).toNumber());
 
-        // -- Row 2: HR (left) | Cadence (right) --
+        // -- Bottom row: HR (left) | Average pace (right) --
         dc.setColor(0xFF3355, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "HR", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.68).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
-        // Cadence cell: label above value — consistent with KM, PACE, HR layout.
-        dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
+        var avgPace = (_sampleN > 0 && _sumPace > 0.0) ? _sumPace / _sampleN.toFloat() : 0.0;
+        dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(rx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "AVG PACE", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.68).toNumber(), metricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.68).toNumber(), metricFont, _fmtPaceDec(avgPace), Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider row 2
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);

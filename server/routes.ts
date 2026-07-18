@@ -525,7 +525,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (timezone) {
         try {
           // Validate timezone using Luxon
-          DateTime.now().setZone(timezone);
+          const validatedTimezone = DateTime.now().setZone(timezone);
+          if (!validatedTimezone.isValid) {
+            throw new Error(`Invalid timezone: ${validatedTimezone.invalidReason || "unknown"}`);
+          }
           
           // Ensure notification preferences exist, then update timezone
           const existingPrefs = await db
@@ -555,39 +558,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Set/update timezone, country, and currency from device timezone on every login.
-      // We always infer and update so users who moved country get the right currency/timezone,
-      // and so new users with the defaults get corrected immediately.
-      if (timezone || country) {
-        try {
-          const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
-          const resolved = timezone
-            ? resolveTimezoneAndCountry(timezone)
-            : { timezone: user.timezone || "UTC", country: user.country || "US" };
-          const resolvedTz = resolved.timezone;
-          const resolvedCountry = country && /^[A-Za-z]{2}$/.test(country)
-            ? country.toUpperCase()
-            : resolved.country;
-          
-          const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
-          const inferredCurrency = inferCurrencyFromTimezone(resolvedTz);
-          
-          await db
-            .update(users)
-            .set({ 
-              timezone: resolvedTz,
-              country: resolvedCountry,
-              currency: inferredCurrency 
-            })
-            .where(eq(users.id, user.id));
-          
-          user.timezone = resolvedTz;
-          user.country = resolvedCountry;
-          user.currency = inferredCurrency;
-          console.log(`[Login] Updated user ${user.id}: timezone=${resolvedTz}, country=${resolvedCountry}, currency=${inferredCurrency}`);
-        } catch (error: any) {
-          console.warn(`[Login] Failed to update timezone/country/currency for user ${user.id}: ${error.message}`);
-        }
+      // Always resolve and persist locale data before returning the user. This
+      // ensures new and legacy users have localized onboarding prices on their
+      // first login, rather than only after logging out and back in again.
+      try {
+        const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
+        const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
+        const resolved = resolveTimezoneAndCountry(timezone || user.timezone || "UTC");
+        const resolvedCountry = country && /^[A-Za-z]{2}$/.test(country)
+          ? country.toUpperCase()
+          : resolved.country;
+        const inferredCurrency = inferCurrencyFromTimezone(resolved.timezone);
+
+        await db
+          .update(users)
+          .set({
+            timezone: resolved.timezone,
+            country: resolvedCountry,
+            currency: inferredCurrency
+          })
+          .where(eq(users.id, user.id));
+
+        user.timezone = resolved.timezone;
+        user.country = resolvedCountry;
+        user.currency = inferredCurrency;
+        console.log(`[Login] Updated user ${user.id}: timezone=${resolved.timezone}, country=${resolvedCountry}, currency=${inferredCurrency}`);
+      } catch (error: any) {
+        console.warn(`[Login] Failed to update timezone/country/currency for user ${user.id}: ${error.message}`);
       }
 
       const token = generateToken({ userId: user.id, email: user.email });
@@ -1786,12 +1783,9 @@ function transformRunForAndroid(run: any) {
         const storedSplits: any[] = Array.isArray(run.kmSplits) ? run.kmSplits : [];
         const normalised = storedSplits.map(normaliseSplit);
 
-        // ── Step 2: detect identical (Garmin-averaged) splits ────────────────
-        // If all splits have the same duration (within ±1 s), Garmin divided
-        // total_time / total_km instead of tracking km boundaries individually.
-        // We recompute from the GPS track when it's available; the accurate
-        // splits are also persisted back to the DB asynchronously so subsequent
-        // fetches serve correct data without recomputing every time.
+        // ── Step 2: repair malformed legacy Garmin splits for this response ──
+        // Reads must be side-effect free. Persisting a derived split set here
+        // could overwrite canonical phone splits during a concurrent upload.
         if (hasIdenticalKmSplits(storedSplits)) {
           const gpsTrack = Array.isArray(run.gpsTrack) ? run.gpsTrack
                          : Array.isArray(run.gpsTrack?.samples) ? run.gpsTrack.samples
@@ -1800,13 +1794,6 @@ function transformRunForAndroid(run: any) {
             const recomputed = computeKmSplitsFromGpsTrack(gpsTrack);
             if (recomputed.length > 0) {
               console.log(`[transformRunForAndroid] Recomputed ${recomputed.length} km splits from GPS track for run ${run.id} (was identical)`);
-              // ── Persist the fix back to the DB asynchronously ───────────────
-              setImmediate(() => {
-                db.update(runs)
-                  .set({ kmSplits: recomputed } as any)
-                  .where(eq(runs.id, run.id))
-                  .catch((err: any) => console.warn(`[transformRunForAndroid] Failed to persist recomputed splits for run ${run.id}:`, err?.message));
-              });
               return recomputed;
             }
           }
@@ -2506,6 +2493,41 @@ function transformRunForAndroid(run: any) {
       console.log(`[POST /api/runs] Elevation fields — steepestIncline: ${steepestIncline}%, steepestDecline: ${steepestDecline}%`);
       console.log(`[POST /api/runs] Date fields — startedAt: ${processedRunData.startTime}, completedAt: ${processedRunData.completedAt}`);
 
+      // A companion-created record can arrive moments before the Android upload.
+      // Merge every missing scalar and series field from that richer upload into
+      // the surviving watch record instead of leaving a partial Neon row.
+      const mergeMissingRunSummary = (existing: any, incoming: any, target: Record<string, any>) => {
+        const fields = [
+          "aiCoachEnabled", "startLat", "startLng", "calories", "minHeartRate",
+          "terrainType", "maxSpeed", "avgSpeed", "movingTime", "elapsedTime",
+          "maxCadence", "minCadence", "avgStrideLength", "minElevation", "maxElevation",
+          "steepestIncline", "steepestDecline", "totalSteps", "activeCalories",
+          "restingCalories", "estSweatLoss", "hasGarminData", "garminDeviceName",
+          "avgGroundContactTime", "minGroundContactTime", "maxGroundContactTime",
+          "avgGroundContactBalance", "avgVerticalOscillation", "maxVerticalOscillation",
+          "avgVerticalRatio", "minStrideLength", "maxStrideLength",
+          "aerobicTrainingEffect", "anaerobicTrainingEffect", "trainingEffectLabel",
+          "recoveryTimeMinutes", "vo2MaxEstimate", "avgRunningPower", "maxRunningPower",
+          "avgRespirationRate", "avgAmbientPressure", "avgBearing", "avgHeartRateZone",
+          "timeInZone1", "timeInZone2", "timeInZone3", "timeInZone4", "timeInZone5",
+          "startedAt"
+        ];
+        for (const field of fields) {
+          if (incoming[field] != null && existing[field] == null) target[field] = incoming[field];
+        }
+        const seriesFields = [
+          "groundContactTimeData", "groundContactBalanceData", "verticalOscillationData",
+          "verticalRatioData", "strideLengthData", "runningPowerData", "respirationRateData",
+          "bearingData", "stepsData"
+        ];
+        for (const field of seriesFields) {
+          if (Array.isArray(incoming[field]) && incoming[field].length > 0 &&
+              (!Array.isArray(existing[field]) || existing[field].length === 0)) {
+            target[field] = incoming[field];
+          }
+        }
+      };
+
       // ── Deduplication guard ──────────────────────────────────────────────────
       // Three cases to catch, checked in order of specificity:
       //
@@ -2652,6 +2674,12 @@ function transformRunForAndroid(run: any) {
               mergeFields.groupRunId = groupRunId;
               console.log(`[POST /api/runs] Case 0: merging groupRunId=${groupRunId} into run ${existingByExternalId.id}`);
             }
+            mergeMissingRunSummary(existingByExternalId as any, {
+              ...runData,
+              startedAt,
+              steepestIncline,
+              steepestDecline,
+            }, mergeFields);
 
             if (Object.keys(mergeFields).length > 0) {
               console.log(`[POST /api/runs] Merging ${Object.keys(mergeFields).join(', ')} into run ${existingByExternalId.id}`);
@@ -2892,6 +2920,12 @@ function transformRunForAndroid(run: any) {
             c2Merge.groupRunId = groupRunId;
             console.log(`[POST /api/runs] Case 2: merging groupRunId=${groupRunId} into run ${garminDup.id}`);
           }
+          mergeMissingRunSummary(garminDup as any, {
+            ...runData,
+            startedAt,
+            steepestIncline,
+            steepestDecline,
+          }, c2Merge);
 
           if (Object.keys(c2Merge).length > 0) {
             await db.update(runs).set(c2Merge).where(eq(runs.id, garminDup.id));
@@ -2935,6 +2969,7 @@ function transformRunForAndroid(run: any) {
       const runningPowerArr        = Array.isArray(runData.runningPowerData)         ? runData.runningPowerData         : null;
       const respirationRateArr     = Array.isArray(runData.respirationRateData)      ? runData.respirationRateData      : null;
       const bearingDataArr         = Array.isArray(runData.bearingData)              ? runData.bearingData              : null;
+      const stepsDataArr           = Array.isArray(runData.stepsData)                ? runData.stepsData                : null;
 
       const run = await storage.createRun({
         ...processedRunData,
@@ -2963,6 +2998,7 @@ function transformRunForAndroid(run: any) {
         runningPowerData:         runningPowerArr,
         respirationRateData:      respirationRateArr,
         bearingData:              bearingDataArr,
+        stepsData:                stepsDataArr,
       });
       console.log(`[POST /api/runs] Run created successfully with ID: ${run.id}`);
 
@@ -6473,8 +6509,8 @@ function transformRunForAndroid(run: any) {
         // Garmin tracking fields
         hasGarminData: true,
         garminActivityId: matchingActivityId,
-        externalId: matchingActivityId,
-        externalSource: 'garmin',
+        // Keep the app-originated record's external identity immutable. Garmin is
+        // linked through garminActivityId, so this run remains an Android run.
 
         // Update timestamp
         updatedAt: new Date(),
@@ -7687,7 +7723,7 @@ function transformRunForAndroid(run: any) {
               // causes every split to display as "0:00 /km".  If the DB already has
               // phone-sourced splits we keep them; otherwise we normalise Garmin's
               // split data into the M:SS format the app expects.
-              const [existingRunRow] = await db.select({ kmSplits: runs.kmSplits }).from(runs).where(eq(runs.id, existingActivity.runId)).limit(1);
+              const [existingRunRow] = await db.select({ kmSplits: runs.kmSplits, paceData: runs.paceData }).from(runs).where(eq(runs.id, existingActivity.runId)).limit(1);
               const existingKmSplits = Array.isArray((existingRunRow as any)?.kmSplits) ? (existingRunRow as any).kmSplits : null;
               const hasPhoneSplits = existingKmSplits != null && existingKmSplits.length > 0;
 
@@ -7711,18 +7747,24 @@ function transformRunForAndroid(run: any) {
                 }
               }
 
-              const updateSet: Record<string, any> = {
-                paceData: paceData.length > 0 ? { samples: paceData } : null,
-              };
+              const hasCanonicalPace = Array.isArray((existingRunRow as any)?.paceData) &&
+                (existingRunRow as any).paceData.length > 0;
+              const updateSet: Record<string, any> = {};
+              // Never null or replace a phone pace series from a webhook.
+              if (!hasCanonicalPace && paceData.length > 0) {
+                updateSet.paceData = { samples: paceData };
+              }
               if (!hasPhoneSplits) {
                 // Only set kmSplits when there's nothing to preserve from the phone
                 updateSet.kmSplits = normalizedSplits && normalizedSplits.length > 0 ? normalizedSplits : null;
               }
 
-              await db
-                .update(runs)
-                .set(updateSet)
-                .where(eq(runs.id, existingActivity.runId));
+              if (Object.keys(updateSet).length > 0) {
+                await db
+                  .update(runs)
+                  .set(updateSet)
+                  .where(eq(runs.id, existingActivity.runId));
+              }
               
               console.log(`[Garmin Webhook] Updated runs record ${existingActivity.runId} with detailed metrics${hasPhoneSplits ? ' (preserved phone kmSplits)' : normalizedSplits ? ` (${normalizedSplits.length} Garmin splits normalised)` : ' (no splits)'}`);
             }
@@ -12116,7 +12158,7 @@ function transformRunForAndroid(run: any) {
           if (phoneMatchedRun) {
             console.log(`[Companion] session/end — phone run ${phoneMatchedRun.id} already exists for this session, linking instead of duplicating`);
             await db.update(garminCompanionSessions)
-              .set({ linkedRunId: phoneMatchedRun.id } as any)
+              .set({ runId: phoneMatchedRun.id })
               .where(eq(garminCompanionSessions.sessionId, sessionId));
             newRunId = phoneMatchedRun.id;
           } else {
@@ -12276,7 +12318,7 @@ function transformRunForAndroid(run: any) {
 
           // Link the companion session to the run
           await db.update(garminCompanionSessions)
-            .set({ linkedRunId: newRunId } as any)
+            .set({ runId: newRunId })
             .where(eq(garminCompanionSessions.sessionId, sessionId));
 
           console.log(`[Companion] Created run record ${newRunId} from standalone Garmin session ${sessionId} (${distanceKm.toFixed(2)}km)`);
@@ -12353,34 +12395,20 @@ function transformRunForAndroid(run: any) {
           if (phoneMatch) {
             console.log(`[Offline Batch] Phone run ${phoneMatch.id} matches batch (${distKmCheck.toFixed(2)} km) — linking to phone run, will NOT overwrite existing rich data`);
             try {
-              // Tag the phone run with the watch session ID + source so future lookups match
+              // Link through garmin_companion_sessions. Do not mutate the canonical
+              // Android row's external identity or ID.
               await db.update(runs).set({
-                externalId:     sessionId,
-                externalSource: 'garmin_companion',
                 hasGarminData:  true,
               }).where(eq(runs.id, phoneMatch.id));
+              await db.update(garminCompanionSessions)
+                .set({ runId: phoneMatch.id })
+                .where(eq(garminCompanionSessions.sessionId, sessionId));
             } catch (updateError: any) {
-              // Handle race condition: if another request beat us to setting this externalId,
-              // just fetch the existing run that now has this sessionId as externalId
-              if (updateError.code === '23505') { // unique constraint violation
-                console.log(`[Offline Batch] Race condition: sessionId ${sessionId} already assigned to another run. Fetching that run instead.`);
-                const [existingWithId] = await db
-                  .select()
-                  .from(runs)
-                  .where(and(eq(runs.userId, userId), eq(runs.externalId, sessionId)));
-                if (existingWithId) {
-                  existingRun = existingWithId as any;
-                }
-              } else {
-                throw updateError;
-              }
+              throw updateError;
             }
-            
-            // If we didn't encounter a race condition, fetch the FULL run we just updated
-            if (!existingRun) {
-              const [fullPhoneRun] = await db.select().from(runs).where(eq(runs.id, phoneMatch.id));
-              existingRun = fullPhoneRun as any;
-            }
+
+            const [fullPhoneRun] = await db.select().from(runs).where(eq(runs.id, phoneMatch.id));
+            existingRun = fullPhoneRun as any;
           }
         }
       }
@@ -12487,47 +12515,10 @@ function transformRunForAndroid(run: any) {
         if (cadence > 0)             cadenceData.push({ time: elapsed_s, value: cadence });
       }
 
-      // ── Build km splits via time-proportional interpolation ─────────────
-      // Without per-point distance we estimate using total distance ÷ total time.
-      const totalDistKm  = (distanceM  || existingRun.distance || 0) / 1000;
-      const totalDurSec  = durationSec || existingRun.duration  || 0;
-      const kmSplits: any[] = [];
-
-      if (totalDistKm > 0.5 && totalDurSec > 0 && points.length > 1) {
-        const secPerKm   = totalDurSec / totalDistKm;
-        const kmCount    = Math.floor(totalDistKm);
-        let prevKmEndSec = 0;
-
-        for (let km = 1; km <= kmCount; km++) {
-          const kmEndSec   = Math.round(km * secPerKm);
-          const kmStartSec = prevKmEndSec;
-          const splitDur   = kmEndSec - kmStartSec;
-
-          // Average metrics from points in this km's time window
-          const kmPts = points.filter((p: number[]) => p[0] >= kmStartSec && p[0] <= kmEndSec);
-          const hrPts = kmPts.filter((p: number[]) => p[4] > 0);
-          const cadPts = kmPts.filter((p: number[]) => p[5] > 0);
-          const elevPts = kmPts.filter((p: number[]) => p[3] !== 0);
-
-          let elevGain = 0;
-          for (let i = 1; i < elevPts.length; i++) {
-            const delta = (elevPts[i][3] - elevPts[i-1][3]) / 10.0;
-            if (delta > 0.1) elevGain += delta;
-          }
-
-          kmSplits.push({
-            km,
-            distance: 1000,
-            duration: splitDur,
-            pace: splitDur,           // sec/km for this 1-km segment
-            hr:      hrPts.length  > 0 ? Math.round(hrPts.reduce((s: number, p: number[]) => s + p[4], 0) / hrPts.length)  : null,
-            cadence: cadPts.length > 0 ? Math.round(cadPts.reduce((s: number, p: number[]) => s + p[5], 0) / cadPts.length) : null,
-            elevGain: Math.round(elevGain * 10) / 10,
-          });
-
-          prevKmEndSec = kmEndSec;
-        }
-      }
+      // Our splits are always calculated from the companion's own recorded
+      // GPS/timeline. Never use Garmin Connect auto-laps or a total-time/total-
+      // distance interpolation, both of which can produce identical bad splits.
+      const kmSplits = computeKmSplitsFromGpsTrack(gpsTrack);
 
       // ── Recompute elevation gain from the altitude series ────────────────
       let computedAscent: number | null = null;
@@ -12544,8 +12535,8 @@ function transformRunForAndroid(run: any) {
       const finalAscent = totalAscent && totalAscent > 0 ? totalAscent : computedAscent;
 
       // ── Patch the run record ─────────────────────────────────────────────
-      // Priority: offline-batch data (per-second from watch GPS) > phone watchPaceSeries (smoothed BT)
-      //           > kmSplits stubs (avg per km only).
+      // The app record is canonical. Offline Garmin data fills genuine gaps but
+      // never replaces existing phone GPS, pace, cadence, or km split series.
       //
       // GPS track: phone has richer data (per-point speed, HR, cadence, inclineDegrees from live
       //            GPS) EXCEPT when the phone GPS track has NO speed values — in that case the batch
@@ -12555,8 +12546,7 @@ function transformRunForAndroid(run: any) {
       // Does the existing GPS track have at least some points with speed? (needed for map coloring)
       const existingGpsHasSpeed = hasExistingGps &&
         (_existingGpsRaw as any[]).some((pt: any) => (pt.speed ?? pt.pace ?? null) != null && (pt.speed ?? pt.pace ?? 0) > 0);
-      // Allow batch GPS to replace existing only when existing track has NO speed values.
-      const shouldUpdateGps = (!hasExistingGps || !existingGpsHasSpeed) && gpsTrack.length > 0;
+      const shouldUpdateGps = !hasExistingGps && gpsTrack.length > 0;
 
       const _existingHrRaw      = (existingRun as any).heartRateData;
       const _existingPaceRaw    = (existingRun as any).paceData;
@@ -12566,22 +12556,11 @@ function transformRunForAndroid(run: any) {
       // HR: prefer flat number[] (phone live data, 1 sample/sec) over object arrays.
       const hasExistingHr       = Array.isArray(_existingHrRaw)   && _existingHrRaw.length   > 0 && typeof _existingHrRaw[0]   !== 'object';
 
-      // paceData: the offline batch produces per-second {time,value} objects — this is the
-      // RICHEST source, showing real pace variation across the run.  Phone watchPaceSeries is a
-      // flat number[] of heavily-smoothed BT frames from Garmin (almost flat at avg pace).
-      // Rule: offline batch ALWAYS replaces:
-      //   • null / absent data
-      //   • kmSplits stubs (object array with ≤ 5 entries)
-      //   • phone watchPaceSeries (flat number[], regardless of entry count)
-      // Offline batch does NOT replace a previous offline-batch result (object array ≥ 20 entries).
-      const existingPaceIsObjectArray = Array.isArray(_existingPaceRaw) && _existingPaceRaw.length > 0 && typeof _existingPaceRaw[0] === 'object';
-      const existingPaceIsRichBatch   = existingPaceIsObjectArray && _existingPaceRaw.length >= 20;
-      const shouldUpdatePace          = !existingPaceIsRichBatch && paceData.length > 0;
+      const hasExistingPace = Array.isArray(_existingPaceRaw) && _existingPaceRaw.length > 0;
+      const shouldUpdatePace = !hasExistingPace && paceData.length > 0;
 
-      // Cadence: same logic as paceData
-      const existingCadIsObjectArray = Array.isArray(_existingCadRaw) && _existingCadRaw.length > 0 && typeof _existingCadRaw[0] === 'object';
-      const existingCadIsRichBatch   = existingCadIsObjectArray && _existingCadRaw.length >= 20;
-      const shouldUpdateCadence      = !existingCadIsRichBatch && cadenceData.length > 0;
+      const hasExistingCadence = Array.isArray(_existingCadRaw) && _existingCadRaw.length > 0;
+      const shouldUpdateCadence = !hasExistingCadence && cadenceData.length > 0;
 
       // Altitude: treat ANY object array ({time,value} or {km,value}) as absent so
       // the batch's GPS-based {time,value} series always replaces the kmSplits stub.
@@ -12604,11 +12583,11 @@ function transformRunForAndroid(run: any) {
         console.log(`[Offline Batch] Updating GPS track with batch data (${gpsTrack.length} pts) — existing had no speed values`);
       }
       if (hasExistingHr)          console.log(`[Offline Batch] Preserved existing HR data — watch batch skipped`);
-      if (!shouldUpdatePace && _existingPaceRaw)  console.log(`[Offline Batch] Preserved existing pace data (${(_existingPaceRaw as any[]).length} entries, richBatch=${existingPaceIsRichBatch}) — watch batch skipped`);
+      if (!shouldUpdatePace && _existingPaceRaw)  console.log(`[Offline Batch] Preserved canonical pace data (${(_existingPaceRaw as any[]).length} entries) — watch batch skipped`);
       if (!shouldUpdatePace && !_existingPaceRaw) { /* no existing, batch will write */ }
-      if (shouldUpdatePace)       console.log(`[Offline Batch] Updating paceData with batch per-second series (${paceData.length} pts) — existing was ${existingPaceIsRichBatch ? 'already-rich' : (Array.isArray(_existingPaceRaw) ? 'phone-flat/kmSplits' : 'absent')}`);
+      if (shouldUpdatePace)       console.log(`[Offline Batch] Filling missing paceData with batch series (${paceData.length} pts)`);
       if (hasExistingAlt)         console.log(`[Offline Batch] Preserved existing altitude data — watch batch skipped`);
-      if (!shouldUpdateCadence && _existingCadRaw) console.log(`[Offline Batch] Preserved existing cadence data (richBatch=${existingCadIsRichBatch}) — watch batch skipped`);
+      if (!shouldUpdateCadence && _existingCadRaw) console.log(`[Offline Batch] Preserved canonical cadence data — watch batch skipped`);
       if (hasExistingKmSplits) console.log(`[Offline Batch] Preserved existing km splits — watch batch skipped`);
 
       if (finalAscent != null) {

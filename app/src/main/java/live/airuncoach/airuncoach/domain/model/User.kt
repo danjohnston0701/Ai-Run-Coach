@@ -47,5 +47,7 @@ data class User(
     val trialExpiresAt: String? = null,
     // Currency inferred from timezone on login (e.g. "NZD", "GBP", "USD")
     // Set server-side and returned in the login response for localized pricing display.
-    val currency: String? = null
+    val currency: String? = null,
+    val timezone: String? = null,
+    val country: String? = null
 )

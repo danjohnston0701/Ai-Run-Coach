@@ -554,6 +554,7 @@ class RunSessionViewModel @Inject constructor(
                     }
                     putExtra(RunTrackingService.EXTRA_HAS_ROUTE, cfg.route != null)
                     putExtra(RunTrackingService.EXTRA_SESSION_TYPE, cfg.activityType.name.lowercase())
+                    putExtra(RunTrackingService.EXTRA_AI_COACH_ENABLED, cfg.aiCoachEnabled)
                     cfg.trainingPlanId?.let { id -> putExtra(RunTrackingService.EXTRA_TRAINING_PLAN_ID, id) }
                     cfg.workoutId?.let      { id -> putExtra(RunTrackingService.EXTRA_WORKOUT_ID, id) }
                     cfg.workoutType?.let    { t  -> putExtra(RunTrackingService.EXTRA_WORKOUT_TYPE, t) }
@@ -1900,7 +1901,11 @@ class RunSessionViewModel @Inject constructor(
                         isStruggling = runSession.value?.isStruggling,
                         
                         // ── Training Context ──────────────────────────────────────────────
-                        activityType = "run",
+                        activityType = runSession.value?.sessionType
+                            ?.trim()
+                            ?.lowercase()
+                            ?.takeIf { it == "walk" }
+                            ?: "run",
                         workoutType = runSession.value?.workoutType,
                         workoutIntensity = runSession.value?.workoutIntensity,
                         

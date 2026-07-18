@@ -117,7 +117,7 @@ fun MapMyRunSetupScreen(
     var isGroupRunEnabled by remember { mutableStateOf(isGroupRun) }
     var groupRunParticipants by remember { mutableStateOf<List<String>>(emptyList()) } // User IDs for group run participants
     // AI Coach should be ENABLED by default for better user experience
-    var isAiCoachEnabled by remember { mutableStateOf(true) }
+    var isAiCoachEnabled by remember { mutableStateOf(initialAiCoachEnabled) }
 
     // TODO: Load group run details if this is a group run screen
     // This would require injecting ApiService directly or creating a ViewModel for it
@@ -419,6 +419,7 @@ fun MapMyRunSetupScreen(
                                             targetHours = hoursInt,
                                             targetMinutes = minutesInt,
                                             targetSeconds = secondsInt,
+                                            aiCoachEnabled = isAiCoachEnabled,
                                             liveTrackingEnabled = isLiveTrackingEnabled,
                                             liveTrackingObservers = watchObservers,
                                             isGroupRun = isGroupRunEnabled,
@@ -477,6 +478,7 @@ fun MapMyRunSetupScreen(
                                             targetHours = hoursInt,
                                             targetMinutes = minutesInt,
                                             targetSeconds = secondsInt,
+                                            aiCoachEnabled = isAiCoachEnabled,
                                             liveTrackingEnabled = isLiveTrackingEnabled,
                                             liveTrackingObservers = phoneObservers,
                                             isGroupRun = isGroupRunEnabled,
@@ -534,6 +536,7 @@ fun MapMyRunSetupScreen(
                                     targetHours = hoursInt,
                                     targetMinutes = minutesInt,
                                     targetSeconds = secondsInt,
+                                    aiCoachEnabled = isAiCoachEnabled,
                                     liveTrackingEnabled = isLiveTrackingEnabled,
                                     liveTrackingObservers = finalObservers,
                                     isGroupRun = isGroupRunEnabled,

@@ -3699,8 +3699,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         // ===== PACE vs ELEVATION (dual-axis overlay) =====
-        val paceElevData = remember(run.routePoints, run.kmSplits) {
-            buildPaceElevationDualSeries(run.routePoints, run.kmSplits)
+        val paceElevData = remember(run.routePoints, run.altitudeData, run.distance) {
+            buildPaceElevationDualSeries(run)
         }
 
         if (paceElevData.paceY.size >= 2 && paceElevData.elevY.size >= 2) {
@@ -3729,8 +3729,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         // ===== CADENCE vs ELEVATION (dual-axis overlay) =====
-        val cadElevData = remember(run.routePoints) {
-            buildCadenceElevationDualSeries(run.routePoints)
+        val cadElevData = remember(run.routePoints, run.altitudeData, run.distance) {
+            buildCadenceElevationDualSeries(run)
         }
 
         if (cadElevData.paceY.size >= 2 && cadElevData.elevY.size >= 2) {
@@ -4864,12 +4864,10 @@ private data class DualSeriesData(
  * Build aligned pace + elevation series over distance.
  * Both series share the same x-axis (distance in km) and same number of data points.
  */
-private fun buildPaceElevationDualSeries(
-    points: List<LocationPoint>,
-    kmSplits: List<KmSplit>
-): DualSeriesData {
+private fun buildPaceElevationDualSeries(run: RunSession): DualSeriesData {
+    val points = run.routePoints
     val valid = points.filter {
-        it.latitude != 0.0 && it.longitude != 0.0 && it.altitude != null && it.speed != null && it.speed > 0.2f
+        it.latitude != 0.0 && it.longitude != 0.0 && it.speed != null && it.speed > 0.2f
     }
     if (valid.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
 
@@ -4891,7 +4889,6 @@ private fun buildPaceElevationDualSeries(
     while (i < valid.size) {
         val curr = valid[i]
 
-        val alt = curr.altitude ?: run { i += step; continue }
         val speed = curr.speed ?: run { i += step; continue }
         if (speed < 0.2f) { i += step; continue }
 
@@ -4901,7 +4898,11 @@ private fun buildPaceElevationDualSeries(
         val km = cumulativeDist[i] / 1000.0
         labels.add(String.format(java.util.Locale.US, "%.1f", km))
         paceOut.add(paceSecPerKm)
-        elevOut.add(alt.toDouble())
+        elevOut.add(canonicalElevationAt(
+            distanceFraction = cumulativeDist[i] / cumulativeDist.last().coerceAtLeast(1.0),
+            run = run,
+            point = curr
+        ))
 
         i += step
     }
@@ -4919,12 +4920,10 @@ private fun buildPaceElevationDualSeries(
 /**
  * Build aligned cadence + elevation series over distance.
  */
-private fun buildCadenceElevationDualSeries(
-    points: List<LocationPoint>
-): DualSeriesData {
+private fun buildCadenceElevationDualSeries(run: RunSession): DualSeriesData {
+    val points = run.routePoints
     val valid = points.filter {
-        it.latitude != 0.0 && it.longitude != 0.0 && it.altitude != null &&
-                it.cadence != null && it.cadence > 0
+        it.latitude != 0.0 && it.longitude != 0.0 && it.cadence != null && it.cadence > 0
     }
     if (valid.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
 
@@ -4956,13 +4955,16 @@ private fun buildCadenceElevationDualSeries(
         val idx = keepIndices[k]
         val curr = valid[idx]
 
-        val alt = curr.altitude ?: run { k += step; continue }
         val cad = curr.cadence ?: run { k += step; continue }
 
         val km = cumulativeDist[idx] / 1000.0
         labels.add(String.format(java.util.Locale.US, "%.1f", km))
         cadOut.add(cad.toDouble())
-        elevOut.add(alt.toDouble())
+        elevOut.add(canonicalElevationAt(
+            distanceFraction = cumulativeDist[idx] / cumulativeDist.last().coerceAtLeast(1.0),
+            run = run,
+            point = curr
+        ))
 
         k += step
     }
@@ -4975,6 +4977,26 @@ private fun buildCadenceElevationDualSeries(
         elevY = smoothY(medianFilter(iqrFilterAltitude(elevOut), 7), 11),
         labels = labels
     )
+}
+
+/**
+ * The elevation overlay must be identical across comparison charts. Prefer the
+ * watch's barometric altitude series, falling back to the route-point altitude.
+ * Both are sampled by their position along the same run, never by metric-specific
+ * filtered subsets such as "points that have cadence".
+ */
+private fun canonicalElevationAt(
+    distanceFraction: Double,
+    run: RunSession,
+    point: LocationPoint
+): Double {
+    val barometric = run.altitudeData
+    if (!barometric.isNullOrEmpty()) {
+        val sourceIndex = (distanceFraction.coerceIn(0.0, 1.0) * (barometric.size - 1)).roundToInt()
+            .coerceIn(0, barometric.lastIndex)
+        return barometric[sourceIndex].toDouble()
+    }
+    return point.altitude ?: 0.0
 }
 
 /* -------------------- DUAL-AXIS CHART CANVAS -------------------- */
@@ -5092,8 +5114,11 @@ private fun DualAxisChartCanvas(
 
             val leftPadPx = 50.dp.toPx()
             val rightPadPx = 50.dp.toPx()
-            val bottomPadPx = 22.dp.toPx()
-            val topPadPx = 8.dp.toPx()
+            // Reserve independent vertical bands for the Compose legend and the
+            // x ticks/title. This prevents the duplicate text collisions shown
+            // in the comparison cards.
+            val bottomPadPx = 44.dp.toPx()
+            val topPadPx = 28.dp.toPx()
 
             val w = size.width
             val h = size.height
@@ -5225,38 +5250,19 @@ private fun DualAxisChartCanvas(
                         textSize = 10.sp.toPx()
                         textAlign = android.graphics.Paint.Align.CENTER
                     }
-                    drawText(label, x, topPadPx + plotH + 16.dp.toPx(), p)
+                    drawText(label, x, topPadPx + plotH + 14.dp.toPx(), p)
                 }
             }
 
-            // Axis unit labels
+            // x-axis title uses a dedicated baseline below the tick labels.
             drawContext.canvas.nativeCanvas.apply {
-                // Left axis label
-                val pL = android.graphics.Paint().apply {
-                    isAntiAlias = true
-                    color = primaryColor.copy(alpha = 0.85f).toArgb()
-                    textSize = 10.sp.toPx()
-                    textAlign = android.graphics.Paint.Align.LEFT
-                }
-                drawText(primaryLabel, leftPadPx, 12.dp.toPx(), pL)
-
-                // Right axis label
-                val pR = android.graphics.Paint().apply {
-                    isAntiAlias = true
-                    color = secondaryColor.copy(alpha = 0.85f).toArgb()
-                    textSize = 10.sp.toPx()
-                    textAlign = android.graphics.Paint.Align.RIGHT
-                }
-                drawText(secondaryLabel, leftPadPx + plotW, 12.dp.toPx(), pR)
-
-                // x-axis title
                 val pX = android.graphics.Paint().apply {
                     isAntiAlias = true
                     color = Colors.textMuted.copy(alpha = 0.85f).toArgb()
                     textSize = 10.sp.toPx()
                     textAlign = android.graphics.Paint.Align.RIGHT
                 }
-                drawText(xTitle, leftPadPx + plotW, topPadPx + plotH + 16.dp.toPx(), pX)
+                drawText(xTitle, leftPadPx + plotW, topPadPx + plotH + 34.dp.toPx(), pX)
             }
         }
 

@@ -38,6 +38,7 @@ data class UploadRunRequest(
     val targetDistance: Double?,
     val targetTime: Long?,
     val wasTargetAchieved: Boolean?,
+    val aiCoachEnabled: Boolean? = null,
     val aiCoachingNotes: List<AiCoachingNote>? = null,
     // Extended elevation metrics
     val maxInclinePercent: Float? = null,
@@ -103,5 +104,13 @@ data class UploadRunRequest(
     val strideLengthData: List<Float>? = null,
     val runningPowerData: List<Int>? = null,      // watts
     val respirationRateData: List<Float>? = null, // br/min
-    val bearingData: List<Float>? = null
+    val bearingData: List<Float>? = null,
+    val minCadence: Int? = null,
+    val avgHeartRateZone: Int? = null,
+    val timeInZone1: Int? = null,
+    val timeInZone2: Int? = null,
+    val timeInZone3: Int? = null,
+    val timeInZone4: Int? = null,
+    val timeInZone5: Int? = null,
+    val stepsData: List<Int>? = null
 )

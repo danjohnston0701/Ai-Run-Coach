@@ -100,7 +100,6 @@ const TIMEZONE_TO_COUNTRY_MAP: Record<string, string> = {
   "Australia/Hobart": "AU",
   "Pacific/Auckland": "NZ",
   "Pacific/Fiji": "FJ",
-  "Pacific/Auckland": "NZ",
   "Pacific/Tongatapu": "TO",
   "Pacific/Apia": "WS",
   "Pacific/Kiritimati": "KI",
@@ -136,7 +135,17 @@ export function resolveTimezoneAndCountry(deviceTimezone: string): {
     deviceTimezone
   );
 
-  const timezone = isValidTimezone ? deviceTimezone : "UTC";
+  let timezone = "UTC";
+  if (isValidTimezone) {
+    try {
+      // The shape check above is not sufficient: values such as
+      // "America/NotARealZone" also match it.
+      new Intl.DateTimeFormat("en-US", { timeZone: deviceTimezone }).format();
+      timezone = deviceTimezone;
+    } catch {
+      timezone = "UTC";
+    }
+  }
   const country = resolveCountryFromTimezone(timezone);
 
   return { timezone, country };

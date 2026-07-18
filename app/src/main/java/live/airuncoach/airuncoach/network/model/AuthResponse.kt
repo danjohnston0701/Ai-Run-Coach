@@ -132,6 +132,15 @@ data class AuthResponse(
     @SerializedName("trialExpiresAt")
     val trialExpiresAt: String? = null,
 
+    @SerializedName("currency")
+    val currency: String? = null,
+
+    @SerializedName("timezone")
+    val timezone: String? = null,
+
+    @SerializedName("country")
+    val country: String? = null,
+
     // Email verification — set to true when registration requires OTP confirmation
     @SerializedName("requiresVerification")
     val requiresVerification: Boolean? = null,
@@ -178,7 +187,10 @@ data class AuthResponse(
                 coachHalfKmCheckInEnabled = coachHalfKmCheckInEnabled,
                 coachKmSplitIntervalKm = coachKmSplitIntervalKm,
                 injuries = injuries,
-                trialExpiresAt = trialExpiresAt
+                trialExpiresAt = trialExpiresAt,
+                currency = currency,
+                timezone = timezone,
+                country = country
             )
         } else {
             null

@@ -155,10 +155,15 @@ class RunTrackingService : Service(), SensorEventListener {
     private var pendingKmSplitCoaching: KmSplit? = null
     private var startTime: Long = 0
     private var lastSplitTime: Long = 0
+    // Watch timer at the last km boundary. For companion-initiated sessions,
+    // this keeps our computed splits on Garmin's paused-session clock instead
+    // of the phone wall clock.
+    private var lastSplitWatchElapsedSeconds: Int = 0
     private var totalDistance: Double = 0.0
     private var maxSpeed: Float = 0f
     private var currentPace: String = "0:00" // Real-time/instant pace based on recent GPS
     private var isTracking = false
+    private var aiCoachEnabledForSession = true
     // Watch speed smoothing — exponential moving average applied to raw Garmin GPS speed
     // before converting to pace, to suppress brief GPS jitter spikes (which would otherwise
     // appear as unrealistically fast pace e.g. "2:04" when the user is actually stationary).
@@ -180,6 +185,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var currentCadence: Int = 0
     private var currentHeartRate: Int = 0
     private var maxHeartRate: Int = 0         // Peak HR seen during this run
+    private var minHeartRate: Int = 0         // Lowest confident HR seen during this run
     private var heartRateSum: Long = 0        // Running sum for true average calculation
     private var heartRateSampleCount: Int = 0 // Number of HR samples taken
 
@@ -225,6 +231,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private var cadenceSum: Long = 0
     private var cadenceCount: Int = 0
     private var maxCadenceValue: Int = 0
+    private var minCadenceValue: Int = 0
+    private val watchZoneSeconds = IntArray(6)
+    private var watchZoneSampleCount: Int = 0
+    private var watchZoneSum: Int = 0
 
     // ── Watch Running Dynamics accumulators (reset at run start) ──────────────
     // Accumulated each 2-second frame from the watch; averaged at run end.
@@ -260,6 +270,8 @@ class RunTrackingService : Service(), SensorEventListener {
     private val watchSlSeries       = mutableListOf<Float>()    // m
     private val watchPwrSeries      = mutableListOf<Int>()      // watts
     private val watchRespSeries     = mutableListOf<Float>()    // br/min
+    private val watchBearingSeries  = mutableListOf<Float>()    // degrees
+    private val watchStepsSeries    = mutableListOf<Int>()      // estimated steps per frame
 
     // Struggle detection - baseline is session average pace, updated every 500m
     private var baselinePace: Float = 0f
@@ -671,6 +683,7 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_TARGET_TIME = "EXTRA_TARGET_TIME"
         const val EXTRA_HAS_ROUTE = "EXTRA_HAS_ROUTE"
         const val EXTRA_SESSION_TYPE = "EXTRA_SESSION_TYPE"
+        const val EXTRA_AI_COACH_ENABLED = "EXTRA_AI_COACH_ENABLED"
         const val EXTRA_ACTIVE_RUN = "extra_active_run"
         // Coaching programme context
         const val EXTRA_TRAINING_PLAN_ID = "EXTRA_TRAINING_PLAN_ID"
@@ -1035,6 +1048,7 @@ class RunTrackingService : Service(), SensorEventListener {
             intent?.getStringExtra(EXTRA_SESSION_TYPE)?.let { requestedType ->
                 currentActivityType = if (requestedType.equals("walk", ignoreCase = true)) "walk" else "run"
             }
+            aiCoachEnabledForSession = intent?.getBooleanExtra(EXTRA_AI_COACH_ENABLED, true) ?: true
             navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
             // Coaching programme context — only overwrite if the intent carries plan extras.
             // ACTION_START_TRACKING_FROM_WATCH and ACTION_START_TRACKING (from ViewModel's
@@ -1203,6 +1217,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // Resetting it here would erase the flag before we can use it.
         startTime = System.currentTimeMillis()
         lastSplitTime = startTime
+        lastSplitWatchElapsedSeconds = 0
         totalPausedMs = 0      // Reset pause tracking for new run
         pauseStartTime = 0
         splitPausedMs = 0
@@ -1241,8 +1256,10 @@ class RunTrackingService : Service(), SensorEventListener {
         cadenceSum = 0
         cadenceCount = 0
         maxCadenceValue = 0
+        minCadenceValue = 0
         currentHeartRate = 0
         maxHeartRate = 0
+        minHeartRate = 0
         recentHrReadings.clear()
         lastConfidentHr = 0
         heartRateSum = 0L
@@ -1261,12 +1278,14 @@ class RunTrackingService : Service(), SensorEventListener {
         watchLatestVo2Max = 0f; watchLatestPressure = 0f; watchLatestBearing = 0f
         watchPwrSum  = 0f;   watchPwrCount  = 0;   watchMaxPwr  = 0
         watchRespSum = 0f;   watchRespCount = 0
+        watchZoneSeconds.fill(0); watchZoneSampleCount = 0; watchZoneSum = 0
         // Reset time-series lists
         watchHrSeries.clear();      watchCadenceSeries.clear()
         watchPaceSeries.clear();    watchAltSeries.clear();     watchGctSeries.clear()
         watchGcbSeries.clear();     watchVoSeries.clear()
         watchVrSeries.clear();      watchSlSeries.clear()
         watchPwrSeries.clear();     watchRespSeries.clear()
+        watchBearingSeries.clear(); watchStepsSeries.clear()
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
@@ -2401,6 +2420,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 heartRateSum += validatedHr
                 heartRateSampleCount++
                 maxHeartRate = maxOf(maxHeartRate, validatedHr)
+                minHeartRate = if (minHeartRate == 0) validatedHr else minOf(minHeartRate, validatedHr)
                 if (kotlin.math.abs(validatedHr - prevHr) > 10) {
                     Log.d("RunTrackingService", "HR change: $prevHr → $validatedHr bpm")
                 }
@@ -2415,6 +2435,12 @@ class RunTrackingService : Service(), SensorEventListener {
             cadenceSum += frame.cadence
             cadenceCount++
             maxCadenceValue = maxOf(maxCadenceValue, frame.cadence)
+            minCadenceValue = if (minCadenceValue == 0) frame.cadence else minOf(minCadenceValue, frame.cadence)
+        }
+        if (frame.heartRateZone in 1..5) {
+            watchZoneSeconds[frame.heartRateZone] += 2
+            watchZoneSampleCount++
+            watchZoneSum += frame.heartRateZone
         }
 
         // ── Running Dynamics (accumulate for averages at run end) ─────────────
@@ -2484,6 +2510,8 @@ class RunTrackingService : Service(), SensorEventListener {
         if (frame.strideLength > 0.1f)     watchSlSeries.add(frame.strideLength)
         if (frame.runningPower > 0)        watchPwrSeries.add(frame.runningPower)
         if (frame.respirationRate > 0f)    watchRespSeries.add(frame.respirationRate)
+        frame.bearingDeg?.takeIf { it >= 0f }?.let { watchBearingSeries.add(it) }
+        if (frame.cadence > 0) watchStepsSeries.add((frame.cadence / 30f).toInt())
 
         // ── Update live RunSession ─────────────────────────────────────────────
         _currentRunSession.value = _currentRunSession.value?.copy(
@@ -2907,12 +2935,17 @@ class RunTrackingService : Service(), SensorEventListener {
 
         if (currentKm > lastKmSplit) {
             val now = System.currentTimeMillis()
-            val splitTime = (now - lastSplitTime) - splitPausedMs  // Exclude paused time from this split
+            val splitTime = if (wasRunStartedByWatch && watchElapsedSeconds > 0) {
+                ((watchElapsedSeconds - lastSplitWatchElapsedSeconds).coerceAtLeast(0) * 1000L)
+            } else {
+                (now - lastSplitTime) - splitPausedMs  // Exclude paused time from this split
+            }
             val splitSpeedKmh = if (splitTime > 0) (1000f / (splitTime / 1000f)) * 3.6f else 0f // m/s → km/h
             val split = KmSplit(km = currentKm, time = splitTime, pace = calculatePace(splitSpeedKmh))
             kmSplits.add(split)
             lastKmSplit = currentKm
             lastSplitTime = now
+            lastSplitWatchElapsedSeconds = watchElapsedSeconds
             splitPausedMs = 0  // Reset pause accumulator for next split
             Log.d("RunTrackingService", "Reached ${currentKm}km split")
 
@@ -3165,7 +3198,7 @@ class RunTrackingService : Service(), SensorEventListener {
             strideLengthData           = watchSlSeries.toList().takeIf { it.isNotEmpty() },
             runningPowerData           = watchPwrSeries.toList().takeIf { it.isNotEmpty() },
             respirationRateData        = watchRespSeries.toList().takeIf { it.isNotEmpty() },
-            bearingData                = null  // GPS bearing stored per-point in gpsTrack
+            bearingData                = watchBearingSeries.toList().takeIf { it.isNotEmpty() }
         )
 
         // ── Broadcast to Garmin watch (Scenario 2) ────────────────────────
@@ -3595,7 +3628,7 @@ class RunTrackingService : Service(), SensorEventListener {
             avgPace = runSession.averagePace ?: "0:00",
             avgHeartRate = computedAvgHR,
             maxHeartRate = if (maxHeartRate > 0) maxHeartRate else null,
-            minHeartRate = null, // TODO: Track min HR (need to track separately)
+            minHeartRate = minHeartRate.takeIf { it > 0 },
             calories = runSession.calories,
             cadence = if (runSession.cadence > 0) runSession.cadence else null,
             maxCadence = runSession.maxCadence,
@@ -3621,6 +3654,7 @@ class RunTrackingService : Service(), SensorEventListener {
             targetDistance = targetDistance?.let { it / 1000.0 }, // Convert metres → km for upload
             targetTime = targetTime,
             wasTargetAchieved = calculateWasTargetAchieved(),
+            aiCoachEnabled = aiCoachEnabledForSession,
             // Struggle points detected during the run
             strugglePoints = runSession.strugglePoints,
             // AI coaching notes from the run
@@ -3631,12 +3665,13 @@ class RunTrackingService : Service(), SensorEventListener {
             minElevation = runSession.minElevation,
             maxElevation = runSession.maxElevation,
             // Additional metrics
-            totalSteps = runSession.totalSteps,
+            totalSteps = runSession.totalSteps
+                ?: ((runSession.cadence * (runSession.duration / 60_000.0)).toInt()).takeIf { it > 0 },
             activeCalories = runSession.activeCalories,
-            avgSpeed = runSession.avgSpeed,
+            avgSpeed = runSession.averageSpeed.takeIf { it > 0f },
             maxSpeed = runSession.maxSpeed,
-            movingTime = runSession.movingTime,
-            elapsedTime = runSession.elapsedTime,
+            movingTime = runSession.movingTime ?: (runSession.duration / 1000),
+            elapsedTime = runSession.elapsedTime ?: (runSession.duration / 1000),
             avgStrideLength = runSession.avgStrideLength,
             // Weather at start — persisted for weather impact analysis
             weatherData = runSession.weatherAtStart,
@@ -3651,8 +3686,8 @@ class RunTrackingService : Service(), SensorEventListener {
             // Group run context if this run is part of a group
             groupRunId = groupRunId,
             // Mark as Garmin data if run was completed on the watch
-            hasGarminData = isWatchRun,
-            garminDeviceName = deviceName,
+            hasGarminData = hasGarminData || isWatchRun,
+            garminDeviceName = garminDeviceName ?: deviceName,
             // ── Running Dynamics (averaged over the full run from watch frames) ──
             avgGroundContactTime     = if (watchGctCount > 0) watchGctSum / watchGctCount else null,
             minGroundContactTime     = null, // tracked per-frame; server derives min from time-series
@@ -3687,6 +3722,15 @@ class RunTrackingService : Service(), SensorEventListener {
             strideLengthData         = watchSlSeries.takeIf { it.isNotEmpty() },
             runningPowerData         = watchPwrSeries.takeIf { it.isNotEmpty() },
             respirationRateData      = watchRespSeries.takeIf { it.isNotEmpty() },
+            bearingData              = watchBearingSeries.takeIf { it.isNotEmpty() },
+            minCadence               = minCadenceValue.takeIf { it > 0 },
+            avgHeartRateZone         = if (watchZoneSampleCount > 0) watchZoneSum / watchZoneSampleCount else null,
+            timeInZone1              = watchZoneSeconds[1].takeIf { it > 0 },
+            timeInZone2              = watchZoneSeconds[2].takeIf { it > 0 },
+            timeInZone3              = watchZoneSeconds[3].takeIf { it > 0 },
+            timeInZone4              = watchZoneSeconds[4].takeIf { it > 0 },
+            timeInZone5              = watchZoneSeconds[5].takeIf { it > 0 },
+            stepsData                = watchStepsSeries.takeIf { it.isNotEmpty() },
         )
 
         // Retry up to 3 times with exponential backoff for server errors

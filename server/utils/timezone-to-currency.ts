@@ -201,8 +201,8 @@ export function inferCurrencyFromTimezone(timezone: string | null | undefined): 
 
   // Pacific
   if (tz.startsWith("pacific/")) {
-    if (tz.includes("auckland") || tz.includes("fiji") || tz.includes("tongatapu")) return "NZD";
     if (tz.includes("fiji")) return "FJD";
+    if (tz.includes("auckland") || tz.includes("tongatapu")) return "NZD";
     return "AUD"; // Default to AUD for other Pacific zones
   }
 
