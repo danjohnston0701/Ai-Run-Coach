@@ -3565,10 +3565,33 @@ private fun formatPaceMinSec(paceSecPerKm: Double): String {
 private enum class ChartMode { Time, Distance }
 
 private data class LabeledSeries(
-    val x: List<Double>,        // normalized x domain (we’ll use index-based layout anyway)
+    val x: List<Double>,
     val y: List<Double>,
     val labels: List<String>
 )
+
+/** The single horizontal scale shared by every chart in one run summary. */
+private data class RunXAxis(
+    val mode: ChartMode,
+    val end: Double,
+    val ticks: List<Double>
+) {
+    val title get() = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)"
+
+    fun format(value: Double): String = if (mode == ChartMode.Time) {
+        value.roundToInt().toString()
+    } else {
+        String.format(java.util.Locale.US, "%.1f", value)
+    }
+}
+
+private fun buildRunXAxis(run: RunSession, mode: ChartMode): RunXAxis {
+    val end = when (mode) {
+        ChartMode.Time -> (run.elapsedTime ?: (run.duration / 1000L)).toDouble() / 60.0
+        ChartMode.Distance -> run.distance / 1000.0
+    }.coerceAtLeast(0.1)
+    return RunXAxis(mode = mode, end = end, ticks = List(5) { end * it / 4.0 })
+}
 
 /* --------------------------------- SECTION -------------------------------- */
 
@@ -3583,6 +3606,9 @@ private fun ChartsSectionFlagship(run: RunSession) {
 
         var mode by remember { mutableStateOf(ChartMode.Time) }
         ChartModeToggleFlagship(mode = mode, onMode = { mode = it })
+        val xAxis = remember(run.distance, run.duration, run.elapsedTime, mode) {
+            buildRunXAxis(run, mode)
+        }
 
         val paceSeries = remember(run.routePoints, run.kmSplits, mode) {
             buildPaceSeries(run.routePoints, run.kmSplits, mode)
@@ -3602,7 +3628,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                 RunLineChartCanvas(
                     series = paceSeries,
                     lineColor = Colors.primary,
-                    xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                    xAxis = xAxis,
                     yFormatter = { secondsPerKm -> formatPaceSeconds(secondsPerKm.toLong()) },
                     yUnitHint = "min/km",
                     invertY = true  // Fastest pace (lower number) at top
@@ -3635,7 +3661,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     RunLineChartCanvas(
                         series = elevationSeries,
                         lineColor = Colors.success,
-                        xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        xAxis = xAxis,
                         yFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
                         yUnitHint = "m",
                         isElevation = true
@@ -3661,7 +3687,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                 RunLineChartCanvas(
                     series = hrSeries,
                     lineColor = Colors.error,
-                    xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                    xAxis = xAxis,
                     yFormatter = { v -> "${v.roundToInt()}" },
                     yUnitHint = "bpm"
                 )
@@ -3690,7 +3716,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
                 RunLineChartCanvas(
                     series = cadenceSeries,
                     lineColor = Color(0xFF9C27B0),
-                    xTitle = if (mode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                    xAxis = xAxis,
                     yFormatter = { v -> "${v.roundToInt()}" },
                     yUnitHint = "spm",
                     isCadence = true
@@ -3699,8 +3725,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         // ===== PACE vs ELEVATION (dual-axis overlay) =====
-        val paceElevData = remember(run.routePoints, run.altitudeData, run.distance) {
-            buildPaceElevationDualSeries(run)
+        val paceElevData = remember(run.routePoints, run.altitudeData, run.distance, run.duration, run.elapsedTime, mode) {
+            buildPaceElevationDualSeries(run, mode)
         }
 
         if (paceElevData.paceY.size >= 2 && paceElevData.elevY.size >= 2) {
@@ -3714,11 +3740,11 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     primaryY = paceElevData.paceY,
                     secondaryY = paceElevData.elevY,
                     labels = paceElevData.labels,
+                    xAxis = xAxis,
                     primaryColor = Colors.primary,
                     secondaryColor = Colors.success,
                     primaryLabel = "Pace",
                     secondaryLabel = "Elevation",
-                    xTitle = "Distance (km)",
                     primaryFormatter = { v -> formatPaceSeconds(v.toLong()) },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
                     fillSecondary = true,
@@ -3729,8 +3755,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         // ===== CADENCE vs ELEVATION (dual-axis overlay) =====
-        val cadElevData = remember(run.routePoints, run.altitudeData, run.distance) {
-            buildCadenceElevationDualSeries(run)
+        val cadElevData = remember(run.routePoints, run.altitudeData, run.distance, run.duration, run.elapsedTime, mode) {
+            buildCadenceElevationDualSeries(run, mode)
         }
 
         if (cadElevData.paceY.size >= 2 && cadElevData.elevY.size >= 2) {
@@ -3745,11 +3771,11 @@ private fun ChartsSectionFlagship(run: RunSession) {
                     primaryY = cadElevData.paceY,
                     secondaryY = cadElevData.elevY,
                     labels = cadElevData.labels,
+                    xAxis = xAxis,
                     primaryColor = Color(0xFF8B5CF6),
                     secondaryColor = Colors.success,
                     primaryLabel = "spm",
                     secondaryLabel = "m",
-                    xTitle = "Distance (km)",
                     primaryFormatter = { v -> "${v.roundToInt()}" },
                     secondaryFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
                     fillSecondary = true,
@@ -4038,7 +4064,7 @@ private fun calculateYAxisBounds(
 private fun RunLineChartCanvas(
     series: LabeledSeries,
     lineColor: Color,
-    xTitle: String,
+    xAxis: RunXAxis,
     yFormatter: (Double) -> String,
     yUnitHint: String,
     invertY: Boolean = false,  // When true, lower Y values at top (for pace: faster = top)
@@ -4115,7 +4141,9 @@ private fun RunLineChartCanvas(
             val plotH = (h - topPadPx - bottomPadPx).coerceAtLeast(1f)
 
             fun xFor(i: Int): Float {
-                return leftPadPx + (i.toFloat() / (n - 1).toFloat()) * plotW
+                val sampleX = series.labels.getOrNull(i)?.toDoubleOrNull()
+                    ?: (i.toDouble() / (n - 1).coerceAtLeast(1) * xAxis.end)
+                return leftPadPx + (sampleX / xAxis.end).coerceIn(0.0, 1.0).toFloat() * plotW
             }
 
             fun yFor(v: Double): Float {
@@ -4203,15 +4231,10 @@ private fun RunLineChartCanvas(
             drawCircle(color = lineColor, radius = 4.dp.toPx(), center = end)
             drawCircle(color = Colors.backgroundRoot, radius = 2.dp.toPx(), center = end)
 
-            // --- x labels (evenly spaced across the ACTUAL axis values, not data indices) ---
-            // Show 4-5 evenly spaced labels using the real label values (km or minutes)
-            val numXLabels = if (n > 10) 5 else 3
-            val xLabelIndices = (0 until numXLabels).map { tick ->
-                ((tick.toFloat() / (numXLabels - 1).toFloat()) * (n - 1)).roundToInt().coerceIn(0, n - 1)
-            }.distinct()
-            xLabelIndices.forEach { idx ->
-                val label = series.labels.getOrNull(idx) ?: idx.toString()
-                val x = xFor(idx)
+            // Every card uses the same run-level ticks, even when this metric
+            // has fewer samples or ends before another metric's final sample.
+            xAxis.ticks.forEach { tick ->
+                val x = leftPadPx + (tick / xAxis.end).toFloat() * plotW
                 drawContext.canvas.nativeCanvas.apply {
                     val p = android.graphics.Paint().apply {
                         isAntiAlias = true
@@ -4219,7 +4242,7 @@ private fun RunLineChartCanvas(
                         textSize = 11.sp.toPx()
                         textAlign = android.graphics.Paint.Align.CENTER
                     }
-                    drawText(label, x, topPadPx + plotH + 14.dp.toPx(), p)
+                    drawText(xAxis.format(tick), x, topPadPx + plotH + 14.dp.toPx(), p)
                 }
             }
 
@@ -4242,7 +4265,7 @@ private fun RunLineChartCanvas(
                     textSize = 11.sp.toPx()
                     textAlign = android.graphics.Paint.Align.RIGHT
                 }
-                drawText(xTitle, leftPadPx + plotW, topPadPx + plotH + 30.dp.toPx(), p)
+                drawText(xAxis.title, leftPadPx + plotW, topPadPx + plotH + 30.dp.toPx(), p)
             }
         }
     }
@@ -4864,7 +4887,7 @@ private data class DualSeriesData(
  * Build aligned pace + elevation series over distance.
  * Both series share the same x-axis (distance in km) and same number of data points.
  */
-private fun buildPaceElevationDualSeries(run: RunSession): DualSeriesData {
+private fun buildPaceElevationDualSeries(run: RunSession, mode: ChartMode): DualSeriesData {
     val points = run.routePoints
     val valid = points.filter {
         it.latitude != 0.0 && it.longitude != 0.0 && it.speed != null && it.speed > 0.2f
@@ -4895,8 +4918,13 @@ private fun buildPaceElevationDualSeries(run: RunSession): DualSeriesData {
         // Pace in seconds per km
         val paceSecPerKm = 1000.0 / speed.toDouble()
 
-        val km = cumulativeDist[i] / 1000.0
-        labels.add(String.format(java.util.Locale.US, "%.1f", km))
+        val xValue = if (mode == ChartMode.Time) {
+            val firstTimestamp = valid.first().timestamp
+            ((curr.timestamp - firstTimestamp).coerceAtLeast(0L) / 60_000.0)
+        } else {
+            cumulativeDist[i] / 1000.0
+        }
+        labels.add(if (mode == ChartMode.Time) xValue.roundToInt().toString() else String.format(java.util.Locale.US, "%.1f", xValue))
         paceOut.add(paceSecPerKm)
         elevOut.add(canonicalElevationAt(
             distanceFraction = cumulativeDist[i] / cumulativeDist.last().coerceAtLeast(1.0),
@@ -4920,7 +4948,7 @@ private fun buildPaceElevationDualSeries(run: RunSession): DualSeriesData {
 /**
  * Build aligned cadence + elevation series over distance.
  */
-private fun buildCadenceElevationDualSeries(run: RunSession): DualSeriesData {
+private fun buildCadenceElevationDualSeries(run: RunSession, mode: ChartMode): DualSeriesData {
     val points = run.routePoints
     val valid = points.filter {
         it.latitude != 0.0 && it.longitude != 0.0 && it.cadence != null && it.cadence > 0
@@ -4957,8 +4985,13 @@ private fun buildCadenceElevationDualSeries(run: RunSession): DualSeriesData {
 
         val cad = curr.cadence ?: run { k += step; continue }
 
-        val km = cumulativeDist[idx] / 1000.0
-        labels.add(String.format(java.util.Locale.US, "%.1f", km))
+        val xValue = if (mode == ChartMode.Time) {
+            val firstTimestamp = valid.first().timestamp
+            ((curr.timestamp - firstTimestamp).coerceAtLeast(0L) / 60_000.0)
+        } else {
+            cumulativeDist[idx] / 1000.0
+        }
+        labels.add(if (mode == ChartMode.Time) xValue.roundToInt().toString() else String.format(java.util.Locale.US, "%.1f", xValue))
         cadOut.add(cad.toDouble())
         elevOut.add(canonicalElevationAt(
             distanceFraction = cumulativeDist[idx] / cumulativeDist.last().coerceAtLeast(1.0),
@@ -5010,11 +5043,11 @@ private fun DualAxisChartCanvas(
     primaryY: List<Double>,
     secondaryY: List<Double>,
     labels: List<String>,
+    xAxis: RunXAxis,
     primaryColor: Color,
     secondaryColor: Color,
     primaryLabel: String,
     secondaryLabel: String,
-    xTitle: String,
     primaryFormatter: (Double) -> String,
     secondaryFormatter: (Double) -> String,
     fillSecondary: Boolean = true,
@@ -5125,7 +5158,11 @@ private fun DualAxisChartCanvas(
             val plotW = (w - leftPadPx - rightPadPx).coerceAtLeast(1f)
             val plotH = (h - topPadPx - bottomPadPx).coerceAtLeast(1f)
 
-            fun xFor(i: Int): Float = leftPadPx + (i.toFloat() / (n - 1).toFloat()) * plotW
+            fun xFor(i: Int): Float {
+                val sampleX = labels.getOrNull(i)?.toDoubleOrNull()
+                    ?: (i.toDouble() / (n - 1).coerceAtLeast(1) * xAxis.end)
+                return leftPadPx + (sampleX / xAxis.end).coerceIn(0.0, 1.0).toFloat() * plotW
+            }
             fun priYFor(v: Double): Float {
                 val t = ((v - priMin) / priRange).toFloat()
                 // When inverted: lower values (faster pace) at top, higher values (slower) at bottom
@@ -5235,14 +5272,10 @@ private fun DualAxisChartCanvas(
             drawCircle(color = primaryColor, radius = 4.dp.toPx(), center = priEnd)
             drawCircle(color = Colors.backgroundRoot, radius = 2.dp.toPx(), center = priEnd)
 
-            // --- x labels (evenly spaced across chart) ---
-            val numXLabels = if (n > 10) 5 else 3
-            val xLabelIndices = (0 until numXLabels).map { tick ->
-                ((tick.toFloat() / (numXLabels - 1).toFloat()) * (n - 1)).roundToInt().coerceIn(0, n - 1)
-            }.distinct()
-            xLabelIndices.forEach { idx ->
-                val label = labels.getOrNull(idx) ?: idx.toString()
-                val x = xFor(idx)
+            // Comparison charts use the same run-level tick positions as all
+            // standalone charts, not the boundaries of their filtered samples.
+            xAxis.ticks.forEach { tick ->
+                val x = leftPadPx + (tick / xAxis.end).toFloat() * plotW
                 drawContext.canvas.nativeCanvas.apply {
                     val p = android.graphics.Paint().apply {
                         isAntiAlias = true
@@ -5250,7 +5283,7 @@ private fun DualAxisChartCanvas(
                         textSize = 10.sp.toPx()
                         textAlign = android.graphics.Paint.Align.CENTER
                     }
-                    drawText(label, x, topPadPx + plotH + 14.dp.toPx(), p)
+                    drawText(xAxis.format(tick), x, topPadPx + plotH + 14.dp.toPx(), p)
                 }
             }
 
@@ -5262,7 +5295,7 @@ private fun DualAxisChartCanvas(
                     textSize = 10.sp.toPx()
                     textAlign = android.graphics.Paint.Align.RIGHT
                 }
-                drawText(xTitle, leftPadPx + plotW, topPadPx + plotH + 34.dp.toPx(), pX)
+                drawText(xAxis.title, leftPadPx + plotW, topPadPx + plotH + 34.dp.toPx(), pX)
             }
         }
 
@@ -7816,6 +7849,9 @@ private fun DynamicsTabContent(
     hasDynamicsTab: Boolean = false,
 ) {
     var chartMode by remember { mutableStateOf(ChartMode.Time) }
+    val xAxis = remember(run.distance, run.duration, run.elapsedTime, chartMode) {
+        buildRunXAxis(run, chartMode)
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -7869,7 +7905,7 @@ private fun DynamicsTabContent(
                     RunLineChartCanvas(
                         series = voSeries,
                         lineColor = Color(0xFF06B6D4),
-                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        xAxis = xAxis,
                         yFormatter = { v -> String.format(java.util.Locale.US, "%.1f", v) },
                         yUnitHint = "cm"
                     )
@@ -7908,7 +7944,7 @@ private fun DynamicsTabContent(
                     RunLineChartCanvas(
                         series = gctSeries,
                         lineColor = Color(0xFFF97316),
-                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        xAxis = xAxis,
                         yFormatter = { v -> "${v.roundToInt()}" },
                         yUnitHint = "ms"
                     )
@@ -7946,7 +7982,7 @@ private fun DynamicsTabContent(
                     RunLineChartCanvas(
                         series = strideSeries,
                         lineColor = Color(0xFF10B981),
-                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        xAxis = xAxis,
                         yFormatter = { v -> String.format(java.util.Locale.US, "%.2f", v) },
                         yUnitHint = "m"
                     )
@@ -8027,7 +8063,7 @@ private fun DynamicsTabContent(
                     RunLineChartCanvas(
                         series = powerSeries,
                         lineColor = Color(0xFFEAB308),
-                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        xAxis = xAxis,
                         yFormatter = { v -> "${v.roundToInt()}" },
                         yUnitHint = "W"
                     )
@@ -8050,7 +8086,7 @@ private fun DynamicsTabContent(
                     RunLineChartCanvas(
                         series = respSeries,
                         lineColor = Color(0xFF8B5CF6),
-                        xTitle = if (chartMode == ChartMode.Time) "Time (min)" else "Distance (km)",
+                        xAxis = xAxis,
                         yFormatter = { v -> String.format(java.util.Locale.US, "%.0f", v) },
                         yUnitHint = "br/min"
                     )

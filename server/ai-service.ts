@@ -2017,8 +2017,10 @@ function getOptimalCadenceForPace(
 
 export async function generateCadenceCoaching(params: {
   cadence: number;
-  strideLength: number;
-  strideZone: StrideZone;
+  strideLength?: number;
+  strideZone?: StrideZone;
+  cadenceProximityTier?: 'ON_TARGET' | 'CLOSE' | 'NEEDS_WORK';
+  cadenceDeviationPercent?: number;
   currentPace: string;
   speed: number;
   distance: number;
@@ -2027,10 +2029,11 @@ export async function generateCadenceCoaching(params: {
   userHeight?: number;
   userWeight?: number;
   userAge?: number;
+  optimalCadenceTarget?: number;
   optimalCadenceMin: number;
   optimalCadenceMax: number;
-  optimalStrideLengthMin: number;
-  optimalStrideLengthMax: number;
+  optimalStrideLengthMin?: number;
+  optimalStrideLengthMax?: number;
   coachName?: string;
   coachTone?: string;
   coachAccent?: string;
@@ -2053,15 +2056,19 @@ export async function generateCadenceCoaching(params: {
     ? (userHeight > 3 ? userHeight : userHeight * 100)  // handle both cm and m input
     : 170;
   const cadenceRange = calculateOptimalCadenceRange(paceSecPerKm, heightCmForCalc, userAge, cadence);
-  // Prefer device-computed range if it was sent, fall back to freshly computed range
+  // Android calculates this range from the live watch/GPS speed and gradient that
+  // caused the coaching trigger. Keep it authoritative so the server never
+  // contradicts the UI with a competing, stale pace-derived target.
   const dynOptimalCadenceMin = optimalCadenceMin > 0 ? optimalCadenceMin : cadenceRange.low;
   const dynOptimalCadenceMax = optimalCadenceMax > 0 ? optimalCadenceMax : cadenceRange.high;
-  const dynOptimalCadenceTarget = cadenceRange.optimal;
+  const dynOptimalCadenceTarget = params.optimalCadenceTarget > 0
+    ? params.optimalCadenceTarget
+    : cadenceRange.optimal;
   const cadenceDeficit = Math.max(0, dynOptimalCadenceTarget - cadence);
 
-  const strideCm = Math.round(strideLength * 100);
-  const optMinCm = Math.round(optimalStrideLengthMin * 100);
-  const optMaxCm = Math.round(optimalStrideLengthMax * 100);
+  const strideCm = Math.round((strideLength ?? 0) * 100);
+  const optMinCm = Math.round((optimalStrideLengthMin ?? 0) * 100);
+  const optMaxCm = Math.round((optimalStrideLengthMax ?? 0) * 100);
   const timeFormatted = formatElapsedForTTS(elapsedTime);
 
   const heightCmDisplay = userHeight
@@ -2079,8 +2086,12 @@ export async function generateCadenceCoaching(params: {
   const cadenceDiff = Math.abs(cadence - dynOptimalCadenceTarget);
   const isWithinTolerance = cadenceDiff <= cadenceTolerance;
 
+  const isBelowPersonalRange = params.cadenceProximityTier != null
+    ? params.cadenceProximityTier !== 'ON_TARGET'
+    : cadence < dynOptimalCadenceMin;
+  const isOnOrAbovePersonalRange = !isBelowPersonalRange;
   let zoneAnalysis = '';
-  if (strideZone === 'OVERSTRIDING') {
+  if (isBelowPersonalRange && strideZone === 'OVERSTRIDING') {
     zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their foot is landing ahead of their centre of mass, creating a braking force with each step.
 
 Key context:
@@ -2089,7 +2100,7 @@ Key context:
 - The correction: shorten stride, move foot strike closer to beneath the hips
 
 Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment. You know how to coach overstriding — pick what will resonate.`;
-  } else if (strideZone === 'UNDERSTRIDING' && !isWithinTolerance) {
+  } else if (isBelowPersonalRange && !isWithinTolerance) {
     // Only flag as understriding if meaningfully below target (beyond tolerance buffer)
     zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm — ${cadenceDeficit} spm below their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm), calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}.
 
@@ -2097,8 +2108,10 @@ This is NOT a generic "everyone should hit 180" situation — this is their spec
 
 Use your coaching expertise to choose the 1-2 most effective, actionable cues to increase their cadence. Arms, mental imagery, foot placement, rhythm — whatever you judge will land best for this runner right now.`;
   } else {
-    // Within tolerance or optimal
-    zoneAnalysis = `Cadence ${cadence} spm with stride ${strideCm}cm is in the optimal zone${isWithinTolerance && strideZone === 'UNDERSTRIDING' ? ` (${cadenceDiff} spm off target is normal form variation)` : ''}. Brief positive reinforcement.`;
+    // Android intentionally treats above-target turnover as on-target. Do not
+    // tell the runner to lower cadence unless a separate, confirmed form signal
+    // (such as overstriding) is available.
+    zoneAnalysis = `Cadence ${cadence} spm is on or above the personalised working range of ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm. Briefly acknowledge the efficient turnover; do NOT tell them to reduce cadence, shorten their stride, take quicker steps, or otherwise change cadence.`;
   }
   
   const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -2115,7 +2128,7 @@ ${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
 ${physicalContext}
 
 ${PACE_FORMAT_RULE}
-Give a coaching message (2-3 sentences). MANDATORY RULE: You MUST say the runner's CURRENT cadence (${cadence} spm) explicitly in your message — the runner cannot see the screen and has no idea what their cadence is. Then tell them their PERSONALISED cadence target (${dynOptimalCadenceTarget} spm), NOT a generic "aim for 180". ${strideZone === 'OPTIMAL' ? 'Acknowledge their good form briefly.' : `Give 1-2 specific, actionable tips they can apply RIGHT NOW — things like "shorten your stride", "quicker arm swing", "think light feet". Be direct.`} Be specific with their actual numbers. No emojis. No markdown.`;
+Give a coaching message (2-3 sentences). MANDATORY RULE: You MUST say the runner's CURRENT cadence (${cadence} spm) explicitly in your message — the runner cannot see the screen and has no idea what their cadence is. Then tell them their PERSONALISED cadence target (${dynOptimalCadenceTarget} spm), NOT a generic "aim for 180". ${isOnOrAbovePersonalRange ? 'Acknowledge their cadence positively. Do NOT give a cadence-change cue: do not say to reel it in, slow turnover, shorten stride, take quicker steps, or increase turnover.' : 'Give 1-2 specific, actionable cues to increase cadence, such as quicker arm swing or light, quick feet. Do not tell them to slow down their turnover.'} Be specific with their actual numbers. No emojis. No markdown.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -2127,7 +2140,7 @@ Give a coaching message (2-3 sentences). MANDATORY RULE: You MUST say the runner
     temperature: 0.7,
   });
 
-  return completion.choices[0].message.content || `Your cadence is ${cadence} steps per minute — your target is ${dynOptimalCadenceTarget} spm. ${strideZone === 'OVERSTRIDING' ? 'Try shortening your stride and landing your foot under your hips.' : strideZone === 'UNDERSTRIDING' ? `You are ${cadenceDeficit} steps per minute below your target. Try a quicker arm swing to lift your turnover.` : 'Great form, keep it up!'}`;
+  return completion.choices[0].message.content || `Your cadence is ${cadence} steps per minute — your target is ${dynOptimalCadenceTarget} spm. ${isBelowPersonalRange ? `You are ${cadenceDeficit} steps per minute below your target. Try a quicker arm swing to lift your turnover.` : 'Your turnover is on track, so keep that rhythm steady.'}`;
 }
 
 export async function generatePreRunSummary(routeData: any, weatherData: any): Promise<any> {
