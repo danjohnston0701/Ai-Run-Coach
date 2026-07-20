@@ -2510,6 +2510,7 @@ function transformRunForAndroid(run: any) {
           "recoveryTimeMinutes", "vo2MaxEstimate", "avgRunningPower", "maxRunningPower",
           "avgRespirationRate", "avgAmbientPressure", "avgBearing", "avgHeartRateZone",
           "timeInZone1", "timeInZone2", "timeInZone3", "timeInZone4", "timeInZone5",
+          "minPace", "maxPace", "avgGpsAccuracy", "worstGpsAccuracy",
           "startedAt"
         ];
         for (const field of fields) {
@@ -2955,6 +2956,35 @@ function transformRunForAndroid(run: any) {
       const maxSpeed    = typeof runData.maxSpeed    === 'number' ? runData.maxSpeed    : null;
       const totalSteps2 = typeof runData.totalSteps  === 'number' ? runData.totalSteps  : (totalSteps || null);
 
+      // Explicit scalar extractions — come through the spread but explicit assignment
+      // guarantees they survive the Drizzle type boundary without silent drops.
+      const minCadenceVal      = typeof runData.minCadence      === 'number' ? runData.minCadence      : null;
+      const avgHRZoneVal       = typeof runData.avgHeartRateZone === 'number' ? runData.avgHeartRateZone : null;
+      const timeInZone1Val     = typeof runData.timeInZone1     === 'number' ? runData.timeInZone1     : null;
+      const timeInZone2Val     = typeof runData.timeInZone2     === 'number' ? runData.timeInZone2     : null;
+      const timeInZone3Val     = typeof runData.timeInZone3     === 'number' ? runData.timeInZone3     : null;
+      const timeInZone4Val     = typeof runData.timeInZone4     === 'number' ? runData.timeInZone4     : null;
+      const timeInZone5Val     = typeof runData.timeInZone5     === 'number' ? runData.timeInZone5     : null;
+      const minPaceVal         = typeof runData.minPace         === 'number' ? runData.minPace         : null;
+      const maxPaceVal         = typeof runData.maxPace         === 'number' ? runData.maxPace         : null;
+      const avgGpsAccVal       = typeof runData.avgGpsAccuracy  === 'number' ? runData.avgGpsAccuracy  : null;
+      const worstGpsAccVal     = typeof runData.worstGpsAccuracy === 'number' ? runData.worstGpsAccuracy : null;
+      const minHeartRateVal    = typeof runData.minHeartRate    === 'number' ? runData.minHeartRate    : null;
+      const aiCoachEnabledVal  = typeof runData.aiCoachEnabled  === 'boolean' ? runData.aiCoachEnabled : null;
+
+      // Estimate resting calories (BMR-based): ~75 kcal/hr for a 70 kg person.
+      // This approximates the calories burned at rest during the run's elapsed time.
+      const durationHours = durationInSeconds / 3600;
+      const restingCalsVal = durationHours > 0 ? Math.round(75 * durationHours) : null;
+
+      // Estimate sweat loss: moderate ~0.8L/hr; increase by HR zone intensity.
+      // Zone 1-2 ≈ 0.6L/hr, Zone 3 ≈ 0.9L/hr, Zone 4-5 ≈ 1.2L/hr.
+      const avgHRForSweat = runData.avgHeartRate;
+      const sweatRateLitresPerHr = avgHRForSweat
+        ? (avgHRForSweat > 160 ? 1.2 : avgHRForSweat > 140 ? 0.9 : 0.6)
+        : 0.8;
+      const estSweatLossVal = durationHours > 0 ? Math.round(sweatRateLitresPerHr * durationHours * 100) / 100 : null;
+
       // Explicit time-series array extractions — the spread passes camelCase arrays but
       // Drizzle sometimes strips unknown keys at the type boundary.  Explicit assignment
       // guarantees they reach the INSERT for all platforms (Android + iOS).
@@ -2984,6 +3014,22 @@ function transformRunForAndroid(run: any) {
         startedAt,
         maxSpeed,
         totalSteps: totalSteps2,
+        // Explicitly extracted scalars (survive Drizzle type boundary)
+        minCadence:       minCadenceVal,
+        avgHeartRateZone: avgHRZoneVal,
+        timeInZone1:      timeInZone1Val,
+        timeInZone2:      timeInZone2Val,
+        timeInZone3:      timeInZone3Val,
+        timeInZone4:      timeInZone4Val,
+        timeInZone5:      timeInZone5Val,
+        minPace:          minPaceVal,
+        maxPace:          maxPaceVal,
+        avgGpsAccuracy:   avgGpsAccVal,
+        worstGpsAccuracy: worstGpsAccVal,
+        minHeartRate:     minHeartRateVal,
+        aiCoachEnabled:   aiCoachEnabledVal,
+        restingCalories:  restingCalsVal,
+        estSweatLoss:     estSweatLossVal,
         // Group run link — must be explicit to survive the Drizzle type boundary
         groupRunId,
         // Time-series arrays (graphs)

@@ -273,6 +273,14 @@ class RunTrackingService : Service(), SensorEventListener {
     private val watchBearingSeries  = mutableListOf<Float>()    // degrees
     private val watchStepsSeries    = mutableListOf<Int>()      // estimated steps per frame
 
+    // GPS accuracy tracking (from Garmin Pos.Quality — 0=poor, 4=best; converted to approx metres CEP)
+    private var watchGpsAccuracySum:   Float = 0f
+    private var watchGpsAccuracyCount: Int   = 0
+    private var watchGpsAccuracyWorst: Float = 0f   // highest metres CEP seen (worst)
+    // Pace extremes (sec/km) — min = fastest, max = slowest
+    private var watchMinPace: Double = 0.0
+    private var watchMaxPace: Double = 0.0
+
     // Struggle detection - baseline is session average pace, updated every 500m
     private var baselinePace: Float = 0f
     private var lastBaselineUpdateDistance: Double = 0.0
@@ -1286,6 +1294,8 @@ class RunTrackingService : Service(), SensorEventListener {
         watchVrSeries.clear();      watchSlSeries.clear()
         watchPwrSeries.clear();     watchRespSeries.clear()
         watchBearingSeries.clear(); watchStepsSeries.clear()
+        watchGpsAccuracySum = 0f; watchGpsAccuracyCount = 0; watchGpsAccuracyWorst = 0f
+        watchMinPace = 0.0; watchMaxPace = 0.0
         initialStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
@@ -2502,6 +2512,9 @@ class RunTrackingService : Service(), SensorEventListener {
         if (speedSample != null && speedSample > 0f) {
             val paceSecPerKm = (1000.0 / speedSample.toDouble()).coerceIn(180.0, 900.0)
             watchPaceSeries.add(paceSecPerKm)
+            // Track pace extremes: min = fastest (lowest sec/km), max = slowest
+            if (watchMinPace == 0.0 || paceSecPerKm < watchMinPace) watchMinPace = paceSecPerKm
+            if (paceSecPerKm > watchMaxPace) watchMaxPace = paceSecPerKm
         }
         if (frame.groundContactTime > 0f)  watchGctSeries.add(frame.groundContactTime)
         if (frame.groundContactBalance in 30f..70f) watchGcbSeries.add(frame.groundContactBalance)
@@ -2512,6 +2525,19 @@ class RunTrackingService : Service(), SensorEventListener {
         if (frame.respirationRate > 0f)    watchRespSeries.add(frame.respirationRate)
         frame.bearingDeg?.takeIf { it >= 0f }?.let { watchBearingSeries.add(it) }
         if (frame.cadence > 0) watchStepsSeries.add((frame.cadence / 30f).toInt())
+        // GPS accuracy: Garmin quality 0-4 → approx metres CEP (4=~3m, 3=~8m, 2=~15m, 1=~50m, 0=~200m)
+        val acc = frame.gpsAccuracy
+        if (acc != null && acc >= 0f) {
+            val metreCep = when {
+                acc >= 4f -> 3f
+                acc >= 3f -> 8f
+                acc >= 2f -> 15f
+                acc >= 1f -> 50f
+                else      -> 200f
+            }
+            watchGpsAccuracySum += metreCep; watchGpsAccuracyCount++
+            if (metreCep > watchGpsAccuracyWorst) watchGpsAccuracyWorst = metreCep
+        }
 
         // ── Update live RunSession ─────────────────────────────────────────────
         _currentRunSession.value = _currentRunSession.value?.copy(
@@ -3731,6 +3757,10 @@ class RunTrackingService : Service(), SensorEventListener {
             timeInZone4              = watchZoneSeconds[4].takeIf { it > 0 },
             timeInZone5              = watchZoneSeconds[5].takeIf { it > 0 },
             stepsData                = watchStepsSeries.takeIf { it.isNotEmpty() },
+            minPace                  = watchMinPace.takeIf { it > 0.0 },
+            maxPace                  = watchMaxPace.takeIf { it > 0.0 },
+            avgGpsAccuracy           = if (watchGpsAccuracyCount > 0) watchGpsAccuracySum / watchGpsAccuracyCount else null,
+            worstGpsAccuracy         = watchGpsAccuracyWorst.takeIf { it > 0f },
         )
 
         // Retry up to 3 times with exponential backoff for server errors

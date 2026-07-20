@@ -11,58 +11,58 @@ This brief documents the **complete architecture, message protocol, lifecycle, a
 ## Architecture Diagram
 
 ```
-┌─────────��────────────────────────────────────────────────────────┐
+┌─────────��───────────────────────────────────────────────────────┐
 │ Android Phone                                                    │
 ├──────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ MainActivity (lifecycle init)                            │    │
-│  │  ↓ initialize()                                         │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────┐     │
+│  │ MainActivity (lifecycle init)                           │     │
+│  │  ↓ initialize()                                         │     │
+│  └─────────────────────────────────────────────────────────┘     │
 │                           ↓                                      │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ GarminWatchManager (ConnectIQ bridge)                    │    │
-│  │  • Manages SDK lifecycle (init → shutdown)              │    │
-│  │  • Resolves companion app on watch (via APP_ID)         │    │
-│  │  • Registers for message events                         │    │
-│  │  • Emits isCompanionAppInstalled StateFlow              │    │
-│  │  • Caches auth token + prepared-run payload             │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────┐     │
+│  │ GarminWatchManager (ConnectIQ bridge)                   │     │
+│  │  • Manages SDK lifecycle (init → shutdown)              │     │
+│  │  • Resolves companion app on watch (via APP_ID)         │     │
+│  │  • Registers for message events                         │     │
+│  │  • Emits isCompanionAppInstalled StateFlow              │     │
+│  │  • Caches auth token + prepared-run payload             │     │
+│  └─────────────────────────────────────────────────────────┘     │
 │         ↓ Message Events ↓                                       │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ RunTrackingService (foreground)                         │    │
-│  │  • Receives watch commands: start | pause | stop        │    │
-│  │  • Processes biometric frames (GPS + HR + dynamics)     │    │
-│  │  • Injects watch locations into route                   │    │
-│  │  • Sends live runUpdate messages to watch               │    │
-│  │  • Toggles foreground notification on watch event       │    │
-│  └───────────────────────────��─────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────┐     │
+│  │ RunTrackingService (foreground)                         │     │
+│  │  • Receives watch commands: start | pause | stop        │     │ 
+│  │  • Processes biometric frames (GPS + HR + dynamics)     │     │
+│  │  • Injects watch locations into route                   │     │
+│  │  • Sends live runUpdate messages to watch               │     │
+│  │  • Toggles foreground notification on watch event       │     │
+│  └───────────────────────────��────────────────────────────┘     │
 │         ↓ UI Binding ↓                                           │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ RunSessionViewModel                                      │    │
-│  │  • Observes RunTrackingService metrics                   │    │
-│  │  • Manages coaching decision (watch + phone HR + pace)   │    │
-│  │  • Prepares & sends configured run to watch via button  │    │
-│  │  • Shows PrepareRunOnWatchButton when app installed      │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────┐     │
+│  │ RunSessionViewModel                                     │     │
+│  │  • Observes RunTrackingService metrics                  │     │
+│  │  • Manages coaching decision (watch + phone HR + pace)  │     │
+│  │  • Prepares & sends configured run to watch via button  │     │
+│  │  • Shows PrepareRunOnWatchButton when app installed     │     │
+│  └─────────────────────────────────────────────────────────┘     │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
           ║         Bluetooth (ConnectIQ)         ║
-          ║     Message-based (fire-and-forget)  ║
+          ║     Message-based (fire-and-forget)   ║
           ║                                       ║
 ┌─────────────────────────────────────────────────────────────────┐
-│ Garmin Watch (Fenix 7, Epix, FR965, etc.)                      │
+│ Garmin Watch (Fenix 7, Epix, FR965, etc.)                       │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ AI Run Coach Companion App (MonkeyC)                     │  │
-│  │  • StartView: idle or "Coached Run Ready ▶"             │  │
-│  │  • RunView: active session (timer, pace, HR, dynamics)  │  │
-│  │  • Manages Activity.Info record                         │  │
-│  │  • Streams biometric frames every ~2 seconds            │  │
-│  │  • Sends commands: start | pause | resume | stop        │  │
-│  │  • Reports offline run batch status: pendingSync ↔ sync  │  │
-│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ AI Run Coach Companion App (MonkeyC)                     │   │
+│  │  • StartView: idle or "Coached Run Ready ▶"              │   │
+│  │  • RunView: active session (timer, pace, HR, dynamics)   │   │
+│  │  • Manages Activity.Info record                          │   │
+│  │  • Streams biometric frames every ~2 seconds             │   │
+│  │  • Sends commands: start | pause | resume | stop         │   │
+│  │  • Reports offline run batch status: pendingSync ↔ sync  │   │
+│  └──────────────────────────────────────────────────────────┘   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -510,7 +510,7 @@ mapOf(
 │  • Collect phone GPS every 2–5 seconds              │
 │  • Send "runUpdate" every 2 seconds to watch        │
 │  • Watch mirrors metrics on RunView                 │
-│  • Watch can PAUSE/RESUME/STOP from its buttons    │
+│  • Watch can PAUSE/RESUME/STOP from its buttons     │
 └─────────────────────────────────────────────────────┘
                        ↓
         (watch sends "pause" | "resume" | "stop")
@@ -542,44 +542,44 @@ mapOf(
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ GarminWatchManager.onSdkReady()                    │
+│ GarminWatchManager.onSdkReady()                     │
 │  • Resolves companion app on watch                  │
 │  • Registers for message events                     │
-│  • Auto-sends cached auth (if available)           │
-│  • Caches auth for future "watchReady"             │
+│  • Auto-sends cached auth (if available)            │
+│  • Caches auth for future "watchReady"              │
 └─────────────────────────────────────────────────────┘
                        ↓
         User taps ▶ on watch (no phone preparation)
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ Watch sends "start" command                        │
-│  • Activity.Info record created on watch           │
-│  • RunView activated; timer begins                 │
-│  • Biometric frames start streaming every ~2s      │
+│ Watch sends "start" command                         │
+│  • Activity.Info record created on watch            │
+│  • RunView activated; timer begins                  │
+│  • Biometric frames start streaming every ~2s       │
 └─────────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ GarminWatchManager.handleWatchMessage("start")     │
-│  1. Send startAck (cancel watch BT retry timer)    │
-│  2. Set wasRunStartedByWatch = true                │
-│  3. Clear cachedPreparedRunPayload                 │
-│  4. If onWatchCommand == null:                     │
-│     • Show "Run in progress" notification          │
-│     • Bootstrap RunTrackingService via             │
-│       ACTION_START_TRACKING_FROM_WATCH             │
-│     • watchOnlyRunActive = true                    │
-│  5. Else: fire onWatchCommand?.invoke("start")     │
+│ GarminWatchManager.handleWatchMessage("start")      │
+│  1. Send startAck (cancel watch BT retry timer)     │
+│  2. Set wasRunStartedByWatch = true                 │
+│  3. Clear cachedPreparedRunPayload                  │
+│  4. If onWatchCommand == null:                      │
+│     • Show "Run in progress" notification           │
+│     • Bootstrap RunTrackingService via              │
+│       ACTION_START_TRACKING_FROM_WATCH              │
+│     • watchOnlyRunActive = true                     │
+│  5. Else: fire onWatchCommand?.invoke("start")      │
 └─────────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ RunTrackingService (watch owns GPS + timer)        │
-│  • wasRunStartedByWatch = true                     │
-│  • DO NOT collect phone GPS                        │
-│  • Process incoming watchData frames               │
-│  • Use watch cumulativeDistance as authoritative   │
-│  • Use watch elapsedSeconds for duration           │
-│  • Accept GPS from watch for route (optional nav)  │
-│  • DO NOT send "runUpdate" back to watch           │
+│ RunTrackingService (watch owns GPS + timer)         │
+│  • wasRunStartedByWatch = true                      │
+│  • DO NOT collect phone GPS                         │
+│  • Process incoming watchData frames                │
+│  • Use watch cumulativeDistance as authoritative    │
+│  • Use watch elapsedSeconds for duration            │
+│  • Accept GPS from watch for route (optional nav)   │
+│  • DO NOT send "runUpdate" back to watch            │
 └─────────────────────────────────────────────────────┘
                        ↓
     (watch streams "watchData" every ~2 seconds)
@@ -587,35 +587,35 @@ mapOf(
 ┌─────────────────────────────────────────────────────┐
 │ RunSessionViewModel (if opened during run)          │
 │  • Observes RunTrackingService.runState             │
-│  • Distance & time come from watch (read-only)     │
-│  • HR & coaching use watch biometrics              │
+│  • Distance & time come from watch (read-only)      │
+│  • HR & coaching use watch biometrics               │
 │  • User can view live metrics on phone              │
 └─────────────────────────────────────────────────────┘
                        ↓
         (user taps ⏹ on watch — only watch can stop)
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ Watch sends "stop" command                         │
-│  • Activity.Info record finalized on watch         │
-│  • Timer stops; Garmin syncs elapsed distance      │
+│ Watch sends "stop" command                          │
+│  • Activity.Info record finalized on watch          │
+│  • Timer stops; Garmin syncs elapsed distance       │
 └─────────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ GarminWatchManager.handleWatchMessage("stop")      │
-│  1. Clear watchOnlyRunActive flag                  │
-│  2. Cancel "Run in progress" notification          │
-│  3. Forward ACTION_STOP_TRACKING to service        │
-│     (if onWatchCommand is null)                    │
-│  4. Else: fire onWatchCommand?.invoke("stop")      │
+│ GarminWatchManager.handleWatchMessage("stop")       │
+│  1. Clear watchOnlyRunActive flag                   │
+│  2. Cancel "Run in progress" notification           │
+│  3. Forward ACTION_STOP_TRACKING to service         │
+│     (if onWatchCommand is null)                     │
+│  4. Else: fire onWatchCommand?.invoke("stop")       │
 └─────────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ RunTrackingService stops & finalizes               │
-│  • Snapshot final distance (from watch)            │
-│  • Snapshot final duration (from watch)            │
-│  • Calculate training effect from watch metrics    │
-│  • Upload session to backend                       │
-│  • Clean up GPS listeners and foreground notif.    │
+│ RunTrackingService stops & finalizes                │
+│  • Snapshot final distance (from watch)             │
+│  • Snapshot final duration (from watch)             │
+│  • Calculate training effect from watch metrics     │
+│  • Upload session to backend                        │
+│  • Clean up GPS listeners and foreground notif.     │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -641,58 +641,58 @@ mapOf(
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ Watch App (disconnected from phone)                │
-│  • User starts run (Activity.Info created)         │
-│  • Timer & biometrics collected entirely on watch  │
-│  • User stops run (Activity.Info finalized)        │
-│  • Run saved to watch memory                       │
-│  • Awaits phone reconnect for sync                 │
+│ Watch App (disconnected from phone)                 │
+│  • User starts run (Activity.Info created)          │
+│  • Timer & biometrics collected entirely on watch   │
+│  • User stops run (Activity.Info finalized)         │
+│  • Run saved to watch memory                        │
+│  • Awaits phone reconnect for sync                  │
 └─────────────────────────────────────────────────────┘
                        ↓
     Phone either reconnects OR user opens app
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ GarminWatchManager.resolveApp()                    │
-│  • App on watch found and registered               │
-│  • Auto-sends cached auth (from previous session)  │
+│ GarminWatchManager.resolveApp()                     │
+│  • App on watch found and registered                │
+│  • Auto-sends cached auth (from previous session)   │
 └─────────────────────────────────────────────────────┘
                        ↓
     Watch app on phone receives auth message
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ Watch App (Garmin Connect relay)                   │
-│  • Detects local offline run batch                 │
-│  • Immediately syncs to Garmin Connect cloud       │
-│  • Garmin webhook → AI Run Coach backend (async)   │
+│ Watch App (Garmin Connect relay)                    │
+│  • Detects local offline run batch                  │
+│  • Immediately syncs to Garmin Connect cloud        │
+│  • Garmin webhook → AI Run Coach backend (async)    │
 └─────────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ Watch App → Phone (still connected)                │
-│  • Sends "watchReady" command (hasPendingSync=true)│
+│ Watch App → Phone (still connected)                 │
+│  • Sends "watchReady" command (hasPendingSync=true) │
 └─────────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────┐
-│ GarminWatchManager.handleWatchMessage("watchReady")│
-│  1. Read hasPendingSync flag                       │
-│  2. If true:                                       │
-│     • Set _hasPendingWatchSync.value = true        │
-│     • Show "pending sync" banner on dashboard      │
-│     • Show heads-up notification                   │
-│     • Forward WATCH_RUN_FINISHED to service        │
-│       (dropped-stop recovery)                      │
-│  3. Auto-send cached auth                         │
-│  4. Re-send any pending preparedRun cache         │
-│  5. Fire onWatchCommand?.invoke("watchReady")      │
+│ GarminWatchManager.handleWatchMessage("watchReady") │
+│  1. Read hasPendingSync flag                        │
+│  2. If true:                                        │
+│     • Set _hasPendingWatchSync.value = true         │
+│     • Show "pending sync" banner on dashboard       │
+│     • Show heads-up notification                    │
+│     • Forward WATCH_RUN_FINISHED to service         │
+│       (dropped-stop recovery)                       │
+│  3. Auto-send cached auth                           │
+│  4. Re-send any pending preparedRun cache           │
+│  5. Fire onWatchCommand?.invoke("watchReady")       │
 └─────────────────────────────────────────────────────┘
                        ↓
     (user opens app; observes dashboard banner)
                        ↓
     Garmin webhook delivers run to backend async
                        ↓
-┌─────────────��───────────────────────────────────────┐
-│ Watch App (phone still connected)                  │
-│  • Polls backend to confirm offline batch uploaded │
-│  • Sends "syncComplete" command to phone           │
+┌─────────────��──────────────────────────────────────┐
+│ Watch App (phone still connected)                   │
+│  • Polls backend to confirm offline batch uploaded  │
+│  • Sends "syncComplete" command to phone            │
 └─────────────────────────────────────────────────────┘
                        ↓
 ┌─────────────────────────────────────────────────────┐
@@ -707,10 +707,10 @@ mapOf(
                        ↓
 ┌─────────────────────────────────────────────────────┐
 │ Dashboard & Previous Runs View                      │
-│  • runSyncedEvent observers trigger refresh        │
-│  • Fresh backend data replaces stale cache         │
-│  • Offline watch run now visible in history        │
-│  • User can tap → run summary                      │
+│  • runSyncedEvent observers trigger refresh         │
+│  • Fresh backend data replaces stale cache          │
+│  • Offline watch run now visible in history         │
+│  • User can tap → run summary                       │
 └─────────────────────────────────────────────────────┘
 ```
 

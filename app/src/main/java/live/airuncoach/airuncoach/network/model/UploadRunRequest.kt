@@ -112,5 +112,9 @@ data class UploadRunRequest(
     val timeInZone3: Int? = null,
     val timeInZone4: Int? = null,
     val timeInZone5: Int? = null,
-    val stepsData: List<Int>? = null
+    val stepsData: List<Int>? = null,
+    val minPace: Double? = null,
+    val maxPace: Double? = null,
+    val avgGpsAccuracy: Float? = null,
+    val worstGpsAccuracy: Float? = null
 )
