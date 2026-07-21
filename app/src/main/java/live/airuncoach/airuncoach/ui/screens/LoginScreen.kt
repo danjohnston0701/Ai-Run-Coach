@@ -135,15 +135,21 @@ fun LoginScreen(
         if (loginState.isLoginSuccessful) {
             android.util.Log.d("LoginScreen", "Login successful, requesting notification permission")
 
-            // Offer to save credentials to Samsung Pass / Google Password Manager.
-            // This shows the system "Save password?" bottom sheet before navigating away.
-            val activity = context as? ComponentActivity
-            if (activity != null) {
-                CredentialManagerHelper.saveCredential(
-                    activity = activity,
-                    email = loginState.email,
-                    password = loginState.password
-                )
+            // Only offer to save credentials if they didn't come from the password manager.
+            // If user logged in with saved credentials, don't prompt to save the same credentials again.
+            if (!loginState.credentialsFromPasswordManager) {
+                // Offer to save credentials to Samsung Pass / Google Password Manager.
+                // This shows the system "Save password?" bottom sheet before navigating away.
+                val activity = context as? ComponentActivity
+                if (activity != null) {
+                    CredentialManagerHelper.saveCredential(
+                        activity = activity,
+                        email = loginState.email,
+                        password = loginState.password
+                    )
+                }
+            } else {
+                android.util.Log.d("LoginScreen", "Credentials from password manager — skipping save prompt")
             }
 
             // Request notification permission after successful login
@@ -166,6 +172,8 @@ fun LoginScreen(
             if (saved != null) {
                 viewModel.onEmailChange(saved.first)
                 viewModel.onPasswordChange(saved.second)
+                // Mark credentials as coming from password manager so we don't re-prompt to save them
+                viewModel.markCredentialsFromPasswordManager(true)
                 android.util.Log.d("LoginScreen", "Pre-filled credentials from password manager")
             }
         }

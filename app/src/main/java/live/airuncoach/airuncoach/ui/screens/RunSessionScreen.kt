@@ -241,8 +241,10 @@ fun RunSessionScreen(
         }
 
         // Only prepare run (show pre-run briefing) if NOT resuming an active run
-        // This prevents the briefing from playing again when resuming from Dashboard
-        if (!runState.isRunning && !runState.isPaused) {
+        // and NOT stopping/finishing the current run.
+        // This prevents: (1) briefing from playing again when resuming from Dashboard,
+        // (2) prepareRun from resetting state after stop is triggered (clearing backendRunId)
+        if (!runState.isRunning && !runState.isPaused && !runState.isStopping) {
             viewModel.prepareRun()
 
             // For coached workouts, auto-start GPS tracking so the pre-run briefing
@@ -2345,8 +2347,8 @@ fun ControlButtons(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (isRunning || isPaused) {
-            // Running/Paused - show Stop and Play/Pause buttons
+        if (isRunning || isPaused || isStopping) {
+            // Running/Paused/Stopping - show Stop and Play/Pause buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,

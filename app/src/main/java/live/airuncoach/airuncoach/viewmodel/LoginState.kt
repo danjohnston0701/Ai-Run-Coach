@@ -13,4 +13,6 @@ data class LoginState(
     val pendingVerificationEmail: String = "",
     val changeEmailError: String? = null,   // Error specific to the change-email dialog
     val changeEmailSuccess: Boolean = false, // True briefly after a successful email change
+    // Track if credentials came from Samsung Pass / password manager autofill
+    val credentialsFromPasswordManager: Boolean = false,
 )

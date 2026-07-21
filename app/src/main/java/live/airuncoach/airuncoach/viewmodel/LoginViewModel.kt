@@ -42,15 +42,19 @@ class LoginViewModel @Inject constructor(
     }
 
     fun onEmailChange(email: String) {
-        _loginState.update { it.copy(email = email) }
+        _loginState.update { it.copy(email = email, credentialsFromPasswordManager = false) }
     }
 
     fun onPasswordChange(password: String) {
-        _loginState.update { it.copy(password = password) }
+        _loginState.update { it.copy(password = password, credentialsFromPasswordManager = false) }
     }
 
     fun onConfirmPasswordChange(confirmPassword: String) {
         _loginState.update { it.copy(confirmPassword = confirmPassword) }
+    }
+
+    fun markCredentialsFromPasswordManager(fromPasswordManager: Boolean) {
+        _loginState.update { it.copy(credentialsFromPasswordManager = fromPasswordManager) }
     }
 
     fun login() {

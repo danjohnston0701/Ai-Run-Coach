@@ -117,6 +117,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastPhase: CoachingPhase? = null
     private var last500mMilestone = 0
     private val coachingHistory = mutableListOf<AiCoachingNote>() // Track what coaching has been given with timestamps
+    private var preRunBriefingText: String? = null // Pre-run briefing text to record in coaching history
     private var isMuted = false // User can mute coach
     private var lastCoachingTime: Long = 0 // Cooldown between coaching events
     private val COACHING_COOLDOWN_MS = 30_000L // 30 second minimum gap between coaching
@@ -708,6 +709,8 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_SESSION_INSTRUCTIONS_JSON = "EXTRA_SESSION_INSTRUCTIONS_JSON"
         // Dynamic coaching plan (rich model from prepare-coaching) — primary coaching source during coached runs
         const val EXTRA_DYNAMIC_COACHING_PLAN_JSON = "EXTRA_DYNAMIC_COACHING_PLAN_JSON"
+        // Pre-run briefing text to record in coaching history
+        const val EXTRA_PRE_RUN_BRIEFING = "EXTRA_PRE_RUN_BRIEFING"
         
         private val _currentRunSession = MutableStateFlow<RunSession?>(null)
         val currentRunSession: StateFlow<RunSession?> = _currentRunSession
@@ -1102,6 +1105,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     dynamicCoachingPlan = null
                 }
             }
+            // Extract pre-run briefing text if provided (to record in coaching history)
+            preRunBriefingText = intent?.getStringExtra(EXTRA_PRE_RUN_BRIEFING)
+            if (preRunBriefingText != null) {
+                Log.d("RunTrackingService", "✅ Pre-run briefing captured for coaching history: ${preRunBriefingText?.take(80)}...")
+            }
         }
 
         when (intent?.action) {
@@ -1424,6 +1432,15 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
+        // Record pre-run briefing in coaching history if provided
+        preRunBriefingText?.takeIf { it.isNotBlank() }?.let { briefingText ->
+            coachingHistory.add(AiCoachingNote(
+                time = 0,  // Pre-run briefing is before the run starts
+                message = briefingText
+            ))
+            Log.d("RunTrackingService", "Pre-run briefing recorded in coaching history: ${briefingText.take(80)}...")
+        }
+        
         // Fire start coaching — short motivational prompt to confirm AI is active
         fireStartCoaching()
     }
@@ -2988,8 +3005,10 @@ class RunTrackingService : Service(), SensorEventListener {
 
             // Only trigger AI coaching at the user's chosen interval (1km, 2km, 3km, 5km, 10km)
             // Suppress split coaching in the final 500m — only motivation allowed
+            // CRITICAL: Suppress split coaching if run target has been reached — run is complete
             val interval = coachingFeaturePrefs.kmSplitIntervalKm
-            if (currentKm % interval == 0 && !isInFinalStretch()) {
+            val hasReachedTarget = targetDistance != null && totalDistance >= (targetDistance!! * 0.99) // 1% tolerance for GPS precision
+            if (currentKm % interval == 0 && !isInFinalStretch() && !hasReachedTarget) {
                 if (!hasCoachingFiredThisTick && canFireCoaching()) {
                     Log.d("RunTrackingService", "Triggering split coaching at ${currentKm}km (interval: every ${interval}km)")
                     hasCoachingFiredThisTick = true
@@ -3000,6 +3019,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     Log.d("RunTrackingService", "Km split at ${currentKm}km deferred (cooldown active) — will retry")
                     pendingKmSplitCoaching = split
                 }
+            } else if (hasReachedTarget) {
+                Log.d("RunTrackingService", "Target distance reached at ${currentKm}km (target was ${(targetDistance!! / 1000.0).toInt()}km) — suppressing km split coaching")
             }
         }
     }

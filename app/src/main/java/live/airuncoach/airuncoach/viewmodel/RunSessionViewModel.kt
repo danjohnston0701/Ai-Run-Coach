@@ -1508,6 +1508,11 @@ class RunSessionViewModel @Inject constructor(
                         Log.w("RunSessionViewModel", "Failed to serialize dynamic coaching plan: ${e.message}")
                     }
                 }
+                // Pass pre-run briefing text to record in coaching history
+                _runState.value.coachText?.takeIf { it.isNotBlank() }?.let { briefingText ->
+                    putExtra(RunTrackingService.EXTRA_PRE_RUN_BRIEFING, briefingText)
+                    Log.d("RunSessionViewModel", "Passed pre-run briefing to service: ${briefingText.take(80)}...")
+                }
             }
             
             // If the service is already running in standby (pre-started for watch), just send
