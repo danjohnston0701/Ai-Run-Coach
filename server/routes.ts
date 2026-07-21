@@ -277,35 +277,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const otpHash = cryptoMod.createHash("sha256").update(otp).digest("hex");
       const otpExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-      // Resolve timezone and country from device timezone (if provided)
-      let resolvedTimezone = "UTC";
-      let resolvedCountry = "US";
-      if (timezone) {
-        try {
-          const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
-          const resolved = resolveTimezoneAndCountry(timezone);
-          resolvedTimezone = resolved.timezone;
-          resolvedCountry = resolved.country;
-          console.log(`[Register] Inferred timezone: ${resolvedTimezone}, country: ${resolvedCountry}`);
-        } catch (tzError: any) {
-          console.warn(`[Register] Failed to resolve timezone/country from "${timezone}": ${tzError.message}`);
-        }
-      }
+      // Resolve timezone and country from device timezone (if provided).
+      // resolveTimezoneAndCountry uses Luxon for reliable IANA validation —
+      // handles 3-part zones (America/Indiana/Indianapolis), hyphens, etc.
+      const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
+      const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
+
+      const resolved = resolveTimezoneAndCountry(timezone);
+      let resolvedTimezone = resolved.timezone;
+      let resolvedCountry = resolved.country;
+
+      // Device-supplied country takes precedence over timezone-inferred country
       if (country && /^[A-Za-z]{2}$/.test(country)) {
         resolvedCountry = country.toUpperCase();
       }
 
-      // Also infer currency from timezone
-      let inferredCurrency = "USD";
-      if (resolvedTimezone && resolvedTimezone !== "UTC") {
-        try {
-          const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
-          inferredCurrency = inferCurrencyFromTimezone(resolvedTimezone);
-          console.log(`[Register] Inferred currency: ${inferredCurrency}`);
-        } catch (currencyError: any) {
-          console.warn(`[Register] Failed to infer currency: ${currencyError.message}`);
-        }
-      }
+      // Infer currency from the resolved timezone.
+      // If timezone resolved to UTC (device didn't send one), try raw device
+      // timezone string as a fallback so at least the currency is right.
+      const tzForCurrency = resolvedTimezone !== "UTC" ? resolvedTimezone : (timezone ?? "UTC");
+      const inferredCurrency = inferCurrencyFromTimezone(tzForCurrency);
+
+      console.log(`[Register] device_tz="${timezone}" → resolved: timezone=${resolvedTimezone}, country=${resolvedCountry}, currency=${inferredCurrency}`);
 
       const user = await storage.createUser({
         email,
@@ -564,11 +557,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { resolveTimezoneAndCountry } = await import("./timezone-country-resolver");
         const { inferCurrencyFromTimezone } = await import("./utils/timezone-to-currency");
-        const resolved = resolveTimezoneAndCountry(timezone || user.timezone || "UTC");
+        // Prefer device timezone; fall back to previously saved value.
+        const rawTz = timezone || user.timezone || "UTC";
+        const resolved = resolveTimezoneAndCountry(rawTz);
         const resolvedCountry = country && /^[A-Za-z]{2}$/.test(country)
           ? country.toUpperCase()
           : resolved.country;
-        const inferredCurrency = inferCurrencyFromTimezone(resolved.timezone);
+        // If Luxon couldn't validate the resolved timezone, try raw device tz for currency.
+        const tzForCurrency = resolved.timezone !== "UTC" ? resolved.timezone : rawTz;
+        const inferredCurrency = inferCurrencyFromTimezone(tzForCurrency);
 
         await db
           .update(users)
