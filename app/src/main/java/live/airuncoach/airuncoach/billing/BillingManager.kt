@@ -73,8 +73,12 @@ class BillingManager @Inject constructor(
     fun initialize() {
         scope.launch {
             billingClient = BillingClient.newBuilder(context)
-                .setListener(::onPurchasesUpdated)
-                .enablePendingPurchases()
+                .setListener(object : PurchasesUpdatedListener {
+                    override fun onPurchasesUpdated(billingResult: BillingResult, purchases: MutableList<Purchase>?) {
+                        this@BillingManager.onPurchasesUpdated(billingResult, purchases)
+                    }
+                })
+                .enablePendingPurchases(PendingPurchasesParams.newBuilder().build())
                 .build()
 
             startBillingConnection()

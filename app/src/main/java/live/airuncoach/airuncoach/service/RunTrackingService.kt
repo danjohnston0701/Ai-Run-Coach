@@ -5688,7 +5688,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastCueFiredAtMs = System.currentTimeMillis()
         // Record current metric snapshot for next delta computation
         lastCueHrAtFire = currentHeartRate
-        lastCuePaceAtFire = currentPaceSecPerKm
+        lastCuePaceAtFire = parsePaceToSeconds(currentPace)
         if (!isCriticalTrigger(triggerType, "on_condition")) {
             nonCriticalCueCount++
             lastNonCriticalCueMs = System.currentTimeMillis()
@@ -6138,8 +6138,9 @@ class RunTrackingService : Service(), SensorEventListener {
         }
         val hrDelta = if (currentHeartRate > 0 && lastCueHrAtFire > 0)
             currentHeartRate - lastCueHrAtFire else null   // negative = fell (good for HR alerts)
-        val paceDelta = if (currentPaceSecPerKm > 0 && lastCuePaceAtFire > 0)
-            (currentPaceSecPerKm - lastCuePaceAtFire).toInt() else null   // positive = slower, negative = faster
+        val currentPaceSeconds = parsePaceToSeconds(currentPace)
+        val paceDelta = if (currentPaceSeconds > 0 && lastCuePaceAtFire > 0)
+            (currentPaceSeconds - lastCuePaceAtFire).toInt() else null   // positive = slower, negative = faster
 
         lastCueHrDelta = hrDelta
         lastCuePaceDelta = paceDelta
