@@ -102,6 +102,46 @@ fun OnboardingSubscriptionScreen(
                     FeaturesAvailableDuringTrial()
                 }
 
+                // ━━ PROMINENT FREE TRIAL CTA — Above subscription options ━━━━━━━━━━
+                // Make it obvious that users can continue without paying
+                item {
+                    Button(
+                        onClick = {
+                            sessionManager.clearOnboardingFlags()
+                            onNavigateToPermissions()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(horizontal = Spacing.lg)
+                            .padding(vertical = Spacing.md),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Colors.primary,  // Teal — prominent
+                            contentColor = Colors.buttonText
+                        ),
+                        shape = RoundedCornerShape(BorderRadius.lg)
+                    ) {
+                        Text(
+                            "Start Free Trial",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+
+                // Subtitle — explain the option below
+                item {
+                    Text(
+                        text = "Or upgrade for premium features",
+                        fontSize = 13.sp,
+                        color = Colors.textSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                    )
+                }
+
                 // What's available in paid plans
                 item {
                     WhatsIncludedInPaidPlans()
@@ -171,32 +211,6 @@ fun OnboardingSubscriptionScreen(
                         }
                     )
                     Spacer(modifier = Modifier.height(Spacing.xxl))
-                }
-
-                // Continue with trial button
-                item {
-                    Button(
-                        onClick = {
-                            sessionManager.clearOnboardingFlags()
-                        onNavigateToPermissions()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .padding(horizontal = Spacing.lg),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Colors.backgroundSecondary,
-                            contentColor = Colors.textPrimary
-                        ),
-                        shape = RoundedCornerShape(BorderRadius.lg)
-                    ) {
-                        Text(
-                            "Continue with Free Trial",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 16.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(Spacing.md))
                 }
 
                 // Footnotes

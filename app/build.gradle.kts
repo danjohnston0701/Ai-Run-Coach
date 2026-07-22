@@ -25,7 +25,7 @@ android {
     defaultConfig {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
-        targetSdk = 35          // Google Play requires 35+ minimum as of June 2026
+        targetSdk = 36          // Google Play requires 36+ as of Aug 2026
         versionCode = 37          // ← Increment by 1 for every Play Store upload
         versionName = "1.9.7"   // ← Human-readable version shown in Play Store
 
@@ -189,7 +189,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging-ktx")
 
     // --- Google Play Billing: In-app subscriptions and purchases ---
-    implementation("com.android.billingclient:billing-ktx:7.0.0")
+    implementation("com.android.billingclient:billing-ktx:8.0.0")
 
     // --- Testing Libraries ---
     testImplementation("junit:junit:4.13.2")

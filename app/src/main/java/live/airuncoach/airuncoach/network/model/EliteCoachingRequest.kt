@@ -83,7 +83,25 @@ data class EliteCoachingRequest(
     @SerializedName("workoutDescription") val workoutDescription: String? = null,
     @SerializedName("planGoalType") val planGoalType: String? = null,      // 5k / 10k / half_marathon / marathon
     @SerializedName("planWeekNumber") val planWeekNumber: Int? = null,
-    @SerializedName("planTotalWeeks") val planTotalWeeks: Int? = null
+    @SerializedName("planTotalWeeks") val planTotalWeeks: Int? = null,
+
+    // ── Session memory — coaching continuity ──────────────────────────────────
+    @SerializedName("topicsDiscussed") val topicsDiscussed: List<String>? = null,
+    @SerializedName("topicsNotCovered") val topicsNotCovered: List<String>? = null,
+    @SerializedName("sessionCueCount") val sessionCueCount: Int? = null,
+    @SerializedName("lastCueTriggerType") val lastCueTriggerType: String? = null,
+    @SerializedName("minutesSinceLastCue") val minutesSinceLastCue: Double? = null,
+    @SerializedName("recentCoachingMessages") val recentCoachingMessages: List<String>? = null,
+
+    // ── Sensor confidence ─────────────────────────────────────────────────────
+    @SerializedName("hrConfidence") val hrConfidence: String? = null,      // "high" | "medium" | "low"
+    @SerializedName("gpsConfidence") val gpsConfidence: String? = null,    // "high" | "medium" | "low"
+    @SerializedName("cadenceConfidence") val cadenceConfidence: String? = null, // "high" | "medium" | "low" | null if no sensor
+
+    // ── Physiological response to last cue ────────────────────────────────────
+    @SerializedName("lastCueHrDelta") val lastCueHrDelta: Int? = null,     // bpm change since last cue (negative = fell)
+    @SerializedName("lastCuePaceDelta") val lastCuePaceDelta: Int? = null, // sec/km change since last cue (negative = faster)
+    @SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null
 )
 
 data class KmSplitBrief(

@@ -592,7 +592,16 @@ export async function getOrGenerateSessionCoaching(
   //         and the preRunBrief — always specify actual bpm ranges.
   //         Android engine now applies a 2% buffer to all "hr > X" condition checks so brief spikes
   //         do not fire zone-high alerts — the athlete must genuinely sustain above the ceiling.
-  const CURRENT_PLAN_VERSION = "2.7";
+  // v2.8 — Richer coaching plans: km-split progress triggers (once, per km) now mandatory for
+  //         distance-based sessions. Form/breathing periodic cues (2+) required in all plans.
+  //         Cadence triggers now allowed for ALL session types (universal form coaching, not
+  //         pace-led only). park_run and steady_state classified as pace-led session types.
+  //         Trigger array ordering enforced: once (progress) → periodic → on_condition (reactive).
+  //         Plan richness requirement: minimum 8 triggers per plan, ~13 for 5 km sessions.
+  //         AI max_tokens increased to 8000 to prevent truncation of richer plans.
+  //         Android engine fixed: 3-pass trigger evaluation prevents reactive triggers from blocking
+  //         progress triggers — km splits and milestones now fire independently of HR alerts.
+  const CURRENT_PLAN_VERSION = "2.8";
 
   // Semver-aware comparison: parse "major.minor" strings to numeric values for correct ordering.
   // String comparison fails for versions like "2.10" vs "2.4" ("2.10" < "2.4" lexicographically).

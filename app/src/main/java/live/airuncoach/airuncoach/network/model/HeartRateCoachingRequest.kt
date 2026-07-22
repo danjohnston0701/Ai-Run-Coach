@@ -19,7 +19,24 @@ data class HeartRateCoachingRequest(
     // Coaching plan context — allows HR coaching to know if runner is in target zone
     @SerializedName("workoutIntensity") val workoutIntensity: String? = null,  // "z1"–"z5" from plan
     @SerializedName("workoutType") val workoutType: String? = null,            // easy/tempo/intervals/etc.
-    // ========== Session Coaching Context (Phase 1) ==========
+    // ========== Session Coaching Context ==========
     @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
-    @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null
+    @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
+
+    // ── Session memory — coaching continuity ──────────────────────────────────
+    @SerializedName("topicsDiscussed") val topicsDiscussed: List<String>? = null,
+    @SerializedName("topicsNotCovered") val topicsNotCovered: List<String>? = null,
+    @SerializedName("sessionCueCount") val sessionCueCount: Int? = null,
+    @SerializedName("lastCueTriggerType") val lastCueTriggerType: String? = null,
+    @SerializedName("minutesSinceLastCue") val minutesSinceLastCue: Double? = null,
+    @SerializedName("recentCoachingMessages") val recentCoachingMessages: List<String>? = null,
+
+    // ── Sensor confidence ─────────────────────────────────────────────────────
+    @SerializedName("hrConfidence") val hrConfidence: String? = null,       // "high" | "medium" | "low"
+    @SerializedName("gpsConfidence") val gpsConfidence: String? = null,     // "high" | "medium" | "low"
+
+    // ── Physiological response to last cue ────────────────────────────────────
+    @SerializedName("lastCueHrDelta") val lastCueHrDelta: Int? = null,      // bpm change since last cue (negative = fell)
+    @SerializedName("lastCuePaceDelta") val lastCuePaceDelta: Int? = null,  // sec/km change since last cue (negative = faster)
+    @SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null
 )

@@ -58,6 +58,7 @@ class RunView extends Ui.View {
     // Run state
     private var _isRunning       = false;
     private var _isPaused        = false;
+    private var _isFinished      = false;  // true after run ends — keeps duration visible until next run starts
     private var _phoneControlled = false;
 
     // Coaching / status
@@ -334,6 +335,7 @@ class RunView extends Ui.View {
         if (_gpsQuality < minGpsQ) { _vibeShort(); Sys.println(">>> startRun() blocked — gps too low (" + _gpsQuality + " < " + minGpsQ + ")"); return; }
         _isRunning     = true;
         _isPaused      = false;
+        _isFinished    = false;  // Clear finished state — new run starting
         _elapsedMs     = 0;
         _elapsedTime   = 0;
         _overlayState  = OVERLAY_NONE;
@@ -440,6 +442,7 @@ class RunView extends Ui.View {
         _isFinishing      = true;   // Block stale runUpdates from phone during shutdown
         _isRunning        = false;
         _isPaused         = false;
+        _isFinished       = true;   // Keep duration visible after run ends
         _startRetryCount  = 0;      // Cancel any pending start-command retry
         _sessionReadySent = false;  // Reset so next session notifies phone again
         _overlayState = OVERLAY_READY;
@@ -676,6 +679,7 @@ class RunView extends Ui.View {
             // Phone owns the backend session + GPS; watch just mirrors the metrics.
             _startRetryCount = 0;      // Cancel any start-retry (phone confirmed)
             _isFinishing     = false;  // Clean slate for the new session
+            _isFinished      = false;  // Clear finished state — new run starting
             _phoneControlled = true;
             _isRunning       = true;
             _isPaused        = false;
@@ -755,6 +759,7 @@ class RunView extends Ui.View {
             // Phone ended the session (Scenario A) - clean up all watch resources.
             _isRunning        = false;
             _isPaused         = false;
+            _isFinished       = true;   // Keep duration visible after run ends
             _phoneControlled  = false;
             // CRITICAL: set _isFinishing = true FIRST so any runUpdate messages
             // already queued are blocked by the guard at the top of the runUpdate handler.
@@ -1205,6 +1210,12 @@ class RunView extends Ui.View {
             dc.drawText(cx, (h * 0.08).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, (h * 0.14).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+        } else if (_isFinished) {
+            // Run just ended — keep duration visible in dimmed green until next run starts
+            dc.setColor(0x007744, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.08).toNumber(), Gfx.FONT_XTINY, "FINISHED", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(0xAAAAAA, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.14).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
             // Idle: show current clock time (24h), no label
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
@@ -1234,6 +1245,12 @@ class RunView extends Ui.View {
             dc.setColor(0x00CC66, Gfx.COLOR_TRANSPARENT);
             dc.drawText(lx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(lx, (h * 0.13).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+        } else if (_isFinished) {
+            // Run just ended — keep duration visible in dimmed green until next run starts
+            dc.setColor(0x007744, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(lx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "FINISHED", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(0xAAAAAA, Gfx.COLOR_TRANSPARENT);
             dc.drawText(lx, (h * 0.13).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);

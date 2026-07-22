@@ -370,6 +370,39 @@ data class SessionTriggerLiveRequest(
     @com.google.gson.annotations.SerializedName("userId") val userId: String? = null,
     @com.google.gson.annotations.SerializedName("runnerName") val runnerName: String? = null,
     @com.google.gson.annotations.SerializedName("fitnessLevel") val fitnessLevel: String? = null,
+
+    // ── Session memory — coaching continuity across triggers ─────────────────────────────────
+    // Gives the AI context about what has already been said so it can vary its coaching focus
+    // and avoid repeating topics that were recently covered.
+    //
+    // topicsDiscussed:    coaching topics that have fired at least once (e.g. "heart_rate", "cadence")
+    // topicsNotCovered:   topics in the session plan that have NOT been addressed yet
+    // sessionCueCount:    total number of coaching messages delivered so far this session
+    // minutesSinceLastCue: elapsed minutes since the previous coaching message (any type)
+    // lastCueTriggerType: the trigger type of the most recent coaching message
+    @com.google.gson.annotations.SerializedName("topicsDiscussed") val topicsDiscussed: List<String>? = null,
+    @com.google.gson.annotations.SerializedName("topicsNotCovered") val topicsNotCovered: List<String>? = null,
+    @com.google.gson.annotations.SerializedName("sessionCueCount") val sessionCueCount: Int? = null,
+    @com.google.gson.annotations.SerializedName("minutesSinceLastCue") val minutesSinceLastCue: Double? = null,
+    @com.google.gson.annotations.SerializedName("lastCueTriggerType") val lastCueTriggerType: String? = null,
+
+    // ── Sensor confidence — lets the AI soften language when data is noisy ───────────────────
+    // "high" = reliable signal (stable readings, good GPS fix)
+    // "medium" = acceptable but not perfect (sparse readings, moderate GPS drift)
+    // "low" = noisy / unreliable (sensor dropouts, poor GPS fix)
+    // null = sensor not connected (cadence only)
+    @com.google.gson.annotations.SerializedName("hrConfidence") val hrConfidence: String? = null,
+    @com.google.gson.annotations.SerializedName("gpsConfidence") val gpsConfidence: String? = null,
+    @com.google.gson.annotations.SerializedName("cadenceConfidence") val cadenceConfidence: String? = null,
+
+    // ── Physiological response to the previous cue ────────────────────────────────────────────
+    // Delta = current metric value MINUS the value at the moment the previous cue fired.
+    // lastCueHrDelta:    negative means HR fell (good after an HR-too-high alert)
+    // lastCuePaceDelta:  positive means pace slowed (more sec/km — good after a "too fast" alert)
+    // athleteRespondedToLastCue: true if the delta indicates the athlete acted on the previous coaching
+    @com.google.gson.annotations.SerializedName("lastCueHrDelta") val lastCueHrDelta: Int? = null,
+    @com.google.gson.annotations.SerializedName("lastCuePaceDelta") val lastCuePaceDelta: Int? = null,
+    @com.google.gson.annotations.SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null,
 )
 
 data class RecentSplit(

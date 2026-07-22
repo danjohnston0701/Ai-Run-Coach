@@ -3535,6 +3535,20 @@ export async function generateHeartRateCoaching(params: {
   fitnessLevel?: string;
   runnerName?: string;
   runnerProfile?: string | null;
+  // Session memory
+  topicsDiscussed?: string[];
+  topicsNotCovered?: string[];
+  sessionCueCount?: number;
+  lastCueTriggerType?: string;
+  minutesSinceLastCue?: number;
+  recentCoachingMessages?: string[];
+  // Sensor confidence
+  hrConfidence?: string;
+  gpsConfidence?: string;
+  // Physiological response
+  lastCueHrDelta?: number;
+  lastCuePaceDelta?: number;
+  athleteRespondedToLastCue?: boolean;
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
 
@@ -3567,6 +3581,50 @@ export async function generateHeartRateCoaching(params: {
   if (runnerAge) runnerProfileContext += `Age: ${runnerAge} (max HR ~${effectiveMaxHR} bpm). `;
   if (fitnessLevel) runnerProfileContext += `Fitness level: ${fitnessLevel}. `;
 
+  // ── Session memory block ────────────────────────────────────────────────────
+  const sessionMemoryBlock = (() => {
+    const lines: string[] = [];
+    if ((params.sessionCueCount ?? 0) > 0) {
+      lines.push(`Cues delivered so far: ${params.sessionCueCount}`);
+      if (params.minutesSinceLastCue != null) lines.push(`Time since last cue: ${params.minutesSinceLastCue.toFixed(1)} min`);
+      if (params.lastCueTriggerType) lines.push(`Last cue type: ${params.lastCueTriggerType.replace(/_/g, ' ')}`);
+    }
+    if (params.topicsDiscussed?.length) lines.push(`Topics already covered: ${params.topicsDiscussed.join(', ')}`);
+    if (params.topicsNotCovered?.length) lines.push(`Topics not yet addressed: ${params.topicsNotCovered.join(', ')}`);
+    if (params.recentCoachingMessages?.length) {
+      lines.push(`Recent coaching messages:`);
+      params.recentCoachingMessages.forEach(m => lines.push(`  • ${m}`));
+    }
+    return lines.length ? `\nSession context:\n${lines.join('\n')}\n` : '';
+  })();
+
+  // ── Physiological response block ───────────────────────────────────────────
+  const physioBlock = (() => {
+    if (params.lastCueHrDelta == null && params.lastCuePaceDelta == null) return '';
+    const lines: string[] = ['\nAthlete response since last cue:'];
+    if (params.lastCueHrDelta != null) {
+      const dir = params.lastCueHrDelta < 0 ? `fell ${Math.abs(params.lastCueHrDelta)} bpm` : `rose ${params.lastCueHrDelta} bpm`;
+      lines.push(`  Heart rate ${dir}`);
+    }
+    if (params.lastCuePaceDelta != null) {
+      const dir = params.lastCuePaceDelta > 0 ? `slowed by ${params.lastCuePaceDelta}s/km` : `quickened by ${Math.abs(params.lastCuePaceDelta)}s/km`;
+      lines.push(`  Pace ${dir}`);
+    }
+    if (params.athleteRespondedToLastCue === true) {
+      lines.push(`  ✓ Athlete is responding — acknowledge this before issuing any new directive`);
+    } else if (params.athleteRespondedToLastCue === false) {
+      lines.push(`  ✗ No response yet to previous cue — reinforce the message with different wording`);
+    }
+    return lines.join('\n') + '\n';
+  })();
+
+  // ── Sensor confidence note ─────────────────────────────────────────────────
+  const sensorNote = params.hrConfidence === 'low'
+    ? `\n⚠️ HR confidence is LOW (sensor noise/dropout) — use softer language: "looks around", "appears to be" rather than stating exact numbers as fact.\n`
+    : params.hrConfidence === 'medium'
+    ? `\nHR confidence is MEDIUM — readings are valid but mention the number with normal confidence.\n`
+    : '';
+
   const prompt = `You are ${coachName}, a ${coachTone} running coach giving real-time heart rate guidance.
 ${runnerProfileContext ? `\nRunner profile: ${runnerProfileContext}` : ''}
 Current stats (${elapsedMinutes} minutes into run):
@@ -3575,14 +3633,16 @@ Current stats (${elapsedMinutes} minutes into run):
 - Average HR this run: ${avgHR} bpm
 ${targetZone ? `- Target Zone: Zone ${targetZone} (${zoneNames[targetZone]})` : ''}
 ${wellnessContext ? `\nWellness context: ${wellnessContext}` : ''}
-
-Give a brief (1-2 sentences) heart rate coaching tip tailored to this runner's age and fitness level. You MUST mention their actual heart rate (${currentHR} bpm) and zone (Zone ${currentZone}). ${
+${sensorNote}${sessionMemoryBlock}${physioBlock}
+Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their actual heart rate (${currentHR} bpm) and zone (Zone ${currentZone}). ${
   targetZone && currentZone !== targetZone 
     ? currentZone > targetZone 
       ? 'They need to slow down to hit their target zone.' 
       : 'They can pick up the pace if feeling good.'
     : ''
-}`;
+}
+→ If topics have already been covered, choose a fresh angle — vary your coaching focus rather than repeating what was just said.
+→ If the athlete is already responding (see response block), acknowledge that first.`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -5058,6 +5118,24 @@ export interface EliteCoachingParams {
   planWeekNumber?: number;
   planTotalWeeks?: number;
   runnerProfile?: string | null;
+
+  // ── Session memory ─────────────────────────────────────────────────────────
+  topicsDiscussed?: string[];
+  topicsNotCovered?: string[];
+  sessionCueCount?: number;
+  lastCueTriggerType?: string;
+  minutesSinceLastCue?: number;
+  recentCoachingMessages?: string[];
+
+  // ── Sensor confidence ──────────────────────────────────────────────────────
+  hrConfidence?: string;        // "high" | "medium" | "low"
+  gpsConfidence?: string;       // "high" | "medium" | "low"
+  cadenceConfidence?: string;   // "high" | "medium" | "low" | undefined if no sensor
+
+  // ── Physiological response to last cue ────────────────────────────────────
+  lastCueHrDelta?: number;                  // bpm change since last cue (negative = fell)
+  lastCuePaceDelta?: number;               // sec/km change (positive = slower)
+  athleteRespondedToLastCue?: boolean;
 }
 
 export async function generateEliteCoaching(params: EliteCoachingParams): Promise<string> {
@@ -5128,6 +5206,47 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
       status += `\n- Today's workout: "${workoutDescription}"`;
     }
     status += `\nUse this context to give plan-aware coaching — reference their ${goalLabel} goal, compare current effort to what this workout is building towards, and reinforce how today's session fits the bigger picture.`;
+  }
+
+  // ── Session memory block ────────────────────────────────────────────────────
+  if ((params.sessionCueCount ?? 0) > 0 || params.topicsDiscussed?.length) {
+    status += `\n\nSession memory (what has already been covered this run):`;
+    if (params.sessionCueCount != null) status += `\n- Cues delivered so far: ${params.sessionCueCount}`;
+    if (params.minutesSinceLastCue != null) status += `\n- Time since last cue: ${params.minutesSinceLastCue.toFixed(1)} min`;
+    if (params.lastCueTriggerType) status += `\n- Last cue type: ${params.lastCueTriggerType.replace(/_/g, ' ')}`;
+    if (params.topicsDiscussed?.length) status += `\n- Topics already covered: ${params.topicsDiscussed.join(', ')}`;
+    if (params.topicsNotCovered?.length) status += `\n- Topics not yet discussed: ${params.topicsNotCovered.join(', ')} — consider these if relevant to current moment`;
+    if (params.recentCoachingMessages?.length) {
+      status += `\n- Recent messages: ${params.recentCoachingMessages.slice(-2).map(m => `"${m}"`).join(' | ')}`;
+    }
+    status += `\n→ Vary your coaching focus — don't repeat the same topic that was just covered unless the situation has materially changed.`;
+  }
+
+  // ── Sensor confidence ────────────────────────────────────────────────────────
+  const sensorWarnings: string[] = [];
+  if (params.hrConfidence === 'low') sensorWarnings.push('HR confidence LOW — use "looks around X bpm" not "heart rate is X bpm"');
+  if (params.gpsConfidence === 'low') sensorWarnings.push('GPS confidence LOW — distance/pace figures may be slightly off; avoid over-precision');
+  if (params.cadenceConfidence === 'low') sensorWarnings.push('Cadence confidence LOW — do not cite cadence as fact');
+  if (sensorWarnings.length) {
+    status += `\n\n⚠️ Sensor notes: ${sensorWarnings.join('; ')}`;
+  }
+
+  // ── Physiological response to last cue ────────────────────────────────────────
+  if (params.lastCueHrDelta != null || params.lastCuePaceDelta != null) {
+    status += `\n\nAthlete response since last cue:`;
+    if (params.lastCueHrDelta != null) {
+      const dir = params.lastCueHrDelta < 0 ? `fell ${Math.abs(params.lastCueHrDelta)} bpm ↓` : `rose ${params.lastCueHrDelta} bpm ↑`;
+      status += `\n- Heart rate ${dir}`;
+    }
+    if (params.lastCuePaceDelta != null) {
+      const dir = params.lastCuePaceDelta > 0 ? `slowed ${params.lastCuePaceDelta}s/km ↓` : `quickened ${Math.abs(params.lastCuePaceDelta)}s/km ↑`;
+      status += `\n- Pace ${dir}`;
+    }
+    if (params.athleteRespondedToLastCue === true) {
+      status += `\n→ Athlete IS responding — acknowledge their adjustment before issuing any new directive.`;
+    } else if (params.athleteRespondedToLastCue === false) {
+      status += `\n→ No response yet to previous cue — reinforce with different wording or fresh angle.`;
+    }
   }
 
   let typePrompt = '';
@@ -5539,17 +5658,22 @@ function buildSessionCoachingPolicy(
 ): SessionCoachingPolicy {
   const type = (sessionType ?? "").toLowerCase();
 
-  // Pace-led session types — cadence and elevation coaching are relevant and valuable
+  // Pace-led session types — cadence and elevation coaching are relevant and valuable.
+  // park_run is included because it is a competitive/tempo 5 km context where pace
+  // and running efficiency matter, even though participants may use HR as a guide.
   const PACE_LED_TYPES = new Set([
     "tempo", "threshold", "intervals", "hill_repeats", "hills",
     "race_pace", "race", "progression_run", "speed",
+    "park_run", "parkrun", "steady_state", "aerobic_threshold",
   ]);
 
   const isPaceLed = PACE_LED_TYPES.has(type);
 
-  // HR-led sessions — effort control is the goal, not pace optimisation
-  // Any session with explicit HR targets AND not in the pace-led list is also HR-led.
-  // Unknown types default to HR-led (conservative).
+  // HR-led sessions — effort control is the goal, not pace optimisation.
+  // Cadence triggers are still allowed as FORM coaching (not pace coaching) for
+  // all sessions — poor cadence is universally inefficient regardless of effort level.
+  // The difference is whether elevation/terrain coaching fires (pace-led only) and
+  // whether HR validation is required before firing HR-based triggers.
   const isHRLed =
     !isPaceLed &&
     (type === "easy" ||
@@ -5570,11 +5694,12 @@ function buildSessionCoachingPolicy(
     };
   }
 
-  // Default: HR-led / conservative
+  // HR-led sessions: allow cadence as a form coaching tool (it's always relevant),
+  // but disable elevation/terrain triggers (terrain coaching conflicts with effort-first intent).
   return {
     primaryMetric: isHRLed ? "hr" : "effort",
-    cadenceTriggersAllowed: false,
-    elevationTriggersAllowed: false,
+    cadenceTriggersAllowed: true,   // Cadence is universal form coaching — always valuable
+    elevationTriggersAllowed: false, // Terrain coaching conflicts with effort-controlled sessions
     hrValidationRequired: true,
   };
 }
@@ -5591,24 +5716,16 @@ function stripInappropriateTriggers(
   triggers: SessionCoachingTrigger[],
   policy: SessionCoachingPolicy
 ): SessionCoachingTrigger[] {
-  // Cadence-related trigger types/ids to strip when cadence is not allowed
-  const CADENCE_TRIGGER_KEYWORDS = ["cadence", "stride", "turnover", "spm"];
-  // Elevation/terrain trigger types/ids to strip when elevation is not allowed
+  // Elevation/terrain trigger types/ids to strip when elevation coaching is not allowed
   const ELEVATION_TRIGGER_KEYWORDS = ["elevation", "hill", "terrain", "grade", "uphill", "downhill", "slope", "rolling"];
 
   return triggers.filter(trigger => {
     const idAndType = `${trigger.id} ${trigger.type}`.toLowerCase();
     const conditionLower = trigger.condition.toLowerCase();
 
-    if (!policy.cadenceTriggersAllowed) {
-      const isCadenceTrigger =
-        CADENCE_TRIGGER_KEYWORDS.some(kw => idAndType.includes(kw)) ||
-        conditionLower.includes("cadence");
-      if (isCadenceTrigger) {
-        console.log(`[stripInappropriateTriggers] Removing cadence trigger '${trigger.id}' from HR-led session plan`);
-        return false;
-      }
-    }
+    // Cadence triggers are now allowed for ALL session types as universal form coaching.
+    // (policy.cadenceTriggersAllowed is always true — guard retained for future policy flexibility)
+    // No cadence stripping here.
 
     if (!policy.elevationTriggersAllowed) {
       const isElevationTrigger =
@@ -5902,6 +6019,16 @@ export async function generateSessionTriggerMessage(params: {
   runnerName?: string;
   fitnessLevel?: string;
   runnerProfile?: string | null;
+
+  // ── Sensor confidence ──────────────────────────────────────────────────────
+  hrConfidence?: string;
+  gpsConfidence?: string;
+  cadenceConfidence?: string;
+
+  // ── Physiological response to last cue ────────────────────────────────────
+  lastCueHrDelta?: number;
+  lastCuePaceDelta?: number;
+  athleteRespondedToLastCue?: boolean;
 }): Promise<string> {
   const {
     triggerId, triggerType, triggerCondition,
@@ -5915,6 +6042,9 @@ export async function generateSessionTriggerMessage(params: {
     recentCoachingMessages, recentSplits,
     coachName, coachTone, coachAccent,
     runnerName, runnerProfile,
+    topicsDiscussed, topicsNotCovered, sessionCueCount, minutesSinceLastCue, lastCueTriggerType,
+    hrConfidence, gpsConfidence, cadenceConfidence,
+    lastCueHrDelta, lastCuePaceDelta, athleteRespondedToLastCue,
   } = params;
 
   const hrTrendDirection   = params.hrTrendDirection;
@@ -6020,6 +6150,25 @@ Phase targets: ${[
 ].filter(Boolean).join(', ') || 'none specified'}
 ${recentMessagesBlock}
 
+━━ SESSION MEMORY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Cues delivered so far this session: ${sessionCueCount ?? 0}
+${minutesSinceLastCue != null ? `Time since last cue: ${minutesSinceLastCue.toFixed(1)} min` : 'First cue of the session'}
+${lastCueTriggerType ? `Last cue type: ${lastCueTriggerType.replace(/_/g, ' ')}` : ''}
+Topics already covered: ${topicsDiscussed && topicsDiscussed.length > 0 ? topicsDiscussed.join(', ') : 'none yet'}
+Topics not yet addressed: ${topicsNotCovered && topicsNotCovered.length > 0 ? topicsNotCovered.join(', ') : 'all covered'}
+→ If heart rate and pace have already been mentioned multiple times, consider addressing a topic not yet covered (e.g. ${topicsNotCovered?.[0] ?? 'form'} or ${topicsNotCovered?.[1] ?? 'breathing'}) if it is relevant to this moment.
+→ Never repeat a topic that was just covered in the previous cue unless the situation has materially changed.
+
+━━ SENSOR CONFIDENCE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${hrConfidence === 'low' ? '⚠️ HR confidence LOW (sensor dropout/noise) — use "looks around X bpm", not "heart rate is X bpm"' : hrConfidence === 'medium' ? 'HR confidence MEDIUM — readings valid, normal confidence' : 'HR confidence HIGH'}
+${gpsConfidence === 'low' ? '⚠️ GPS confidence LOW — pace/distance figures may be slightly off; avoid over-precision' : gpsConfidence === 'medium' ? 'GPS confidence MEDIUM — acceptable accuracy' : 'GPS confidence HIGH'}
+${cadenceConfidence === 'low' ? '⚠️ Cadence confidence LOW — do not cite cadence as fact' : cadenceConfidence ? `Cadence confidence: ${cadenceConfidence.toUpperCase()}` : 'No cadence sensor connected'}
+
+━━ ATHLETE RESPONSE TO LAST CUE ━━━━━━━━━━━━━━━━━━━━━━━━
+${lastCueHrDelta != null ? `Heart rate ${lastCueHrDelta < 0 ? `fell ${Math.abs(lastCueHrDelta)} bpm since last cue ↓ (self-correcting)` : `rose ${lastCueHrDelta} bpm since last cue ↑`}` : 'No HR delta data (first cue, or HR unavailable)'}
+${lastCuePaceDelta != null ? `Pace ${lastCuePaceDelta > 0 ? `slowed ${lastCuePaceDelta}s/km since last cue (easing back)` : `quickened ${Math.abs(lastCuePaceDelta)}s/km since last cue`}` : ''}
+${athleteRespondedToLastCue === true ? '✓ ATHLETE IS RESPONDING to previous coaching — acknowledge their adjustment before any new directive.' : athleteRespondedToLastCue === false ? '✗ No measurable response to previous cue yet — reinforce with different wording or a fresh angle.' : ''}
+
 ━━ TREND CONTEXT (last ~40 seconds) ━━━━━━━━━━━━━━━━━━━━
 ${hrTrendDirection ? `Heart rate trend: ${hrTrendDirection.toUpperCase()} — ${hrTrendDirection === 'falling' ? 'moving toward target' : hrTrendDirection === 'rising' ? 'moving away from target' : 'holding steady'}` : ''}
 ${paceTrendDirection ? `Pace trend: ${paceTrendDirection.toUpperCase()} — ${paceTrendDirection === 'slowing' ? 'athlete is easing off' : paceTrendDirection === 'speeding_up' ? 'athlete is pushing harder' : 'pace is steady'}` : ''}
@@ -6032,6 +6181,7 @@ Deliver ONE message (max 20 words, spoken aloud) that reacts to what is ACTUALLY
 - If the athlete is already self-correcting (see TREND CONTEXT above): acknowledge and encourage — never repeat a cue they are already executing
 - If the athlete is on target: give a genuine observation tied to their actual data, not generic praise
 - Reference the session context — this is a ${sessionType.replace(/_/g, ' ')} session with specific objectives, not a free run
+- Use session memory to pick the most valuable coaching focus for THIS moment — vary topics, don't repeat
 - Write "heart rate" never "HR"
 ${PACE_FORMAT_RULE}`;
 
@@ -6197,8 +6347,13 @@ The session is organised around rep count — NOT total distance or total time.
       return `
 PRIMARY SESSION STRUCTURE: DISTANCE-BASED
 The session is organised around reaching ${targetDistanceKm} km — this is the end point.
-- Design km-split feedback triggers that fire every 1 km with a short pace or effort summary (e.g. "1 km done, feeling good — keep that rhythm going").
-- Design distance milestone triggers: the 50% point (${halfKm} km) and the last 500 m.
+
+MANDATORY km-split triggers (one per km, all with frequency: "once"):
+${Array.from({length: Math.floor(targetDistanceKm)}, (_, i) => `- { id: "km_split_${i+1}", type: "km_split", condition: "distance >= ${i+1}.0", frequency: "once" } — fires when ${i+1} km is reached`).join('\n')}
+These must use frequency: "once" (NOT "on_condition") so they fire exactly once at each km mark. The message should reference the athlete's pace and heart rate.
+
+- MANDATORY halfway trigger: condition "distance >= ${halfKm}", frequency: "once" — acknowledge progress and encourage continued effort.
+- MANDATORY final 500m trigger: condition "remaining_m <= 500", frequency: "once" — acknowledge the final push.
 - The session ends when the athlete reaches ${targetDistanceKm} km. Use condition: "distance >= ${targetDistanceKm}".
 - MANDATORY: Include a session_complete trigger (type: "session_complete", frequency: "once", condition: "distance >= ${targetDistanceKm}") as the LAST trigger. This is the spoken end-of-session summary — make it feel like a real coach wrapping up a session, not a generic "well done". Mention the distance completed and acknowledge the effort.
 - Duration (${targetDurationMinutes} min) is an ESTIMATE only. Mention it in the preRunBrief as "should take around ${targetDurationMinutes} minutes" but DO NOT build time-based end triggers.
@@ -6266,8 +6421,26 @@ MESSAGE VARIABLES — substituted live at trigger time:
 VOICE: messages are read aloud — keep under 18 words. Write "heart rate" not "HR".
 PACE FORMAT IN preRunBrief: NEVER write pace as "6:57/km" — TTS reads colons as clock time. Say "6 minutes 57 per kilometre" instead.
 HR ZONE TRIGGERS: Every hr_zone trigger message MUST state the athlete's actual heart rate number and the zone boundary. Example: "Heart rate's at {hr} — ease back below {targetHRMax}." NEVER say just "heart rate high" without numbers.
-HR-LED SESSIONS (easy, recovery, long_run, Zone 2): Do NOT include cadence triggers or elevation/terrain triggers. These sessions are about EFFORT CONTROL — cadence and terrain coaching are irrelevant and distracting. Focus ONLY on: hr_zone triggers, distance/time milestones, effort check-ins, and completion cues.
-CADENCE TRIGGERS: ONLY for tempo, threshold, and interval sessions. Include at least 2 cadence triggers (e.g. condition: "cadence < 170 AND elapsed_min > 5", frequencySeconds 180). Optimal cadence for tempo/threshold is 170–180 spm. NEVER add cadence triggers to easy, recovery, or long_run sessions.
+
+CADENCE TRIGGERS: Include cadence coaching in ALL session types — running cadence is a universal efficiency metric regardless of pace or effort goal.
+- For tempo/threshold/interval/race sessions: fire if cadence drops significantly below 170–180 spm, e.g. condition "cadence < 170 AND elapsed_min > 5", frequency "periodic", frequencySeconds 180.
+- For easy/recovery/long_run sessions: fire if cadence is very low (e.g. cadence < 160), as a form coaching cue — not a performance correction.
+- Include at least 1–2 cadence triggers in every plan.
+
+POSITIVE CHECK-IN TRIGGERS (the coaching gap you MUST fill):
+The most common failure mode is a plan that only alerts when things go wrong (HR too high, HR too low).
+Great coaching also acknowledges when the athlete is EXECUTING WELL. You must include:
+- For distance-based sessions: per-km split triggers (frequency: "once") for every km, e.g. condition "distance >= 1.0", "distance >= 2.0" etc. These fire and report the athlete's current pace and heart rate vs targets. Example message: "One kilometre done. Heart rate at {hr} and pace is on target — keep it going."
+- A halfway trigger (frequency: "once") that summarises effort so far and encourages continuation.
+- A final 500m trigger (remaining_m <= 500, frequency: "once") that acknowledges the session and the final push.
+- These are PROGRESS TRIGGERS and must use frequency: "once" so they fire exactly once at each milestone.
+
+FORM + BREATHING CUES (periodic, every 3–5 minutes):
+Include at least 2 periodic coaching cues that cover running form and breathing — these are universal to all session types:
+- Form cue: e.g. "Relax your shoulders, arms low and loose — let your body settle into this pace."
+- Breathing cue: e.g. "Let your breathing stay rhythmic and controlled — nice and easy."
+These use frequency: "periodic" with frequencySeconds of 180–300, condition: "elapsed_min > 5".
+They keep the athlete mentally engaged and technically consistent throughout the session.
 
 MULTI-PHASE EFFORT SESSIONS (sessions that change HR zone or intensity mid-run):
 If the session instructions describe a progression (e.g. "steady Zone 2 for first 2.5 km then push into Zone 3 for the last 1.5 km"), you MUST:
@@ -6275,6 +6448,15 @@ If the session instructions describe a progression (e.g. "steady Zone 2 for firs
 2. The phase_start trigger for the higher-effort phase MUST tell the athlete: what to do, the new effort level, and the specific new heart rate target (e.g. "Now push the effort — target heart rate 132 to 145 for this final push.").
 3. HR zone alert triggers should automatically use the current phase's targetHRMax — so once the runner is in the higher-effort phase, the old Zone 2 ceiling no longer applies.
 4. NEVER use zone names like "Zone 2" or "Zone 3" alone in the preRunBrief or trigger messages — ALWAYS state the actual BPM range so athletes with different HR monitors or zone calibrations know exactly what to aim for.
+
+TRIGGER ORDERING — MANDATORY:
+The coaching engine processes triggers in three priority passes: progress triggers (once) → periodic → reactive (on_condition).
+To ensure the most important messages always fire, you MUST order triggers in this sequence:
+1. FIRST: All progress triggers (frequency: "once") — km splits, halfway, final 500m, session_complete
+2. SECOND: All periodic triggers (frequency: "periodic") — form cues, breathing, cadence check-ins
+3. LAST: All reactive triggers (frequency: "on_condition") — HR zone alerts, pace drift, cadence corrections
+
+session_complete MUST always be the very last trigger in the array.
 
 MANDATORY SESSION COMPLETE TRIGGER — REQUIRED IN EVERY PLAN:
 Every plan MUST include exactly ONE session_complete trigger as the FINAL trigger in the list. This fires when the athlete finishes the session and delivers a spoken end-of-session summary.
@@ -6284,6 +6466,17 @@ Every plan MUST include exactly ONE session_complete trigger as the FINAL trigge
 - message: A meaningful, personalised 2–3 sentence spoken summary. Must NOT just say "well done" — it should briefly acknowledge what the athlete achieved (e.g. "That's your {targetDistanceKm} km done — great controlled effort today. You kept your heart rate disciplined and built well into the final push. Rest up and we'll go again.").
 - Do NOT set alternativeMessages on session_complete — it fires once and must feel like a proper session close.
 - This trigger MUST be the last item in the triggers array and must NOT be skipped.
+
+PLAN RICHNESS REQUIREMENT:
+A complete coaching plan for a 5 km continuous-effort session should include approximately:
+- 5 km-split triggers (one per km, frequency: "once")
+- 1 halfway trigger (frequency: "once")
+- 1 final 500m trigger (frequency: "once")
+- 2 form/breathing periodic cues (frequency: "periodic")
+- 1–2 cadence triggers (frequency: "periodic" or "on_condition")
+- 2 HR zone triggers (hr_high, hr_low, frequency: "on_condition")
+- 1 session_complete trigger (frequency: "once")
+That is ~13 triggers total. Plans with fewer than 8 triggers are underdeveloped — build a richer plan.
 
 COACHING PRINCIPLES:
 - Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
@@ -6410,11 +6603,30 @@ MESSAGE QUALITY RULES — every trigger message must pass these tests:
 TRIGGER ids must be unique. Format: "{phase_name}_{trigger_type}".
 For rep triggers: include 4-5 alternativeMessages with varied language — the athlete will hear these across multiple reps.
 For reactive triggers (hr_zone, pace): 3-5 alternativeMessages with completely different wording.
+For km-split triggers (once): 3-4 alternativeMessages since the athlete will hear a different one each km.
+
+TRIGGER TYPE VOCABULARY — use semantic names that describe the coaching INTENT, not just the metric:
+  progress_update       — km split or distance milestone (athlete on track, summarise their numbers)
+  performance_summary   — mid-run effort summary (how are they tracking overall?)
+  technique_review      — cadence, stride, form — one technical cue
+  breathing_cue         — breathing rhythm and relaxation reminder
+  hr_zone_high          — heart rate above target ceiling (corrective)
+  hr_zone_low           — heart rate below target floor (corrective)
+  hr_recovery_ack       — heart rate returned to zone after alert (positive acknowledgement)
+  pace_drift            — pace has deviated from target range (corrective)
+  motivation            — encouragement, acknowledgement of effort, mental engagement
+  effort_check          — general effort level check-in (is this feeling right?)
+  phase_start           — session phase just changed (tell athlete what's next)
+  session_complete      — session finished (spoken summary)
+These are EXAMPLES — you may use your own names. The key is that the type clearly conveys the coaching intent so the live AI engine and session memory system can accurately track what topics have been covered.
 
 FINAL REMINDER — NON-NEGOTIABLE:
-1. Every plan MUST end with a "session_complete" trigger (type: "session_complete", frequency: "once") that fires when the session distance or time target is reached. This is the end-of-session spoken summary.
-2. If this session has multiple distinct effort phases (e.g. Zone 2 base then a Zone 3 push), each phase MUST have its own targetHRMin and targetHRMax values, and the phase_start trigger for the harder phase MUST clearly state the new BPM target.
-3. NEVER refer to zones by name only (Zone 2, Zone 3) — ALWAYS include the actual BPM range in the same message so the athlete knows exactly what the target is regardless of their HR monitor's zone calibration.`;
+1. TRIGGER ORDER: Place all frequency:"once" triggers first (km splits, milestones, session_complete), then frequency:"periodic" triggers, then frequency:"on_condition" triggers last. session_complete MUST be the very last trigger.
+2. PROGRESS TRIGGERS REQUIRED: For distance-based sessions, you MUST include individual km-split triggers for each km (distance >= 1.0, distance >= 2.0, etc.) with frequency:"once". These are NOT optional — they are the primary coaching touch-points during the run.
+3. Every plan MUST end with a "session_complete" trigger (type: "session_complete", frequency: "once") that fires when the session distance or time target is reached. This is the end-of-session spoken summary.
+4. If this session has multiple distinct effort phases (e.g. Zone 2 base then a Zone 3 push), each phase MUST have its own targetHRMin and targetHRMax values, and the phase_start trigger for the harder phase MUST clearly state the new BPM target.
+5. NEVER refer to zones by name only (Zone 2, Zone 3) — ALWAYS include the actual BPM range in the same message so the athlete knows exactly what the target is regardless of their HR monitor's zone calibration.
+6. MAX_TOKENS WARNING: This plan may use up to 6000 tokens. Generate ALL km-split triggers even if that means a longer response. A truncated plan is worse than a complete one.`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -6424,8 +6636,8 @@ FINAL REMINDER — NON-NEGOTIABLE:
         { role: "user", content: userPrompt },
       ],
       temperature: 0.75,  // Slightly higher for more natural/varied language
-      max_tokens: 6000,  // Generous headroom — complex plans with 12+ triggers × 5 alternativeMessages each
-                         // can produce 4500-5500 tokens. Truncation = invalid JSON = silent fallback to generic plan.
+      max_tokens: 8000,  // Increased for v2.8 richer plans: 13+ triggers × 5 alternativeMessages × longer km-split messages
+                         // can produce 5500-7500 tokens. Truncation = invalid JSON = silent fallback to generic plan.
       response_format: { type: "json_object" },
     });
 

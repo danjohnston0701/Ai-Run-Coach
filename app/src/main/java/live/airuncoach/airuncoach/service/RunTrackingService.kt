@@ -987,6 +987,44 @@ class RunTrackingService : Service(), SensorEventListener {
     private val triggerFiredOnce: MutableSet<String> = mutableSetOf()
     private val triggerAltMessageIndex: MutableMap<String, Int> = mutableMapOf()
 
+    // ── Session memory — coaching continuity ───────────────────────────────────────────
+    // Tracks what topics have been covered during this session so the AI can naturally
+    // vary its coaching focus rather than repeating the same theme every cue.
+    private val sessionTopicsDiscussed: MutableSet<String> = mutableSetOf()
+    private var sessionCueCount: Int = 0
+    private var lastCueTriggerType: String? = null
+    private var lastCueFiredAtMs: Long = 0L
+
+    // ── Coaching budget ────────────────────────────────────────────────────────────────
+    // Limits non-critical cues (form tips, breathing, cadence check-ins) so the
+    // athlete isn't overwhelmed. Safety/progress triggers always bypass the budget.
+    // Critical triggers: km_split, session_complete, milestone, hr_zone alerts
+    // Non-critical: periodic form cues, breathing cues, cadence check-ins, motivation
+    private val SESSION_MAX_NON_CRITICAL_CUES = 12   // max non-critical cues per session
+    private val NON_CRITICAL_MIN_GAP_MS = 90_000L    // min 90s between non-critical cues
+    private var nonCriticalCueCount: Int = 0
+    private var lastNonCriticalCueMs: Long = 0L
+
+    // All possible coaching topics — used to report what's not yet been covered
+    private val ALL_COACHING_TOPICS = listOf(
+        "heart_rate", "pace", "cadence", "breathing", "form", "motivation", "progress"
+    )
+
+    // ── Physiological response tracking ───────────────────────────────────────
+    // Records the athlete's HR and pace AT THE MOMENT each cue fires.
+    // On the next cue, we compute the delta so the AI knows whether the runner
+    // responded to the previous coaching (e.g. HR fell after a "slow down" cue).
+    private var lastCueHrAtFire: Int = 0          // HR bpm when last cue fired
+    private var lastCuePaceAtFire: Double = 0.0   // pace sec/km when last cue fired
+    // Computed delta (filled when next cue fires, passed to AI)
+    private var lastCueHrDelta: Int? = null        // bpm change since last cue: negative = fell (good for HR-high cues)
+    private var lastCuePaceDelta: Int? = null      // sec/km change since last cue: negative = faster
+    private var athleteRespondedToLastCue: Boolean? = null  // did the runner act on the previous cue?
+
+    // ── Last-known GPS accuracy ────────────────────────────────────────────────
+    // Stored on every accepted location update so we can report GPS confidence to AI
+    private var lastGpsAccuracyM: Float = 0f
+
     // Current active phase from the dynamic plan (updated by evaluateDynamicPhase())
     private var dynamicCurrentPhaseIndex: Int = 0
     private var dynamicCurrentPhaseName: String? = null
@@ -1099,6 +1137,21 @@ class RunTrackingService : Service(), SensorEventListener {
                 try {
                     dynamicCoachingPlan = gson.fromJson(dynamicPlanJson, live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan::class.java)
                     sessionCoachingPlanComplete = false // Reset so new plan can fire all triggers
+                    // Reset session memory for fresh run
+                    sessionTopicsDiscussed.clear()
+                    sessionCueCount = 0
+                    nonCriticalCueCount = 0
+                    lastCueTriggerType = null
+                    lastCueFiredAtMs = 0L
+                    lastNonCriticalCueMs = 0L
+                    triggerFiredOnce.clear()
+                    triggerLastFiredMs.clear()
+                    // Reset physiological response tracking
+                    lastCueHrAtFire = 0
+                    lastCuePaceAtFire = 0.0
+                    lastCueHrDelta = null
+                    lastCuePaceDelta = null
+                    athleteRespondedToLastCue = null
                     Log.d("RunTrackingService", "✅ Dynamic coaching plan loaded: strategy=${dynamicCoachingPlan?.cueingStrategy}, phases=${dynamicCoachingPlan?.phases?.size}, triggers=${dynamicCoachingPlan?.triggers?.size}")
                 } catch (e: Exception) {
                     Log.w("RunTrackingService", "Failed to deserialize dynamic coaching plan: ${e.message}")
@@ -2737,6 +2790,7 @@ class RunTrackingService : Service(), SensorEventListener {
             val isSpeedReasonable = impliedSpeedKmh < 40.0 || isFirstLocations
 
             if (location.accuracy <= maxAcceptableAccuracy && isDistanceReasonable && isSpeedReasonable) {
+                lastGpsAccuracyM = location.accuracy  // Track latest accepted GPS accuracy for sensor confidence reporting
                 // Calculate instantaneous pace from consecutive GPS points (for UI display)
                 val currentPaceSeconds = if (timeSinceLastPoint > 0 && distanceIncrement > 0) {
                     (1000.0 * timeSinceLastPoint / distanceIncrement).toFloat() // seconds per km
@@ -3103,6 +3157,15 @@ class RunTrackingService : Service(), SensorEventListener {
         // Fires immediately when conditions are met — not on a timer.
         // Takes priority over all other coaching paths during coached sessions.
         if (dynamicCoachingPlan != null && !hasCoachingFiredThisTick) {
+            // If targetDistance wasn't set via intent (e.g. watch-initiated run), fall back to
+            // the distance declared in the coaching plan so that "remaining_m" conditions work.
+            if (targetDistance == null) {
+                val planDist = dynamicCoachingPlan?.targetMetrics?.totalDistanceKm
+                if (planDist != null && planDist > 0) {
+                    targetDistance = planDist * 1000.0
+                    Log.d("RunTrackingService", "📏 targetDistance inferred from coaching plan: ${planDist}km")
+                }
+            }
             evaluateSessionConditionTriggers(displayDistanceKm)
         }
 
@@ -4489,12 +4552,74 @@ class RunTrackingService : Service(), SensorEventListener {
     //   recovery_start               — fired at the start of each recovery jog phase
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Extracts a coaching topic category from a trigger type string.
+     * Used to build session memory so the AI knows what has been discussed.
+     */
+    private fun extractTopicFromTriggerType(triggerType: String): String {
+        val t = triggerType.lowercase()
+        return when {
+            t.contains("hr") || t.contains("heart") || t.contains("zone") -> "heart_rate"
+            t.contains("pace") || t.contains("speed") || t.contains("km_split") || t.contains("split") -> "pace"
+            t.contains("cadence") || t.contains("stride") || t.contains("turnover") -> "cadence"
+            t.contains("breath") || t.contains("respir") -> "breathing"
+            t.contains("form") || t.contains("posture") || t.contains("shoulder") || t.contains("technique") -> "form"
+            t.contains("motivat") || t.contains("encourage") -> "motivation"
+            t.contains("milestone") || t.contains("halfway") || t.contains("finish") || t.contains("progress") || t.contains("session_complete") -> "progress"
+            else -> "general"
+        }
+    }
+
+    /**
+     * Returns true if this trigger bypasses the coaching budget.
+     * Critical = HR safety alerts, progress milestones (once), session transitions.
+     * Non-critical = periodic form/breathing cues, cadence check-ins, motivation.
+     */
+    private fun isCriticalTrigger(triggerType: String, frequency: String): Boolean {
+        val t = triggerType.lowercase()
+        return frequency == "once" ||  // All progress/milestone triggers are once — always critical
+            t.contains("hr_zone") || t.contains("hr_high") || t.contains("hr_low") ||
+            t.contains("heart_rate_high") || t.contains("heart_rate_low") ||
+            t.contains("session_complete") || t.contains("session_end") ||
+            t.contains("phase_start") || t.contains("rep_start") || t.contains("recovery_start")
+    }
+
     /** Minimum gap between reactive trigger re-fires (90 seconds for on_condition triggers) */
     private val REACTIVE_TRIGGER_COOLDOWN_MS = 90_000L
+
+    // Trigger types that are handled exclusively by evaluateDynamicPhase() — skip in condition loops
+    private val PHASE_TRANSITION_TRIGGER_TYPES = setOf(
+        "phase_start", "phase_end", "rep_start", "rep_end", "recovery_start"
+    )
 
     /**
      * Evaluate all dynamic plan triggers against live metrics each GPS tick.
      * Called in the main location-update loop before generic prompts.
+     *
+     * ═══════════════════════════════════════════════════════════════════════
+     * THREE-PASS PRIORITY SYSTEM
+     * ═══════════════════════════════════════════════════════════════════════
+     * The old single-loop design had a critical flaw: HR zone triggers (which are
+     * reactive / on_condition and fire frequently) blocked all progress triggers
+     * (km splits, halfway, final 500m, session_complete) because a single trigger
+     * firing would set hasCoachingFiredThisTick=true and exit the loop before those
+     * triggers were ever evaluated.
+     *
+     * The new design separates triggers into three priority passes:
+     *
+     * PASS 1 — Progress triggers (frequency="once")
+     *   km splits, halfway, final 500m, session_complete.
+     *   These fire FIRST and are NEVER blocked by reactive triggers.
+     *   Max one per tick (audio overlap prevention).
+     *
+     * PASS 2 — Periodic triggers (frequency="periodic")
+     *   Fixed-interval check-ins (e.g. every 90s regardless of metrics).
+     *   Only fires if Pass 1 produced nothing.
+     *
+     * PASS 3 — Reactive triggers (frequency="on_condition")
+     *   HR zone alerts, pace drift, cadence cues.
+     *   Only fires if Passes 1 and 2 produced nothing.
+     *   Max one per tick. 90s per-trigger cooldown.
      */
     private fun evaluateSessionConditionTriggers(currentDistanceKm: Double) {
         val plan = dynamicCoachingPlan ?: return
@@ -4514,79 +4639,33 @@ class RunTrackingService : Service(), SensorEventListener {
         val phaseHRMin = currentPhase?.targetHRMin ?: plan.targetMetrics.mainEffortHRMin
         val phasePaceMax = currentPhase?.targetPaceMax ?: plan.targetMetrics.mainEffortPaceMax  // sec/km
         val phasePaceMin = currentPhase?.targetPaceMin ?: plan.targetMetrics.mainEffortPaceMin  // sec/km
-        val currentPaceSecPerKm = parsePaceToSeconds(currentPace)
         // Base phase name (without rep suffix) — used for "phase == recovery_walk" conditions
         val currentPhaseBaseName = currentPhase?.name
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // PASS 1 — PROGRESS TRIGGERS (frequency="once", not yet fired)
+        // ═══════════════════════════════════════════════════════════════════════
+        // km splits, halfway milestone, final 500m, and session_complete.
+        // These represent EARNED progress and must ALWAYS fire when conditions
+        // are met — they are NEVER blocked by reactive HR/pace/cadence triggers.
+        // If a progress trigger fires on the same GPS tick as an HR alert, the
+        // progress trigger wins (it's more valuable context for the athlete).
         for (trigger in plan.triggers) {
-            if (hasCoachingFiredThisTick) return
-
-            // Phase-transition triggers are handled entirely by evaluateDynamicPhase() — skip here
-            if (trigger.type in listOf("phase_start", "phase_end", "rep_start", "rep_end", "recovery_start")) continue
-
-            // Skip "once" triggers that already fired
-            if (trigger.frequency == "once" && triggerFiredOnce.contains(trigger.id)) continue
-
-            val lastFiredMs = triggerLastFiredMs[trigger.id] ?: 0L
-
-            // ── Periodic triggers ──────────────────────────────────────────────
-            // OpenAI sets frequency = "periodic" and frequencySeconds = N.
-            // The engine fires these every N seconds regardless of live-data conditions.
-            // OpenAI uses this for regular check-ins like HR updates, effort summaries, etc.
-            if (trigger.frequency == "periodic") {
-                val periodMs = (trigger.frequencySeconds ?: 120) * 1_000L
-                // Don't fire periodic triggers in the first 60 seconds (warmup grace period)
-                if (getActiveRunDuration() < 60_000L) continue
-                if ((now - lastFiredMs) < periodMs) continue
-                // Evaluate optional condition (OpenAI may restrict to certain phases)
-                if (trigger.condition.isNotBlank() &&
-                    trigger.condition != "always" &&
-                    !evaluateConditionExpression(trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName)) continue
-
-                triggerLastFiredMs[trigger.id] = now
-                Log.d("RunTrackingService", "⏱️ Periodic trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
-                // Mark fired BEFORE async call to prevent duplicate triggers this tick
-                hasCoachingFiredThisTick = true
-                fireLiveTriggerMessage(
-                    trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
-                    phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
-                    phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
-                    currentDistanceKm = currentDistanceKm, plan = plan,
-                    currentPhase = currentPhase,
-                )
-                continue
-            }
-
-            // ── Reactive / condition-based triggers ────────────────────────────
-            // OpenAI defines the condition expression using our metric vocabulary.
-            // We evaluate it against live data — no hardcoded trigger-type logic.
-            val cooldown = if (trigger.frequency == "once") 0L else REACTIVE_TRIGGER_COOLDOWN_MS
-            if ((now - lastFiredMs) < cooldown) continue
+            if (hasCoachingFiredThisTick) break  // One audio per tick — stop after first fires
+            if (trigger.frequency != "once") continue
+            if (triggerFiredOnce.contains(trigger.id)) continue
+            if (trigger.type in PHASE_TRANSITION_TRIGGER_TYPES) continue
 
             val conditionMet = when (trigger.type) {
-                // Legacy milestone type — distance-pct condition evaluated separately
                 "milestone" -> {
-                    val td = targetDistance ?: 0.0
+                    val td = targetDistance ?: (plan.targetMetrics.totalDistanceKm?.let { it * 1000.0 }) ?: 0.0
                     if (td <= 0) false
                     else evaluateMilestoneCondition(trigger.condition, currentDistanceKm, td / 1000.0)
                 }
-                // ALL other trigger types (hr_zone_high, hr_zone_low, pace_too_slow, cadence_low,
-                // effort_check, form_alert, performance_check — whatever OpenAI named them)
-                // are evaluated via the flexible condition language:
                 else -> {
-                    // Require 2 min elapsed for reactive triggers — prevents premature firing at run start
-                    if (getActiveRunDuration() < 120_000L) false
-                    // HR confidence guard: when the session policy requires validated HR, suppress
-                    // any HR-based trigger until we have a confident, stable reading.
-                    // This silences false "HR too high" cues caused by sensor contact-loss dropouts.
-                    else if (plan.coachingPolicy?.hrValidationRequired == true &&
-                        trigger.condition.contains("hr", ignoreCase = true) &&
-                        !isHRReadingConfident()
-                    ) {
-                        Log.d("RunTrackingService",
-                            "HR trigger '${trigger.id}' suppressed — waiting for confident HR reading")
-                        false
-                    }
+                    // session_complete: require at least 60s elapsed to avoid instant-completion edge cases
+                    if ((trigger.type.contains("session_complete") || trigger.type.contains("session_end")) &&
+                        getActiveRunDuration() < 60_000L) false
                     else evaluateConditionExpression(
                         trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName
                     )
@@ -4596,22 +4675,10 @@ class RunTrackingService : Service(), SensorEventListener {
             if (!conditionMet) continue
 
             triggerLastFiredMs[trigger.id] = now
-            if (trigger.frequency == "once") triggerFiredOnce.add(trigger.id)
+            triggerFiredOnce.add(trigger.id)
 
-            Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
-            // Mark fired BEFORE async call to prevent duplicate triggers this tick
+            Log.d("RunTrackingService", "📍 Progress trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
             hasCoachingFiredThisTick = true
-
-            // Track whether this is an HR-zone-high trigger so we can fire a recovery
-            // acknowledgement later when HR returns to zone.
-            if (trigger.type.contains("hr_zone_high") ||
-                trigger.type.contains("hr_high") ||
-                trigger.type.contains("heart_rate_high") ||
-                (trigger.type.contains("hr") && trigger.condition.contains(">") &&
-                 trigger.condition.contains("targetHRMax", ignoreCase = true))) {
-                hrZoneExceededMax = phaseHRMax ?: 0
-                Log.d("RunTrackingService", "💓 HR zone exceeded (max=$hrZoneExceededMax) — will fire recovery ack when HR returns")
-            }
 
             // Detect session completion — stop all further trigger evaluation after this fires
             if (trigger.type.contains("session_complete") || trigger.type.contains("session_end")) {
@@ -4626,6 +4693,122 @@ class RunTrackingService : Service(), SensorEventListener {
                 currentDistanceKm = currentDistanceKm, plan = plan,
                 currentPhase = currentPhase,
             )
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PASS 2 — PERIODIC TRIGGERS (frequency="periodic")
+        // ═══════════════════════════════════════════════════════════════════════
+        // Fixed-interval check-ins (e.g. every 90s, regardless of live-data conditions).
+        // OpenAI uses this for regular effort summaries, cadence check-ins, etc.
+        // Only evaluates if no progress trigger fired in Pass 1.
+        if (!hasCoachingFiredThisTick) {
+            for (trigger in plan.triggers) {
+                if (hasCoachingFiredThisTick) break
+                if (trigger.frequency != "periodic") continue
+                if (trigger.type in PHASE_TRANSITION_TRIGGER_TYPES) continue
+
+                val periodMs = (trigger.frequencySeconds ?: 120) * 1_000L
+                // Don't fire periodic triggers in the first 60 seconds (warmup grace period)
+                if (getActiveRunDuration() < 60_000L) continue
+                val lastFiredMs = triggerLastFiredMs[trigger.id] ?: 0L
+                if ((now - lastFiredMs) < periodMs) continue
+                // Evaluate optional condition (OpenAI may restrict to certain phases)
+                if (trigger.condition.isNotBlank() &&
+                    trigger.condition != "always" &&
+                    !evaluateConditionExpression(trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName)) continue
+                // Coaching budget gate — non-critical periodic cues respect spacing and count limits
+                if (!isCriticalTrigger(trigger.type, trigger.frequency ?: "")) {
+                    if (nonCriticalCueCount >= SESSION_MAX_NON_CRITICAL_CUES) continue
+                    if ((now - lastNonCriticalCueMs) < NON_CRITICAL_MIN_GAP_MS) continue
+                }
+
+                triggerLastFiredMs[trigger.id] = now
+                Log.d("RunTrackingService", "⏱️ Periodic trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
+                hasCoachingFiredThisTick = true
+                fireLiveTriggerMessage(
+                    trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
+                    phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+                    phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
+                    currentDistanceKm = currentDistanceKm, plan = plan,
+                    currentPhase = currentPhase,
+                )
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PASS 3 — REACTIVE TRIGGERS (frequency="on_condition")
+        // ═══════════════════════════════════════════════════════════════════════
+        // HR zone alerts, pace drift, cadence cues — fire when live metrics cross
+        // defined thresholds. Only one fires per GPS tick; 90s cooldown per trigger.
+        // Only evaluates if Passes 1 and 2 produced nothing this tick.
+        if (!hasCoachingFiredThisTick) {
+            for (trigger in plan.triggers) {
+                if (hasCoachingFiredThisTick) break
+                // Only reactive / on_condition triggers in this pass
+                if (trigger.frequency == "once" || trigger.frequency == "periodic") continue
+                if (trigger.type in PHASE_TRANSITION_TRIGGER_TYPES) continue
+
+                val lastFiredMs = triggerLastFiredMs[trigger.id] ?: 0L
+                if ((now - lastFiredMs) < REACTIVE_TRIGGER_COOLDOWN_MS) continue
+                // Coaching budget — non-critical reactive cues (cadence, form, motivation) respect count/spacing
+                if (!isCriticalTrigger(trigger.type, trigger.frequency ?: "")) {
+                    if (nonCriticalCueCount >= SESSION_MAX_NON_CRITICAL_CUES) continue
+                    if ((now - lastNonCriticalCueMs) < NON_CRITICAL_MIN_GAP_MS) continue
+                }
+
+                val conditionMet = when (trigger.type) {
+                    // Legacy milestone type — distance-pct condition evaluated separately
+                    "milestone" -> {
+                        val td = targetDistance ?: (plan.targetMetrics.totalDistanceKm?.let { it * 1000.0 }) ?: 0.0
+                        if (td <= 0) false
+                        else evaluateMilestoneCondition(trigger.condition, currentDistanceKm, td / 1000.0)
+                    }
+                    else -> {
+                        // Require 2 min elapsed for reactive triggers — prevents premature firing at run start
+                        if (getActiveRunDuration() < 120_000L) false
+                        // HR confidence guard: when the session policy requires validated HR, suppress
+                        // any HR-based trigger until we have a confident, stable reading.
+                        // This silences false "HR too high" cues caused by sensor contact-loss dropouts.
+                        else if (plan.coachingPolicy?.hrValidationRequired == true &&
+                            trigger.condition.contains("hr", ignoreCase = true) &&
+                            !isHRReadingConfident()
+                        ) {
+                            Log.d("RunTrackingService",
+                                "HR trigger '${trigger.id}' suppressed — waiting for confident HR reading")
+                            false
+                        }
+                        else evaluateConditionExpression(
+                            trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName
+                        )
+                    }
+                }
+
+                if (!conditionMet) continue
+
+                triggerLastFiredMs[trigger.id] = now
+
+                Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
+                hasCoachingFiredThisTick = true
+
+                // Track whether this is an HR-zone-high trigger so we can fire a recovery
+                // acknowledgement later when HR returns to zone.
+                if (trigger.type.contains("hr_zone_high") ||
+                    trigger.type.contains("hr_high") ||
+                    trigger.type.contains("heart_rate_high") ||
+                    (trigger.type.contains("hr") && trigger.condition.contains(">") &&
+                     trigger.condition.contains("targetHRMax", ignoreCase = true))) {
+                    hrZoneExceededMax = phaseHRMax ?: 0
+                    Log.d("RunTrackingService", "💓 HR zone exceeded (max=$hrZoneExceededMax) — will fire recovery ack when HR returns")
+                }
+
+                fireLiveTriggerMessage(
+                    trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
+                    phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+                    phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
+                    currentDistanceKm = currentDistanceKm, plan = plan,
+                    currentPhase = currentPhase,
+                )
+            }
         }
 
         // ── HR recovery acknowledgement ─────────────────────────────────────────
@@ -4709,6 +4892,23 @@ class RunTrackingService : Service(), SensorEventListener {
         val recentSplits = kmSplits.takeLast(3).map { split ->
             live.airuncoach.airuncoach.network.model.RecentSplit(km = split.km, pace = split.pace)
         }
+
+        // ── Session memory snapshot ────────────────────────────────────────────
+        val topicsDiscussedSnapshot = sessionTopicsDiscussed.toList()
+        val topicsNotCoveredSnapshot = ALL_COACHING_TOPICS.filter { it !in sessionTopicsDiscussed }
+        val minutesSinceLast = if (lastCueFiredAtMs > 0L)
+            (System.currentTimeMillis() - lastCueFiredAtMs) / 60_000.0 else null
+
+        // ── Sensor confidence snapshot ─────────────────────────────────────────
+        val hrConfSnap  = hrConfidenceLevel()
+        val gpsConfSnap = gpsConfidenceLevel()
+        val cadConfSnap = cadenceConfidenceLevel()
+
+        // ── Physiological delta (computed in fireDynamicTrigger before snapshot update) ──
+        // These are already set by the time we build this request
+        val hrDeltaSnap   = lastCueHrDelta
+        val paceDeltaSnap = lastCuePaceDelta
+        val respondedSnap = athleteRespondedToLastCue
 
         // ── Trend context — computed from rolling buffers ──────────────────────
         val hrTrend = computeHRTrend()
@@ -4812,6 +5012,20 @@ class RunTrackingService : Service(), SensorEventListener {
                     userId = currentUser?.id,
                     runnerName = currentUser?.name,
                     fitnessLevel = currentUser?.fitnessLevel,
+                    // Session memory — coaching continuity
+                    topicsDiscussed = topicsDiscussedSnapshot.ifEmpty { null },
+                    topicsNotCovered = topicsNotCoveredSnapshot.ifEmpty { null },
+                    sessionCueCount = sessionCueCount,
+                    minutesSinceLastCue = minutesSinceLast,
+                    lastCueTriggerType = lastCueTriggerType,
+                    // Sensor confidence
+                    hrConfidence = hrConfSnap,
+                    gpsConfidence = gpsConfSnap,
+                    cadenceConfidence = cadConfSnap,
+                    // Physiological response to previous cue
+                    lastCueHrDelta = hrDeltaSnap,
+                    lastCuePaceDelta = paceDeltaSnap,
+                    athleteRespondedToLastCue = respondedSnap,
                 )
 
                 val response = withTimeoutOrNull(3_500L) {
@@ -5462,6 +5676,24 @@ class RunTrackingService : Service(), SensorEventListener {
         hasCoachingFiredThisTick = true
         recordCoachingFired()
 
+        // ── Physiological delta — compute BEFORE updating the snapshot ────────
+        // This gives us: "how did the athlete change since the PREVIOUS cue?"
+        computePhysiologicalDelta()
+
+        // ── Update session memory ──────────────────────────────────────────────
+        val topic = extractTopicFromTriggerType(triggerType)
+        sessionTopicsDiscussed.add(topic)
+        sessionCueCount++
+        lastCueTriggerType = triggerType
+        lastCueFiredAtMs = System.currentTimeMillis()
+        // Record current metric snapshot for next delta computation
+        lastCueHrAtFire = currentHeartRate
+        lastCuePaceAtFire = currentPaceSecPerKm
+        if (!isCriticalTrigger(triggerType, "on_condition")) {
+            nonCriticalCueCount++
+            lastNonCriticalCueMs = System.currentTimeMillis()
+        }
+
         // Sanitise AI messages: replace abbreviation "HR" with full "heart rate" so TTS reads
         // naturally. The AI sometimes writes "HR at 143" or "HR still elevated" — we always
         // want "heart rate at 143" in spoken output.
@@ -5469,7 +5701,7 @@ class RunTrackingService : Service(), SensorEventListener {
             .replace(Regex("\\bHR\\b"), "heart rate")
             .replace(Regex("\\bHR's\\b"), "heart rate's")
 
-        Log.d("RunTrackingService", "🎯 Dynamic trigger [$triggerType] phase=$phaseName: $sanitisedMessage")
+        Log.d("RunTrackingService", "🎯 Dynamic trigger [$triggerType] phase=$phaseName cue#$sessionCueCount topic=$topic: $sanitisedMessage")
         _latestCoachingText.value = sanitisedMessage
 
         // Record in coaching history so messages appear in the post-run summary and saved JSON.
@@ -5839,6 +6071,88 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
+     * Returns a three-level HR confidence string for the AI.
+     * High   = rolling window full, stable readings (low variance)
+     * Medium = rolling window partial, or variance is notable
+     * Low    = very few readings, or current HR is 0/implausible
+     */
+    private fun hrConfidenceLevel(): String {
+        if (currentHeartRate <= 0) return "low"
+        if (recentHrReadings.size < HR_CONFIDENCE_WINDOW) return "medium"
+        val readings = recentHrReadings.map { it.second }
+        val mean = readings.average()
+        val variance = readings.map { (it - mean) * (it - mean) }.average()
+        return when {
+            variance < 25.0 -> "high"    // std dev < 5 bpm — very stable
+            variance < 100.0 -> "medium" // std dev < 10 bpm — acceptable
+            else -> "low"                // high variance — sensor contact issue
+        }
+    }
+
+    /**
+     * Returns a three-level GPS confidence string for the AI.
+     * Based on the most recently accepted location's horizontal accuracy.
+     * High   = <= 8m  (open sky or Garmin watch quality)
+     * Medium = <= 20m (typical phone GPS)
+     * Low    = > 20m  (urban canyon, tree cover, indoors)
+     */
+    private fun gpsConfidenceLevel(): String {
+        if (lastGpsAccuracyM <= 0f) return "medium"
+        return when {
+            lastGpsAccuracyM <= 8f  -> "high"
+            lastGpsAccuracyM <= 20f -> "medium"
+            else -> "low"
+        }
+    }
+
+    /**
+     * Returns cadence confidence based on how recently we received a cadence reading
+     * and whether the value looks plausible (140–220 spm for running).
+     * Returns null if no cadence sensor is connected at all.
+     */
+    private fun cadenceConfidenceLevel(): String? {
+        if (currentCadence <= 0) return null   // No cadence sensor connected
+        return when {
+            currentCadence in 140..220 -> "high"    // Normal running range
+            currentCadence in 100..139 || currentCadence in 221..250 -> "medium"
+            else -> "low"
+        }
+    }
+
+    /**
+     * Computes the physiological delta since the last coaching cue and updates
+     * [lastCueHrDelta], [lastCuePaceDelta], [athleteRespondedToLastCue].
+     * Call this BEFORE recording the current cue's snapshot, so we compute
+     * delta = current − previous.
+     *
+     * "Responded" = HR fell after an HR-high cue, OR pace slowed after a pace-fast cue.
+     * We use a simple heuristic: any meaningful delta (>= 3 bpm or >= 5 sec/km)
+     * in the expected direction counts as a response.
+     */
+    private fun computePhysiologicalDelta() {
+        if (lastCueHrAtFire <= 0 || sessionCueCount == 0) {
+            lastCueHrDelta = null
+            lastCuePaceDelta = null
+            athleteRespondedToLastCue = null
+            return
+        }
+        val hrDelta = if (currentHeartRate > 0 && lastCueHrAtFire > 0)
+            currentHeartRate - lastCueHrAtFire else null   // negative = fell (good for HR alerts)
+        val paceDelta = if (currentPaceSecPerKm > 0 && lastCuePaceAtFire > 0)
+            (currentPaceSecPerKm - lastCuePaceAtFire).toInt() else null   // positive = slower, negative = faster
+
+        lastCueHrDelta = hrDelta
+        lastCuePaceDelta = paceDelta
+
+        val prevTopic = lastCueTriggerType?.let { extractTopicFromTriggerType(it) }
+        athleteRespondedToLastCue = when (prevTopic) {
+            "heart_rate" -> hrDelta != null && hrDelta <= -3  // HR came down
+            "pace"       -> paceDelta != null && paceDelta >= 5  // slowed down (more sec/km)
+            else         -> null  // Can't determine for other topics
+        }
+    }
+
+    /**
      * Computes the current HR trend direction from [hrTrendBuffer].
      * Returns "rising", "stable", or "falling".
      * Requires at least 5 readings; returns "stable" otherwise.
@@ -5920,6 +6234,15 @@ class RunTrackingService : Service(), SensorEventListener {
         recordCoachingFired()
         hasCoachingFiredThisTick = true
 
+        // ── Update session memory + physiological tracking ─────────────────────
+        computePhysiologicalDelta()
+        sessionTopicsDiscussed.add("heart_rate")
+        sessionCueCount++
+        lastCueTriggerType = "hr_coaching"
+        lastCueFiredAtMs = now
+        lastCueHrAtFire = currentHeartRate
+        lastCuePaceAtFire = parsePaceToSeconds(currentPace).toDouble()
+
         serviceScope.launch {
             try {
                 // Derive target zone number from plan intensity label (z1=1, z2=2, etc.)
@@ -5942,9 +6265,24 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Plan context so HR coaching can tell runner if they're in target zone
                     workoutIntensity = planWorkoutIntensity,
                     workoutType = planWorkoutType,
-                    // ========== NEW: Session Coaching Context ==========
+                    // ========== Session Coaching Context ==========
                     sessionCoachingTone = sessionCoachingTone,
-                    linkedWorkoutId = planWorkoutId
+                    linkedWorkoutId = planWorkoutId,
+                    // Session memory
+                    topicsDiscussed = sessionTopicsDiscussed.toList().ifEmpty { null },
+                    topicsNotCovered = ALL_COACHING_TOPICS.filter { it !in sessionTopicsDiscussed }.ifEmpty { null },
+                    sessionCueCount = sessionCueCount,
+                    lastCueTriggerType = lastCueTriggerType,
+                    minutesSinceLastCue = if (lastCueFiredAtMs > 0L)
+                        (System.currentTimeMillis() - lastCueFiredAtMs) / 60_000.0 else null,
+                    recentCoachingMessages = coachingHistory.takeLast(3).map { it.message }.ifEmpty { null },
+                    // Sensor confidence
+                    hrConfidence = hrConfidenceLevel(),
+                    gpsConfidence = gpsConfidenceLevel(),
+                    // Physiological response
+                    lastCueHrDelta = lastCueHrDelta,
+                    lastCuePaceDelta = lastCuePaceDelta,
+                    athleteRespondedToLastCue = athleteRespondedToLastCue
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(
@@ -6605,7 +6943,23 @@ class RunTrackingService : Service(), SensorEventListener {
             workoutDescription = planWorkoutDescription,
             planGoalType = planGoalType,
             planWeekNumber = planWeekNumber,
-            planTotalWeeks = planTotalWeeks
+            planTotalWeeks = planTotalWeeks,
+            // ── Session memory — gives the AI a view of the full coaching conversation so far
+            topicsDiscussed = sessionTopicsDiscussed.toList().ifEmpty { null },
+            topicsNotCovered = ALL_COACHING_TOPICS.filter { it !in sessionTopicsDiscussed }.ifEmpty { null },
+            sessionCueCount = sessionCueCount,
+            lastCueTriggerType = lastCueTriggerType,
+            minutesSinceLastCue = if (lastCueFiredAtMs > 0L)
+                (System.currentTimeMillis() - lastCueFiredAtMs) / 60_000.0 else null,
+            recentCoachingMessages = coachingHistory.takeLast(3).map { it.message }.ifEmpty { null },
+            // ── Sensor confidence — lets AI soften language on noisy data
+            hrConfidence = hrConfidenceLevel(),
+            gpsConfidence = gpsConfidenceLevel(),
+            cadenceConfidence = cadenceConfidenceLevel(),
+            // ── Physiological response to previous cue
+            lastCueHrDelta = lastCueHrDelta,
+            lastCuePaceDelta = lastCuePaceDelta,
+            athleteRespondedToLastCue = athleteRespondedToLastCue
         )
     }
 
@@ -6615,6 +6969,16 @@ class RunTrackingService : Service(), SensorEventListener {
         lastCoachingTime = now
         hasCoachingFiredThisTick = true
         recordCoachingFired()
+
+        // ── Update session memory + physiological tracking ─────────────────────
+        computePhysiologicalDelta()
+        val topic = extractTopicFromTriggerType(request.coachingType)
+        sessionTopicsDiscussed.add(topic)
+        sessionCueCount++
+        lastCueTriggerType = request.coachingType
+        lastCueFiredAtMs = now
+        lastCueHrAtFire = currentHeartRate
+        lastCuePaceAtFire = parsePaceToSeconds(currentPace).toDouble()
 
         serviceScope.launch {
             try {
