@@ -1494,39 +1494,39 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
   const normalizedAccent = (coachAccent || '').trim().toLowerCase();
   switch (normalizedAccent) {
     case 'british':
-      runnerProfileContext += '\nWrite with natural British English phrasing — use "brilliant", "well done", "cracking pace", "spot on", "kilometres". Avoid Americanisms.';
+      runnerProfileContext += '\nWrite with natural British English phrasing — use english slang and words like, but not limited to "brilliant", "well done", "cracking pace", "spot on". Avoid Americanisms and use kilometers for distance.';
       break;
     case 'irish':
-      runnerProfileContext += '\nWrite with natural Irish English phrasing — use "grand", "mighty", "fair play", "dead on", "kilometres". Warm and friendly tone.';
+      runnerProfileContext += '\nWrite with natural Irish English phrasing — use irish slang and words like, but not limited to "grand", "mighty", "fair play", "dead on". and use kilometers for distance.';
       break;
     case 'scottish':
-      runnerProfileContext += '\nWrite with natural Scottish English phrasing — use "brilliant", "well done", "cracking", "braw", "kilometres". Direct and warm.';
+      runnerProfileContext += '\nWrite with natural Scottish English phrasing — use scottish slang and words like, but not limited to "brilliant", "well done", "cracking", "braw". Direct and warm, and use kilometers for distance.';
       break;
     case 'australian':
-      runnerProfileContext += '\nWrite with natural Australian English phrasing — use "legend", "ripper", "no worries", "you beauty", "kays" or "kilometres". Relaxed and confident.';
+      runnerProfileContext += '\nWrite with natural Australian English phrasing — use Australian slang and words like, but not limited to "legend", "ripper", "no worries", "you beauty". Relaxed and confident, and use kilometers for distance.';
       break;
     case 'new zealand':
     case 'newzealand':
     case 'nz':
-      runnerProfileContext += '\nWrite with natural New Zealand English phrasing — use "sweet as", "good on ya", "choice", "chur", "kilometres". Understated, genuine warmth — not over the top. Kiwi style.';
+      runnerProfileContext += '\nWrite with natural New Zealand English phrasing — use New Zealand slang and words like, but not limited to "sweet as", "good on ya", "choice", "chur". Understated, genuine warmth — not over the top. Kiwi style, and use kilometers for distance.';
       break;
     case 'american':
-      runnerProfileContext += '\nWrite with natural American English phrasing — use "awesome", "great job", "crushing it", "miles" if user prefers or "kilometres". High energy and direct.';
+      runnerProfileContext += '\nWrite with natural American English phrasing — use American slang and words like, but not limited to "awesome", "great job", "crushing it", "miles" if user prefers or "kilometres". High energy and direct, and use kilometers for distance.';
       break;
     case 'south african':
-      runnerProfileContext += '\nWrite with natural South African English phrasing — use "lekker", "shame" (sympathetic), "howzit", "ja", "kilometres". Resilient, warm energy — like someone who runs ultra-marathons for fun.';
+      runnerProfileContext += '\nWrite with natural South African English phrasing — use South African slang and words like, but not limited to "lekker", "shame" (sympathetic), "howzit", "ja", "kilometres". Resilient, warm energy — like someone who runs ultra-marathons for fun, and use kilometers for distance.';
       break;
     case 'canadian':
-      runnerProfileContext += '\nWrite with natural Canadian English phrasing — use "eh", "for sure", "beauty", "no doubt", "kilometres". Friendly, humble, and genuinely encouraging. Never boastful.';
+      runnerProfileContext += '\nWrite with natural Canadian English phrasing — use Canadian slang and words like, but not limited to "eh", "for sure", "beauty", "no doubt", "kilometres". Friendly, humble, and genuinely encouraging. Never boastful, and use kilometers for distance.';
       break;
     case 'welsh':
-      runnerProfileContext += '\nWrite with natural Welsh English phrasing — use "lovely", "tidy", "fair play", "cracking on", "kilometres". Passionate and heartfelt with musical warmth.';
+      runnerProfileContext += '\nWrite with natural Welsh English phrasing — use Welsh slang and words like, but not limited to "lovely", "tidy", "fair play", "cracking on", "kilometres". Passionate and heartfelt with musical warmth, and use kilometers for distance.';
       break;
     case 'caribbean':
-      runnerProfileContext += '\nWrite with natural Caribbean English phrasing — use "wicked", "big up yourself", "nuff respect", "easy now", "kilometres". Rhythmic, confident, uplifting energy. Island warmth.';
+      runnerProfileContext += '\nWrite with natural Caribbean English phrasing — use "wicked", "big up yourself", "nuff respect", "easy now", "kilometres". Rhythmic, confident, uplifting energy. Island warmth, and use kilometers for distance.';
       break;
     case 'scandinavian':
-      runnerProfileContext += '\nWrite with natural Scandinavian-influenced English — use "very nice", "good job", "exactly", "perfect", "kilometres". Clean, precise, understated positivity. Hygge energy — calm confidence.';
+      runnerProfileContext += '\nWrite with natural Scandinavian-influenced English — use Scandinavian slang and words like, but not limited to "very nice", "good job", "exactly", "perfect", "kilometres". Clean, precise, understated positivity. Hygge energy — calm confidence, and use kilometers for distance.';
       break;
   }
 
