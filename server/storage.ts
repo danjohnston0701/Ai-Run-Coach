@@ -918,14 +918,6 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, email.toLowerCase()));
-    return user || undefined;
-  }
-
   // Events
   async getEvents(): Promise<Event[]> {
     return db.select().from(events).where(eq(events.isActive, true));

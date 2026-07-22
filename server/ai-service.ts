@@ -5293,7 +5293,7 @@ ${isNegativeSplitting ? '- They are NEGATIVE SPLITTING (getting faster as the ru
 ${fastestSplitKm && fastestSplitPace ? `- Their fastest split was km ${fastestSplitKm} at ${formatPaceForTTS(fastestSplitPace)} — call this out!` : ''}
 
 Give a 2-3 sentence message that reinforces what's working. Reference real data. This is about substance, not generic praise.`;
-      systemExtra = 'Acknowledge what they're doing well with specifics, not empty praise. Connect it to running quality if you choose.';
+      systemExtra = "Acknowledge what they're doing well with specifics, not empty praise. Connect it to running quality if you choose.";
       break;
 
     case 'target_eta': {

@@ -225,7 +225,6 @@ const TIMEZONE_TO_COUNTRY_MAP: Record<string, string> = {
   "Europe/Andorra": "AD",
   "Europe/Gibraltar": "GI",
   "Europe/Malta": "MT",
-  "Europe/Amsterdam": "NL",
   "Atlantic/Reykjavik": "IS",
 
   // ── Africa ────────────────────────────────────────────────────────────────
@@ -243,7 +242,6 @@ const TIMEZONE_TO_COUNTRY_MAP: Record<string, string> = {
   "Africa/Bujumbura": "BI",
   "Africa/Cairo": "EG",
   "Africa/Casablanca": "MA",
-  "Africa/Ceuta": "ES",
   "Africa/Conakry": "GN",
   "Africa/Dakar": "SN",
   "Africa/Dar_es_Salaam": "TZ",
