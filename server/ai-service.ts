@@ -4414,17 +4414,9 @@ ${isIntervalSession && plannedWorkout.restDurationSeconds ? `- Recovery Duration
 **Performance Analysis Lens** — ${postRunPhilosophy.completionNote}
 `;
 
-    // Generic comparative section for all workout types
-    prompt += `
-
-**KEY COMPARISONS**:
-- Was distance close to plan? (${plannedWorkout.distance || '?'}km planned)
-- Did average pace align with targets?
-- Heart rate: Did they stay in the right zone for the session type?
-- Any struggles in form, fatigue, or pacing consistency?
-
-Use this context to explain whether they "nailed the session," "found it challenging but gutsy," or "played it conservative." Reference the specific planned targets in your feedback.
-`;
+    // KEY COMPARISONS block removed — WorkoutPhilosophy already defines how to evaluate success
+    // (successCriteria, completionNote). GPT derives the relevant comparisons from the philosophy
+    // + planned targets above. Generic metric checklists are redundant and reduce coaching quality.
   }
 
   // ── Coaching Insight from Plan Reassessment ────────────────────────────────
