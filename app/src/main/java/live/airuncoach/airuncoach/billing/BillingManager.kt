@@ -78,7 +78,7 @@ class BillingManager @Inject constructor(
                         this@BillingManager.onPurchasesUpdated(billingResult, purchases)
                     }
                 })
-                .enablePendingPurchases(PendingPurchasesParams.newBuilder().build())
+                .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
                 .build()
 
             startBillingConnection()

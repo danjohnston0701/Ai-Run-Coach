@@ -1532,14 +1532,16 @@ App capabilities available in every session: real-time GPS pace/distance, live a
       // just without the pace-history-calibrated targets. Self-healing job will retry.
     }
 
-    // Fire-and-forget: generate session instructions in the background.
-    // For enriched workouts this will be re-run after enrichment completes with better data.
-    // For un-enriched workouts (new users weeks 1+) this generates placeholder briefings.
-    setImmediate(() => {
-      generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch((err) =>
-        console.error(`[SessionInstructions] Background generation failed for plan ${planId}:`, err)
-      );
-    });
+    // DISABLED: Background session instruction pre-generation is wasteful — these plans are
+    // generated with gpt-4o-mini in an old format (pre-v2.8) and are immediately discarded
+    // when the user opens the workout and hits /prepare-coaching, which always regenerates
+    // them with gpt-4o using the current CURRENT_PLAN_VERSION gate. Every token spent here
+    // is wasted. Session instructions are generated on-demand at Prepare Run time instead.
+    // setImmediate(() => {
+    //   generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch((err) =>
+    //     console.error(`[SessionInstructions] Background generation failed for plan ${planId}:`, err)
+    //   );
+    // });
 
     return planId;
   } catch (error) {
@@ -1827,12 +1829,13 @@ STRUCTURAL CONSTRAINTS:
     // Non-fatal — self-healing BPM job + daily scheduler will correct remaining issues
   }
 
-  // Background session instruction generation (enrichment regen fires after enrichment completes)
-  setImmediate(() => {
-    generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch(err =>
-      console.error(`[NextBlock][SessionInstructions] Background generation failed:`, err)
-    );
-  });
+  // DISABLED: Same reason as generateTrainingPlan — background session instructions are
+  // pre-v2.8 placeholder quality and always replaced on first Prepare Run. No-op here.
+  // setImmediate(() => {
+  //   generateSessionInstructionsInBackground(userId, pendingSessionInstructions).catch(err =>
+  //     console.error(`[NextBlock][SessionInstructions] Background generation failed:`, err)
+  //   );
+  // });
 }
 
 /**
