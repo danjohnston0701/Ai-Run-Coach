@@ -352,17 +352,27 @@ fun WorkoutDetailScreen(
                                 Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
                             }
 
-                            // Heart rate range — show stored BPMs from the server (server enforces
-                            // Tanaka zone ranges via enrichment). Only fall back to client-side
-                            // computation if the stored values are missing or clearly invalid.
-                            val hrMin = workout.hrZoneMinBpm
-                            val hrMax = workout.hrZoneMaxBpm
+                            // Heart rate range — for interval workouts, prefer the per-interval
+                            // HR targets (the work effort zone) over hrZoneMinBpm/hrZoneMaxBpm
+                            // (which represent the session-average / recovery zone).
+                            val isIntervalType = workout.workoutType.lowercase() in
+                                    setOf("hill_repeats", "intervals", "fartlek")
+                            val workIntervalHrMin = if (isIntervalType) workout.intervalHeartRateMin else null
+                            val workIntervalHrMax = if (isIntervalType) workout.intervalHeartRateMax else null
+                            val hrMin = workIntervalHrMin ?: workout.hrZoneMinBpm
+                            val hrMax = workIntervalHrMax ?: workout.hrZoneMaxBpm
                             val storedBpmsValid = hrMin != null && hrMax != null &&
                                 hrMin > 50 && hrMax < 230 && hrMin < hrMax
                             if (storedBpmsValid) {
                                 Spacer(modifier = Modifier.height(Spacing.sm))
-                                Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                                val hrLabel = if (workIntervalHrMin != null) "Work interval heart rate:" else "Target heart rate:"
+                                Text(hrLabel, style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                                 Text("Keep your HR between $hrMin and $hrMax bpm", style = AppTextStyles.small, color = Colors.textSecondary)
+                                // Also show recovery HR cap for interval workouts
+                                if (isIntervalType && workout.restHeartRateMax != null) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Recovery target: HR below ${workout.restHeartRateMax} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
+                                }
                             } else if (userMaxHR > 0) {
                                 // Only show client-side fallback when stored values are truly missing
                                 val fallbackRange = HeartRateZones.getTargetHRRange(zoneNumber, userMaxHR)
@@ -904,45 +914,54 @@ fun WorkoutStructureSection(workout: WorkoutDetails) {
 /**
  * Resolve the HR zone number (1-5) for display and HR range calculations.
  *
- * Priority:
- *  1. hrZoneNumber from the planned workout — most accurate (set by the AI plan generator)
- *  2. Parse intensity string for "z1"–"z5" format (e.g. "z2", "Z3")
- *  3. Map workoutType to its natural zone (easy/long_run �� 2, tempo → 3, intervals → 4, etc.)
- *  4. Default to Zone 2 as a safe fallback
+ * For INTERVAL workouts (hill_repeats, intervals, fartlek):
+ *  - hrZoneNumber represents the session-average / recovery zone, NOT the work effort zone.
+ *    Using it as primary would show "Zone 2" for a hill repeats session where the work
+ *    intervals run at 145-160 bpm (Zone 3-4). So for interval workouts we skip it and
+ *    read the effort from the intensity field first, then fall back to type defaults.
  *
- * This avoids the "Zone 2310" bug that occurred when the bare-digit regex stripped ALL digits
- * from free-text intensity strings like "RPE 2–3/10".
+ * For NON-INTERVAL workouts:
+ *  - hrZoneNumber is the session zone — use it as highest priority.
+ *  - Fall back to intensity string, then workout-type defaults.
+ *
+ * This fixes the "Zone 2 on a hill repeats session" bug.
  */
 fun resolveZoneNumber(workout: WorkoutDetails): Int {
-    // 1. Explicit zone number from AI plan
-    workout.hrZoneNumber?.let { if (it in 1..5) return it }
+    val isIntervalWorkout = workout.workoutType.lowercase() in
+            setOf("hill_repeats", "intervals", "fartlek")
 
-    // 2. "z1"–"z5" intensity format
+    if (!isIntervalWorkout) {
+        // Non-interval: hrZoneNumber IS the session zone — use it first
+        workout.hrZoneNumber?.let { if (it in 1..5) return it }
+    }
+
+    // "z1"-"z5" intensity string correctly encodes the overall session effort for all types
     workout.intensity?.let { intensity ->
         Regex("z([1-5])", RegexOption.IGNORE_CASE).find(intensity)
             ?.groupValues?.get(1)?.toIntOrNull()
             ?.let { return it }
     }
 
-    // 3. Workout type default
+    // Workout type default
     return when (workout.workoutType.lowercase()) {
-        "recovery", "rest"             -> 1
-        "easy", "long_run"             -> 2
-        "tempo"                        -> 3
-        "intervals", "hill_repeats"    -> 4
-        else                           -> 2
+        "recovery", "rest"          -> 1
+        "easy", "long_run"          -> 2
+        "tempo"                     -> 3
+        "intervals", "hill_repeats",
+        "fartlek"                   -> 4
+        else                        -> 2
     }
 }
 
 /**
  * Calculate dynamic pace range for a given zone based on target pace.
- * 
+ *
  * When a workout has a specific target pace (from enrichment), we calculate the range
  * by applying zone-specific offsets:
  * - Zone 1: ~40-50% slower than target pace
- * - Zone 2: ±10-15% of target pace (e.g., 8:30 target → 7:30–9:45)
+ * - Zone 2: +-10-15% of target pace (e.g., 8:30 target -> 7:30-9:45)
  * - Zone 3: ~10-20% faster than target pace
- * 
+ *
  * Falls back to hardcoded ranges if no target pace is available.
  */
 fun calculateZonePaceRange(zoneNumber: Int, targetPace: String?): String {
