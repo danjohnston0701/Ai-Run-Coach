@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { COACHING_PHASE_PROMPT, determinePhase, type CoachingPhase } from "../shared/coaching-statements";
 import { runnerProfileBlock } from "./runner-profile-service";
+import { getWorkoutPhilosophy, formatPhilosophyForPrompt } from "./workoutPhilosophy";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -4387,61 +4388,31 @@ ${planProgressWeek && planProgressWeeks ? `- Reference the week number and progr
 **Workout Type**: ${plannedWorkout.workoutType}
 `;
 
-    // Add specific expectations based on workout type
-    if (plannedWorkout.workoutType === 'easy' || plannedWorkout.workoutType === 'recovery') {
-      prompt += `
-**Easy/Recovery Run Expectations:**
+    // Inject workout philosophy — replaces hardcoded per-type expectation blocks.
+    // Same training science, applied universally to any workout type without branching.
+    const postRunPhilosophy = getWorkoutPhilosophy(plannedWorkout.workoutType);
+    const postRunPhilosophyBlock = formatPhilosophyForPrompt(postRunPhilosophy, plannedWorkout.workoutType, {
+      includeCelebrate: false,
+      includeWarningSigns: false,
+    });
+    prompt += `\n${postRunPhilosophyBlock}\n`;
+
+    // Add the specific planned targets for comparison — these are factual, not philosophical
+    const isIntervalSession = ['intervals', 'hill_repeats', 'fartlek', 'repeats'].includes(plannedWorkout.workoutType);
+    prompt += `
+**Planned Session Targets** (compare actual performance against these):
 - Distance: ${plannedWorkout.distance || '?'}km
-- Duration: ${plannedWorkout.duration ? `${plannedWorkout.duration} minutes` : '?'}
-- Target Pace: ${plannedWorkout.targetPace || 'conversational pace'} /km
-${plannedWorkout.hrZoneNumber ? `- Heart Rate Zone: Zone ${plannedWorkout.hrZoneNumber} (${plannedWorkout.hrZoneMinBpm}-${plannedWorkout.hrZoneMaxBpm} BPM) — ${plannedWorkout.hrZoneScenario || 'steady aerobic'}` : ''}
-- Effort: ${plannedWorkout.effortDescription || 'recovery focused, build aerobic base'}
+- Duration: ${plannedWorkout.duration ? `${Math.round(plannedWorkout.duration / 60)} minutes` : '?'}
+- Target Pace: ${plannedWorkout.targetPace || 'by effort'} /km
+${plannedWorkout.hrZoneNumber ? `- Overall HR Zone: Zone ${plannedWorkout.hrZoneNumber} (${plannedWorkout.hrZoneMinBpm}–${plannedWorkout.hrZoneMaxBpm} BPM)` : ''}
+${isIntervalSession && plannedWorkout.intervalCount ? `- Structure: ${plannedWorkout.intervalCount} × ${plannedWorkout.intervalDistanceMeters ? `${(plannedWorkout.intervalDistanceMeters / 1000).toFixed(2)}km` : plannedWorkout.intervalDurationSeconds ? `${Math.round(plannedWorkout.intervalDurationSeconds / 60)} min` : '?'}` : ''}
+${isIntervalSession && plannedWorkout.intervalTargetPace ? `- Work Interval Pace: ${plannedWorkout.intervalTargetPace} /km` : ''}
+${isIntervalSession && plannedWorkout.intervalHeartRateMin && plannedWorkout.intervalHeartRateMax ? `- Work Interval HR: ${plannedWorkout.intervalHeartRateMin}–${plannedWorkout.intervalHeartRateMax} BPM` : ''}
+${isIntervalSession && plannedWorkout.restHeartRateMax ? `- Recovery HR Target: < ${plannedWorkout.restHeartRateMax} BPM` : ''}
+${isIntervalSession && plannedWorkout.restDurationSeconds ? `- Recovery Duration: ${Math.round(plannedWorkout.restDurationSeconds / 60)} min` : ''}
 
-**Performance Analysis**:
-Compare actual pace, HR, and distance to these targets. For easy runs, consistency is more important than speed — did they maintain steady effort?
+**Performance Analysis Lens** — ${postRunPhilosophy.completionNote}
 `;
-    } else if (plannedWorkout.workoutType === 'tempo') {
-      prompt += `
-**Tempo Run Expectations:**
-- Distance: ${plannedWorkout.distance || '?'}km
-- Duration: ${plannedWorkout.duration ? `${plannedWorkout.duration} minutes` : '?'}
-- Target Pace: ${plannedWorkout.targetPace || 'threshold pace'} /km
-${plannedWorkout.hrZoneNumber ? `- Heart Rate Zone: Zone ${plannedWorkout.hrZoneNumber} (${plannedWorkout.hrZoneMinBpm}-${plannedWorkout.hrZoneMaxBpm} BPM) — ${plannedWorkout.hrZoneScenario || 'sustained hard effort'}` : ''}
-- Effort: ${plannedWorkout.effortDescription || 'sustained, controlled effort at lactate threshold'}
-
-**Performance Analysis**:
-Did they hold the target pace? Monitor for form breakdown in the final third (sign of fatigue). Compare average HR to zone expectations. Praise steady effort and controlled pacing, flag any negative splits or pacing inconsistency.
-`;
-    } else if (plannedWorkout.workoutType === 'intervals' || plannedWorkout.workoutType === 'repeats') {
-      prompt += `
-**Interval/Repeat Workout Expectations:**
-- Structure: ${plannedWorkout.intervalCount || '?'} × ${plannedWorkout.intervalDistanceMeters ? `${(plannedWorkout.intervalDistanceMeters / 1000).toFixed(2)}km` : `${plannedWorkout.intervalDurationSeconds ? `${Math.round(plannedWorkout.intervalDurationSeconds / 60)} min` : '?'}`}
-- Interval Target Pace: ${plannedWorkout.intervalTargetPace || '?'} /km
-- Recovery Target Pace: ${plannedWorkout.restTargetPace || 'easy pace'} /km
-${plannedWorkout.intervalHeartRateMin && plannedWorkout.intervalHeartRateMax ? `- Interval HR Target: ${plannedWorkout.intervalHeartRateMin}-${plannedWorkout.intervalHeartRateMax} BPM` : ''}
-${plannedWorkout.restHeartRateMax ? `- Recovery HR Target: < ${plannedWorkout.restHeartRateMax} BPM` : ''}
-- Rest Period: ${plannedWorkout.restDistanceMeters ? `${(plannedWorkout.restDistanceMeters / 1000).toFixed(2)}km` : `${plannedWorkout.restDurationSeconds ? `${Math.round(plannedWorkout.restDurationSeconds / 60)} min` : '?'}`}
-- Effort: ${plannedWorkout.effortDescription || 'hard push with full recovery between reps'}
-
-**Performance Analysis**:
-- Check each interval: Did they hit target pace? Monitor for consistent pacing across intervals (should get slightly slower, but not dramatically).
-- Recovery sections: Were they truly easy, or did HR spike too high between efforts?
-- Positive/Negative Split: Intervals should be relatively consistent; large slowdowns signal fatigue.
-- Overall Quality: Did they complete all reps at target intensity?
-`;
-    } else if (plannedWorkout.workoutType === 'fartlek' || plannedWorkout.workoutType === 'mixed_pace') {
-      prompt += `
-**Fartlek/Mixed Pace Run Expectations:**
-- Structure: Varied pace with playful effort changes
-- Base Pace: ${plannedWorkout.targetPace || '?'} /km
-- Fast Sections: ${plannedWorkout.intervalTargetPace || '?'} /km (effort-based)
-- Easy Sections: ${plannedWorkout.restTargetPace || 'conversational'} /km
-- Effort: ${plannedWorkout.effortDescription || 'spontaneous, controlled intensity play'}
-
-**Performance Analysis**:
-Did they balance hard efforts with proper recovery? Look for varied HR spikes and good recovery between pushes. This workout is about feel and adaptability — positive if they executed varied efforts smoothly.
-`;
-    }
 
     // Generic comparative section for all workout types
     prompt += `
@@ -6108,8 +6079,14 @@ export async function generateSessionTriggerMessage(params: {
     : '';
 
   // ── Build the full session context block ──────────────────────────────────
-  // This is the critical part that was missing — GPT needs to understand the WHOLE session,
-  // not just the current phase, to give coaching that makes sense in context.
+  // Includes workout philosophy so GPT understands WHY this session exists, not just
+  // what the metrics are. This is the single biggest improvement to live coaching quality.
+  const livePhilosophy = getWorkoutPhilosophy(sessionType);
+  const livePhilosophyBlock = formatPhilosophyForPrompt(livePhilosophy, sessionType, {
+    includeCelebrate: true,
+    includeWarningSigns: true,
+  });
+
   const sessionContextBlock = [
     sessionInstructions ? `WORKOUT DESCRIPTION: ${sessionInstructions}` : null,
     preRunBrief ? `PRE-RUN BRIEF (what the athlete was told): "${preRunBrief}"` : null,
@@ -6121,6 +6098,7 @@ export async function generateSessionTriggerMessage(params: {
       : null,
     repContext ? `INTERVAL PROGRESS: ${repContext}` : null,
     phaseTimeContext ? `PHASE TIMING: ${phaseTimeContext}` : null,
+    livePhilosophyBlock,
   ].filter(Boolean).join('\n');
 
   // ── Build the prompt ───────────────────────────────────────────────────────
@@ -6489,12 +6467,7 @@ COACHING PRINCIPLES:
 - The coaching engine evaluates triggers continuously (~1/sec on GPS tick), so reactive triggers fire immediately when conditions are met
 - Provide 3-5 alternativeMessages for every repeating trigger so the athlete hears DIFFERENT language at each rep — never the same phrase twice
 - The preRunBrief must name the actual heart rate targets and pace targets for each phase. The athlete should know EXACTLY what they're aiming for before they start.
-- Match coaching tone to the session's demands — not just the athlete's general preference:
-  * Walk-run/beginner builds: warm, supportive, clear — tell them what's coming and why it helps them
-  * Recovery/easy/aerobic: calm, conversational — focus on how it should feel, not numbers
-  * Intervals/hills/speed: energetic, focused — celebrate rep completion, motivate the next effort
-  * Tempo/threshold: technical, steady — help the athlete lock in and hold the target zone
-  * Long run: milestone-aware, narrative — manage pacing and keep them mentally engaged over distance
+- The WORKOUT PHILOSOPHY block in the user prompt explains what today's session exists to achieve, what success looks like, what mistakes to avoid, and what deserves praise. Use it to guide your coaching decisions — coach toward the PURPOSE, not just toward hitting metrics.
 
 You must respond with ONLY valid JSON (no markdown, no code blocks).`;
 
@@ -6509,12 +6482,22 @@ SESSION STRUCTURE SCAFFOLD for this ${intervalCount}× walk-run session:
 `
     : "";
 
+  // Build workout philosophy block — zero extra tokens at generation time, just training science
+  const philosophy = getWorkoutPhilosophy(sessionType);
+  const philosophyBlock = formatPhilosophyForPrompt(philosophy, sessionType, {
+    includeCelebrate: true,
+    includeWarningSigns: true,
+  });
+
   const userPrompt = `${runnerContext}
 
 ${recentRunsContext}
 
 ${sessionContext}
 ${walkRunScaffold}
+
+${philosophyBlock}
+
 Design a complete, bespoke coaching plan for this specific athlete and session.
 
 You are the coaching brain. Decide what to monitor, when to intervene, and what live data to include in messages. Think: what would a world-class coach actually say to THIS person at each moment of THIS run? Include data in messages using {hr}, {cadence}, {pace}, {repNum}, {repsLeft}, {targetHRMax} etc. where helpful.
