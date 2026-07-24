@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.sp
 import live.airuncoach.airuncoach.network.model.PendingAdaptation
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
-import live.airuncoach.airuncoach.ui.theme.Spacing
 
 /**
  * Adaptive Plan Update Card
@@ -44,39 +43,37 @@ fun AdaptivePlanUpdateCard(
     }
 
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp)),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = Colors.backgroundSecondary,
             contentColor = Colors.textPrimary
         ),
-        shape = RoundedCornerShape(16.dp),
-        border = null
+        shape = RoundedCornerShape(16.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Header with wand icon and title
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
                     contentDescription = "Adaptive Plan Update",
                     tint = Colors.primary,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = "Adaptive Plan Update",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    style = AppTextStyles.h4,
+                    fontWeight = FontWeight.SemiBold,
                     color = Colors.textPrimary,
-                    fontSize = 16.sp
+                    fontSize = 15.sp
                 )
             }
 
@@ -85,96 +82,91 @@ fun AdaptivePlanUpdateCard(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(80.dp),
+                        .height(60.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(28.dp),
                         color = Colors.primary,
                         strokeWidth = 2.dp
                     )
                 }
             } else if (adaptation != null) {
-                // AI Suggestion text
-                Text(
-                    text = adaptation.aiSuggestion ?: "AI analysis for upcoming workouts",
-                    style = AppTextStyles.body,
-                    color = Colors.textPrimary,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
-
-                // Changes count badge (if available)
-                if (adaptation.changes != null && adaptation.changes.isNotEmpty()) {
-                    Surface(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Colors.primary.copy(alpha = 0.1f)),
-                        color = Colors.primary.copy(alpha = 0.1f)
+                // AI Suggestion text — the meat of the card
+                // This is the personalized AI reasoning, so it should be prominent
+                if (!adaptation.aiSuggestion.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top
                     ) {
+                        // AI emoji/icon to match iOS style
                         Text(
-                            text = "Affects ${adaptation.changes.size} upcoming workouts",
-                            style = AppTextStyles.caption,
-                            color = Colors.primary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(8.dp, 4.dp)
+                            text = "🧠",
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        Text(
+                            text = adaptation.aiSuggestion,
+                            style = AppTextStyles.body,
+                            color = Colors.textPrimary,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
 
-                // Action buttons
+                // Action buttons — more prominent spacing
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = Spacing.sm),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Decline button - outlined style
                     OutlinedButton(
                         onClick = { onDecline(adaptation.id) },
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp),
+                            .height(42.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = Colors.textSecondary
                         ),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(
-                            width = 1.dp
-                        ),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(width = 1.dp),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
                             text = "Decline",
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
-                    // Accept button - filled style with checkmark
+                    // Accept button - filled cyan/teal to match iOS
                     Button(
                         onClick = { onAccept(adaptation.id) },
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp),
+                            .height(42.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Colors.success.copy(alpha = 0.85f),
+                            containerColor = Color(0xFF00BCD4),  // Cyan to match iOS
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = "✓",
-                                fontSize = 16.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = "Accept Changes",
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -212,20 +204,9 @@ fun AdaptivePlanUpdateSection(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Show count of pending adaptations (only if more than 1)
-        if (adaptations.size > 1) {
-            Text(
-                text = "${adaptations.size} pending adaptations",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-        }
-
-        // Main adaptation card
+        // Main adaptation card (shows first adaptation if multiple exist)
         AdaptivePlanUpdateCard(
             adaptation = selectedAdaptation,
             isLoading = isLoading,
@@ -233,12 +214,12 @@ fun AdaptivePlanUpdateSection(
             onDecline = onDecline
         )
 
-        // Pagination indicator (only if more than 1)
+        // Simple pagination indicator (only if more than 1 adaptation)
         if (adaptations.size > 1) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = Spacing.sm),
+                    .padding(top = 4.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -251,7 +232,7 @@ fun AdaptivePlanUpdateSection(
                                 if (index == selectedAdaptationIndex) {
                                     Colors.primary
                                 } else {
-                                    Colors.primary.copy(alpha = 0.3f)
+                                    Colors.primary.copy(alpha = 0.25f)
                                 }
                             )
                     )
