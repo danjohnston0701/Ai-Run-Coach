@@ -189,8 +189,15 @@ class RunSummaryViewModel @Inject constructor(
                 _runSession.value = session
                 _currentUser.value = getUserFromPrefs()  // Refresh user profile for personalised metric targets
 
-                // Initialize struggle points + comments from run payload (if available)
-                _strugglePoints.value = session.strugglePoints.ifEmpty { inferStrugglePointsFromSplits(session) }
+                // Initialize struggle points + comments from run payload (if available).
+                // Only infer struggle points for native runs — Garmin/Strava imports don't have
+                // real-time coaching data so inference produces misleading false positives.
+                val isExternalRun = !session.externalSource.isNullOrBlank()
+                _strugglePoints.value = if (isExternalRun) {
+                    session.strugglePoints  // external: only show server-stored struggle points
+                } else {
+                    session.strugglePoints.ifEmpty { inferStrugglePointsFromSplits(session) }
+                }
                 _userPostRunComments.value = session.userComments.orEmpty()
                 _analysisState.value = AiAnalysisState.Idle
 
@@ -213,9 +220,10 @@ class RunSummaryViewModel @Inject constructor(
                 loadRacePredictions(resolvedId)
 
                 // Load pending adaptations if this run is linked to a coaching plan
+                Log.d("AdaptationDebug", "🏃 Run loaded: id=$resolvedId linkedPlanId=${session.linkedPlanId}")
                 session.linkedPlanId?.let { planId ->
                     loadPendingAdaptations(planId)
-                }
+                } ?: Log.w("AdaptationDebug", "⚠️ Run has no linkedPlanId — skipping adaptation load")
                 
                 _isLoadingRun.value = false
             } catch (e: Exception) {
@@ -226,6 +234,7 @@ class RunSummaryViewModel @Inject constructor(
                 if (localSession != null && localSession.distance > 0) {
                     Log.d("RunSummaryViewModel", "Using local run data (distance: ${localSession.distance}m)")
                     _runSession.value = localSession
+                    // Local sessions are always native (no external source), so inference is safe
                     _strugglePoints.value = localSession.strugglePoints.ifEmpty { inferStrugglePointsFromSplits(localSession) }
                     _userPostRunComments.value = localSession.userComments.orEmpty()
                     _analysisState.value = AiAnalysisState.Idle
@@ -1456,12 +1465,21 @@ class RunSummaryViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _isLoadingAdaptations.value = true
+                Log.d("AdaptationDebug", "🔍 Fetching adaptations for planId=$planId")
+
                 val response = apiService.getPendingAdaptations(planId)
+
+                Log.d("AdaptationDebug", "📦 Raw response: count=${response.count}, adaptations=${response.adaptations.size}")
+                response.adaptations.forEachIndexed { i, a ->
+                    Log.d("AdaptationDebug", "  [$i] id=${a.id} status='${a.status}' suggestion=${a.aiSuggestion?.take(60)}")
+                }
+
                 // Only show adaptations with status "pending"
-                _pendingAdaptations.value = response.adaptations.filter { it.status == "pending" }
-                Log.d("RunSummaryViewModel", "✅ Loaded ${response.count} pending adaptations for plan $planId")
+                val filtered = response.adaptations.filter { it.status == "pending" }
+                Log.d("AdaptationDebug", "✅ After filter: ${filtered.size} pending (of ${response.adaptations.size} total)")
+                _pendingAdaptations.value = filtered
             } catch (e: Exception) {
-                Log.e("RunSummaryViewModel", "Failed to load pending adaptations", e)
+                Log.e("AdaptationDebug", "❌ FAILED to load adaptations for planId=$planId — ${e.javaClass.simpleName}: ${e.message}", e)
                 _pendingAdaptations.value = emptyList()
             } finally {
                 _isLoadingAdaptations.value = false
