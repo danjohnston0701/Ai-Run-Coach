@@ -143,6 +143,13 @@ class RunSummaryViewModel @Inject constructor(
     val isLoadingRacePredictions: StateFlow<Boolean> = _isLoadingRacePredictions.asStateFlow()
     // ───────────────────────────────────────────────────────────────────────────
 
+    // ── Adaptive Plan Updates ──────────────────────────────────────────────────
+    private val _pendingAdaptations = MutableStateFlow<List<PendingAdaptation>>(emptyList())
+    val pendingAdaptations: StateFlow<List<PendingAdaptation>> = _pendingAdaptations.asStateFlow()
+    private val _isLoadingAdaptations = MutableStateFlow(false)
+    val isLoadingAdaptations: StateFlow<Boolean> = _isLoadingAdaptations.asStateFlow()
+    // ───────────────────────────────────────────────────────────────────────────
+
     init {
         checkGarminConnection()
     }
@@ -204,6 +211,11 @@ class RunSummaryViewModel @Inject constructor(
 
                 // Load race predictions (Riegel formula) for this run
                 loadRacePredictions(resolvedId)
+
+                // Load pending adaptations if this run is linked to a coaching plan
+                session.linkedPlanId?.let { planId ->
+                    loadPendingAdaptations(planId)
+                }
                 
                 _isLoadingRun.value = false
             } catch (e: Exception) {
@@ -1430,6 +1442,73 @@ class RunSummaryViewModel @Inject constructor(
                 _racePredictions.value = null
             } finally {
                 _isLoadingRacePredictions.value = false
+            }
+        }
+    }
+
+    // ── Adaptive Plan Updates ─────────────────────────────────────────────────
+
+    /**
+     * Load pending adaptations for the current run's linked training plan.
+     * Only called if the run is linked to a coaching plan (linkedPlanId != null).
+     */
+    fun loadPendingAdaptations(planId: String) {
+        viewModelScope.launch {
+            try {
+                _isLoadingAdaptations.value = true
+                val response = apiService.getPendingAdaptations(planId)
+                // Only show adaptations with status "pending"
+                _pendingAdaptations.value = response.adaptations.filter { it.status == "pending" }
+                Log.d("RunSummaryViewModel", "✅ Loaded ${response.count} pending adaptations for plan $planId")
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Failed to load pending adaptations", e)
+                _pendingAdaptations.value = emptyList()
+            } finally {
+                _isLoadingAdaptations.value = false
+            }
+        }
+    }
+
+    /**
+     * Accept a pending adaptation and update the training plan.
+     */
+    fun acceptAdaptation(adaptationId: String) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.acceptAdaptation(adaptationId)
+                if (response.isSuccessful) {
+                    Log.d("RunSummaryViewModel", "✅ Adaptation accepted: $adaptationId")
+                    // Remove from pending list
+                    _pendingAdaptations.value = _pendingAdaptations.value.filter {
+                        it.id != adaptationId
+                    }
+                } else {
+                    Log.e("RunSummaryViewModel", "Failed to accept adaptation: ${response.errorBody()?.string()}")
+                }
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Error accepting adaptation", e)
+            }
+        }
+    }
+
+    /**
+     * Decline a pending adaptation without applying it.
+     */
+    fun declineAdaptation(adaptationId: String) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.declineAdaptation(adaptationId)
+                if (response.isSuccessful) {
+                    Log.d("RunSummaryViewModel", "⏭️ Adaptation declined: $adaptationId")
+                    // Remove from pending list
+                    _pendingAdaptations.value = _pendingAdaptations.value.filter {
+                        it.id != adaptationId
+                    }
+                } else {
+                    Log.e("RunSummaryViewModel", "Failed to decline adaptation: ${response.errorBody()?.string()}")
+                }
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Error declining adaptation", e)
             }
         }
     }

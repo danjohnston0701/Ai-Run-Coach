@@ -1382,16 +1382,17 @@ export const planAdaptations = pgTable("plan_adaptations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   trainingPlanId: varchar("training_plan_id").notNull().references(() => trainingPlans.id),
   adaptationDate: timestamp("adaptation_date").defaultNow(),
-  reason: text("reason").notNull(), // missed_workout, injury, over_training, ahead_of_schedule
+  reason: text("reason").notNull(), // run_data_feedback, missed_workout, injury, over_training, ahead_of_schedule
   changes: jsonb("changes"), // What was changed
   aiSuggestion: text("ai_suggestion"),
-  userAccepted: boolean("user_accepted").default(false),
+  status: varchar("status", { length: 50 }).default("pending"), // pending, accepted, declined
+  userAccepted: boolean("user_accepted").default(false), // kept for backwards compatibility
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   // Indexes for performance
   trainingPlanIdIdx: index("idx_plan_adaptations_training_plan").on(table.trainingPlanId),
-  userAcceptedIdx: index("idx_plan_adaptations_user_accepted").on(table.userAccepted),
-  compositeIdx: index("idx_plan_adaptations_plan_status").on(table.trainingPlanId, table.userAccepted),
+  statusIdx: index("idx_plan_adaptations_status").on(table.status),
+  compositeIdx: index("idx_plan_adaptations_plan_status").on(table.trainingPlanId, table.status),
 }));
 
 // ==================== SHARED RUNS ====================

@@ -97,6 +97,7 @@ import live.airuncoach.airuncoach.network.model.RacePrediction
 import live.airuncoach.airuncoach.network.model.RacePredictionsResponse
 import live.airuncoach.airuncoach.network.model.TechnicalAnalysis
 import live.airuncoach.airuncoach.ui.components.CoachingPlanBadge
+import live.airuncoach.airuncoach.ui.components.AdaptivePlanUpdateSection
 import live.airuncoach.airuncoach.ui.components.TrainingLoadCard
 import live.airuncoach.airuncoach.analytics.calculateTrainingLoad
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
@@ -314,6 +315,10 @@ fun RunSummaryScreenFlagship(
                             hasGroupRun = hasGroupRun,
                             hasDynamicsTab = hasDynamicsTab,
                             onNavigateToSubscription = onNavigateToSubscription,
+                            pendingAdaptations = viewModel.pendingAdaptations.collectAsState().value,
+                            isLoadingAdaptations = viewModel.isLoadingAdaptations.collectAsState().value,
+                            onAcceptAdaptation = { adaptationId -> viewModel.acceptAdaptation(adaptationId) },
+                            onDeclineAdaptation = { adaptationId -> viewModel.declineAdaptation(adaptationId) },
                         )
 
                         // Tab 1: Group Run leaderboard (only when run is linked to a group run)
@@ -1153,6 +1158,10 @@ private fun AiInsightsTabContent(
     onRequestAiConsent: () -> Unit = {},
     hasGroupRun: Boolean = false,
     onNavigateToSubscription: () -> Unit = {},
+    pendingAdaptations: List<live.airuncoach.airuncoach.network.model.PendingAdaptation> = emptyList(),
+    isLoadingAdaptations: Boolean = false,
+    onAcceptAdaptation: (String) -> Unit = {},
+    onDeclineAdaptation: (String) -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -1217,6 +1226,18 @@ private fun AiInsightsTabContent(
                     workoutType = run.workoutType,
                     planProgressWeek = run.planProgressWeek,
                     totalWeeks = run.planProgressWeeks
+                )
+            }
+        }
+
+        // Adaptive Plan Update — show pending adaptations if this run is linked to a plan
+        if (run.linkedPlanId != null && (pendingAdaptations.isNotEmpty() || isLoadingAdaptations)) {
+            item {
+                AdaptivePlanUpdateSection(
+                    adaptations = pendingAdaptations,
+                    isLoading = isLoadingAdaptations,
+                    onAccept = onAcceptAdaptation,
+                    onDecline = onDeclineAdaptation
                 )
             }
         }
@@ -2045,8 +2066,9 @@ private fun HeaderDistanceBlockFlagship(run: RunSession) {
             }
         }
 
-        // Difficulty chip below
-        val difficulty = (run.difficulty ?: run.getDifficultyLevel())
+        // Difficulty chip below — always use calculated difficulty based on elevation
+        // (backend difficulty field may be inaccurate; elevation-based calculation is more reliable)
+        val difficulty = run.getDifficultyLevel()
         DifficultyChipFlagship(difficulty)
     }
 }
@@ -2054,10 +2076,15 @@ private fun HeaderDistanceBlockFlagship(run: RunSession) {
 @Composable
 private fun DifficultyChipFlagship(difficulty: String) {
     val (color, label) = when (difficulty.lowercase(Locale.getDefault())) {
+        "flat" -> Colors.success to "Flat"
+        "rolling" -> Colors.success to "Rolling"
+        "hilly" -> Colors.warning to "Hilly"
+        "steep" -> Colors.accent to "Steep"
+        "extreme" -> Colors.error to "Extreme"
+        // Legacy backend values (deprecated but kept for backwards compatibility)
         "easy" -> Colors.success to "Easy"
         "moderate" -> Colors.warning to "Moderate"
         "challenging", "hard" -> Colors.accent to "Challenging"
-        "extreme" -> Colors.error to "Extreme"
         else -> Colors.primary to difficulty.replaceFirstChar { it.uppercase() }
     }
     Box(

@@ -19,12 +19,12 @@ data class AdaptationResponse(
 
 data class PendingAdaptation(
     @SerializedName("id") val id: String,
-    @SerializedName("trainingPlanId") val trainingPlanId: String,
-    @SerializedName("adaptationDate") val adaptationDate: String,
-    @SerializedName("reason") val reason: String,  // missed_workout, injury, over_training, ahead_of_schedule
+    @SerializedName("training_plan_id") val trainingPlanId: String,
+    @SerializedName("adaptation_date") val adaptationDate: String,
+    @SerializedName("reason") val reason: String,  // run_data_feedback, missed_workout, injury, over_training, ahead_of_schedule
+    @SerializedName("status") val status: String = "pending",  // pending, accepted, declined
     @SerializedName("changes") val changes: Map<String, Any>? = null,
-    @SerializedName("aiSuggestion") val aiSuggestion: String? = null,
-    @SerializedName("userAccepted") val userAccepted: Boolean = false
+    @SerializedName("ai_suggestion") val aiSuggestion: String? = null
 )
 
 data class PendingAdaptationsResponse(

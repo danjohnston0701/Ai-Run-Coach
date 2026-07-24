@@ -133,7 +133,7 @@ export async function acceptAndApplyAdaptation(
     // 5. Mark adaptation as accepted
     await db
       .update(planAdaptations)
-      .set({ userAccepted: true })
+      .set({ userAccepted: true, status: "accepted" })
       .where(eq(planAdaptations.id, adaptationId));
 
     console.log(
@@ -178,10 +178,10 @@ export async function declineAdaptation(
       return { success: false, error: "Adaptation not found or access denied" };
     }
 
-    // Mark as declined (set userAccepted to false, but don't apply changes)
+    // Mark as declined — don't apply changes, update status column
     await db
       .update(planAdaptations)
-      .set({ userAccepted: false })
+      .set({ userAccepted: false, status: "declined" })
       .where(eq(planAdaptations.id, adaptationId));
 
     console.log(`⏭️  Adaptation ${adaptationId} declined by user.`);
@@ -217,9 +217,10 @@ export async function getPendingAdaptations(
         and(
           eq(planAdaptations.trainingPlanId, trainingPlanId),
           eq(trainingPlans.userId, userId),
-          // Only include rows where userAccepted is NULL (never responded)
-          // Exclude declined (userAccepted = false) and accepted (userAccepted = true)
-          isNull(planAdaptations.userAccepted)
+          // Filter by status column — only return pending adaptations.
+          // Rows created before the status column existed will have status = 'pending' (default),
+          // so this covers both old and new records correctly.
+          eq(planAdaptations.status, "pending")
         )
       );
 
