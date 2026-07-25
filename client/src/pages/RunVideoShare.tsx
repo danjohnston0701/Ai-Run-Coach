@@ -24,17 +24,18 @@ const TERRAIN_TILES =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 
 // ─── Animation timeline (ms) ──────────────────────────────────────────────────
-const INTRO_MS  = 2200;    // zoom/tilt into the start (slow, cinematic)
-const OUTRO_MS  = 3400;    // pull up to reveal the whole route
-const HOLD_MS   = 1400;    // hold the final frame before stopping the recorder
+const INTRO_MS  = 1467;    // zoom/tilt into the start (slow, cinematic)
+const OUTRO_MS  = 2267;    // pull up to reveal the whole route
+const HOLD_MS   = 933;     // hold the final frame before stopping the recorder
 
 // The drone-follow segment scales with run distance so a marathon isn't crammed into the
-// same 18s as a 3km run. Square-root scaling keeps long runs watchable without dragging:
-//   3km → 18s · 5km → 23s · 10km → 33s · half → 48s · marathon → 60s (capped).
-const FOLLOW_MS_BASE = 18000; // follow duration tuned for a ~3 km run
+// same 12s as a 3km run. Square-root scaling keeps long runs watchable without dragging:
+//   3km → 12s · 5km → 15s · 10km → 22s · half → 32s · marathon → 40s (capped).
+// Speed increased by 50% vs original (durations divided by 1.5).
+const FOLLOW_MS_BASE = 12000; // follow duration tuned for a ~3 km run
 const followMsForMeters = (meters: number) => {
   const km = Math.max(0.5, (meters > 0 ? meters : 3000) / 1000);
-  return Math.round(Math.min(60_000, Math.max(12_000, FOLLOW_MS_BASE * Math.sqrt(km / 3))));
+  return Math.round(Math.min(40_000, Math.max(8_000, FOLLOW_MS_BASE * Math.sqrt(km / 3))));
 };
 
 // ─── Camera tuning ────────────────────────────────────────────────────────────
