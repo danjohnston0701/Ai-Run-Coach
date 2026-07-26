@@ -1,0 +1,314 @@
+═══════════════════════════════════════════════════════════════════════════════
+  CONSISTENCY SCORE BRIEF FOR iOS — DELIVERY SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+PROJECT: AI Run Coach
+TASK: Create briefs explaining how Android calculates consistency score, so iOS can match it
+DELIVERABLES: 5 markdown documents + this summary
+STATUS: ✅ COMPLETE
+
+───────────────────────────────────────────────────────────────────────────────
+WHAT WAS DELIVERED
+───────────────────────────────────────────────────────────────────────────────
+
+5 COMPREHENSIVE BRIEFS (1,264 lines total)
+
+1. CONSISTENCY_SCORE_README.md (197 lines, 8.0K)
+   ⭐ Master index and navigation guide
+   • Overview of all 4 documents
+   • Quick facts and formulas
+   • Explains which document to read for different needs
+   • Android source code reference
+   • Implementation checklist
+
+2. CONSISTENCY_SCORE_BRIEF_FOR_IOS.md (198 lines, 8.0K)
+   📋 Main brief with all essentials
+   • Formula and step-by-step calculation
+   • Quality tiers (5 levels from Excellent to Uneven)
+   • Display format specifications
+   • Edge cases and null handling
+   • Data sources (km splits preferred, pace data fallback)
+   • Testing examples (good run, poor run, no data)
+   • Key differences from other metrics
+
+3. CONSISTENCY_SCORE_IMPLEMENTATION_GUIDE.md (388 lines, 12K)
+   🔧 Complete coding guide with Swift examples
+   • 8-step implementation walkthrough
+   • Complete ready-to-use Swift function
+   • Integration points in the app
+   • Data model requirements
+   • 4 comprehensive test cases
+   • Debugging tips
+   • Color reference table
+   • Ring animation specifications
+
+4. CONSISTENCY_SCORE_VISUAL_REFERENCE.md (318 lines, 12K)
+   📊 Visual walkthroughs and examples
+   • Formula visualization diagram
+   • 3-ring metrics context diagram
+   • 6 real-world examples with calculations:
+     * Marathon pace (Excellent: 98%)
+     * Road race (Good: 93%)
+     * Hill workout (Variable: 57%)
+     * Long run with fade (Poor: 47%)
+     * Chaotic run (Very Poor: 40%)
+     * No data scenario
+   • Step-by-step worked example
+   • Swift pseudo-code
+   • Ring animation specs
+
+5. CONSISTENCY_SCORE_QUICK_REFERENCE.md (163 lines, 8.0K)
+   🎯 One-page cheat sheet
+   • Formula in one line
+   • Plain English explanation
+   • Quality tiers table
+   • Display format
+   • Data sources
+   • Sub-label mapping
+   • 4 quick calculation examples
+   • Color logic
+   • iOS checklist
+   • CV multiplier explanation
+
+───────────────────────────────────────────────────────────────────────────────
+THE FORMULA
+───────────────────────────────────────────────────────────────────────────────
+
+Consistency Score = (1 - CV × 5) × 100%
+
+Where CV = Coefficient of Variation = Standard Deviation / Mean
+
+Clamped to [0%, 100%]
+
+Data Sources (in priority):
+  1. km split times (if ≥ 2 splits available)
+  2. pace data samples (if ≥ 10 samples available)
+  3. Show "—" if neither available
+
+───────────────────────────────────────────────────────────────────────────────
+QUALITY TIERS
+───────────────────────────────────────────────────────────────────────────────
+
+Score    Label       Color    Meaning                    Example
+────────────────────────────────────────────────────────────────────────────
+90-100%  Excellent   🟢 Green  Outstanding consistency    5:28, 5:26, 5:27, 5:29
+75-89%   Solid       🟢 LtGrn  Very good consistency      5:15, 5:23, 5:18, 5:25
+55-74%   Variable    🟡 Yellow Moderate variation         5:10, 6:05, 5:15, 6:10
+0-54%    Uneven      🟠 Orange Significant variation      5:10, 5:15, 5:50, 6:30
+(null)   —           ⚪ Gray   No data available          <2 splits, <10 pace pts
+
+───────────────────────────────────────────────────────────────────────────────
+KEY DIFFERENCES FROM ANDROID
+───────────────────────────────────────────────────────────────────────────────
+
+Nothing! The formula is identical.
+
+Android Implementation:
+  File: RunSummaryScreen.kt
+  Lines: 6772-6793
+  Language: Kotlin
+
+iOS Implementation:
+  Language: Swift (formulas translated in the guides)
+  Ready-to-use code: In CONSISTENCY_SCORE_IMPLEMENTATION_GUIDE.md
+
+──────────────────────��────────────────────────────────────────────────────────
+WHAT iOS NEEDS TO DO
+───────────────────────────────────────────────────────────────────────────────
+
+1. Read CONSISTENCY_SCORE_BRIEF_FOR_IOS.md (5 minutes)
+   → Understand what consistency score is and why it matters
+
+2. Read CONSISTENCY_SCORE_IMPLEMENTATION_GUIDE.md (15 minutes)
+   → Get the code and integration instructions
+
+3. Implement the function (30-60 minutes)
+   → Copy code, adapt to your data model, integrate with UI
+
+4. Test with provided test cases (10 minutes)
+   → Verify 94% ≈ "Excellent", 57% ≈ "Variable", etc.
+
+5. Deploy (5 minutes)
+   → Consistency score now shows correctly on iOS!
+
+───────────────────────────────────────────────────────────────────────────────
+CURRENT STATUS
+───────────────────────────────────────────────────────────────────────────────
+
+✅ Android:  Implemented and working (lines 6772-6793 RunSummaryScreen.kt)
+❌ iOS:      Currently showing 0 — needs implementation
+📋 Docs:     Complete and comprehensive (5 briefs, 1,264 lines)
+
+Location: Run Summary → Graphs tab (3 circular metrics)
+- EFFORT circle (multi-factor effort)
+- HR ZONE circle (or CADENCE as fallback)
+- CONSISTENCY circle ← This is what needs fixing in iOS
+
+───────────────────────────────────────────────────────────────────────────────
+GIT COMMIT
+───────────────────────────────────────────────────────────────────────────────
+
+Commit: fc20178
+Author: Firebender
+Message: Add comprehensive Consistency Score briefs for iOS implementation
+
+Files committed:
+  ✓ CONSISTENCY_SCORE_BRIEF_FOR_IOS.md
+  ✓ CONSISTENCY_SCORE_IMPLEMENTATION_GUIDE.md
+  ✓ CONSISTENCY_SCORE_QUICK_REFERENCE.md
+  ✓ CONSISTENCY_SCORE_README.md
+  ✓ CONSISTENCY_SCORE_VISUAL_REFERENCE.md
+
+───────────────────────────────────────────────────────────────────────────────
+READING PATHS
+───────────────────────────────────────────────────────────────────────────────
+
+👤 iOS Developer (Quick Path - 20 min)
+   1. CONSISTENCY_SCORE_README.md (3 min)
+   2. CONSISTENCY_SCORE_BRIEF_FOR_IOS.md (5 min)
+   3. CONSISTENCY_SCORE_IMPLEMENTATION_GUIDE.md (15 min)
+   → Ready to code
+
+👤 iOS Developer (Thorough Path - 35 min)
+   1. CONSISTENCY_SCORE_README.md (3 min)
+   2. CONSISTENCY_SCORE_BRIEF_FOR_IOS.md (5 min)
+   3. CONSISTENCY_SCORE_VISUAL_REFERENCE.md (10 min) — examples help understanding
+   4. CONSISTENCY_SCORE_IMPLEMENTATION_GUIDE.md (15 min)
+   5. CONSISTENCY_SCORE_QUICK_REFERENCE.md (2 min) — keep at desk
+   → Deeply understand, ready to code with confidence
+
+👤 Team Lead / Manager (Executive Path - 10 min)
+   1. CONSISTENCY_SCORE_README.md (3 min)
+   → Understand scope and status
+   2. First page of CONSISTENCY_SCORE_BRIEF_FOR_IOS.md (3 min)
+   → Know what's being built
+   3. Implementation estimate: 30-60 minutes of dev time (4 min read)
+   → Understand effort required
+
+───────────────────────────────────────────────────────────────────────────────
+WHY THESE BRIEFS WORK
+───────────────────────────────────────────────────────────────────────────────
+
+✅ Comprehensive: Covers formula, code, examples, and testing
+✅ Multiple formats: Brief, guide, visual, and quick reference
+✅ Practical: Includes ready-to-use code and test cases
+✅ Clear: Examples show expected outputs for verification
+✅ Complete: No need to look elsewhere
+✅ Actionable: Each document has specific purpose and audience
+
+──────────────────────────────────��────────────────────────────────────────────
+SUCCESS CRITERIA
+───────────────────────────────────────────────────────────────────────────────
+
+iOS implementation is successful when:
+
+1. ✅ Consistency score displays percentage (0-100%) for runs with data
+2. ✅ Quality label displays (Excellent, Solid, Variable, Uneven)
+3. ✅ Ring color matches quality tier
+4. ✅ Sub-label displays appropriate message
+5. ✅ Null/no-data cases show "—" with gray color
+6. ✅ Scores match Android for identical runs (within rounding)
+7. ✅ 3 metrics (Effort, HR Zone/Cadence, Consistency) all display correctly
+
+────────────────���──────────────────────────────────────────────────────────────
+EXAMPLE VERIFICATION
+───────────────────────────────────────────────────────────────────────────────
+
+To verify iOS implementation matches Android, test with this run:
+
+Run Data:
+  - 5 km splits
+  - Times: 5:28, 5:26, 5:27, 5:29, 5:28 (or 328, 326, 327, 329, 328 seconds)
+
+Expected Results:
+  - Mean: 327.6 seconds
+  - StdDev: 1.14 seconds
+  - CV: 0.00349
+  - Consistency Fraction: 0.9825
+  - Score: 98%
+  - Label: "Excellent"
+  - SubLabel: "Very even"
+  - Color: Green
+
+If iOS shows "98% Excellent / Very even" in green → Implementation correct! ✅
+
+───────────────────────────────────────────────────────────────────────────────
+DELIVERABLE CHECKLIST
+───────────────────────────────────────────────────────────────────────────────
+
+☑ Formula documented and explained
+☑ Step-by-step calculation guide
+☑ Quality tiers defined with colors
+☑ Data sources specified (km splits, pace data)
+☑ Edge cases (no data, single split, etc.)
+☑ Complete Swift implementation code
+☑ 4+ test cases with expected outputs
+☑ Real-world examples (6 scenarios)
+☑ Integration points documented
+☑ Visual diagrams and walkthroughs
+☑ Quick reference card created
+☑ Master index created
+☑ All files committed to git
+☑ This summary document
+
+───────────────────────────────────────────────────────────────────────────────
+NEXT STEPS
+───────────────────────────────────────────────────────────────────────────────
+
+FOR iOS TEAM:
+  1. Clone/update repo to get the 5 new brief documents
+  2. Read CONSISTENCY_SCORE_README.md first
+  3. Choose your reading path (Quick or Thorough)
+  4. Implement using the code from IMPLEMENTATION_GUIDE.md
+  5. Test with provided test cases
+  6. Deploy when ready
+
+FOR ANDROID TEAM:
+  Nothing! Your implementation is already correct.
+  These briefs were created to help iOS catch up.
+
+FOR PROJECT MANAGERS:
+  Implementation estimate: 30-60 minutes dev time
+  Complexity: Low-medium (straightforward statistics)
+  Risk: Low (deterministic, testable, based on proven Android code)
+
+───────────────────────────────────────────────────────────────────────────────
+CONTACT & QUESTIONS
+───────────────────────────────────────────────────────────────────────────────
+
+For questions about the formula:
+  → See CONSISTENCY_SCORE_BRIEF_FOR_IOS.md
+
+For questions about implementation:
+  → See CONSISTENCY_SCORE_IMPLEMENTATION_GUIDE.md
+
+For questions about examples:
+  → See CONSISTENCY_SCORE_VISUAL_REFERENCE.md
+
+For a quick lookup while coding:
+  → See CONSISTENCY_SCORE_QUICK_REFERENCE.md
+
+For navigation and overview:
+  → See CONSISTENCY_SCORE_README.md
+
+───────────────────────────────────────────────────────────────────────────────
+FINAL SUMMARY
+───────────────────────────────────────────────────────────────────────────────
+
+✅ Problem: iOS consistency score shows 0, needs to match Android
+✅ Solution: Created 5 comprehensive briefs explaining the calculation
+✅ Format: Formula, code, examples, visuals, quick reference
+✅ Status: Ready for iOS implementation
+✅ Effort: 30-60 minutes for iOS developers
+✅ Confidence: High (based on proven Android implementation)
+
+The consistency score measures pace evenness using the Coefficient of Variation
+formula. It's one of 3 circular metrics in the Run Summary Graphs tab. These
+briefs provide everything iOS needs to implement it correctly.
+
+All files are committed to git and ready for use.
+
+═══════════════════════════════════════════════════════════════════════════════
+Created: 2026-07-26
+Status: ✅ COMPLETE AND READY FOR iOS IMPLEMENTATION
+═══════════════════════════════════════════════════════════════════════════════
