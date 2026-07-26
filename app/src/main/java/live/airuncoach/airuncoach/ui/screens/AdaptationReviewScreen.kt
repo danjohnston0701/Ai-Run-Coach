@@ -46,6 +46,19 @@ fun AdaptationReviewScreen(
         viewModel.loadPendingAdaptations(planId)
     }
 
+    // Auto-navigate back to coaching plan when all adaptations are handled
+    LaunchedEffect(adaptations.isEmpty(), isLoading) {
+        // Only navigate if:
+        // 1. Adaptations list is empty (all handled)
+        // 2. We're not currently loading (initial load complete)
+        // 3. No error occurred
+        if (adaptations.isEmpty() && !isLoading && errorMessage.isNullOrBlank()) {
+            // Give a tiny delay so user sees the "No pending adaptations" message briefly
+            kotlinx.coroutines.delay(800)
+            onNavigateBack()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
