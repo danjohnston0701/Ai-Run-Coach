@@ -2048,6 +2048,7 @@ export async function adaptTrainingPlan(
       adjustmentType?: string;
       recommendation?: string;
     };
+    hasHeartRateData?: boolean;  // Whether this runner has HR monitoring — gates zone-based language
   }
 ): Promise<void> {
   try {
@@ -2107,13 +2108,18 @@ export async function adaptTrainingPlan(
       .orderBy(plannedWorkouts.scheduledDate)
       .limit(7);
 
+    // Whether this runner has a heart rate monitor — gates all HR zone language in the prompt
+    const hasHR = options?.hasHeartRateData ?? true; // default true (conservative) if not provided
+
     // Build session compliance section if available
     const complianceSection = options?.sessionCompliance
       ? `
 SESSION PERFORMANCE DETAILS:
 - Session type: ${options.sessionCompliance.sessionType || "run"}
-- HR above zone alerts fired: ${options.sessionCompliance.hrZoneHighAlerts} times
-- HR below zone alerts fired: ${options.sessionCompliance.hrZoneLowAlerts} times
+${hasHR
+  ? `- HR above zone alerts fired: ${options.sessionCompliance.hrZoneHighAlerts} times
+- HR below zone alerts fired: ${options.sessionCompliance.hrZoneLowAlerts} times`
+  : `- HR zone alerts: not applicable (runner has no heart rate device)`}
 - Pace deviation alerts fired: ${options.sessionCompliance.paceDeviationAlerts} times
 ${options.sessionCompliance.intervalsCompleted != null ? `- Intervals completed: ${options.sessionCompliance.intervalsCompleted}` : ""}
 ${options.sessionCompliance.intervalsFailed != null ? `- Intervals failed/cut short: ${options.sessionCompliance.intervalsFailed}` : ""}
@@ -2158,14 +2164,17 @@ TRAINING PLAN:
 ${complianceSection}
 ${upcomingSection}
 
-INSTRUCTIONS:
+${!hasHR ? `⚠️ IMPORTANT: This runner has NO heart rate monitor. NEVER reference heart rate zones, BPM values, zone 1/2/3/4/5, or any HR-based targets in descriptions, summaries or suggestions. Use pace and effort level instead.\n\n` : ''}INSTRUCTIONS:
 - Only adjust workouts that genuinely need it — not every session requires a change
 - Use the exact workout IDs from the UPCOMING WORKOUTS list above in your response
-- For HR zone adherence issues (many hr_zone_high alerts): reduce intensity of next hard session
+${hasHR
+  ? `- For HR zone adherence issues (many hr_zone_high alerts): reduce intensity of next hard session`
+  : `- For pace adherence issues (too fast): reduce target pace or distance of next hard session`}
 - For poor interval completion: reduce interval count or distance for next interval session
 - For overtraining signals: add rest, reduce volume
 - For underperformance: encourage consistency, don't increase load yet
 - Keep changes minimal and targeted — 1-3 workouts maximum
+${!hasHR ? `- Describe workouts using pace targets and perceived effort — NEVER heart rate zones` : ''}
 
 Respond with ONLY valid JSON in this exact format:
 {
@@ -2176,7 +2185,7 @@ Respond with ONLY valid JSON in this exact format:
       "workoutId": "exact-id-from-list-above",
       "newIntensity": "z2",
       "newWorkoutType": "easy",
-      "newDescription": "Easy recovery run — keep heart rate in zone 2 the whole way",
+      "newDescription": "${hasHR ? 'Easy recovery run — keep heart rate in zone 2 the whole way' : 'Easy recovery run — keep the pace conversational and comfortable'}",
       "newDistance": 6.0,
       "skip": false
     }
@@ -2376,12 +2385,18 @@ export async function reassessTrainingPlansWithRunData(
           overallAdherence,
         };
 
+        // Determine if the runner has heart rate data — used to guard HR zone references in AI prompts.
+        // Check current run AND last 10 runs: if none have HR data, treat as a non-HR user.
+        const currentRunHasHR = !!(run.avgHeartRate && run.avgHeartRate > 0);
+        const historicRunsHaveHR = recentRuns.some(r => r.avgHeartRate && r.avgHeartRate > 0);
+        const hasHeartRateData = currentRunHasHR || historicRunsHaveHR;
+
         // Build session compliance string for the reassessment prompt
         const complianceText = sessionEvents.length > 0
           ? `
 SESSION COACHING DATA (from live AI coaching during the run):
-- HR above zone alerts: ${hrZoneHighAlerts} times${hrZoneHighAlerts > 3 ? " ⚠️ SIGNIFICANT — runner consistently above target zone" : ""}
-- HR below zone alerts: ${hrZoneLowAlerts} times
+${hasHeartRateData ? `- HR above zone alerts: ${hrZoneHighAlerts} times${hrZoneHighAlerts > 3 ? " ⚠️ SIGNIFICANT — runner consistently above target zone" : ""}
+- HR below zone alerts: ${hrZoneLowAlerts} times` : `- HR zone alerts: not applicable (runner has no heart rate device)`}
 - Pace deviation alerts: ${paceDeviationAlerts} times
 - Intervals completed: ${intervalsCompleted} (started: ${repStarts})
 - Overall session adherence: ${overallAdherence.toUpperCase()}
@@ -2451,8 +2466,9 @@ RECENT RUN (Just Completed):
 - Distance: ${(run.distance > 200 ? run.distance / 1000 : run.distance).toFixed(2)} km
 - Duration: ${(run.duration > 86400 ? run.duration / 1000 : run.duration / 60).toFixed(0)} minutes
 - Pace: ${run.avgPace || 'N/A'}
-- Avg Heart Rate: ${run.avgHeartRate || 'N/A'} bpm
-- Max Heart Rate: ${run.maxHeartRate || 'N/A'} bpm
+${hasHeartRateData
+  ? `- Avg Heart Rate: ${run.avgHeartRate || 'N/A'} bpm\n- Max Heart Rate: ${run.maxHeartRate || 'N/A'} bpm`
+  : `- Heart Rate: No heart rate device — do NOT reference HR zones or bpm values in any suggestions`}
 - Elevation Gain: ${run.elevationGain || 0} m
 ${complianceText}
 
@@ -2460,16 +2476,18 @@ PLAN PROGRESS:
 - Completed workouts in plan: ${completedWorkouts.length}
 - Recent runs in last 10: ${recentRuns.length}
 
-KEY QUESTIONS TO ANSWER:
-1. Was the session completed as intended? (check adherence + HR/pace deviation alerts)
-2. Does the HR zone data suggest the runner is struggling (consistently above zone) or coasting (consistently below)?
+${!hasHeartRateData ? `⚠️ IMPORTANT: This runner has NO heart rate monitor. Never reference heart rate zones, BPM targets, or zone-based metrics in your reason, recommendation, or any workout descriptions. Use pace and perceived effort instead.\n\n` : ''}KEY QUESTIONS TO ANSWER:
+1. Was the session completed as intended? (check distance vs target, pace deviation alerts)
+${hasHeartRateData
+  ? `2. Does the HR zone data suggest the runner is struggling (consistently above zone) or coasting (consistently below)?`
+  : `2. Does the pace data suggest the runner went too hard or too easy? (use pace deviation alerts)`}
 3. Are intervals being completed fully? (check intervalsCompleted vs repStarts)
 4. Does the training load need to change based on this run?
 
 Provide your assessment in JSON format:
 {
   "needsAdjustment": true/false,
-  "reason": "Specific explanation referencing the actual coaching data (e.g. HR alerts, interval completion)",
+  "reason": "Specific explanation referencing the actual coaching data (e.g. pace alerts, interval completion)${hasHeartRateData ? ', HR alerts' : ''}",
   "adjustmentType": "none" | "volume_reduction" | "volume_increase" | "intensity_adjustment" | "recovery_addition",
   "recommendation": "Specific coaching recommendation for the runner"
 }`;
@@ -2538,6 +2556,7 @@ Provide your assessment in JSON format:
                 adjustmentType: assessment.adjustmentType,
                 recommendation: assessment.recommendation,
               },
+              hasHeartRateData,
             }
           );
         } else {
