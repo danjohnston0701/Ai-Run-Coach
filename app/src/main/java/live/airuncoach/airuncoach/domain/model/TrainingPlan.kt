@@ -151,12 +151,20 @@ data class PlanProgress(
 
 /**
  * AI-suggested adaptations to plan
+ * 
+ * Adaptations can be:
+ * - Plan-level: Applied to entire training plan (runRecordId and plannedWorkoutId are null)
+ * - Run-specific: Result of analysis of a specific run (runRecordId is set)
+ * - Workout-specific: Result of a planned workout completion (plannedWorkoutId is set)
  */
 data class PlanAdaptation(
+    val id: String,
     val date: LocalDate,
     val reason: String,
     val change: String,
-    val applied: Boolean
+    val applied: Boolean,
+    val runRecordId: String? = null,        // If adaptation is result of a specific run
+    val plannedWorkoutId: String? = null   // If adaptation is result of a specific workout
 )
 
 /**

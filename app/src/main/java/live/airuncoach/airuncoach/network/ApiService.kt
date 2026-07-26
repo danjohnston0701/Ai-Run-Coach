@@ -464,6 +464,20 @@ interface ApiService {
     @GET("/api/training-plans/{planId}/adaptations/pending")
     suspend fun getPendingAdaptations(@Path("planId") planId: String): PendingAdaptationsResponse
 
+    /**
+     * Get adaptations specific to a particular run record.
+     * These are adaptations created as a result of analyzing this specific run.
+     */
+    @GET("/api/runs/{runId}/adaptations/pending")
+    suspend fun getPendingAdaptationsByRunId(@Path("runId") runId: String): PendingAdaptationsResponse
+
+    /**
+     * Get adaptations specific to a particular planned workout.
+     * These are adaptations created as a result of completing this specific workout.
+     */
+    @GET("/api/planned-workouts/{workoutId}/adaptations/pending")
+    suspend fun getPendingAdaptationsByWorkoutId(@Path("workoutId") workoutId: String): PendingAdaptationsResponse
+
     // ========== NOTIFICATION PREFERENCES ==========
 
     @GET("/api/notification-preferences/{userId}")

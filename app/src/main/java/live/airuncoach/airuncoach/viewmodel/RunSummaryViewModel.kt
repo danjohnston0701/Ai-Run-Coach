@@ -1488,6 +1488,36 @@ class RunSummaryViewModel @Inject constructor(
     }
 
     /**
+     * Load pending adaptations specific to the current run.
+     * These are adaptations created as a result of analyzing this specific run.
+     */
+    fun loadPendingAdaptationsByRunId(runId: String) {
+        viewModelScope.launch {
+            try {
+                _isLoadingAdaptations.value = true
+                Log.d("AdaptationDebug", "🔍 Fetching run-specific adaptations for runId=$runId")
+
+                val response = apiService.getPendingAdaptationsByRunId(runId)
+
+                Log.d("AdaptationDebug", "📦 Raw run-specific response: count=${response.count}, adaptations=${response.adaptations.size}")
+                response.adaptations.forEachIndexed { i, a ->
+                    Log.d("AdaptationDebug", "  [$i] id=${a.id} status='${a.status}' runId=${a.runRecordId}")
+                }
+
+                // Only show adaptations with status "pending"
+                val filtered = response.adaptations.filter { it.status == "pending" }
+                Log.d("AdaptationDebug", "✅ After filter: ${filtered.size} pending run-specific adaptations (of ${response.adaptations.size} total)")
+                _pendingAdaptations.value = filtered
+            } catch (e: Exception) {
+                Log.e("AdaptationDebug", "❌ FAILED to load run-specific adaptations for runId=$runId — ${e.javaClass.simpleName}: ${e.message}", e)
+                _pendingAdaptations.value = emptyList()
+            } finally {
+                _isLoadingAdaptations.value = false
+            }
+        }
+    }
+
+    /**
      * Accept a pending adaptation and update the training plan.
      */
     fun acceptAdaptation(adaptationId: String) {
@@ -1527,6 +1557,36 @@ class RunSummaryViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("RunSummaryViewModel", "Error declining adaptation", e)
+            }
+        }
+    }
+
+    /**
+     * Load pending adaptations specific to a planned workout.
+     * These are adaptations created as a result of completing this specific planned workout.
+     */
+    fun loadPendingAdaptationsByWorkoutId(workoutId: String) {
+        viewModelScope.launch {
+            try {
+                _isLoadingAdaptations.value = true
+                Log.d("AdaptationDebug", "🔍 Fetching workout-specific adaptations for workoutId=$workoutId")
+
+                val response = apiService.getPendingAdaptationsByWorkoutId(workoutId)
+
+                Log.d("AdaptationDebug", "📦 Raw workout-specific response: count=${response.count}, adaptations=${response.adaptations.size}")
+                response.adaptations.forEachIndexed { i, a ->
+                    Log.d("AdaptationDebug", "  [$i] id=${a.id} status='${a.status}' workoutId=${a.plannedWorkoutId}")
+                }
+
+                // Only show adaptations with status "pending"
+                val filtered = response.adaptations.filter { it.status == "pending" }
+                Log.d("AdaptationDebug", "✅ After filter: ${filtered.size} pending workout-specific adaptations (of ${response.adaptations.size} total)")
+                _pendingAdaptations.value = filtered
+            } catch (e: Exception) {
+                Log.e("AdaptationDebug", "❌ FAILED to load workout-specific adaptations for workoutId=$workoutId — ${e.javaClass.simpleName}: ${e.message}", e)
+                _pendingAdaptations.value = emptyList()
+            } finally {
+                _isLoadingAdaptations.value = false
             }
         }
     }
