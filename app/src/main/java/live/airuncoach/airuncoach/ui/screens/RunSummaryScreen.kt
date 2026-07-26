@@ -8140,7 +8140,13 @@ private fun DataTabFlagship(
 
         // ==================== PACE SECTION ====================
         item {
-            val bestPace = run.kmSplits.minByOrNull { parsePaceToSeconds(it.pace) }
+            // Build pace series for best pace calculation (matches graph display)
+            val paceSeries = remember(run.routePoints, run.kmSplits) {
+                buildPaceSeries(run.routePoints, run.kmSplits, ChartMode.Distance)
+            }
+            val bestPaceDisplay = remember(paceSeries, run.routePoints, run.kmSplits) {
+                getBestInstantPace(paceSeries, run.routePoints, run.kmSplits)
+            }
             val worstPace = run.kmSplits.maxByOrNull { parsePaceToSeconds(it.pace) }
             
             DataSectionCard(
@@ -8149,7 +8155,7 @@ private fun DataTabFlagship(
                 metrics = buildList {
                     run.averagePace?.let { add("Avg Pace" to "$it/km") }
                     run.currentPace?.let { add("Current Pace" to "$it/km") }
-                    if (bestPace != null) add("Best Km Pace" to bestPace.pace.replace("/km", "") + "/km")
+                    add("Best Pace" to bestPaceDisplay)
                     if (worstPace != null) add("Slowest Km Pace" to worstPace.pace.replace("/km", "") + "/km")
                 }
             )
