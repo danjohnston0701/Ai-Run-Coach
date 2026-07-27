@@ -7486,15 +7486,19 @@ private fun RunningEconomyCard(run: RunSession) {
         (run.duration / 1000.0) / (run.distance / 1000.0)
     } else return
 
-    // Running economy = pace per heartbeat (lower = more efficient)
-    // Speed per HR beat: (m/s) / bpm
-    val speedMs = run.distance / (run.duration / 1000.0)
-    val economyIndex = (speedMs / run.heartRate) * 1000 // meters per beat
+    // Running economy = distance per heartbeat (metres per beat)
+    // Formula: total distance (m) / total heartbeats = m/beat
+    // This measures how efficiently you convert cardiac output to distance
+    val durationMinutes = run.duration / 60000.0
+    val totalHeartbeats = durationMinutes * run.heartRate
+    val economyIndex = if (totalHeartbeats > 0) {
+        run.distance / totalHeartbeats  // metres per heartbeat
+    } else return
 
     val (rating, color) = when {
-        economyIndex > 7.0 -> "Elite Economy" to Color(0xFF4CAF50)
-        economyIndex > 5.5 -> "Good Economy" to Color(0xFF8BC34A)
-        economyIndex > 4.0 -> "Average Economy" to Color(0xFFFFC107)
+        economyIndex > 1.5 -> "Excellent Economy" to Color(0xFF4CAF50)
+        economyIndex > 1.2 -> "Good Economy" to Color(0xFF8BC34A)
+        economyIndex > 0.9 -> "Average Economy" to Color(0xFFFFC107)
         else -> "Developing" to Color(0xFFFF9800)
     }
 
