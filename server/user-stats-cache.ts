@@ -33,6 +33,7 @@ import { db } from './db';
 import { runs, userStats, goals } from '@shared/schema';
 import { eq, and, gte, lte, isNotNull, count, sum, avg, max, min, sql } from 'drizzle-orm';
 import { refreshRunnerProfile } from './runner-profile-service';
+import { calculateLongestConsecutiveRunStreak } from './my-data-service';
 
 // Distance band definitions for PB categories (in km).
 // Half marathon band is deliberately wide (21.0–21.6) because GPS tracks 21.097km
@@ -298,7 +299,10 @@ export async function recomputeForUser(userId: string): Promise<void> {
 
   const highestElevationM = Math.round(Number(agg.highestElevationM ?? 0));
 
-  console.log(`[UserStatsCache] Recomputing for user ${userId}: ${totalRuns} runs, ${totalDistanceKm.toFixed(2)}km, ${totalDurationSeconds}s, longestTime=${longestRunTimeSec}s, highElev=${highestElevationM}m`);
+  // ── Calculate longest consecutive run streak ────────────────────────────
+  const mostConsecutiveRuns = totalRuns > 0 ? await calculateLongestConsecutiveRunStreak(userId) : 0;
+
+  console.log(`[UserStatsCache] Recomputing for user ${userId}: ${totalRuns} runs, ${totalDistanceKm.toFixed(2)}km, ${totalDurationSeconds}s, longestTime=${longestRunTimeSec}s, highElev=${highestElevationM}m, streak=${mostConsecutiveRuns}`);
 
   const upsertData = {
     userId,
@@ -314,6 +318,7 @@ export async function recomputeForUser(userId: string): Promise<void> {
     longestRunKm,
     longestRunTimeSec,
     highestElevationM,
+    mostConsecutiveRuns,
     // PB fields — all duration columns store MILLISECONDS
     pb1kDurationMs:       pbUpdates['pb1kDurationMs'] as number | null,
     pb1kRunId:            pbUpdates['pb1kRunId'] as string | null,

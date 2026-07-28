@@ -245,7 +245,7 @@ export async function getPeriodStatistics(userId: string, days: number) {
 
     return {
       totalRuns,
-      totalDistance:       Math.round((Number(stats.totalDistanceKm ?? 0) / 1000) * 10) / 10,
+      totalDistance:       Math.round(Number(stats.totalDistanceKm ?? 0) * 10) / 10,
       totalDuration:       totalDurationSec * 1000,  // ms for client compatibility
       totalElevationGain:  Math.round(Number(stats.totalElevationGain ?? 0)),
       averagePace:         formatPace(avgPace),
@@ -254,7 +254,7 @@ export async function getPeriodStatistics(userId: string, days: number) {
       averageRunDuration:  Math.round(totalDurationSec / totalRuns) * 1000,  // ms
       fastestRun:          fastestPace > 0 ? Math.round((1 / fastestPace) * 60 * 10) / 10 : 0,
       slowestRun:          slowestPace > 0 ? Math.round((1 / slowestPace) * 60 * 10) / 10 : 0,
-      longestRun:          Math.round((Number(stats.longestRunKm ?? 0) / 1000) * 10) / 10,
+      longestRun:          Math.round(Number(stats.longestRunKm ?? 0) * 10) / 10,
       totalCalories,
       averageCalories:     Math.round(totalCalories / totalRuns),
       consistencyScore,
@@ -598,13 +598,28 @@ export async function getAllTimeStats(userId: string) {
   try {
     const [cached] = await db.select().from(userStats).where(eq(userStats.userId, userId));
     if (cached) {
+      const totalRuns = cached.totalRuns ?? 0;
+
+      // If the cached streak is 0 but the user has runs, the cache predates the streak
+      // column being populated. Calculate live and backfill the cache so future reads are fast.
+      let mostConsecutiveRuns = cached.mostConsecutiveRuns ?? 0;
+      if (mostConsecutiveRuns === 0 && totalRuns > 0) {
+        mostConsecutiveRuns = await calculateLongestConsecutiveRunStreak(userId);
+        if (mostConsecutiveRuns > 0) {
+          // Backfill the cache so the next request is O(1) again
+          await db.update(userStats)
+            .set({ mostConsecutiveRuns })
+            .where(eq(userStats.userId, userId));
+        }
+      }
+
       // Note: cached fields are already in km (totalDistanceKm, longestRunKm)
       return {
-        totalRuns:             cached.totalRuns ?? 0,
+        totalRuns,
         totalDistanceKm:       Math.round((cached.totalDistanceKm ?? 0) * 10) / 10,
         totalHours:            Math.round(((cached.totalDurationSeconds ?? 0) / 3600) * 10) / 10,
         totalCalories:         cached.totalCalories ?? 0,
-        mostConsecutiveRuns:   cached.mostConsecutiveRuns ?? 0,
+        mostConsecutiveRuns,
         longestRunKm:          Math.round((cached.longestRunKm ?? 0) * 10) / 10,
         longestRunTimeSec:     cached.longestRunTimeSec ?? 0,
         highestElevationM:     Math.round(cached.highestElevationM ?? 0),
@@ -680,11 +695,11 @@ async function getAllTimeStatsLive(userId: string) {
 
     return {
       totalRuns,
-      totalDistanceKm:     Math.round((Number(stats.totalDistanceKm ?? 0) / 1000) * 10) / 10,
+      totalDistanceKm:     Math.round(Number(stats.totalDistanceKm ?? 0) * 10) / 10,
       totalHours:          Math.round((Number(stats.totalDurationSec ?? 0) / 3600) * 10) / 10,
       totalCalories:       Number(stats.totalCalories ?? 0),
       mostConsecutiveRuns,
-      longestRunKm:        Math.round((Number(stats.longestRunKm ?? 0) / 1000) * 10) / 10,
+      longestRunKm:        Math.round(Number(stats.longestRunKm ?? 0) * 10) / 10,
       longestRunTimeSec,
       highestElevationM,
       goalsAchieved,
@@ -713,7 +728,7 @@ function countPersonalRecordsInCache(cached: typeof userStats.$inferSelect): num
  * Calculate the longest consecutive day streak of runs
  * Considers runs on different calendar days (even hours apart) as consecutive
  */
-async function calculateLongestConsecutiveRunStreak(userId: string): Promise<number> {
+export async function calculateLongestConsecutiveRunStreak(userId: string): Promise<number> {
   try {
     // Get all run dates, sorted by date
     const runDates = await db
