@@ -9,14 +9,17 @@
 
 ## 📋 Executive Summary
 
-The onboarding flow is a **7-step journey** that:
+The onboarding flow is a **8-step journey** that:
 1. Requests location & activity recognition permissions
-2. Welcomes the user with a clear overview of what's ahead
-3. Collects personal details (name, age, date of birth, weight, fitness level)
-4. Collects injury history
+2. Welcomes the user with a clear overview of what's ahead (Onboarding Intro)
+3. Collects personal details (name, email, date of birth, gender, weight, height, default session type)
+4. Determines fitness level (beginner/intermediate/advanced)
 5. Obtains explicit AI coaching consent with transparent data privacy info
-6. Allows configuration of AI coach personality and in-session coaching features
-7. Presents subscription tiers with free trial offer
+6. Allows configuration of AI coach personality (name, voice, tone, master toggle)
+7. Configures in-session coaching feature toggles (pace, route nav, elevation, HR, cadence, etc.)
+8. Presents subscription tiers with free trial offer
+
+**Important**: Injury history is **NOT** part of new user onboarding. It's only available in Profile → Settings after onboarding is complete.
 
 State is persisted at each step using secure local storage (Keychain on iOS, `SecurePreferences` on Android). Users can close the app mid-flow and resume exactly where they left off.
 
@@ -44,23 +47,18 @@ OnboardingIntroScreen (NEW)
     └─ "Get Started" button → PersonalDetailsScreen
     ↓
 PersonalDetailsScreen
-    ├─ Name (text field)
-    ├─ Date of Birth (date picker)
-    ├─ Weight (number field, kg)
-    ├─ Weekly availability (number field, hours/week)
+    ├─ Full Name (text field)
+    ├─ Email (text field)
+    ├─ Date of Birth (day/month/year dropdowns + year-only toggle)
+    ├─ Gender (male / female / prefer not to say)
+    ├─ Weight in kg (number field)
+    ├─ Height in cm (number field)
+    ├─ Default Session Type (Run / Walk buttons)
     └─ Continue → saves to local storage
     ↓
 FitnessLevelScreen
     ├─ Radio buttons: Beginner / Intermediate / Advanced
     └─ Continue
-    ↓
-InjuryOnboardingScreen
-    ├─ Yes/No toggle for injury history
-    ├─ [IF Yes] Injury type picker (dropdown)
-    ├─ [IF Yes] Injury details (text area)
-    └─ Continue
-    ↓
-[IF needs_coach_setup == true]
     ↓
 AiCoachingConsentScreen (NEW)
     ├─ Title: "Your AI Running Coach"
@@ -96,6 +94,9 @@ OnboardingSubscriptionScreen
     └─ "Upgrade Now" buttons on each plan
     ↓
 [Navigate to Main App]
+
+NOTE: Injury history is NOT in new user onboarding.
+It's available post-onboarding in Profile → Health & Injuries.
 ```
 
 ### Smart Routing Based on Onboarding Flags
@@ -281,54 +282,81 @@ private fun OnboardingStep(number: String, title: String, description: String) {
 
 **Route name**: `personal_details`  
 **Trigger**: First screen after onboarding intro  
-**Purpose**: Collect basic profile information
+**Purpose**: Collect user's basic profile information (used to calibrate training plans)
 
 **Fields**:
 
 | Field | Type | Validation | Required |
 |-------|------|-----------|----------|
-| **Full Name** | Text | Min 2 chars, max 50, no numbers | Yes |
-| **Date of Birth** | Date picker | Age 13–120 | Yes |
+| **Full Name** | Text | Min 2 chars, max 50 | Yes |
+| **Email** | Email | Valid email format | Yes |
+| **Date of Birth** | Day/Month/Year dropdowns | Age 13–120 | Yes* |
+| **Gender** | Dropdown (Male / Female / Prefer not to say) | — | Yes |
 | **Weight (kg)** | Number | 30–250 | Yes |
-| **Weekly Availability** | Number (hours) | 1–100 | Yes |
+| **Height (cm)** | Number | 100–250 | Yes |
+| **Default Session Type** | Button group (Run / Walk) | — | Yes |
+
+*Note: Users can toggle "I only want to provide my year of birth" to skip day/month and just provide year.
 
 **Layout**:
 ```
-[Top bar: "Personal Details"]
+[Top bar with back button: "Personal Details"]
 
 [Scrollable form]
   Full Name
-  [text field]
+  [text input field]
+  
+  Email
+  [text input field]
   
   Date of Birth
-  [date picker]
+  [Toggle: "I only want to provide my year of birth"]
+  [If toggle ON: Year only field]
+  [If toggle OFF: Day, Month, Year dropdown selectors]
+  Helper text: "Used to estimate your maximum heart rate 
+               and personalise training intensity."
+  
+  Gender
+  [Dropdown selector]
+    ├─ Male
+    ├─ Female
+    └─ Prefer not to say
   
   Weight (kg)
-  [number field]
+  [number input field]
+  [Helper text: "Enter your weight in kilograms"]
   
-  Weekly Availability (hours/week)
-  [number field]
+  Height (cm)
+  [number input field]
+  [Helper text: "Enter your height in centimeters"]
   
-  Error message (if validation fails)
+  Default Session Type
+  [Button group: Run | Walk]
+  Label: "What's your primary activity?"
 
 [Sticky bottom button]
-  [Continue button - disabled until all fields valid]
+  [Save Changes button - disabled until all required fields filled]
 ```
 
 **Validation Rules**:
-- Name: At least 2 characters, no numbers, no special chars except apostrophes/hyphens
-- Age derived from DOB: 13–120 years old
-- Weight: 30–250 kg (catches invalid values)
-- Availability: 1–100 hours/week (prevents 0 or unrealistic values)
+- Name: At least 2 characters
+- Email: Valid email format (standard email validation)
+- Age (derived from DOB): 13–120 years old
+- Weight: 30–250 kg
+- Height: 100–250 cm
+- All fields except gender are required
 
 **On Save**:
 ```swift
-// Save to local storage
+// Save to local storage / backend
 SessionManager.shared.setUserProfile(
     name: nameField.text,
-    dateOfBirth: dobPicker.selectedDate,
-    weight: weightField.value,
-    weeklyAvailability: availabilityField.value
+    email: emailField.text,
+    dateOfBirth: dobValue,  // Format: "DDMMYYYY" or "0101YYYY" if year-only
+    gender: genderSelector.selected,
+    weight: Float(weightField.text),
+    height: Float(heightField.text),
+    defaultSessionType: sessionTypeButtons.selected  // "Run" | "Walk"
 )
 
 // Update flag
@@ -337,6 +365,12 @@ SessionManager.shared.setNeedsProfileSetup(false)
 // Navigate to next screen
 navigateTo(.fitnessLevel)
 ```
+
+**Reference Implementation (Android)**:
+- PersonalDetailsScreen.kt handles all 7 fields
+- Uses Compose OutlinedTextField, dropdowns, and button groups
+- Date picker uses day/month/year dropdowns with year-only toggle option
+- Form persists to backend via viewModel and SessionManager
 
 ---
 
@@ -376,72 +410,12 @@ navigateTo(.fitnessLevel)
 SessionManager.shared.setFitnessLevel(
     fitnessLevel.selectedOption  // "beginner" | "intermediate" | "advanced"
 )
-navigateTo(.injuryOnboarding)
-```
-
----
-
-### Screen 5: Injury History Screen
-
-**Route name**: `injury_onboarding`  
-**Purpose**: Understand user's current injury status
-
-**Layout**:
-```
-[Top bar: "Injury History"]
-
-[Scrollable content]
-  Do you have any current running injuries?
-  
-  [Button Group]
-    [Yes]  [No]
-  
-  (If Yes is selected:)
-  
-  Injury Type
-  [Dropdown selector]
-    ├─ Knee
-    ├─ Shin splints
-    ├─ Ankle
-    ├─ IT band
-    ├─ Other
-  
-  Details (optional)
-  [Text area - 200 char max]
-    Tell us about your injury...
-
-(If No is selected:)
-  [Hidden - only Continue button shows]
-
-[Sticky bottom]
-  [Continue button]
-```
-
-**State Management**:
-- If "No" selected: Continue is enabled immediately
-- If "Yes" selected: Injury type becomes required, details optional
-
-**On Save**:
-```swift
-if hasInjury {
-    SessionManager.shared.setInjuryHistory(
-        hasInjury: true,
-        injuryType: injuryTypePicker.selected,
-        injuryDetails: detailsField.text
-    )
-} else {
-    SessionManager.shared.setInjuryHistory(
-        hasInjury: false,
-        injuryType: nil,
-        injuryDetails: nil
-    )
-}
 navigateTo(.aiCoachingConsent)
 ```
 
 ---
 
-### Screen 6: AI Coaching Consent Screen (NEW)
+### Screen 5: AI Coaching Consent Screen (NEW)
 
 **Route name**: `ai_coaching_consent`  
 **Trigger**: After fitness level screen  
@@ -557,7 +531,7 @@ struct AiConsentManager {
 
 ---
 
-### Screen 7: AI Coach Settings Screen (MODIFIED)
+### Screen 6: AI Coach Settings Screen (MODIFIED)
 
 **Route name**: `coach_settings`  
 **Change**: In-session coaching toggles REMOVED (moved to separate screen)  
@@ -646,7 +620,7 @@ if isOnboarding {
 
 ---
 
-### Screen 8: Coaching Prompts Settings Screen (NEW)
+### Screen 7: Coaching Prompts Settings Screen (NEW)
 
 **Route name**: `coaching_prompts_settings`  
 **Trigger**: After AI Coach Settings in onboarding flow  
@@ -769,7 +743,7 @@ navigateTo(.onboardingSubscription)
 
 ---
 
-### Screen 9: Onboarding Subscription Screen
+### Screen 8: Onboarding Subscription Screen
 
 **Route name**: `onboarding_subscription`  
 **Purpose**: Present free trial offer and paid subscription tiers  
@@ -804,21 +778,17 @@ navigateTo(.onboardingSubscription)
 **Personal Details**:
 ```
 "user_name" : String                      // Full name
-"user_date_of_birth" : String             // ISO-8601 date
+"user_email" : String                     // Email address
+"user_date_of_birth" : String             // DDMMYYYY or 0101YYYY format
+"user_gender" : String                    // "male" | "female" | "prefer_not_to_say"
 "user_weight_kg" : Float                  // Weight in kg
-"user_weekly_availability_hours" : Int    // Hours per week
+"user_height_cm" : Float                  // Height in cm
+"default_session_type" : String           // "Run" | "Walk"
 ```
 
 **Fitness Level**:
 ```
 "fitness_level" : String                  // "beginner" | "intermediate" | "advanced"
-```
-
-**Injury History**:
-```
-"has_current_injury" : Bool               // true if selected yes
-"injury_type" : String?                   // "knee" | "shin" | "ankle" | "it_band" | "other"
-"injury_details" : String?                // Text description
 ```
 
 **AI Consent** (UserDefaults, not Keychain):
@@ -1003,24 +973,23 @@ override func viewDidLoad() {
 1. [ ] Sign up → Email verification → Location permission screen
 2. [ ] Grant permissions → Onboarding Intro appears
 3. [ ] "Get Started" → Personal Details form
-4. [ ] Fill all fields → Continue → Fitness Level
-5. [ ] Select "Intermediate" → Continue → Injury History
-6. [ ] Select "No injury" → Continue → AI Coaching Consent
-7. [ ] Tap "Enable AI Coaching" → consent saved, navigate to Coach Settings
-8. [ ] Fill coach name/voice/tone → Continue → Coaching Prompts
-9. [ ] All toggles ON by default → "Save & Continue" → Subscription
-10. [ ] "Continue with Free Trial" → Main app
-11. [ ] Verify all saved data in Keychain/UserDefaults
+4. [ ] Fill all 7 fields (name, email, DOB, gender, weight, height, session type) → Continue → Fitness Level
+5. [ ] Select "Intermediate" → Continue → AI Coaching Consent
+6. [ ] Tap "Enable AI Coaching" → consent saved, navigate to Coach Settings
+7. [ ] Fill coach name/voice/tone → Continue → Coaching Prompts
+8. [ ] All toggles ON by default → "Save & Continue" → Subscription
+9. [ ] "Continue with Free Trial" → Main app
+10. [ ] Verify all saved data in Keychain/UserDefaults
 
 **Scenario 2: Resume After App Closure**
 1. [ ] Complete Personal Details → Close app
 2. [ ] Reopen app → Fitness Level screen appears (form empty)
 3. [ ] Select fitness level → Close app
-4. [ ] Reopen app → Injury History screen appears
-5. [ ] Select "Yes" injury → Close app
-6. [ ] Reopen app → Injury screen still shows with empty fields (form not prepopulated in this case)
-7. [ ] Complete injury details → AI Coaching Consent screen
-8. [ ] Complete to end → Verify no data loss
+4. [ ] Reopen app → AI Coaching Consent screen appears
+5. [ ] Select "Enable AI Coaching" → Close app
+6. [ ] Reopen app → Coach Settings screen appears (form empty)
+7. [ ] Complete coach settings → Coaching Prompts → Subscription → Main app
+8. [ ] Verify no data loss throughout
 
 **Scenario 3: User Skips AI Coaching**
 1. [ ] Complete fitness level → AI Coaching Consent screen
@@ -1033,10 +1002,10 @@ override func viewDidLoad() {
 **Scenario 4: Form Validation Errors**
 1. [ ] Personal Details → Leave name empty → Try to continue
 2. [ ] Error message appears under name field: "Name is required"
-3. [ ] Leave age as 10 → Error: "Must be at least 13"
+3. [ ] Leave DOB incomplete → Error shown, form requires valid date
 4. [ ] Leave weight as 0 → Error: "Weight must be 30–250 kg"
-5. [ ] Injury screen → Select "Yes" → Leave injury type empty
-6. [ ] Error message appears: "Injury type is required"
+5. [ ] Leave email invalid → Error: "Enter a valid email address"
+6. [ ] Leave height as 0 → Error: "Height must be 100–250 cm"
 
 **Scenario 5: Navigation Consistency**
 1. [ ] On any onboarding screen with back button → Back navigates to previous screen
@@ -1079,16 +1048,15 @@ override func viewDidLoad() {
 
 ## 📝 Summary
 
-The Android onboarding flow is a **7-step guided experience** that:
+The Android onboarding flow is an **8-step guided experience** that:
 - ✅ Requests permissions upfront
 - ✅ Sets clear expectations with intro screen
-- ✅ Collects personal details (name, DOB, weight, availability)
+- ✅ Collects personal details (name, email, DOB, gender, weight, height, default session type)
 - ✅ Determines fitness level
-- ✅ Understands injury history
 - ✅ Obtains explicit AI coaching consent
-- ✅ Configures AI coach personality
-- ✅ Sets up coaching feature toggles
-- ✅ Presents subscription offer
+- ✅ Configures AI coach personality (name, voice, tone, master toggle)
+- ✅ Sets up coaching feature toggles (9 types + km split interval)
+- ✅ Presents subscription offer with free trial
 
 **Key Features**:
 - State persisted at each step (Keychain + UserDefaults)
