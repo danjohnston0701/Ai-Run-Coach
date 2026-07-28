@@ -795,7 +795,7 @@ function buildMercatorRouteSvg(
 
   // White casing under the route — matches the crisp look of the app summary map
   const polyPts = mapped.map(p => `${p.x},${p.y}`).join(" ");
-  const glowSvg = `<polyline points="${polyPts}" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
+  const glowSvg = `<polyline points="${polyPts}" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
   let routeSvg = "";
 
   if (ptPaces && ptPaces.length === mapped.length) {
@@ -804,10 +804,10 @@ function buildMercatorRouteSvg(
       const segPace = (ptPaces[i] + ptPaces[i + 1]) / 2;
       const color = paceToGradientColor(segPace, fast, slow);
       const a = mapped[i], b = mapped[i + 1];
-      routeSvg += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="6" stroke-linecap="round"/>`;
+      routeSvg += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="12" stroke-linecap="round"/>`;
     }
   } else {
-    routeSvg = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    routeSvg = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
 
   const sp = mapped[0];
