@@ -27,18 +27,33 @@ export async function getPersonalBests(userId: string) {
     // Attempt cache read first (O(1) PK lookup)
     const [cached] = await db.select().from(userStats).where(eq(userStats.userId, userId));
 
-    if (cached) {
+    if (cached && (cached.totalRuns ?? 0) > 0) {
       const fromCache = buildPersonalBestsFromCache(cached);
-      // Self-heal: if cache exists but all PBs are null (stale/pre-PB cache), fall through to live
-      if (fromCache.length > 0 || (cached.totalRuns ?? 0) === 0) {
-        return fromCache;
+      
+      // Self-heal: verify that at least the first cached PB's run actually exists
+      // This catches stale cache data from before the PB calculation logic changed
+      if (fromCache.length > 0) {
+        const firstPB = fromCache[0];
+        if (firstPB && firstPB.runId) {
+          const pbRunExists = await db.select()
+            .from(runs)
+            .where(and(eq(runs.userId, userId), eq(runs.id, firstPB.runId)))
+            .limit(1);
+          
+          // PB run exists, cache is valid — return from cache
+          if (pbRunExists.length > 0) {
+            return fromCache;
+          }
+        }
+        // If we get here, cache is invalid (PB references non-existent run)
+        // Fall through to live query
       }
     }
   } catch (err) {
-    console.warn('[MyData] user_stats cache miss for PBs, falling back to live query:', err);
+    console.warn('[MyData] user_stats cache miss/validation failure for PBs, falling back to live query:', err);
   }
 
-  // Fallback: live query (runs for users without cache yet, or stale cache)
+  // Fallback: live query (runs for users without cache yet, or stale/invalid cache)
   return getPersonalBestsLive(userId);
 }
 
