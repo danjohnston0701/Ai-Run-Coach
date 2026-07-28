@@ -5493,7 +5493,39 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  // ── Current month usage + tier limits ─────────────────────────────────────
+  // ========== APPLE APP STORE SERVER NOTIFICATIONS V2 ==========
+  // Webhook endpoint for App Store purchase notifications
+  // Apple POSTs to this endpoint when subscriptions are purchased, renewed, or expire
+  // No authentication required — Apple doesn't send Bearer tokens
+  // All validation is done via JWS signature verification
+
+  app.post("/api/apple/server-notifications", async (req: Request, res: Response) => {
+    try {
+      const { signedPayload } = req.body;
+
+      if (!signedPayload) {
+        return res.status(400).json({ error: "signedPayload is required" });
+      }
+
+      // Import and call the handler (it will update the DB asynchronously)
+      const { handleAppleServerNotification } = await import("./apple-server-notifications");
+      
+      // Process the notification asynchronously — respond 200 immediately
+      // so Apple doesn't retry while we're doing DB work
+      handleAppleServerNotification(signedPayload).catch((error: any) => {
+        console.error("[Apple Notifications] Async handler error:", error.message);
+      });
+
+      // Always respond 200 so Apple knows we received it
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Apple Notifications] POST /api/apple/server-notifications error:", error);
+      // Still respond 200 so Apple doesn't retry
+      res.json({ success: true });
+    }
+  });
+
+  // ── Current month usage + tier limits ────────────────────────────────��────
   // Returns how much of each capped feature the user has consumed this month,
   // what their tier limits are, and how much remains.
   app.get("/api/usage/current", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {

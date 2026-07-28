@@ -58,20 +58,16 @@ android {
             )
             // Define the base URL for the release (production) build.
             buildConfigField("String", "BASE_URL", "\"https://airuncoach.live\"")
-            // OpenWeatherMap API key
-            buildConfigField("String", "WEATHER_API_KEY", "\"5cce843c24f81f4ea2c2880b112e27d5\"")
-            // Google Cloud Platform API key (for Maps later)
-            buildConfigField("String", "GOOGLE_API_KEY", "\"AIzaSyAunS1M9c5wxGMqjd9gOoNTvso7AACZcF0\"")
+            // Google Cloud Platform API key — set GOOGLE_API_KEY in local.properties or via environment
+            buildConfigField("String", "GOOGLE_API_KEY", "\"${localProp("GOOGLE_API_KEY")}\"")
             // Picovoice Porcupine AccessKey — set PICOVOICE_ACCESS_KEY in local.properties
             buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProp("PICOVOICE_ACCESS_KEY")}\"")
         }
         debug {
             // Define the base URL for the debug (local development) build.
             buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:3000\"")
-            // OpenWeatherMap API key
-            buildConfigField("String", "WEATHER_API_KEY", "\"5cce843c24f81f4ea2c2880b112e27d5\"")
-            // Google Cloud Platform API key (for Maps later)
-            buildConfigField("String", "GOOGLE_API_KEY", "\"AIzaSyAunS1M9c5wxGMqjd9gOoNTvso7AACZcF0\"")
+            // Google Cloud Platform API key — set GOOGLE_API_KEY in local.properties or via environment
+            buildConfigField("String", "GOOGLE_API_KEY", "\"${localProp("GOOGLE_API_KEY")}\"")
             // Picovoice Porcupine AccessKey — set PICOVOICE_ACCESS_KEY in local.properties
             buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProp("PICOVOICE_ACCESS_KEY")}\"")
         }

@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
 import live.airuncoach.airuncoach.di.GarminWatchManagerEntryPoint
@@ -32,7 +31,6 @@ import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.WeatherData
 import live.airuncoach.airuncoach.network.ApiService
-import live.airuncoach.airuncoach.network.WeatherRetrofitClient
 import live.airuncoach.airuncoach.network.model.CompleteWorkoutRequest
 import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
 import live.airuncoach.airuncoach.network.model.TodayWorkoutResponse
@@ -265,23 +263,22 @@ class DashboardViewModel @Inject constructor(
                 if (location != null) {
                     Log.d("DashboardViewModel", "Location: ${location.latitude}, ${location.longitude}")
                     
-                    // Fetch weather for actual device location
-                    val weather = WeatherRetrofitClient.weatherApiService
-                        .getCurrentWeather(
-                            latitude = location.latitude,
-                            longitude = location.longitude,
-                            apiKey = BuildConfig.WEATHER_API_KEY,
-                            units = "metric"
-                        )
+                    // Fetch weather from backend proxy
+                    val weather = apiService.getWeather(
+                        latitude = location.latitude,
+                        longitude = location.longitude
+                    )
                     
                     _weatherData.value = WeatherData(
-                        temperature = weather.main.temperature,
-                        condition = weather.weather.firstOrNull()?.main ?: "Clear",
-                        description = weather.weather.firstOrNull()?.description ?: "",
-                        humidity = weather.main.humidity.toDouble(),
-                        windSpeed = weather.wind.speed
+                        temperature = weather.temp ?: 0.0,
+                        condition = weather.condition ?: "Clear",
+                        description = weather.condition ?: "",
+                        humidity = weather.humidity ?: 0.0,
+                        windSpeed = weather.windSpeed ?: 0.0,
+                        feelsLike = weather.feelsLike,
+                        windDirection = weather.windDirection
                     )
-                    Log.d("DashboardViewModel", "Weather loaded for location: ${weather.main.temperature}°C, ${weather.weather.firstOrNull()?.description}")
+                    Log.d("DashboardViewModel", "Weather loaded for location: ${weather.temp}°C, ${weather.condition}")
                 } else {
                     Log.w("DashboardViewModel", "Location unavailable, using default weather")
                     setDefaultWeather()

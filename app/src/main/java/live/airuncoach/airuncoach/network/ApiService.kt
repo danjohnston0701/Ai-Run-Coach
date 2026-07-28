@@ -366,6 +366,14 @@ interface ApiService {
     @GET("/api/fitness/current/{userId}")
     suspend fun getCurrentFitness(@Path("userId") userId: String): DailyFitness
 
+    // ========== WEATHER ==========
+    
+    @GET("/api/weather")
+    suspend fun getWeather(
+        @Query("lat") latitude: Double,
+        @Query("lng") longitude: Double
+    ): BackendWeatherResponse
+
     // ========== WEATHER IMPACT ANALYSIS ==========
     
     @GET("/api/users/{userId}/weather-impact")

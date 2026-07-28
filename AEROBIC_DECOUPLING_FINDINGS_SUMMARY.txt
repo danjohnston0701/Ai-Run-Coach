@@ -1,0 +1,378 @@
+================================================================================
+AEROBIC DECOUPLING — COMPLETE FINDINGS SUMMARY
+================================================================================
+
+REQUESTED INFORMATION (7 ITEMS):
+═══════════════════════════════════════════════════════════════════════════════
+
+1. ✅ DEFINITION & CALCULATION
+───────────────────────────────
+Formula:
+  hrDrift = (secondHalfHr - firstHalfHr) / firstHalfHr × 100%
+  paceDrift = (secondHalfPace - firstHalfPace) / firstHalfPace × 100%
+  decoupling = hrDrift + paceDrift
+
+What It Measures:
+  → Combined percentage drift of heart rate + pace from first to second half
+  → Lower = better aerobic efficiency
+  → Indicates how well the runner maintained pace without HR spike
+
+Thresholds:
+  < 3.0%   → Excellent aerobic efficiency
+  3.0–5.0% → Good / solid aerobic base
+  5.0–8.0% → Moderate / room for improvement
+  ≥ 8.0%   → High / significant decoupling (fatigue)
+
+REFERENCE: AEROBIC_DECOUPLING_COMPREHENSIVE_GUIDE.md, Section 1
+
+
+2. ✅ COMPOSABLE SOURCE CODE (Full)
+──────────────────────────────────
+Location: RunSummaryScreen.kt, lines 7363–7477
+Function: AerobicDecouplingCard()
+Type: Private @Composable function
+
+Structure:
+  ├─ Input validation (≥10 HR samples, ≥2 km splits)
+  ├─ Data extraction & filtering
+  ├─ Split calculation (midpoint division)
+  ├─ Drift computation (HR + Pace)
+  ├─ Threshold logic (when statement)
+  └─ Card rendering with Material Design 3
+
+Complete source available in:
+  AEROBIC_DECOUPLING_COMPREHENSIVE_GUIDE.md, Section 2 (fully quoted)
+
+
+3. ✅ UI LOCATION
+──────────────
+Screen:   RunSummaryScreen (post-run analysis page)
+Tab:      "Graphs" (second tab in summary screen)
+Card:     "Aerobic Decoupling" with 🔬 emoji
+Order:    Displayed after FatigueCurveCard, before RunningEconomyCard
+Shown If: ≥10 HR samples AND ≥2 km splits (otherwise early return)
+
+Layout Hierarchy:
+  RunSummaryScreen
+    └─ GraphsTabContent()
+        └─ LazyColumn
+            ├─ FatigueCurveCard()
+            ├─ AerobicDecouplingCard()    ← THIS CARD
+            ├─ RunningEconomyCard()
+            ├─ RaceTimePredictorCard()
+            └─ WeatherPerformanceCard()
+
+
+4. ✅ EXACT DATA FROM RUN SESSION
+─────────────────────────────────
+Primary Fields Used:
+  run.heartRateData  →  List<Int>    (time-series HR samples, typically every ~2 sec)
+  run.kmSplits       →  List<KmSplit> (per-kilometer splits with pace data)
+
+Data Processing:
+  Step 1: Filter heartRateData, remove zeros
+  Step 2: Parse KmSplit.pace from "M:SS/km" format to seconds
+  Step 3: Divide both arrays at chronological midpoint
+  Step 4: Average first half vs second half
+  Step 5: Calculate percentage change for each
+  Step 6: Sum to get combined decoupling
+
+Validation:
+  ✗ If heartRateData.size < 10  → Card doesn't render
+  ✗ If kmSplits.size < 2        → Card doesn't render
+
+Helper Function: parsePaceToSeconds()
+  Location: RunSummaryScreen.kt:5335–5346
+  Input:    "4:32/km" or "4:32"
+  Output:   272 seconds (4×60 + 32)
+
+
+5. ✅ COLOR RULES & DESIGN
+──────────────────────────
+Color Palette:
+  Rating       | Decoupling | Color Hex  | CSS Color
+  ─────────────┼────────────┼────────────┼─────────────────
+  Excellent    | < 3.0%     | #FF4CAF50  | Bright Green
+  Good         | 3.0–5.0%   | #FF8BC34A  | Light Green
+  Moderate     | 5.0–8.0%   | #FFFFC107  | Yellow/Amber
+  High         | ≥ 8.0%     | Colors.error | Red
+
+Card Design:
+  Background:    Colors.backgroundSecondary (theme-aware surface)
+  Shape:         RoundedCornerShape(18.dp) — smooth modern corners
+  Border:        1dp solid, Colors.border at 60% opacity
+  Internal Padding: 16.dp
+  Element Spacing: 10.dp vertical gaps
+
+Typography:
+  Title:         ExtraBold, h3 size
+  Subtitle:      Regular caption
+  Values:        h4 Bold with conditional coloring
+  Decoupling %:  h4 ExtraBold, threshold-based color
+  Rating Badge:  Caption Bold, pill-shaped (999dp border radius)
+  Advice:        Small text, secondary color
+
+Conditional Highlighting:
+  HR Drift   > 5%   → Colors.error (Red text)
+  Pace Drift > 3%   → #FF9800 (Orange text)
+  Combined value    → Uses threshold-based color (green → red gradient)
+
+Rating Badge: 12% background opacity + 30% border opacity of main color
+              Creates soft tinted appearance matching overall theme
+
+
+6. ✅ THRESHOLDS & REFERENCE VALUES
+────────────────────────────────────
+Decoupling Quality Thresholds:
+  < 3.0%      → Excellent    | "Your aerobic system handled this effort efficiently."
+  3.0–5.0%    → Good         | "Minimal cardiac drift — your aerobic base is solid."
+  5.0–8.0%    → Moderate     | "More aerobic base work (easy runs) would help."
+  ≥ 8.0%      → High         | "Significant decoupling — fitness needs development."
+
+Individual Component Thresholds:
+  HR Drift > 5%   → Highlighted in red (warning level)
+  Pace Drift > 3% → Highlighted in orange (caution level)
+
+Interpretation by Workout Type:
+  Easy Run (Z1–Z2)        → Target < 5% (gold standard < 3%)
+  Long Run                → Expect 5–8% (fatigue normal)
+  Tempo/Threshold         → Expect 8–15% (intentional hard effort)
+  VO2 Max Intervals       → Expect 15–25% (high intensity)
+  Recovery Run            → Target < 3% (best indicator of fitness)
+
+Elite vs Recreational:
+  Elite runners:          1–3% in easy runs
+  Trained runners:        3–6% in easy runs
+  Recreational:           5–10% typical
+  Untrained/High intensity: 10–20%+ common
+
+Industry Reference:
+  Based on modern running science & Garmin metrics
+  Aligns with aerobic base building philosophy
+  Zone 2 training most effective for improvement
+
+
+7. ✅ EARLY VS LATE PACE/HR COMPUTATION
+────────────────────────────────────────
+Split Method: CHRONOLOGICAL MIDPOINT (not distance-based)
+
+Algorithm:
+  val hrMid = hr.size / 2
+  val firstHalfHr = hr.subList(0, hrMid).average()
+  val secondHalfHr = hr.subList(hrMid, hr.size).average()
+  
+  val paceMid = paces.size / 2
+  val firstHalfPace = paces.subList(0, paceMid).average()
+  val secondHalfPace = paces.subList(paceMid, paces.size).average()
+
+Why This Approach:
+  ✓ Simple and deterministic
+  ✓ Works for any run distance
+  ✓ Captures temporal first-half vs second-half effort
+  ��� No weighting bias toward fast/slow portions
+
+Example (10 km Run, 5 km = ~25 min each):
+  First Half Duration:  0–25 min (HR samples 0–75 of 150 total)
+  Second Half Duration: 25–50 min (HR samples 75–150 of 150 total)
+
+Example (5 km Run, 2.5 km each):
+  First Half:  1st 2–3 km splits
+  Second Half: Last 2–3 km splits
+
+Edge Cases:
+  - Negative split (faster 2nd half): Can result in negative decoupling
+  - Uneven split sizes: Handled with subList range adjustment
+  - Small datasets: Caught by validation (< 2 splits = no card)
+
+═══════════════════════════════════════════════════════════════════════════════
+ADDITIONAL FINDINGS
+═══════════════════════════════════════════════════════════════════════════════
+
+RELATED METRICS (Same Card Section):
+────────────────────────────────────
+1. Fatigue Curve (shown before decoupling)
+   → Pace decay: (lastThird - middleThird) / middleThird × 100%
+   → Thresholds: 0% (negative) → 10%+ (severe)
+
+2. Aerobic Decoupling (this card)
+   → HR + pace drift combined: hrDrift + paceDrift
+   → Thresholds: < 3% (excellent) → ≥ 8% (high)
+
+3. Running Economy (shown after decoupling)
+   → Pace per heartbeat: (speedMs / heartRate) × 1000
+   → Thresholds: > 7.0 (elite) → < 4.0 (developing)
+
+4. Race Time Predictor (below economy)
+   → Estimates 5K/10K/marathon finish times
+
+5. Weather Performance (at bottom)
+   → Temperature, humidity, pressure impact analysis
+
+FILE LOCATIONS (Key Code References):
+──────────────────────────────────────
+Main Implementation:
+  app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunSummaryScreen.kt
+
+Specific Lines:
+  ├─ 1640:        Composable call in GraphsTabContent()
+  ├─ 5335–5346:   parsePaceToSeconds() helper function
+  ├─ 7229–7358:   FatigueCurveCard() (related metric before decoupling)
+  ├─ 7363–7477:   AerobicDecouplingCard() full implementation ← MAIN
+  ├─ 7479–7512:   RunningEconomyCard() (metric after decoupling)
+  └─ 6676–6800:   RunMetricRingsRow() (3 metric rings for Graphs tab)
+
+Data Models:
+  app/src/main/java/live/airuncoach/airuncoach/domain/model/RunSession.kt
+  ├─ Line 69:  heartRateData: List<Int>?
+  └─ Line 23:  kmSplits: List<KmSplit>
+
+Network Models:
+  └─ Various files reference aerobicTrainingEffect (different metric)
+
+DATA FLOW ARCHITECTURE:
+──────────────────────
+Garmin Watch/Device
+  ↓ (Syncs HR time-series + km splits)
+RunSession Object (loaded from backend)
+  ↓
+GraphsTabContent() [RunSummaryScreen]
+  ↓
+AerobicDecouplingCard() Composable
+  ├─ Validate data
+  ├─ Parse/filter
+  ├─ Split at midpoint
+  ├─ Calculate drifts
+  ├─ Apply threshold logic
+  └─ Render with appropriate color + rating
+
+COMPOSABLE STRUCTURE:
+────────────────────
+Card(Material Design)
+  └─ Column(16.dp padding, 10.dp gaps)
+      ├─ Row [Header with 🔬 emoji]
+      ├─ Row [3 Metric Columns: HR Drift | Pace Drift | Decoupling]
+      ├─ Box [Rating Pill Badge]
+      └─ Text [Contextual Advice]
+
+VALIDATION & ERROR HANDLING:
+────────────────────────────
+Early Returns (card doesn't render):
+  ✗ hr.size < 10           → No time-series HR data
+  ✗ kmSplits.size < 2      → Not enough km splits
+  ✗ paces.size < 2         → Parsed paces invalid
+
+Safe Parsing:
+  → parsePaceToSeconds() returns 0 for unparseable strings
+  → filter { it > 0 } removes invalid values
+  → coerceIn() prevents negative/extreme values
+
+Zero-Division Protection:
+  → firstHalfHr/Pace checks before division
+  → Would throw if firstHalf = 0 (caught by validation)
+
+TESTING SCENARIOS:
+──────────────────
+Test 1: Perfect Aerobic Efficiency
+  Input:  HR +2.5%, Pace +0.4%
+  Result: 2.9% → Excellent (Green) ✅
+
+Test 2: Moderate Decoupling
+  Input:  HR +8.5%, Pace +4.3%
+  Result: 12.8% → High (Red) 🔴
+
+Test 3: Negative Split (Better 2nd Half)
+  Input:  HR -7.8%, Pace -12.0%
+  Result: -19.8% → Excellent (Green) ✅
+
+Test 4: Insufficient Data
+  Input:  Only 8 HR samples
+  Result: Early return, card not shown
+
+═══════════════════════════════════════════════════════════════════════════════
+DOCUMENTATION FILES CREATED
+═══════════════════════════════════════════════════════════════════════════════
+
+1. AEROBIC_DECOUPLING_QUICK_REFERENCE.md
+   Purpose:    Quick lookup for athletes, coaches, non-technical users
+   Length:     ~8 pages
+   Contents:   Plain language intro, formula, colors, interpretation, improvement tips
+
+2. AEROBIC_DECOUPLING_COMPREHENSIVE_GUIDE.md
+   Purpose:    Complete technical reference for engineers & product managers
+   Length:     ~60 pages
+   Contents:   All 7 requirements + testing + FAQ + code references
+
+3. AEROBIC_DECOUPLING_VISUAL_EXAMPLES.md
+   Purpose:    Visual diagrams, examples, and design reference
+   Length:     ~40 pages
+   Contents:   10 diagrams (flow, color, hierarchy, real-world examples, state)
+
+4. AEROBIC_DECOUPLING_INDEX.md
+   Purpose:    Navigation guide, matrix, key facts, FAQ by audience
+   Length:     ~20 pages
+   Contents:   Document index, quick navigation, verification checklist
+
+5. AEROBIC_DECOUPLING_FINDINGS_SUMMARY.txt
+   Purpose:    This file — executive summary of all findings
+   Length:     ~8 pages
+   Contents:   All 7 requirements summarized + additional findings
+
+═══════════════════════════════════════════════════════════════════════════════
+KEY TAKEAWAYS FOR DIFFERENT AUDIENCES
+═══════════════════════════════════════════════════════════════════════════════
+
+👤 ATHLETES:
+  → Lower decoupling = better aerobic fitness (< 3% is excellent)
+  → Improves through consistent Zone 2 easy runs
+  → Can be tracked over weeks to measure fitness progress
+  → High decoupling on easy runs suggests fatigue or overtraining
+
+👨‍💼 COACHES:
+  → Great indicator of aerobic base development
+  → Compare across athletes in your team
+  → Combine with Fatigue Curve for complete picture
+  → Use to recommend training adjustments (more easy runs, etc.)
+
+👨‍💻 ENGINEERS:
+  → Simple calculation: split time-series at midpoint, compute % change
+  → Client-side only, no server processing needed
+  → Early return if insufficient data (≥10 HR samples, ≥2 splits)
+  → Uses Jetpack Compose with Material Design 3
+  → Can extend with trending, aggregation, or AI integration
+
+🎨 DESIGNERS:
+  → Card uses standard 18dp rounded corners + 1dp subtle border
+  → Color system: green (excellent) → yellow (moderate) → red (high)
+  → 3-column layout for metrics: HR | Pace | Combined
+  → Rating badge is pill-shaped with tinted background
+
+🧪 QA/TESTERS:
+  → Card only shows with sufficient data (see validation section)
+  → Colors must match threshold logic exactly
+  → Both drift values should always display (not just combined)
+  → Test with Garmin watch data (native runs may lack HR data)
+
+═══════════════════════════════════════════════════════════════════════════════
+STATUS: ✅ COMPLETE
+
+All 7 requested information points have been thoroughly documented with:
+  ✓ Definitions & formulas
+  ✓ Complete source code (quoted)
+  ✓ UI location confirmed
+  ✓ Exact data fields identified
+  ✓ Color rules & design system documented
+  ✓ Thresholds & reference values specified
+  ✓ Early/late computation algorithm explained
+
+Plus:
+  ✓ Related metrics documented
+  ✓ Data flow diagrams created
+  ✓ Real-world examples provided
+  ✓ Testing scenarios included
+  ✓ 5 comprehensive markdown files created
+  ✓ Visual examples with 10+ diagrams
+
+═══════════════════════════════════════════════════════════════════════════════
+Last Updated: July 27, 2026
+Search Coverage: RunSummaryScreen.kt, RunSession.kt, domain/model, ui/components, ui/screens
+Total Documentation: 150+ KB across 5 files

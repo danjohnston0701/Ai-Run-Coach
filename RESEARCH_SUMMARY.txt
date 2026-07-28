@@ -1,0 +1,262 @@
+================================================================================
+                    ANDROID APP - 3 CIRCLE METRICS RESEARCH
+                              COMPLETE SUMMARY
+================================================================================
+
+TASK COMPLETED: ✅ Found and documented the 3 circle metrics in the Android app's
+Run Summary Graphs tab, including all visual components, calculations, and data sources.
+
+================================================================================
+                            FILES CREATED (3 DOCUMENTS)
+================================================================================
+
+1. ANDROID_3_CIRCLE_METRICS_SUMMARY.md (12 KB, 364 lines)
+   └─ Comprehensive technical documentation
+      • File locations and function references
+      • Complete calculation formulas for all 3 metrics
+      • All data sources and dependencies
+      • Color palette with hex codes
+      • Testing & debugging guidance
+
+2. ANDROID_CIRCLE_METRICS_VISUAL_REFERENCE.md (12 KB, 471 lines)
+   └─ Visual guides and practical examples
+      • ASCII diagrams of the 3 circle layout
+      • Example displays for each metric
+      • Calculation walkthroughs with actual numbers
+      • Color mapping and quality thresholds
+      • Edge cases and special states
+      • Responsive design behavior
+
+3. ANDROID_CIRCLE_METRICS_INDEX.md (7.7 KB, 260 lines)
+   └─ Quick reference and navigation guide
+      • At-a-glance metric information
+      • Code location quick reference
+      • Key formulas summary
+      • Debugging checklist
+      • Related components overview
+
+================================================================================
+                        THE 3 CIRCLE METRICS AT A GLANCE
+================================================================================
+
+CIRCLE #1: EFFORT SCORE
+────────────────────────────────────────────────────────────────────────────
+What: Multi-factor effort score (0-100%)
+Calculation: Duration + Distance + Pace + Elevation + Heart Rate
+Data Needs: distance, duration, heartRate, elevationGain, userAge
+Always Shown: YES
+Code Location: calculateEffortScore() at line 5973
+
+CIRCLE #2: HR ZONE (preferred) or CADENCE (fallback)
+────────────────────────────────────────────────────────────────────────────
+Option A - HR ZONE (when heartRate > 0):
+  What: Heart rate zone quality (Zone 1-5)
+  Calculation: avgHR / maxHR × 100%
+  Max HR Formula: 208 - (0.7 × age) [Tanaka method]
+  Data Needs: heartRate, heartRateData, userAge
+  Zone Quality: Zone 2 (60-70% maxHR) is Excellent
+
+Option B - CADENCE (fallback when HR unavailable):
+  What: Cadence quality as % of personalized target
+  Calculation: actual / target × 100% (capped at 120%)
+  Target Cadence Factors: speed, height, age, weight, incline
+  Data Needs: cadence, userHeightCm, userAge, userWeightKg
+  Code Location: computeOptimalCadence() at line 6585
+
+CIRCLE #3: CONSISTENCY SCORE
+��───────────────────────────────────────────────────────────────────────────
+What: Pace consistency via Coefficient of Variation (0-100%)
+Calculation: CV of split times; score = (1 - CV×5) × 100%
+Data Needs: kmSplits (≥2) OR paceData (≥10)
+Shown When: Split or pace data available
+Code Location: Built into RunMetricRingsRow() at line 6772
+
+================================================================================
+                          VISUAL PROPERTIES
+================================================================================
+
+Ring Size:        86 dp diameter
+Ring Stroke:      9 dp (donut/progress indicator style)
+Layout:           3 equal-width rings in horizontal row
+Center Text:      Bold 14sp percentage value
+Animation:        1200 ms smooth ease-out fill
+Glow Effect:      18% opacity subtle highlight
+Progress:         Clockwise from -90° (top)
+
+================================================================================
+                          COLOR SYSTEM (All 3 Rings)
+================================================================================
+
+Quality Level        Threshold      Color             Hex Code
+────────────────────────────────────────────────────────────────────
+Excellent            90%+           Bright Green      #00E676
+Good / Solid         75-89%         Light Green       #69F0AE
+Average / Variable   55-74%         Yellow            #FFEE58
+Caution / Low        35-54%         Orange            #FF9800
+Bad / Uneven         <35%           Red               #FF5252
+No Data              (none)         Muted Gray        (theme color)
+
+================================================================================
+                        CODE LOCATION & STRUCTURE
+================================================================================
+
+Primary File:
+  app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunSummaryScreen.kt
+  (9,844 lines total - Large file)
+
+Key Functions:
+  ├─ GraphsTabContent()               (line 1538)
+  │  └─ Renders the Graphs tab with all content
+  │
+  ├─ RunMetricRingsRow()              (line 6676) ⭐ MAIN COMPONENT
+  │  ├─ Computes all 3 metrics
+  │  ├─ Calls calculateEffortScore()
+  │  ├─ Calculates HR Zone or Cadence
+  │  ├─ Calculates Consistency
+  │  └─ Renders MetricRing() × 3
+  │
+  ├─ MetricRing()                     (line 6879)
+  │  └─ Composable for individual ring (Canvas-based drawing)
+  │
+  ├─ calculateEffortScore()           (line 5973)
+  │  └─ Multi-factor effort calculation
+  │
+  ├─ computeOptimalCadence()          (line 6585)
+  │  └─ Personalized target cadence calculation
+  │
+  ├─ cadenceQualityScore()            (line 6664)
+  │  └─ Cadence % of target calculation
+  │
+  └─ tanakaMaxHr()                   (line 6652)
+     └─ Tanaka max HR formula: 208 - (0.7 × age)
+
+ViewModel File:
+  app/src/main/java/live/airuncoach/airuncoach/viewmodel/RunSummaryViewModel.kt
+  └─ Manages RunSession data loading and updates
+
+================================================================================
+                        DATA FLOW & DEPENDENCIES
+================================================================================
+
+Data Sources:
+  ├─ RunSession object (from backend API)
+  │  ├─ duration, distance, cadence, heartRate
+  │  ├─ heartRateData (array of HR samples)
+  │  ├─ kmSplits (array of per-km split times)
+  │  ├─ paceData (array of pace time-series)
+  │  └─ totalElevationGain, totalElevationLoss
+  │
+  └─ User Profile (from SharedPreferences)
+     ├─ age, height (cm), weight (kg)
+     └─ [Fallback defaults if not set]
+
+Calculation Order:
+  1. Load RunSession from API
+  2. Load user profile from SharedPreferences
+  3. RunMetricRingsRow() computes:
+     ├─ Effort Score (all runs have this)
+     ├─ HR Zone (if HR > 0) OR Cadence (fallback)
+     └─ Consistency (if split data exists)
+  4. MetricRing() renders each metric
+  5. Rings animate on load (1200ms)
+
+================================================================================
+                          KEY INSIGHTS
+================================================================================
+
+1. PERSONALIZATION
+   - All metrics personalized to user's age, height, weight
+   - Cadence target varies significantly by individual
+   - Max HR calculated via Tanaka formula (not fixed)
+
+2. SMART FALLBACK LOGIC
+   - HR Zone (preferred) → Cadence (fallback when no HR)
+   - Ensures meaningful metric is always displayed
+   - Clear data validation before showing rings
+
+3. QUALITY CONSISTENCY
+   - All 3 rings use same 5-color palette
+   - Quality thresholds consistent across metrics
+   - Color = instant visual quality assessment
+
+4. VISUAL DESIGN
+   - Canvas-based custom drawing (not built-in components)
+   - Donut/progress indicator style (not filled circles)
+   - Smooth animation with glow effect
+   - Responsive: scales to 1/3 width per ring
+
+5. PERFORMANCE
+   - All calculations cached in remember{} blocks
+   - Recalculates only when dependencies change
+   - Efficient for frequent screen reloads
+
+6. RELIABILITY
+   - Multiple fallback strategies for missing data
+   - Shows "--" for unavailable metrics
+   - Gray ring for no-data state
+   - Validates data before calculations
+
+================================================================================
+                        TESTING & VERIFICATION
+================================================================================
+
+To verify the implementation:
+
+1. Open Run Summary screen → Graphs tab
+2. Look for "Run Score" card (top of Graphs tab)
+3. Should see 3 circular progress rings side-by-side:
+   - Left: EFFORT (should always show percentage)
+   - Middle: HR ZONE (with HR data) or CADENCE (without HR)
+   - Right: CONSISTENCY (with split data)
+
+4. Verify colors match quality:
+   - Green/light green = good
+   - Yellow = average
+   - Orange = needs improvement
+   - Red = poor quality
+
+5. Test data validation:
+   - Runs with no HR data → shows Cadence ring
+   - Runs with HR data → shows HR Zone ring
+   - Runs with no splits → shows "--" for Consistency
+
+================================================================================
+                        HOW TO USE DOCUMENTATION
+================================================================================
+
+For Quick Understanding:
+  1. Start with ANDROID_CIRCLE_METRICS_INDEX.md (this file references it)
+  2. Look at the ASCII diagrams in VISUAL_REFERENCE.md
+  3. Review the color system and example displays
+
+For Implementation Details:
+  1. Read ANDROID_3_CIRCLE_METRICS_SUMMARY.md
+  2. Review specific calculation functions
+  3. Check data source requirements
+
+For Visual Understanding:
+  1. Open ANDROID_CIRCLE_METRICS_VISUAL_REFERENCE.md
+  2. Look at example displays for each metric
+  3. Study the calculation examples with numbers
+
+For Debugging:
+  1. Check the debugging checklist in INDEX.md
+  2. Review data validation section
+  3. Log the calculation functions during development
+
+================================================================================
+                            RESEARCH COMPLETE
+================================================================================
+
+All information about the 3 Circle Metrics has been captured in three
+comprehensive documentation files. The implementation is well-structured,
+personalized, and user-friendly.
+
+Files are saved in the project root directory:
+  • ANDROID_3_CIRCLE_METRICS_SUMMARY.md
+  • ANDROID_CIRCLE_METRICS_VISUAL_REFERENCE.md
+  • ANDROID_CIRCLE_METRICS_INDEX.md
+
+Total Documentation: 1,102 lines across 3 files
+
+================================================================================

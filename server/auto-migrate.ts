@@ -388,6 +388,40 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_group_run_participants_completed_at",
       sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_completed_at ON group_run_participants(group_run_id, completed_at)",
     },
+
+    // ── apple_transactions ───────────────────────────────────────────────────────
+    // Store Apple App Store transaction IDs to map notifications back to users.
+    // Enables tracking subscription renewals, expiries, and refunds.
+    {
+      name: "apple_transactions.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS apple_transactions (
+          id                     VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id                VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          original_transaction_id VARCHAR NOT NULL UNIQUE,
+          transaction_id         VARCHAR NOT NULL,
+          app_account_token      VARCHAR,
+          product_id             VARCHAR NOT NULL,
+          created_at             TIMESTAMP DEFAULT NOW(),
+          updated_at             TIMESTAMP DEFAULT NOW()
+        )
+      `,
+    },
+    {
+      name: "idx_apple_transactions_user",
+      sql: "CREATE INDEX IF NOT EXISTS idx_apple_transactions_user ON apple_transactions(user_id)",
+    },
+    {
+      name: "idx_apple_transactions_original_id",
+      sql: "CREATE INDEX IF NOT EXISTS idx_apple_transactions_original_id ON apple_transactions(original_transaction_id)",
+    },
+
+    // ── users.apple_account_token ───────────────────────────────────────────────
+    // Store the app account token to link Apple notifications to users
+    {
+      name: "users.apple_account_token",
+      sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_account_token VARCHAR",
+    },
   ];
 
   let succeeded = 0;
