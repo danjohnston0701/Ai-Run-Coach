@@ -28,13 +28,17 @@ export async function getPersonalBests(userId: string) {
     const [cached] = await db.select().from(userStats).where(eq(userStats.userId, userId));
 
     if (cached) {
-      return buildPersonalBestsFromCache(cached);
+      const fromCache = buildPersonalBestsFromCache(cached);
+      // Self-heal: if cache exists but all PBs are null (stale/pre-PB cache), fall through to live
+      if (fromCache.length > 0 || (cached.totalRuns ?? 0) === 0) {
+        return fromCache;
+      }
     }
   } catch (err) {
     console.warn('[MyData] user_stats cache miss for PBs, falling back to live query:', err);
   }
 
-  // Fallback: live query (runs for users without cache yet)
+  // Fallback: live query (runs for users without cache yet, or stale cache)
   return getPersonalBestsLive(userId);
 }
 
@@ -76,7 +80,8 @@ async function getPersonalBestsLive(userId: string) {
       if (!run.avgPace || run.distance === null) continue;
 
       // Distance stored in metres — convert to km for comparison
-      const distanceKm = run.distance / 1000;
+      // runs.distance is stored in km; apply safety-net for any legacy meter rows (distance > 200 → impossible in km)
+      const distanceKm = run.distance > 200 ? run.distance / 1000 : run.distance;
       if (distanceKm < dist.min || distanceKm > dist.max) continue;
 
       const paceMinutes = parsePaceToMinutes(run.avgPace);
@@ -179,18 +184,26 @@ function buildPersonalBestsFromCache(cached: typeof userStats.$inferSelect) {
   ];
 
   for (const entry of entries) {
-    if (entry.duration && entry.runId) {
+    // Only show PB if both duration AND runId are non-null/non-empty
+    // Sanity-check: duration should be > 0 and reasonable (>= 30s for even fast segments)
+    // AND the date is valid (some stale cache rows may have garbage data)
+    if (entry.duration && entry.duration > 30000 && entry.runId && entry.date) {
       // Convert duration (ms) to pace (min/km)
       const durationMins = entry.duration / 1000 / 60;
       const paceMinPerKm = durationMins / entry.distance;
-      bests.push({
-        category: entry.label,
-        pace: formatPace(paceMinPerKm),
-        distance: entry.distance,
-        duration: entry.duration,
-        date: entry.date?.toISOString().split('T')[0] || '',
-        runId: entry.runId,
-      });
+      
+      // Final sanity-check: pace should be realistic (0.5 to 60 min/km)
+      // Anything outside this range indicates corrupt cache data
+      if (paceMinPerKm > 0.5 && paceMinPerKm < 60) {
+        bests.push({
+          category: entry.label,
+          pace: formatPace(paceMinPerKm),
+          distance: entry.distance,
+          duration: entry.duration,
+          date: entry.date?.toISOString().split('T')[0] || '',
+          runId: entry.runId,
+        });
+      }
     }
   }
 
