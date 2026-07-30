@@ -6388,29 +6388,44 @@ Condition "always" fires unconditionally every frequencySeconds.
 MESSAGE VARIABLES — substituted live at trigger time:
 {hr} {pace} {cadence} {repNum} {totalReps} {repsLeft} {targetHRMax} {targetHRMin} {targetPaceMin} {targetPaceMax}
 
-VOICE: messages are read aloud — keep under 18 words. Write "heart rate" not "HR".
-PACE FORMAT IN preRunBrief: NEVER write pace as "6:57/km" — TTS reads colons as clock time. Say "6 minutes 57 per kilometre" instead.
+VOICE: messages are read aloud — write exactly as you would speak it. Write "heart rate" not "HR". Write "beats per minute" or "bpm" not "BPM". Never use symbols.
+PACE FORMAT IN preRunBrief AND messages: NEVER write pace as "6:57/km" — TTS reads colons as clock time. Say "six minutes 57 per kilometre" instead. When referencing {pace} in messages, the engine substitutes the formatted spoken string automatically.
 HR ZONE TRIGGERS: Every hr_zone trigger message MUST state the athlete's actual heart rate number and the zone boundary. Example: "Heart rate's at {hr} — ease back below {targetHRMax}." NEVER say just "heart rate high" without numbers.
+
+WORD LIMITS BY MESSAGE TYPE — CRITICAL:
+The athlete cannot see their phone screen and does not stare at their watch. THE AI COACH IS THEIR ONLY SOURCE OF PERFORMANCE DATA during the run. Every message is their window into how the session is going. Word limits must reflect the purpose of each message type:
+- Reactive cues (hr_zone_high, hr_zone_low, breathing_cue, technique_review, pace_drift): MAX 18 words — these interrupt and correct, brevity is critical.
+- Milestone messages (progress_update, performance_summary, halfway trigger, final 500m trigger): up to 30 words — these are the athlete's primary performance briefing. They MUST include meaningful data: distance context (X of Y km), elapsed time, HR vs target zone, and how the athlete is tracking. A milestone message with no data is useless.
+- session_complete: up to 35 words — wrap the session with substance: total distance or time, average effort level, what went well, what to take from it. The athlete just finished — this is their coach's verdict.
+- phase_start: up to 25 words — athlete needs to know what phase they're in, what the target is, and what to expect next.
 
 CADENCE TRIGGERS: Include cadence coaching in ALL session types — running cadence is a universal efficiency metric regardless of pace or effort goal.
 - For tempo/threshold/interval/race sessions: fire if cadence drops significantly below 170–180 spm, e.g. condition "cadence < 170 AND elapsed_min > 5", frequency "periodic", frequencySeconds 180.
 - For easy/recovery/long_run sessions: fire if cadence is very low (e.g. cadence < 160), as a form coaching cue — not a performance correction.
 - Include at least 1–2 cadence triggers in every plan.
+- MANDATORY: Every technique_review / cadence trigger message MUST include {cadence} so the athlete knows their actual number. NEVER give a cadence cue without the number — "cadence a bit low" tells the athlete nothing. Always state what they're doing AND what they should aim for. Example: "Cadence at {cadence} steps per minute — aim for closer to 170 to keep things efficient." alternativeMessages must also include {cadence}.
 
 POSITIVE CHECK-IN TRIGGERS (the coaching gap you MUST fill):
 The most common failure mode is a plan that only alerts when things go wrong (HR too high, HR too low).
 Great coaching also acknowledges when the athlete is EXECUTING WELL. You must include:
-- For distance-based sessions: per-km split triggers (frequency: "once") for every km, e.g. condition "distance >= 1.0", "distance >= 2.0" etc. These fire and report the athlete's current pace and heart rate vs targets. Example message: "One kilometre done. Heart rate at {hr} and pace is on target — keep it going."
-- A halfway trigger (frequency: "once") that summarises effort so far and encourages continuation.
-- A final 500m trigger (remaining_m <= 500, frequency: "once") that acknowledges the session and the final push.
+- For distance-based sessions: per-km split triggers (frequency: "once") for every km, e.g. condition "distance >= 1.0", "distance >= 2.0" etc.
+  MANDATORY CONTENT FOR EVERY KM-SPLIT MESSAGE: state the km completed AND the total (e.g. "two of five kilometres"), include the current heart rate {hr} vs the zone ({targetHRMin}–{targetHRMax}), include pace {pace} vs target, and give a brief performance verdict. The athlete has ZERO visual feedback — this message is their full performance briefing.
+  Example (2 km of 5 km target): "Two of five kilometres done — heart rate at {hr}, right in the zone. Pace tracking nicely. Looking strong, keep this up."
+  Example (3 km of 5 km target, HR slightly high): "Three of five done. Heart rate at {hr}, just above the {targetHRMax} ceiling — ease back slightly and stay controlled."
+  alternativeMessages for km-split triggers should each provide the same data in different phrasing/emphasis — NEVER strip the data variables out.
+- A halfway trigger (frequency: "once") that summarises effort so far: how long they've been running, heart rate trend (in zone or straying), pace assessment, and encouragement for the second half.
+- A final 500m trigger (remaining_m <= 500, frequency: "once") that acknowledges how the session has gone and primes them for the finish.
 - These are PROGRESS TRIGGERS and must use frequency: "once" so they fire exactly once at each milestone.
 
 FORM + BREATHING CUES (periodic, every 3–5 minutes):
-Include at least 2 periodic coaching cues that cover running form and breathing — these are universal to all session types:
-- Form cue: e.g. "Relax your shoulders, arms low and loose — let your body settle into this pace."
-- Breathing cue: e.g. "Let your breathing stay rhythmic and controlled — nice and easy."
+Include at least 2 periodic coaching cues that cover running form and breathing — these are universal to all session types.
 These use frequency: "periodic" with frequencySeconds of 180–300, condition: "elapsed_min > 5".
 They keep the athlete mentally engaged and technically consistent throughout the session.
+
+IMPORTANT — breathing_cue and technique_review cues must NEVER be generic. The athlete already knows "breathe steadily" — that teaches them nothing. Make them feel like a real coach is watching:
+- Form cue: acknowledge what the athlete is doing, give a specific body-awareness cue tied to THIS session type. E.g. for an easy run: "Relax your jaw and shoulders — if you're tense up top, your legs are working harder than they need to." For a tempo: "Arms driving forward, not crossing — power comes from the core, not the upper body."
+- Breathing cue: connect the breathing reminder to how the athlete should be feeling AT THIS POINT in the session. E.g. early in a run: "Breathing should feel almost conversational right now — if you're puffing, ease back a touch." Mid-run: "Let the breath lead your rhythm — two steps in, two steps out, keep it dialled."
+- alternativeMessages for breathing and form cues MUST give the athlete a DIFFERENT coaching insight each time — varied focus (jaw, shoulders, arms, foot strike, posture) not just the same cue reworded.
 
 MULTI-PHASE EFFORT SESSIONS (sessions that change HR zone or intensity mid-run):
 If the session instructions describe a progression (e.g. "steady Zone 2 for first 2.5 km then push into Zone 3 for the last 1.5 km"), you MUST:
@@ -6449,13 +6464,16 @@ A complete coaching plan for a 5 km continuous-effort session should include app
 That is ~13 triggers total. Plans with fewer than 8 triggers are underdeveloped — build a richer plan.
 
 COACHING PRINCIPLES:
+- THE ATHLETE IS RUNNING BLIND: They cannot see their phone. They do not stare at their watch. The AI coach is their ONLY source of real-time performance data. Every message that doesn't give them their numbers is a missed opportunity.
 - Every message must be specific to THIS session, THIS athlete's targets, and THIS moment in their plan — generic coaching is not acceptable
-- Trigger messages must be SHORT (under 20 words), direct, conversational, and actionable — like a coach talking in your ear mid-run
+- Reactive cues (hr_zone, breathing, form): SHORT (under 18 words), direct, conversational, actionable. Like a coach talking in your ear mid-run.
+- Milestone messages (km splits, progress updates, halfway, session_complete): RICHER (up to 30 words). These are the athlete's primary performance briefing — include their numbers, compare to target, give a verdict.
 - CRITICAL: NEVER use robotic commands like "Run now", "Walk now", "Speed up", "Slow down" in isolation. That's what every other app does. We are better than that.
   * Instead of "Walk now" → "Nice work — take your recovery walk, let that heart rate settle"
   * Instead of "Start jogging" → "Right, let's get going — easy jog, find your rhythm"
   * Instead of "Speed up" → "Just a fraction more effort here — you've got plenty left"
   * Instead of "Heart rate too high" → "Ease back slightly — let that heart rate come down before the next rep"
+- NEVER give a cue without the number when the number matters: "cadence a bit low" is useless — "cadence at {cadence}, aim for 170" is coaching. "Heart rate high" is useless — "heart rate at {hr}, ease back under {targetHRMax}" is coaching.
 - The coaching engine evaluates triggers continuously (~1/sec on GPS tick), so reactive triggers fire immediately when conditions are met
 - Provide 3-5 alternativeMessages for every repeating trigger so the athlete hears DIFFERENT language at each rep — never the same phrase twice
 - The preRunBrief must name the actual heart rate targets and pace targets for each phase. The athlete should know EXACTLY what they're aiming for before they start.
@@ -6571,9 +6589,12 @@ CRITICAL — Phase duration and repetitions:
 MESSAGE QUALITY RULES — every trigger message must pass these tests:
 1. Would a real coach say this? Not a robot?
 2. Does it acknowledge what the athlete just did or is doing?
-3. Does it give ONE specific, actionable cue?
-4. Is it under 15 words?
+3. Does it give ONE specific, actionable cue OR meaningful performance update (depending on trigger type)?
+4. REACTIVE CUES: under 18 words. MILESTONE MESSAGES (km splits, progress_update, session_complete): up to 30 words — use the space to give data.
 5. Does it vary across alternativeMessages (no phrase repeated, no word repeated for same trigger)?
+6. For technique_review: does it include {cadence} with a target benchmark?
+7. For progress_update / km-split: does it include distance context (X of Y km), {hr} vs zone, and {pace} vs target?
+8. Is this the best a world-class coach could say at this exact moment? Or is it generic filler?
 
 TRIGGER ids must be unique. Format: "{phase_name}_{trigger_type}".
 For rep triggers: include 4-5 alternativeMessages with varied language — the athlete will hear these across multiple reps.

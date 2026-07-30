@@ -601,7 +601,7 @@ export async function getOrGenerateSessionCoaching(
   //         AI max_tokens increased to 8000 to prevent truncation of richer plans.
   //         Android engine fixed: 3-pass trigger evaluation prevents reactive triggers from blocking
   //         progress triggers — km splits and milestones now fire independently of HR alerts.
-  const CURRENT_PLAN_VERSION = "2.8";
+  const CURRENT_PLAN_VERSION = "2.9";
 
   // Semver-aware comparison: parse "major.minor" strings to numeric values for correct ordering.
   // String comparison fails for versions like "2.10" vs "2.4" ("2.10" < "2.4" lexicographically).
