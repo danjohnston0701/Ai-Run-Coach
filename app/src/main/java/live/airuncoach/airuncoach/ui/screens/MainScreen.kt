@@ -137,6 +137,25 @@ fun MainScreen(
     val deepLinkRoute = MainActivity.pendingDeepLink.value
     LaunchedEffect(deepLinkRoute) {
         val route = deepLinkRoute ?: return@LaunchedEffect
+
+        // Guard: suppress deep-link navigation to a *different* run_summary while
+        // the user is already viewing one.  This prevents an accidental tap on the
+        // Garmin "sync complete" heads-up notification from replacing the current
+        // (correctly plan-linked) run summary with the companion run record, which
+        // may not yet have linkedWorkoutId at the moment the notification fires.
+        if (route.startsWith("run_summary/")) {
+            val currentDest = navController.currentBackStackEntry?.destination?.route
+            if (currentDest?.startsWith("run_summary/") == true) {
+                val incomingId = route.removePrefix("run_summary/")
+                val currentId  = currentDest.removePrefix("run_summary/").split("?")[0]
+                if (incomingId != currentId) {
+                    Log.d("MainScreen", "Suppressing deep-link to run_summary/$incomingId — already viewing run_summary/$currentId")
+                    MainActivity.pendingDeepLink.value = null
+                    return@LaunchedEffect
+                }
+            }
+        }
+
         delay(300) // let the inner NavHost finish initial composition
         Log.d("MainScreen", "Consuming pendingDeepLink → $route")
         try {

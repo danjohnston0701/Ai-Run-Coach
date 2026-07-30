@@ -2798,9 +2798,13 @@ function transformRunForAndroid(run: any) {
             eq(runs.externalSource, 'garmin_companion'),
           ))
           .limit(10);
+        // 15% tolerance: phone GPS and watch GPS commonly disagree by 5–12% due to
+        // different satellite acquisition, algorithms, and BLE dropout gaps during
+        // live runs.  Using 15% prevents creating a duplicate phone run when the
+        // companion record already exists with a slightly different measured distance.
         const garminDup = garminCandidates.find(r => {
           const rDist = (r as any).distance ?? 0;
-          return rDist > 0 && Math.abs(rDist - distanceRounded) / Math.max(rDist, 0.1) < 0.1;
+          return rDist > 0 && Math.abs(rDist - distanceRounded) / Math.max(rDist, 0.1) < 0.15;
         });
         if (garminDup) {
           console.log(`[POST /api/runs] Case 2 — phone upload matches watch run ${garminDup.id} — merging phone data in`);
@@ -3027,6 +3031,8 @@ function transformRunForAndroid(run: any) {
         aiCoachEnabled:   aiCoachEnabledVal,
         restingCalories:  restingCalsVal,
         estSweatLoss:     estSweatLossVal,
+        // Power saver mode telemetry — flag indicating phone's power saver was active during run
+        powerSaverModeDetected: typeof runData.powerSaverModeDetected === 'boolean' ? runData.powerSaverModeDetected : false,
         // Group run link — must be explicit to survive the Drizzle type boundary
         groupRunId,
         // Time-series arrays (graphs)
@@ -12227,8 +12233,12 @@ function transformRunForAndroid(run: any) {
               isNull(runs.externalId),          // phone uploads have no externalId
             ))
             .limit(10);
+          // 15% tolerance: phone GPS and watch GPS often disagree by 5–12%
+          // (different satellite lock, algorithm differences, BLE dropout gaps).
+          // Using 15% instead of 10% prevents creating a duplicate companion run
+          // when the distances are close but not identical.
           const phoneMatchedRun = existingPhoneRuns.find(r =>
-            Math.abs((r.distance ?? 0) - distanceKm) / Math.max(distanceKm, 0.1) < 0.1
+            Math.abs((r.distance ?? 0) - distanceKm) / Math.max(distanceKm, 0.1) < 0.15
           );
           if (phoneMatchedRun) {
             console.log(`[Companion] session/end — phone run ${phoneMatchedRun.id} already exists for this session, linking instead of duplicating`);
@@ -12461,10 +12471,12 @@ function transformRunForAndroid(run: any) {
             ))
             .limit(10);
           
-          // Try to find a matching phone run (externalId=null, similar distance)
+          // Try to find a matching phone run (externalId=null, similar distance).
+          // 15% tolerance: phone GPS and watch GPS commonly disagree by 5–12% due to
+          // different satellite acquisition, algorithms, and BLE dropout gaps.
           const phoneMatch = phoneRuns.find((r: any) =>
             r.externalId === null &&
-            Math.abs((r.distance ?? 0) - distKmCheck) / Math.max(distKmCheck, 0.1) < 0.1
+            Math.abs((r.distance ?? 0) - distKmCheck) / Math.max(distKmCheck, 0.1) < 0.15
           );
           
           if (phoneMatch) {
@@ -16356,6 +16368,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       difficulty: run.difficulty || undefined,
       gpsTrack,
       heartRateData: (run.heartRateData as any) || undefined,
+      cadenceData: (run.cadenceData as any) || undefined,
       paceData,
       paceSamples,
       completedAt: run.completedAt?.toISOString() || undefined,

@@ -649,9 +649,9 @@ class GarminWatchManager(
                     // "OFFLINE - 90min charts" warning — this must happen regardless of
                     // whether a ViewModel has registered onWatchCommand.
                     if (action == "syncComplete") {
-                        val runId    = map["runId"]?.toString()
+                        val companionRunId = map["runId"]?.toString()
                         val session  = map["sessionId"] as? String
-                        Log.d(TAG, "syncComplete received — runId=$runId session=$session")
+                        Log.d(TAG, "syncComplete received — runId=$companionRunId session=$session")
                         _hasPendingWatchSync.value = false   // clear dashboard banner
                         dismissPendingSyncNotification()     // replace prompt with success notif
                         // Drop the stale cached run list so the newly-uploaded run is
@@ -659,7 +659,19 @@ class GarminWatchManager(
                         // then signal observers (dashboard / run history) to refresh now.
                         runRepository?.clearAllCaches()
                         _runSyncedEvent.value = System.currentTimeMillis()
-                        showOfflineSyncNotification(runId)
+                        // Prefer the phone's uploaded run ID over the companion run ID from
+                        // the watch.  When the phone also tracked this run (live session with
+                        // BT connected), the phone's run record has coaching-plan context
+                        // (linkedWorkoutId) that the watch-created companion record may not
+                        // have yet.  Using the phone's run ID ensures any notification
+                        // tap deep-links to the correct, plan-linked run rather than the
+                        // unlinked companion record.
+                        val phoneUploadId = RunTrackingService.uploadComplete.value
+                        val notifRunId = if (!phoneUploadId.isNullOrBlank()) phoneUploadId else companionRunId
+                        if (!phoneUploadId.isNullOrBlank() && phoneUploadId != companionRunId) {
+                            Log.d(TAG, "syncComplete: preferring phone run ID $phoneUploadId over companion ID $companionRunId for notification")
+                        }
+                        showOfflineSyncNotification(notifRunId)
                         return
                     }
 
