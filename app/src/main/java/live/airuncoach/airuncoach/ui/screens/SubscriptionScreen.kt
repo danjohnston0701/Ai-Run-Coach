@@ -1552,7 +1552,7 @@ data class PlanData(
             monthlyEquivalent = "No credit card required",
             features = listOf(
                 PlanFeature("15km of AI Coaching during trial", true),
-                PlanFeature("3 AI Post-Run Summaries during trial", true),
+                PlanFeature("3 AI Session Summaries during trial", true),
                 PlanFeature("No AI Route Generation", false),
                 PlanFeature("No AI Training Plans", false),
                 PlanFeature("Full access expires after 14 days", false)
@@ -1568,9 +1568,9 @@ data class PlanData(
             annualMonthlyEquivalent = "USD 5.00/month — save USD 11.89",
             accentColor = Colors.primary,
             features = listOf(
-                PlanFeature("Unlimited AI Runs", true),
+                PlanFeature("Unlimited AI Sessions", true),
                 PlanFeature("50km of AI Coaching per month", true),
-                PlanFeature("15 AI Post-Run Summaries per month", true),
+                PlanFeature("15 AI Session Summaries per month", true),
                 PlanFeature("10 AI Route Generations per month", true),
                 PlanFeature("1 AI Training Plan per month", true)
             )
@@ -1585,9 +1585,9 @@ data class PlanData(
             annualMonthlyEquivalent = "USD 10.83/month — save USD 25.89",
             accentColor = Color(0xFFA78BFA),
             features = listOf(
-                PlanFeature("Unlimited AI Runs", true),
+                PlanFeature("Unlimited AI Sessions", true),
                 PlanFeature("200km of AI Coaching per month", true),
-                PlanFeature("50 AI Post-Run Summaries per month", true),
+                PlanFeature("50 AI Session Summaries per month", true),
                 PlanFeature("30 AI Route Generations per month", true),
                 PlanFeature("3 AI Training Plan generations per month", true)
             )

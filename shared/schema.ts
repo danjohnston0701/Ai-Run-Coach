@@ -355,6 +355,9 @@ export const runs = pgTable("runs", {
   // ── Basic Metrics Extended ───────────────────────────────────────────────────
   totalEnergy: integer("total_energy"),                       // kcal burned
 
+  // ── Battery & Power Management ───────────────────────────────────────────────
+  powerSaverModeDetected: boolean("power_saver_mode_detected").default(false), // TRUE if phone's power saver was active
+
   // ── Metadata ─────────────────────────────────────────────────────────────────
   // User-selected activity for this session — normalized to "run" or "walk".
   // Kept separate from Garmin's activityType classification.

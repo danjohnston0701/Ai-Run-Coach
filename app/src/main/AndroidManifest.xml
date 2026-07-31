@@ -29,6 +29,15 @@
     <!-- Wake lock to keep CPU active during tracking (screen off) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Battery optimisation exemption — allows the app to request that the user
+         whitelists it from Android's battery optimiser and power saver restrictions.
+         Without this exemption, power saver mode throttles GPS updates from 1 Hz
+         to ~0.1 Hz, causing severely under-reported pace and distance.
+         The permission does NOT grant exemption automatically — it only allows the
+         app to show the system prompt asking the user to enable the exemption.
+         Used by: RunSessionViewModel before a run starts. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Post notifications for foreground service (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

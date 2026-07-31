@@ -1926,7 +1926,7 @@ private fun ShareableSummaryCard(
             ) {
                 Column {
                     Text(
-                        text = run.name ?: "Run Summary",
+                        text = run.name ?: "${if (run.sessionType.lowercase() == "walk") "Walk" else "Run"} Summary",
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
                         color = Colors.textPrimary
                     )
@@ -3701,8 +3701,8 @@ private fun ChartsSectionFlagship(run: RunSession) {
         val runStartTs = remember(run.routePoints) {
             run.routePoints.firstOrNull { it.latitude != 0.0 && it.longitude != 0.0 }?.timestamp ?: 0L
         }
-        val cadenceSeries = remember(run.routePoints, mode) {
-            buildCadenceSeries(run.routePoints, mode, runStartTs)
+        val cadenceSeries = remember(run.cadenceData, run.routePoints, run.distance, run.duration, mode) {
+            buildCadenceSeriesFromData(run, mode, runStartTs)
         }
 
         if (cadenceSeries.y.size >= 2) {
@@ -3756,7 +3756,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
         }
 
         // ===== CADENCE vs ELEVATION (dual-axis overlay) =====
-        val cadElevData = remember(run.routePoints, run.altitudeData, run.distance, run.duration, run.elapsedTime, mode) {
+        val cadElevData = remember(run.cadenceData, run.routePoints, run.altitudeData, run.distance, run.duration, run.elapsedTime, mode) {
             buildCadenceElevationDualSeries(run, mode)
         }
 
@@ -4733,6 +4733,93 @@ private fun hrFromRoutePoints(points: List<LocationPoint>, mode: ChartMode): Lab
     return LabeledSeries(xOut, smoothY(yOut, 11), labels)
 }
 
+/**
+ * Build cadence series, preferring dedicated cadence sensor data (cadenceData)
+ * over GPS-derived cadence. Falls back to GPS points if cadenceData is unavailable.
+ * 
+ * cadenceData: dense, regular 2-second samples from watch/band (preferred)
+ * GPS points: sparse, irregular samples from GPS (fallback for legacy runs)
+ */
+private fun buildCadenceSeriesFromData(
+    run: RunSession,
+    mode: ChartMode,
+    runStartTs: Long = 0L
+): LabeledSeries {
+    // Prefer dedicated cadence sensor data if available
+    if (!run.cadenceData.isNullOrEmpty() && run.cadenceData.size >= 2) {
+        return buildCadenceSeriesFromArray(
+            cadenceArray = run.cadenceData,
+            totalDistance = run.distance,
+            totalDuration = run.duration,
+            runStartTs = runStartTs,
+            mode = mode
+        )
+    }
+    
+    // Fall back to GPS-derived cadence for legacy runs or GPS-only data
+    return buildCadenceSeries(run.routePoints, mode, runStartTs)
+}
+
+/**
+ * Build cadence series from a dense array of cadence samples (typically 2-second intervals).
+ * This is the preferred method for runs with dedicated cadence sensors.
+ * 
+ * @param cadenceArray    Array of cadence values (spm)
+ * @param totalDistance   Total run distance in meters (for distance-mode x-axis)
+ * @param totalDuration   Total run duration in milliseconds (for time-mode x-axis)
+ * @param runStartTs      GPS run start timestamp (for aligning time axis)
+ * @param mode            ChartMode.Time or ChartMode.Distance
+ */
+private fun buildCadenceSeriesFromArray(
+    cadenceArray: List<Int>,
+    totalDistance: Double,
+    totalDuration: Long,
+    runStartTs: Long = 0L,
+    mode: ChartMode
+): LabeledSeries {
+    val valid = cadenceArray.filter { it > 0 }
+    if (valid.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+    
+    // Assume 2-second interval samples (typical for watch cadence sensors)
+    val sampleIntervalSec = 2.0
+    val totalDurationSec = totalDuration / 1000.0
+    val totalDistanceKm = totalDistance / 1000.0
+    
+    // Trim first and last ~10% to remove sensor startup/cooldown artifacts
+    val trimCount = (valid.size * 0.05).toInt().coerceAtLeast(1)
+    val trimmedIndices = (trimCount until (valid.size - trimCount)).toList()
+    if (trimmedIndices.size < 2) return LabeledSeries(emptyList(), emptyList(), emptyList())
+    
+    val xOut = mutableListOf<Double>()
+    val yOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+    
+    // Downsample to ~200 points for chart performance
+    val step = (trimmedIndices.size / 200f).coerceAtLeast(1f).toInt()
+    
+    var idx = 0
+    while (idx < trimmedIndices.size) {
+        val sampleIdx = trimmedIndices[idx]
+        val elapsedSec = sampleIdx * sampleIntervalSec
+        
+        val xLabel = if (mode == ChartMode.Time) {
+            String.format(java.util.Locale.US, "%.0f", elapsedSec / 60.0)
+        } else {
+            // Approximate distance based on time progression and total distance
+            val distProgress = (elapsedSec / totalDurationSec).coerceIn(0.0, 1.0)
+            String.format(java.util.Locale.US, "%.1f", distProgress * totalDistanceKm)
+        }
+        
+        xOut.add(xOut.size.toDouble())
+        yOut.add(valid[sampleIdx].toDouble())
+        labels.add(xLabel)
+        
+        idx += step
+    }
+    
+    return LabeledSeries(xOut, smoothY(yOut, 11), labels)
+}
+
 private fun buildCadenceSeries(
     points: List<LocationPoint>,
     mode: ChartMode,
@@ -4950,9 +5037,82 @@ private fun buildPaceElevationDualSeries(run: RunSession, mode: ChartMode): Dual
 }
 
 /**
+ * Build cadence + elevation dual series using dedicated cadence sensor data.
+ * Both series are aligned to the same x-axis (time or distance).
+ */
+private fun buildCadenceElevationDualSeriesFromArray(run: RunSession, mode: ChartMode): DualSeriesData {
+    val cadenceArray = run.cadenceData ?: return DualSeriesData(emptyList(), emptyList(), emptyList())
+    val altitudeArray = run.altitudeData ?: return DualSeriesData(emptyList(), emptyList(), emptyList())
+    
+    if (cadenceArray.size < 4 || altitudeArray.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
+    
+    // Assume 2-second interval samples for cadence (typical for watch sensors)
+    val sampleIntervalSec = 2.0
+    val totalDurationSec = run.duration / 1000.0
+    val totalDistanceKm = run.distance / 1000.0
+    
+    // Trim first and last ~5% to remove sensor startup/cooldown artifacts
+    val trimCount = (cadenceArray.size * 0.05).toInt().coerceAtLeast(1)
+    val trimmedIndices = (trimCount until (cadenceArray.size - trimCount)).toList()
+    if (trimmedIndices.size < 4) return DualSeriesData(emptyList(), emptyList(), emptyList())
+    
+    val cadOut = mutableListOf<Double>()
+    val elevOut = mutableListOf<Double>()
+    val labels = mutableListOf<String>()
+    
+    // Downsample to ~200 points for chart performance
+    val step = (trimmedIndices.size / 200f).coerceAtLeast(1f).toInt()
+    
+    var idx = 0
+    while (idx < trimmedIndices.size) {
+        val sampleIdx = trimmedIndices[idx]
+        
+        // Skip if cadence is invalid
+        if (sampleIdx >= cadenceArray.size || cadenceArray[sampleIdx] <= 0) {
+            idx += step
+            continue
+        }
+        
+        val elapsedSec = sampleIdx * sampleIntervalSec
+        
+        val xLabel = if (mode == ChartMode.Time) {
+            String.format(java.util.Locale.US, "%.0f", elapsedSec / 60.0)
+        } else {
+            // Approximate distance based on time progression and total distance
+            val distProgress = (elapsedSec / totalDurationSec).coerceIn(0.0, 1.0)
+            String.format(java.util.Locale.US, "%.1f", distProgress * totalDistanceKm)
+        }
+        
+        labels.add(xLabel)
+        cadOut.add(cadenceArray[sampleIdx].toDouble())
+        
+        // Use altitude at corresponding sample, or interpolate if altitudeArray is shorter
+        val altIdx = (sampleIdx * altitudeArray.size / cadenceArray.size).coerceIn(0, altitudeArray.size - 1)
+        elevOut.add(altitudeArray[altIdx].toDouble())
+        
+        idx += step
+    }
+    
+    if (cadOut.size < 2) return DualSeriesData(emptyList(), emptyList(), emptyList())
+    
+    return DualSeriesData(
+        paceY = smoothY(cadOut, 11),
+        elevY = smoothY(medianFilter(iqrFilterAltitude(elevOut), 7), 11),
+        labels = labels
+    )
+}
+
+/**
  * Build aligned cadence + elevation series over distance or time.
+ * Prefers dedicated cadence sensor data (cadenceData) over GPS-derived cadence.
  */
 private fun buildCadenceElevationDualSeries(run: RunSession, mode: ChartMode): DualSeriesData {
+    // If cadenceData is available, use it (higher quality than GPS-derived cadence)
+    if (!run.cadenceData.isNullOrEmpty() && run.cadenceData.size >= 4 && run.altitudeData != null) {
+        return buildCadenceElevationDualSeriesFromArray(run, mode)
+    }
+    
+    // Fall back to GPS-derived cadence for legacy runs
     val points = run.routePoints
     val valid = points.filter {
         it.latitude != 0.0 && it.longitude != 0.0 && it.cadence != null && it.cadence > 0

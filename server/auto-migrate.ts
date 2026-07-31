@@ -389,6 +389,14 @@ export async function runAutoMigrations(): Promise<void> {
       sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_completed_at ON group_run_participants(group_run_id, completed_at)",
     },
 
+    // ── runs.power_saver_mode_detected ───────────────────────────────────────────
+    // Tracks whether the phone had power saver / battery saver active during the run.
+    // When true, GPS was likely throttled by the OS which reduces tracking accuracy.
+    {
+      name: "runs.power_saver_mode_detected",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS power_saver_mode_detected boolean DEFAULT false",
+    },
+
     // ── apple_transactions ───────────────────────────────────────────────────────
     // Store Apple App Store transaction IDs to map notifications back to users.
     // Enables tracking subscription renewals, expiries, and refunds.

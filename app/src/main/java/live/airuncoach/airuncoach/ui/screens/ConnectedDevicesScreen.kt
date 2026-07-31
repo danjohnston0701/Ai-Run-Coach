@@ -646,7 +646,7 @@ private fun StravaIntegrationCard(
 
             // Feature chips
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallChip(Icons.Default.History, "Run History", Color(0xFFFC5200))
+                SmallChip(Icons.Default.History, "Activity History", Color(0xFFFC5200))
                 SmallChip(Icons.Default.Star, "AI Baseline", Color(0xFFFC5200))
                 SmallChip(Icons.AutoMirrored.Filled.TrendingUp, "Trends", Color(0xFFFC5200))
             }
@@ -728,7 +728,7 @@ private fun StravaIntegrationCard(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "Import Run History",
+                            "Import Activity History",
                             style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -908,7 +908,7 @@ private fun GarminConnectCard(
             // Feature chips
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SmallChip(Icons.Default.Refresh, "Activity Sync", Color(0xFF4CAF50))
-                SmallChip(Icons.Default.DateRange, "Run History", Color(0xFF4CAF50))
+                SmallChip(Icons.Default.DateRange, "Activity History", Color(0xFF4CAF50))
             }
 
 

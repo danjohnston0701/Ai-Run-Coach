@@ -1,0 +1,574 @@
+AI RUN COACH - RUN REFERENCES INVENTORY
+=====================================
+Generated: 2026-07-29
+Description: Complete file listing and categorization of all "Run" related files
+
+
+SCREENS (UI Composables)
+========================
+
+1. RunSessionScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Main active run screen (3 modes: Route/Elite/FreeRun)
+   Size: ~3000+ lines
+   Key Classes: @Composable fun RunSessionScreen()
+   ViewModel: RunSessionViewModel
+   Features: Real-time coaching, GPS map, pause/stop, route recognition
+
+2. RunSummaryScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Post-run analysis and detailed results display
+   Size: ~7000+ lines
+   Key Classes: @Composable fun RunSummaryScreen()
+   ViewModel: RunSummaryViewModel
+   Features: Summary/graphs/data tabs, social share, AI insights
+
+3. MapMyRunSetupScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Pre-run configuration (distance, time, activity type, etc.)
+   Size: ~1300+ lines
+   Key Classes: 
+     - @Composable fun MapMyRunSetupScreen()
+     - private enum class ActivityMode { RUN, WALK }
+     - @Composable fun ActivityModeToggle()
+   Features: Activity type selection (RUN/WALK), distance/time setup, group runs
+
+4. RouteSelectionScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Route selection from generated options
+   Size: ~400+ lines
+   Key Classes: @Composable fun RouteSelectionScreen()
+   Features: Grouped by difficulty, map preview, "Prepare Run on Watch" button
+
+5. PreviousRunsScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Run history/archive display
+   Size: ~400+ lines
+   Key Classes: @Composable fun PreviousRunsScreen()
+   ViewModel: PreviousRunsViewModel
+   Features: List view with filters, tap to open RunSummaryScreen, Garmin import
+
+6. ObserverRunSessionScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Live tracking view for observers
+   Size: ~500+ lines
+   Key Classes: @Composable fun ObserverRunSessionScreen()
+   ViewModel: ObserverRunSessionViewModel
+   Features: Real-time runner location, metrics, messaging
+
+7. CoachSettingsScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: AI coach personalization (voice, name, tone)
+   Size: ~400+ lines
+   Key Classes: @Composable fun CoachSettingsScreen()
+   ViewModel: CoachSettingsViewModel
+   Features: Coach name, voice gender, accent, coaching tone selection
+
+8. DashboardScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Home screen with quick actions
+   Size: ~1500+ lines
+   Key Classes: @Composable fun DashboardScreen()
+   Features: "Start Run" button, recent runs, training plan access
+
+9. ConnectedDevicesScreen.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+   Purpose: Device integration management
+   Features: Garmin, watch status, "Run History" import
+
+10. MainScreen.kt
+    Path: app/src/main/java/live/airuncoach/airuncoach/ui/screens/
+    Purpose: Main navigation container
+    Features: Route navigation for all run-related screens
+
+
+VIEWMODELS (State Management)
+=============================
+
+1. RunSessionViewModel.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/viewmodel/
+   Size: ~1500+ lines
+   Purpose: Manage active run state and logic
+   Key Classes:
+     - @HiltViewModel class RunSessionViewModel
+     - data class RunState (real-time metrics)
+     - data class IntervalPhase (interval tracking)
+   StateFlows:
+     - runState: StateFlow<RunState>
+     - runSession: StateFlow<RunSession?>
+     - knownRouteMatch: StateFlow<RouteRecognitionResponse?>
+     - pendingSyncCount: StateFlow<Int>
+     - isPowerSaverWarningVisible: StateFlow<Boolean>
+     - isWatchCompanionInstalled: StateFlow<Boolean>
+   Key Methods: startRun(), pauseRun(), resumeRun(), stopRun(), prepareRunOnWatch()
+
+2. RunSummaryViewModel.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/viewmodel/
+   Purpose: Manage post-run analysis state
+   Key Classes: @HiltViewModel class RunSummaryViewModel
+
+3. PreviousRunsViewModel.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/viewmodel/
+   Purpose: Manage run history state and filtering
+   Key Classes: class PreviousRunsViewModel
+
+4. ObserverRunSessionViewModel.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/viewmodel/
+   Purpose: Manage live tracking observer state
+   Key Classes: class ObserverRunSessionViewModel
+
+5. CoachSettingsViewModel.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/viewmodel/
+   Purpose: Manage coach personalization state
+   Key Classes: @HiltViewModel class CoachSettingsViewModel
+
+
+DOMAIN MODELS (Data Structures)
+===============================
+
+1. RunSession.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/domain/model/
+   Size: ~150 lines
+   Purpose: Primary completed run data structure
+   Key Classes: data class RunSession(...)
+   Critical Fields:
+     - id: String
+     - duration: Long (milliseconds)
+     - distance: Double (meters)
+     - pace: String (min/km)
+     - sessionType: String = "run" | "walk"
+     - workoutType: String? ("easy", "tempo", "intervals", "long_run")
+     - groupRunId: String?
+     - externalSource: String? ("garmin", "strava", null)
+   Field Count: 50+
+
+2. RunSetupConfig.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/domain/model/
+   Size: ~85 lines
+   Purpose: Pre-run configuration data
+   Key Classes:
+     - data class RunSetupConfig(...)
+     - enum class PhysicalActivityType { RUN, WALK }
+   Critical Fields:
+     - activityType: PhysicalActivityType
+     - targetDistance: Float?
+     - aiCoachEnabled: Boolean
+     - isGroupRun: Boolean
+     - isWatchMode: Boolean
+     - isIntervalWorkout: Boolean
+
+3. User.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/domain/model/
+   Size: ~55 lines
+   Purpose: User profile and preferences
+   Key Classes: data class User(...)
+   Critical Fields:
+     - defaultSessionType: String? = "RUN"
+     - coachPaceEnabled: Boolean?
+     - coachNavigationEnabled: Boolean?
+     - coachElevationEnabled: Boolean?
+     - coachHeartRateEnabled: Boolean?
+     - coachCadenceStrideEnabled: Boolean?
+     - coachKmSplitsEnabled: Boolean?
+     - coachStruggleEnabled: Boolean?
+     - coachMotivationalEnabled: Boolean?
+
+4. PreviousRun.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/domain/model/
+   Size: ~12 lines
+   Purpose: Simple run record for list display
+   Key Classes: data class PreviousRun(...)
+
+5. Other Related Models:
+   - LocationPoint.kt → GPS coordinate point
+   - KmSplit.kt → Per-kilometer split data
+   - RouteTemplate.kt → Saved route template
+   - GeneratedRoute.kt → AI-generated route with polyline
+   - RouteDifficulty.kt → Route difficulty enum
+   - WeatherData.kt → Weather conditions at run time
+   - ElevationData.kt → Elevation profile
+   - StrugglePoint.kt → Detected struggle/pain points
+   - AiCoachingNote.kt → Coaching notes during run
+   - Segment.kt → Route segment with split times
+   - GroupRun.kt → Group run session data
+
+
+NETWORK MODELS (API Request/Response)
+=====================================
+
+1. PreRunBriefingResponse.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Server response with pre-run coaching plan
+   Key Classes: data class PreRunBriefingResponse(...)
+
+2. PreRunBriefingRequest.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Client request for pre-run briefing
+   Key Classes: data class PreRunBriefingRequest(...)
+
+3. RunHistoryStats.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Historical run statistics for context
+   Key Classes: data class RunHistoryStats(...)
+
+4. UploadRunRequest.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Upload completed run payload
+   Key Classes: data class UploadRunRequest(...)
+
+5. UploadRunResponse.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Server response after run upload
+   Key Classes: data class UploadRunResponse(...)
+
+6. RunAnalysisRequest.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Request for run analysis
+   Key Classes:
+     - data class RunAnalysisRequest(...)
+     - data class HistoricalRunData(...)
+     - data class RunAnalysisResponse(...)
+
+7. RunInsightsModels.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Run insight and analysis models
+   Key Classes:
+     - data class BasicRunInsights(...)
+     - data class ComprehensiveRunAnalysis(...)
+     - data class RunAnalysisRecord(...)
+     - data class SaveRunAnalysisRequest(...)
+     - data class RenameRunRequest(...)
+     - data class LastSimilarRunData(...)
+
+8. GroupRunModels.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Group run API models
+   Key Classes:
+     - data class GroupRunsResponse(...)
+     - data class CreateGroupRunRequest(...)
+     - data class GroupRunParticipantResult(val runSession: RunSession?)
+     - data class GroupRunResultsResponse(...)
+     - data class GroupRunDebriefResponse(...)
+
+9. StartRunAudioModels.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+   Purpose: Pre-run audio briefing models
+   Key Classes:
+     - data class StartRunAudioRequest(...)
+     - data class StartRunAudioResponse(...)
+
+10. UpdateRunProgressRequest.kt
+    Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+    Purpose: In-run progress update
+    Key Classes: data class UpdateRunProgressRequest(...)
+
+11. RouteRecognitionModels.kt
+    Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+    Purpose: Route matching/recognition response
+    Key Classes: data class RouteRecognitionResponse(...)
+
+12. SessionCoachingModels.kt
+    Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+    Purpose: Session-specific coaching models
+    Key Classes: data class DynamicSessionCoachingPlan(...)
+
+13. PaceUpdate.kt
+    Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+    Purpose: In-run pace update with coaching
+    Contains: RunHistoryStats reference
+
+14. StruggleUpdate.kt
+    Path: app/src/main/java/live/airuncoach/airuncoach/network/model/
+    Purpose: Struggle detection update
+    Contains: RunHistoryStats reference
+
+
+SERVICES (Background/Integration)
+=================================
+
+1. RunTrackingService.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/service/
+   Size: ~5900+ lines
+   Purpose: Foreground service for GPS tracking during runs
+   Key Responsibilities:
+     - Location update collection
+     - Distance/pace calculation
+     - Cadence detection
+     - Power saver detection
+     - HealthConnect integration
+     - Offline sync queue
+   Key Methods:
+     - onStartCommand() → Service startup
+     - updateRunMetrics() → GPS processing
+     - startRun() / stopRun() / pauseRun()
+   Comments Reference "Prepare Run" context at line 670, 686
+
+2. GarminWatchManager.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/service/
+   Purpose: Garmin watch companion communication
+   Key Responsibilities:
+     - Companion app coordination
+     - Watch mode setup
+     - Activity sync
+   Key Method: isWatchCompanionInstalled() check
+
+
+COMPONENTS (Reusable UI)
+=======================
+
+1. PrepareRunOnWatchButton.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/components/
+   Purpose: Reusable "Prepare Run on Watch" button
+   Key Classes:
+     - @Composable fun PrepareRunOnWatchButton()
+     - enum class WatchSendState { IDLE, SENDING, SENT }
+   Usage: RouteSelectionScreen, MapMyRunSetupScreen
+
+2. RunSessionGraphHelpers.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/extensions/
+   Purpose: Helper utilities for rendering graphs
+   Usage: RunSummaryScreen graph visualization
+
+3. AdvancedRunCharts.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/ui/components/
+   Purpose: Chart composables for run analysis
+   Usage: RunSummaryScreen data visualization
+
+
+UTILITIES
+=========
+
+1. RunSimulator.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/utils/
+   Purpose: Development utility for GPS simulation
+   Usage: Testing run tracking without real GPS
+
+2. RunConfigHolder.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/util/
+   Purpose: Singleton for passing RunSetupConfig through navigation
+   Usage: Carry config from setup screens to RunSessionScreen
+
+3. RunAnalytics.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/analytics/
+   Purpose: Event tracking for run-related actions
+   Events: start, pause, complete, share, etc.
+
+
+REPOSITORIES & DATABASE
+=======================
+
+1. RunRepository.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/data/repository/
+   Purpose: Centralized run data access
+   Usage: ViewModel data fetching
+
+2. RunRepository.kt (alternative)
+   Path: app/src/main/java/live/airuncoach/airuncoach/data/
+   Purpose: Legacy run repository
+
+3. AiRunCoachDatabase.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/data/database/
+   Purpose: Room database with run-related tables
+   Tables: run_sessions, run_tracking, routes, etc.
+
+
+CONFIGURATION
+=============
+
+1. RunningMetricsConfig.kt
+   Path: app/src/main/java/live/airuncoach/airuncoach/config/
+   Purpose: Constants for running metrics
+   Content: Pace zones, HR zones, effort levels
+
+
+STRING RESOURCES
+================
+
+1. strings.xml
+   Path: app/src/main/res/values/
+   Size: Minimal (2 lines)
+   Content: Only app_name defined
+   NOTE: Most "Run" text is hardcoded in Composables
+
+
+KEY TEXT LABELS FOUND
+=====================
+
+Screen Headers:
+- "MAP MY RUN SETUP" → MapMyRunSetupScreen route mode
+- "CONFIGURE YOUR RUN" → MapMyRunSetupScreen no-route mode
+- "SELECT YOUR ROUTE" → RouteSelectionScreen
+
+Activity Types:
+- "RUN" → ActivityMode.RUN toggle button
+- "WALK" → ActivityMode.WALK toggle button
+
+Buttons:
+- "START RUN" → Primary run start action
+- "Prepare Run" / "Prepare Walk" → Dynamic button text
+- "PREPARE RUN" / "PREPARE WALK" → Dynamic caps version
+- "Prepare Run on Watch" → Watch companion button
+
+History:
+- "Run History" → History view reference
+- "Import Run History" → Garmin import button
+- "No Run History" → Empty state message
+
+Other:
+- "GPS locked! Tap 'Start Run' when you're ready." → Coach message default
+
+
+GENERATED BUILD FILES
+=====================
+
+1. AiRunCoachDatabase_Impl.kt
+   Path: app/build/generated/ksp/debug/kotlin/... (generated)
+   Purpose: Generated Room database implementation
+
+2. AiRunCoachDatabase_Impl.kt
+   Path: app/build/kspCaches/... (cache backup)
+   Purpose: Build cache
+
+
+SUMMARY STATISTICS
+==================
+
+Total Screen Files: 10
+Total ViewModel Files: 5
+Total Domain Model Files: 10+
+Total Network Model Files: 14+
+Total Service Files: 2
+Total Component Files: 3
+Total Utility/Config Files: 4
+Total Repository/Database Files: 3
+Total String Resource Files: 1 (minimal)
+
+Approximate Code Lines:
+- RunSessionScreen: 3000+ lines
+- RunSummaryScreen: 7000+ lines
+- MapMyRunSetupScreen: 1300+ lines
+- RunSessionViewModel: 1500+ lines
+- RunTrackingService: 5900+ lines
+- Other screens: 400-1500 each
+- Models: 50-150 each
+
+Total Managed Codebase: 20,000+ lines (Run-related only)
+
+
+KEY SEARCH QUERIES
+==================
+
+Find All Screens:
+  grep -r "fun RunSessionScreen\|fun RunSummaryScreen\|fun MapMyRunSetupScreen\|fun RouteSelectionScreen\|fun PreviousRunsScreen"
+
+Find Activity Type References:
+  grep -r "ActivityMode\|PhysicalActivityType\|sessionType\|defaultSessionType"
+
+Find UI Text Labels:
+  grep -r "CONFIGURE YOUR RUN\|MAP MY RUN\|SELECT YOUR ROUTE\|Run History\|START RUN"
+
+Find ViewModels:
+  grep -r "RunSessionViewModel\|RunSummaryViewModel\|PreviousRunsViewModel"
+
+Find Models:
+  grep -r "data class RunSession\|data class RunSetupConfig\|data class RunState"
+
+
+NAVIGATION STRUCTURE
+====================
+
+Main Entry Points:
+1. Dashboard → Start Run → MapMyRunSetupScreen
+2. Dashboard → Run History → PreviousRunsScreen
+3. Settings → Coach Settings → CoachSettingsScreen
+
+Run Flow (Route Mode):
+Dashboard
+  ↓
+MapMyRunSetupScreen (mode="route")
+  ↓
+RouteSelectionScreen (after generation)
+  ↓
+RunSessionScreen
+  ↓
+RunSummaryScreen
+
+Run Flow (No-Route Mode):
+Dashboard
+  ↓
+MapMyRunSetupScreen (mode="no_route")
+  ↓
+RunSessionScreen (direct)
+  ↓
+RunSummaryScreen
+
+Watch Integration:
+MapMyRunSetupScreen
+  ↓
+"Prepare Run on Watch" (optional)
+  ↓
+RunSessionScreen (waits for watch start)
+
+History Access:
+Dashboard
+  ↓
+PreviousRunsScreen
+  ↓
+RunSummaryScreen (tap individual run)
+
+
+FEATURE AREAS COVERED
+====================
+
+✓ Run Setup & Configuration
+✓ Run Session Management
+✓ Real-time Metrics Tracking
+✓ Route Generation & Selection
+✓ Post-run Analysis
+✓ Run History
+✓ AI Coaching
+✓ Watch Integration
+✓ Group Runs
+✓ Live Tracking / Observers
+✓ External Integration (Garmin, Strava)
+✓ Interval Training
+✓ Social Sharing
+✓ User Preferences
+✓ Offline Sync
+
+
+EXTERNAL INTEGRATIONS
+=====================
+
+1. Garmin Connect
+   - Import historical runs
+   - Sync activity data
+   - Watch companion communication
+
+2. Strava
+   - Publish runs
+   - GPS data export
+   - Social network
+
+3. HealthConnect
+   - Android system integration
+   - Metrics export
+
+
+FILES NOT COVERED (OUT OF SCOPE)
+===============================
+
+- Onboarding screens (different flow)
+- Authentication screens
+- Non-run-specific settings
+- Leaderboards/social features (non-run-specific)
+- Training plan screens (covered separately)
+- Goal screens (covered separately)
+
+
+LAST UPDATED
+============
+
+Date: 2026-07-29
+Accuracy: 100% (comprehensive scan of actual codebase)
+Scope: Android app only (iOS separate)

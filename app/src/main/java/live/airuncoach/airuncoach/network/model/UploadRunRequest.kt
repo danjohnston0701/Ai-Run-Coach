@@ -116,5 +116,7 @@ data class UploadRunRequest(
     val minPace: Double? = null,
     val maxPace: Double? = null,
     val avgGpsAccuracy: Float? = null,
-    val worstGpsAccuracy: Float? = null
+    val worstGpsAccuracy: Float? = null,
+    // ── Battery & Power Management ────────────────────────────────────────────────
+    val powerSaverModeDetected: Boolean = false  // Flag indicating phone's power saver was active during run
 )

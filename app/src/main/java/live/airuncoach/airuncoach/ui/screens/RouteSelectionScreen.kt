@@ -29,6 +29,7 @@ import com.google.android.gms.maps.model.*
 import com.google.maps.android.PolyUtil
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.domain.model.GeneratedRoute
+import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RouteDifficulty
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WatchSendState
@@ -46,7 +47,8 @@ fun RouteSelectionScreen(
     onBack: () -> Unit,
     onRegenerateRoutes: () -> Unit,
     aiCoachEnabled: Boolean,
-    onAiCoachToggle: (Boolean) -> Unit
+    onAiCoachToggle: (Boolean) -> Unit,
+    activityType: PhysicalActivityType = PhysicalActivityType.RUN
 ) {
     val viewModel: RunSessionViewModel = hiltViewModel()
     val companionInstalled by viewModel.isWatchCompanionInstalled.collectAsState()
@@ -54,6 +56,9 @@ fun RouteSelectionScreen(
 
     // Reset watch send state when route changes
     LaunchedEffect(selectedRouteId) { watchSendState = WatchSendState.IDLE }
+    
+    // Get activity type label
+    val activityTypeLabel = if (activityType == PhysicalActivityType.WALK) "WALK" else "RUN"
 
     Scaffold(
         topBar = {
@@ -178,7 +183,7 @@ fun RouteSelectionScreen(
                     }
                 )
 
-                // Primary "Start Run on Phone" button
+                // Primary "Start Run/Walk on Phone" button
                 Button(
                     onClick = onStartRun,
                     enabled = selectedRouteId != null,
@@ -192,7 +197,7 @@ fun RouteSelectionScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        "START RUN",
+                        "START $activityTypeLabel",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (selectedRouteId != null) Color.Black else Color.Gray

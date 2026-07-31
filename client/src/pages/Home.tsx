@@ -2261,10 +2261,10 @@ export default function Home() {
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-2xl p-6 max-h-[85vh] overflow-y-auto"
+              className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-6 p-6 pb-0 flex-shrink-0">
                 <div>
                   <h2 className="text-xl font-display uppercase tracking-wider">
                     {preRunMode === "mapmyrun" ? "Map My Run Setup" : "Run Setup"}
@@ -2282,7 +2282,8 @@ export default function Home() {
                 </Button>
               </div>
 
-              <div className="space-y-4">
+              <div className="flex-1 overflow-y-auto px-6 min-h-0">
+              <div className="space-y-4 pt-6 pb-6">
                 {/* Exercise Type Toggle - Compact inline */}
                 <div className="flex items-center justify-between px-1" data-testid="section-exercise-type">
                   <span className="text-sm text-muted-foreground" id="exercise-type-label">Activity</span>
@@ -2479,8 +2480,9 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+              </div>
 
-              <div className="mt-6 space-y-3">
+              <div className="mt-6 space-y-3 p-6 border-t border-white/10 flex-shrink-0">
                 <Button
                   className="w-full h-12 font-display uppercase tracking-wider bg-primary text-background"
                   onClick={handleConfirmPreRun}

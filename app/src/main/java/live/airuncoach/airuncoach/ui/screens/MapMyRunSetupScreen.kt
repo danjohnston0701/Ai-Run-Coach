@@ -10,7 +10,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -187,9 +186,10 @@ fun MapMyRunSetupScreen(
         }
     }
 
-    // Header copy by mode
-    val title = if (mode == "route") "MAP MY RUN SETUP" else "CONFIGURE YOUR RUN"
-    val subtitle = if (mode == "route") "Configure your route preferences" else "Set your run details"
+    // Header copy by mode and activity type
+    val activityTypeLabel = if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
+    val title = if (mode == "route") "MAP MY $activityTypeLabel SETUP" else "CONFIGURE YOUR $activityTypeLabel"
+    val subtitle = if (mode == "route") "Configure your route preferences" else "Set your ${activityTypeLabel.lowercase()} details"
 
     // Button enablement
     val gpsReady = currentLocation != null && !isGettingLocation
@@ -201,10 +201,13 @@ fun MapMyRunSetupScreen(
     val secondsInt = targetSeconds.toIntOrNull() ?: 0
     val isKeyboardVisible = WindowInsets.isImeVisible
     val density = LocalDensity.current
+    // 140.dp covers the fixed PREPARE RUN button bar (~56dp button + 2×Spacing.lg padding + text)
+    // so the Social / Group Run section can always be scrolled fully above it.
+    val ctaBarHeight = 140.dp
     val bottomContentPadding = if (isKeyboardVisible) {
-        with(density) { WindowInsets.ime.getBottom(this).toDp() }
+        with(density) { WindowInsets.ime.getBottom(this).toDp() } + ctaBarHeight
     } else {
-        Spacing.lg
+        ctaBarHeight
     }
 
     Box(
@@ -331,7 +334,7 @@ fun MapMyRunSetupScreen(
 
  */
 
-            item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
+            // contentPadding handles bottom clearance above the fixed CTA bar
         }
 
         // Bottom CTA — single, clean action. Removes “Prepare → Start” gating.
@@ -1213,86 +1216,79 @@ private fun GroupRunParticipantSection(
                 modifier = Modifier.padding(vertical = Spacing.md)
             )
         } else {
-            // Scrollable friends list with checkboxes (similar to CreateGroupRunScreen)
-            Box(
+            // Friends list with checkboxes — uses Column (not LazyColumn) so the outer
+            // LazyColumn can scroll through all items without a nested-scroll conflict.
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 300.dp)
                     .background(Colors.backgroundTertiary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(friends.size) { index ->
-                        val friend = friends[index]
-                        val isSelected = friend.id in participants
-                        
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onParticipantsChanged(
-                                        if (isSelected) {
-                                            participants.filter { it != friend.id }
-                                        } else {
-                                            participants + friend.id
-                                        }
-                                    )
-                                }
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            // Checkbox
-                            Checkbox(
-                                checked = isSelected,
-                                onCheckedChange = { checked ->
-                                    onParticipantsChanged(
-                                        if (checked) {
-                                            participants + friend.id
-                                        } else {
-                                            participants.filter { it != friend.id }
-                                        }
-                                    )
-                                },
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = Colors.primary,
-                                    uncheckedColor = Colors.primary.copy(alpha = 0.5f)
-                                )
-                            )
-
-                            // Avatar placeholder
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Colors.primary.copy(alpha = 0.2f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    friend.name.firstOrNull()?.uppercaseChar().toString(),
-                                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                                    color = Colors.primary
+                friends.forEach { friend ->
+                    val isSelected = friend.id in participants
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onParticipantsChanged(
+                                    if (isSelected) {
+                                        participants.filter { it != friend.id }
+                                    } else {
+                                        participants + friend.id
+                                    }
                                 )
                             }
-
-                            // Friend name and fitness level
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    friend.name,
-                                    style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
-                                    color = Colors.textPrimary
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Checkbox
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { checked ->
+                                onParticipantsChanged(
+                                    if (checked) {
+                                        participants + friend.id
+                                    } else {
+                                        participants.filter { it != friend.id }
+                                    }
                                 )
-                                friend.fitnessLevel?.let { level ->
-                                    Text(
-                                        level,
-                                        style = AppTextStyles.small,
-                                        color = Colors.textMuted
-                                    )
-                                }
+                            },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = Colors.primary,
+                                uncheckedColor = Colors.primary.copy(alpha = 0.5f)
+                            )
+                        )
+
+                        // Avatar placeholder
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Colors.primary.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                friend.name.firstOrNull()?.uppercaseChar().toString(),
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                                color = Colors.primary
+                            )
+                        }
+
+                        // Friend name and fitness level
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                friend.name,
+                                style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textPrimary
+                            )
+                            friend.fitnessLevel?.let { level ->
+                                Text(
+                                    level,
+                                    style = AppTextStyles.small,
+                                    color = Colors.textMuted
+                                )
                             }
                         }
                     }

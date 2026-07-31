@@ -46,7 +46,7 @@ fun GarminConnectScreen(
         "30" to "Last 30 days",
         "14" to "Last 14 days",
         "7" to "Last 7 days",
-        "0" to "No Run History"
+        "0" to "No Activity History"
     )
 
     Scaffold(

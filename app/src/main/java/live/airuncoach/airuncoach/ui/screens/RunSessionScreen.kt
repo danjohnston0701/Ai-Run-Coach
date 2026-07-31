@@ -142,6 +142,7 @@ fun RunSessionScreen(
     val wakeWordState by viewModel.wakeWordState.collectAsState()
     val liveSessionId by viewModel.liveSessionId.collectAsState()
     val liveObserverCount by viewModel.liveObserverCount.collectAsState()
+    val isPowerSaverWarningVisible by viewModel.isPowerSaverWarningVisible.collectAsState()
 
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
@@ -406,6 +407,40 @@ fun RunSessionScreen(
                             },
                             modifier = Modifier.padding(horizontal = Spacing.md).padding(bottom = Spacing.sm)
                         )
+                    }
+                }
+            }
+
+            item {
+                // ── Power Saver Warning Banner ──────────────────────────────────────────
+                // Shown when Android's power saver mode is on AND the app is not exempt from
+                // battery optimisation.  Power saver throttles GPS updates from 1 Hz → ~0.1 Hz
+                // which causes heavily under-reported pace and distance.
+                AnimatedVisibility(
+                    visible = isPowerSaverWarningVisible && runState.isRunning,
+                    enter = fadeIn(tween(400)) + expandVertically(tween(400)),
+                    exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Spacing.md)
+                            .padding(bottom = Spacing.sm),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFB45309) // amber-700
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "⚠️ Power saver on — GPS accuracy reduced. Disable for accurate tracking.",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
                     }
                 }
             }

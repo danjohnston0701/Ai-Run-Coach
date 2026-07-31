@@ -6,14 +6,17 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -77,6 +80,14 @@ class RunTrackingService : Service(), SensorEventListener {
     private var usingStepDetector = false  // Track which sensor is active
     private var wakeLock: PowerManager.WakeLock? = null
     
+    // ── Power Saver Mode Detection ──────────────────────────────────────────��──────
+    // When the phone's power saver/low power mode is enabled, Android throttles GPS
+    // updates and sensor reads, which directly impacts tracking accuracy.
+    // We track this state and adjust location request priority accordingly.
+    private var isPhonePowerSaverActive = false
+    private var powerSaverModeDetected = false  // Flag indicating power saver was active during this run
+    private var powerSaverStatusBroadcastReceiver: BroadcastReceiver? = null
+    
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // ── Garmin watch bridge (Scenario 2 — Phone + Watch) ──────────────────────
@@ -116,6 +127,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private var activeGoals: List<ActiveGoalInfo> = emptyList()  // Goals for AI coaching context
     private var lastPhase: CoachingPhase? = null
     private var last500mMilestone = 0
+    // For walk sessions: tracks the last 500m boundary at which a split coaching cue fired.
+    // Walk sessions get a coaching update every 500m (vs every 1km for runs) because walkers
+    // move slower and need more frequent check-ins to stay engaged and on pace.
+    private var lastWalk500mSplit = 0
     private val coachingHistory = mutableListOf<AiCoachingNote>() // Track what coaching has been given with timestamps
     private var preRunBriefingText: String? = null // Pre-run briefing text to record in coaching history
     private var isMuted = false // User can mute coach
@@ -767,6 +782,11 @@ class RunTrackingService : Service(), SensorEventListener {
         private val _firstGpsPoint = MutableStateFlow<Pair<Double, Double>?>(null)
         val firstGpsPoint: StateFlow<Pair<Double, Double>?> = _firstGpsPoint
 
+        // Power saver mode — observed by RunSessionViewModel to surface a warning banner in the UI.
+        // Updated from the instance-level broadcast receiver so the companion value stays in sync.
+        private val _isPowerSaverActive = MutableStateFlow(false)
+        val isPowerSaverActive: StateFlow<Boolean> = _isPowerSaverActive
+
         /**
          * Route intelligence context injected by [RunSessionViewModel] after a known route is matched.
          * Picked up by the Service when building PaceUpdate requests for km-split coaching.
@@ -828,6 +848,9 @@ class RunTrackingService : Service(), SensorEventListener {
         // Start periodic background sync work
         SyncWorker.schedulePeriodicSync(this)
         Log.d("RunTrackingService", "✅ Initialized offline sync queue and scheduled periodic sync")
+        
+        // Register broadcast receiver for power saver mode changes
+        registerPowerSaverModeReceiver()
         
         // Load user profile and run history for coach personalisation
         serviceScope.launch {
@@ -1036,6 +1059,118 @@ class RunTrackingService : Service(), SensorEventListener {
     // Whether there is an active coaching plan (either system) — used to suppress generic prompts
     private val isCoachingPlanActive: Boolean
         get() = dynamicCoachingPlan != null || sessionInstructions != null
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // AI RUN COACH — COACHING ENGINE DESIGN CONTRACT
+    //
+    // This engine creates COACHING OPPORTUNITIES, not coaching messages.
+    // OpenAI decides what to say based on: athlete context, workout context,
+    // live run context, and the purpose of the coaching opportunity.
+    //
+    // READ THIS BEFORE MAKING ANY CHANGE TO COACHING LOGIC.
+    // Every change should be validated against the regression checklist at the bottom.
+    //
+    // ──────────────────────────────────────────────────────────────────────────────────
+    // CONTINUOUS COACHING  (free runs, walks, and Tier 2 coaching plan sessions)
+    // ──────────────────────────────────────────────────────────────────────────────────
+    //
+    // GUARANTEED MILESTONES — non-negotiable, always fire:
+    //   ✓ Run briefing (pre-run summary with weather + target)
+    //   ✓ Run start motivation
+    //   ✓ 500m settling check-in (one-time, first 500m of any run)
+    //   ✓ Every 1km progress summary (runs) / every 500m summary (walks)
+    //   ✓ Final 500m — push to finish
+    //   ✓ Final 250m — last effort
+    //   ✓ Final 100m — sprint cue
+    //   ✓ Post-run analysis
+    //
+    // DYNAMIC COACHING OPPORTUNITIES — fire between milestones, priority-ordered:
+    //   ✓ Pace trends (speeding up / slowing down / consistent)
+    //   ✓ Heart rate trends (zone awareness, aerobic drift)
+    //   ✓ Cadence (personalised to height, pace, and age — not a generic target)
+    //   ✓ Form coaching (posture, arm swing, foot strike, stride)
+    //   ✓ Breathing rhythm and technique
+    //   ✓ Elevation awareness (hill strategy, descent recovery)
+    //   ✓ Environment (weather, temperature, wind)
+    //   ✓ Motivation and encouragement
+    //   ✓ Historical comparisons (faster/slower than previous similar runs)
+    //   ✓ Struggle point awareness (historically difficult km zones for this runner)
+    //   ✓ Similar runs (prior efforts at this distance/route/weather)
+    //   ✓ Coach memory (what has been said this session — avoid repetition)
+    //   ✓ Athlete profile (fitness level, age, BMI — calibrates directness)
+    //   ✓ Personal strengths (what this runner does well)
+    //   ✓ Personal weaknesses (what this runner needs to work on)
+    //   ✓ Recovery quality and fatigue signals
+    //   ✓ Positive reinforcement (negative splitting, consistency streaks)
+    //   ✓ Target ETA (projected finish vs goal time)
+    //
+    // DYNAMIC COACHING MUST:
+    //   • Avoid repeating the same topic consecutively — rotate across categories
+    //   • Respect cooldowns — no coaching within 15 seconds or 150m of the last cue
+    //   • Prefer new insights over repeated advice that hasn't been acted on
+    //   • Celebrate improvement when advice is followed (athlete responds to last cue)
+    //   • Stop repeating ineffective advice — shift topic or let it cool down
+    //   • Never allow one category to dominate a session (cadence every 2 min = bad)
+    //
+    // PRIORITY ORDER within each GPS tick (only ONE coaching event fires per tick):
+    //   Phase change → 500m milestone / walk-500m split → HR timer →
+    //   cadence → elite coaching (milestone → ETA → pace trend → reinforcement
+    //   → technique/form → elevation)
+    //
+    // ──────────────────────────────────────────────────────────────────────────────────
+    // INTERVAL COACHING  (Tier 1 coaching plan sessions: VO₂, track, hills, fartlek)
+    // ───────���──────────────────────────────────────────────────────────────────────────
+    //
+    // AI SESSION PLANNER CREATES:
+    //   ✓ Warm-up briefing
+    //   ✓ Rep starts (work interval begin)
+    //   ✓ Mid-rep check-ins
+    //   ✓ Recovery phase start
+    //   ✓ Recovery complete / next rep alert
+    //   ✓ Phase transitions (warmup → intervals → cooldown)
+    //   ✓ Final rep motivation
+    //   ✓ Session complete
+    //
+    // DYNAMIC COACHING REMAINS AVAILABLE when relevant (cadence, elevation, breathing,
+    // recovery quality, HR zone, running form). These must not conflict with the rep
+    // sequence — they supplement it, they don't replace it.
+    //
+    // km SPLITS are SUPPRESSED — irrelevant and contradictory mid-rep.
+    // Workout philosophy informs coaching. It never dictates wording.
+    //
+    // ──────────────────────────────────────────────────────────────────────────────────
+    // NON-NEGOTIABLES — breaking any of these is a regression, not a refactor
+    // ──────────────────────────────────────────────────────────────────────────────────
+    //   ✗ Never remove guaranteed milestones
+    //   ✗ Never remove coaching diversity / topic rotation
+    //   ✗ Never allow one coaching category to monopolise a session
+    //   ✗ Never remove athlete context from OpenAI prompts
+    //   ✗ Never remove historical run context from OpenAI prompts
+    //   ✗ Never remove personalised coaching (cadence targets, HR zones, fitness level)
+    //   ✗ OpenAI must always receive enough context to decide the most valuable message
+    //
+    // ────────────────���─────────────────────────────────────────────────────────────────
+    // REGRESSION CHECKLIST — verify ALL of these after any coaching engine change
+    // ──────────────────────────────────────────────────────────────────────────────────
+    //   □ Free run produces a 500m settling check-in
+    //   □ Free run produces km-by-km split coaching
+    //   □ Walk session produces 500m split coaching (not 1km)
+    //   □ Cadence coaching cannot monopolise a run (topic diversity enforced)
+    //   □ Dynamic topic rotation occurs (not the same category back-to-back)
+    //   □ Cooldowns prevent coaching within 15s / 150m of the previous cue
+    //   □ Struggle point insights still reach OpenAI when available
+    //   □ Historical run comparisons still reach OpenAI when available
+    //   □ Athlete profile (age, BMI, fitness level) still influences coaching tone
+    //   □ Workout philosophy only applies to coaching plan sessions
+    //   □ Interval sessions do NOT receive km split coaching
+    //   □ Continuous plan sessions (tempo, long_run) DO receive km split coaching
+    //   □ Final 500m / 250m / 100m cues fire for ALL session types
+    //   □ Sensor confidence gates (HR, GPS, cadence) still suppress low-confidence cues
+    //   □ TypeScript: no server-side function referenced without being defined (compile check)
+    //   □ Cadence template routing: low cadence → overstriding cues; high cadence → spinning/understriding;
+    //     on-target → celebrate + pivot. No `if (true)` or hardcoded branch overrides.
+    //
+    // ══════════════════════════════════════════════════════════════════════════════════
 
     // ── Coaching plan session tiers ──────────────────────────────────────────────────────────
     //
@@ -1295,6 +1430,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastKmSplit = 0
         pendingKmSplitCoaching = null  // Clear any deferred split from previous run
         last500mMilestone = 0  // Reset for new run
+        lastWalk500mSplit = 0  // Reset for new walk session
         hasGarminData = false       // Will be set true once first watch biometric frame arrives
         garminDeviceName = null     // Re-captured on first frame new run
         lastPhase = null        // Reset for new run - allow first phase change to trigger
@@ -2676,9 +2812,33 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
         try {
-            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_UPDATE_INTERVAL).apply { setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL); setWaitForAccurateLocation(false) }.build()
+            // Determine if power saver mode is active and log it
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val isPowerSaveMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                powerManager.isPowerSaveMode
+            } else {
+                false
+            }
+            
+            // Sync both instance flag and companion StateFlow so the UI is immediately aware
+            isPhonePowerSaverActive = isPowerSaveMode
+            _isPowerSaverActive.value = isPowerSaveMode
+            if (isPowerSaveMode) {
+                Log.w("RunTrackingService", "⚠️ POWER SAVER MODE DETECTED at run start - GPS tracking may be throttled")
+                powerSaverModeDetected = true
+            } else {
+                Log.d("RunTrackingService", "Power saver mode: NOT active")
+            }
+            
+            // Always use PRIORITY_HIGH_ACCURACY to override power saver constraints
+            // setWaitForAccurateLocation(false) ensures we don't wait indefinitely for GPS lock
+            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_UPDATE_INTERVAL).apply { 
+                setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL)
+                setWaitForAccurateLocation(false)
+                // Note: numUpdates(Integer.MAX_VALUE) not used as we control lifecycle via service start/stop
+            }.build()
             fusedLocationClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
-            Log.d("RunTrackingService", "Location updates requested successfully")
+            Log.d("RunTrackingService", "Location updates requested successfully (Power saver active: $isPowerSaveMode)")
         } catch (e: Exception) {
             Log.e("RunTrackingService", "Failed to request location updates", e)
             stopSelf()
@@ -3019,6 +3179,41 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun checkForKmSplit() {
         val currentKm = (totalDistance / 1000).toInt()
 
+        // ── Walk session: 500m splits ───────────────────────────────────────────────────────────
+        // Walkers move at ~8–15 min/km — a 1km split interval means 8–15 minutes of silence.
+        // Every 500m gives walkers regular coaching check-ins to keep them engaged and on target.
+        // This fires for all walk sessions (free walks and continuous coaching plan walks).
+        // Suppressed in the final 500m — final stretch cues handle the finish.
+        // The initial 500m is already handled by check500mMilestones() as a one-time event,
+        // so walk 500m splits start from the 1000m mark (same as km 1 split, then 1500m, 2000m, etc.)
+        if (currentActivityType == "walk" && !isCoachingPlanActive) {
+            val current500mBlock = (totalDistance / 500).toInt()
+            // Skip the very first block (0-500m) — handled by check500mMilestones() as the initial check-in
+            // Skip if in the final stretch — final 500m coaching takes over
+            if (current500mBlock > lastWalk500mSplit && current500mBlock >= 2 && !isInFinalStretch()) {
+                lastWalk500mSplit = current500mBlock
+                val hasReachedTarget = targetDistance != null && totalDistance >= (targetDistance!! * 0.99)
+                if (!hasReachedTarget && !hasCoachingFiredThisTick && canFireCoaching()) {
+                    Log.d("RunTrackingService", "Walk 500m split at ${String.format("%.1f", totalDistance / 1000)}km — triggering coaching")
+                    hasCoachingFiredThisTick = true
+                    recordCoachingFired()
+                    // Build a synthetic split using distance since last 500m boundary
+                    val now = System.currentTimeMillis()
+                    val splitTime = (now - lastSplitTime) - splitPausedMs
+                    val distSinceLastSplit = 500.0 // Always 500m blocks for walk sessions
+                    val splitSpeedKmh = if (splitTime > 0) (distSinceLastSplit / (splitTime / 1000.0) * 3.6).toFloat() else 0f
+                    val walkSplit = KmSplit(
+                        km = current500mBlock, // Use 500m block count as the "km" index for the API
+                        time = splitTime,
+                        pace = calculatePace(splitSpeedKmh)
+                    )
+                    lastSplitTime = now
+                    splitPausedMs = 0
+                    triggerKmSplitCoaching(walkSplit)
+                }
+            }
+        }
+
         // ── Retry any pending split from a previous tick where cooldown blocked it ──
         val pending = pendingKmSplitCoaching
         if (pending != null && !hasCoachingFiredThisTick && canFireCoaching() && !isInFinalStretch()) {
@@ -3046,14 +3241,22 @@ class RunTrackingService : Service(), SensorEventListener {
             splitPausedMs = 0  // Reset pause accumulator for next split
             Log.d("RunTrackingService", "Reached ${currentKm}km split")
 
-            // All coaching plan sessions: suppress km splits entirely.
-            // The session coaching plan owns all pacing feedback — its periodic check-ins,
-            // phase transitions, and milestone triggers (distance_pct > 50/75/90) already give
-            // per-distance context with full knowledge of the session goal and what was just said.
-            // A generic km split firing mid-plan is context-ignorant and potentially contradictory
-            // (e.g. "brilliant pace!" immediately after a plan trigger said "ease off, HR is high").
-            if (isCoachingPlanActive) {
-                Log.d("RunTrackingService", "Skipping km split coaching for coached session at ${currentKm}km")
+            // Coaching plan session gate for km splits:
+            //
+            // ── Interval sessions (Tier 1) ───────────────────────────────────────────
+            // All km split coaching is suppressed. The AI-generated session trigger plan owns
+            // every cue — rep starts, rep ends, recovery transitions, and HR/pace alerts.
+            // A km split firing mid-rep is context-ignorant and directly contradicts what the
+            // plan may have just said ("ease off — HR is high" vs "great pace, keep it up!").
+            //
+            // ── Continuous coaching plan sessions (Tier 2: tempo, long_run, threshold, race_pace) ──
+            // Km splits ARE allowed because sustained continuous effort benefits from per-km
+            // progress feedback. The AI prompt receives workoutType so splits are framed around
+            // the session objective (e.g. "5 seconds/km ahead of your tempo target — ease slightly
+            // to stay in the prescribed effort zone") rather than the long-term race goal.
+            // The AI-generated triggers still fire alongside splits for HR, form, and motivation.
+            if (isCoachingPlanActive && isIntervalTypeSession) {
+                Log.d("RunTrackingService", "Skipping km split coaching for interval coached session at ${currentKm}km")
                 return
             }
 
@@ -3183,11 +3386,16 @@ class RunTrackingService : Service(), SensorEventListener {
         
         if (!inFinalStretch) {
             // ── GENERIC PROMPTS GATE ──
-            // During a coached session (dynamic plan OR legacy session instructions), suppress
-            // generic free-run prompts (phase changes, 500m check-ins, HR timer, elite motivation).
-            // Cadence coaching is preserved — technique matters in ALL sessions.
-            if (!isCoachingPlanActive) {
-                // Free run — all generic prompts active
+            // Interval sessions (Tier 1): suppress all generic free-run prompts. The AI session
+            // trigger plan owns all cueing — phase changes and HR timer would conflict with
+            // structured rep/recovery coaching.
+            //
+            // Continuous coaching plan sessions (Tier 2) + Free runs: all generic prompts active.
+            // 500m check-in, phase changes, and HR timer add value on sustained effort sessions.
+            // Continuous plan sessions use reactive hr_zone triggers from the plan for HR-critical
+            // cues, but the HR timer provides supplemental aerobic zone awareness.
+            val allowGenericPrompts = !isCoachingPlanActive || !isIntervalTypeSession
+            if (allowGenericPrompts) {
                 checkPhaseChange(phase)
 
                 if (!hasCoachingFiredThisTick) {
@@ -3200,7 +3408,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     }
                 }
 
-                // HR coaching timer — free run only (coached sessions use reactive hr_zone triggers)
+                // HR coaching timer — free runs and continuous plan sessions
+                // (Interval sessions use reactive hr_zone triggers from the plan instead)
                 if (!hasCoachingFiredThisTick && canFireCoaching()) {
                     maybeTriggerHeartRateCoaching()
                 }
@@ -3214,10 +3423,18 @@ class RunTrackingService : Service(), SensorEventListener {
         }
 
         // Standard coaching triggers (elite coaching, final stretch motivation).
-        // FULLY SUPPRESSED during planned workout sessions — the dynamic coaching plan
-        // owns ALL cueing. Final 250m, pace trend, technique form triggers are disruptive
-        // and clash with the session's own trigger design.
-        if (!hasCoachingFiredThisTick && canFireCoaching() && !isCoachingPlanActive) {
+        //
+        // Interval sessions (Tier 1): FULLY SUPPRESSED — the AI-generated session trigger plan
+        // owns all cueing. Pace trend, technique, and ETA triggers are irrelevant mid-rep and
+        // clash with the session's structured rep sequence.
+        //
+        // Continuous coaching plan sessions (Tier 2: tempo, long_run, threshold, race_pace):
+        // Elite coaching fires alongside the session plan. Pace trend, positive reinforcement,
+        // technique, elevation, and final stretch cues all add value on continuous efforts and
+        // are non-conflicting with the session's milestone triggers.
+        //
+        // Free runs: Fully active — all elite coaching categories fire.
+        if (!hasCoachingFiredThisTick && canFireCoaching() && (!isCoachingPlanActive || !isIntervalTypeSession)) {
             maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
         }
         
@@ -3845,6 +4062,8 @@ class RunTrackingService : Service(), SensorEventListener {
             maxPace                  = watchMaxPace.takeIf { it > 0.0 },
             avgGpsAccuracy           = if (watchGpsAccuracyCount > 0) watchGpsAccuracySum / watchGpsAccuracyCount else null,
             worstGpsAccuracy         = watchGpsAccuracyWorst.takeIf { it > 0f },
+            // Power saver mode telemetry — if phone's power saver was active during this run
+            powerSaverModeDetected   = powerSaverModeDetected,
         )
 
         // Retry up to 3 times with exponential backoff for server errors
@@ -4124,10 +4343,90 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun releaseWakeLock() { wakeLock?.takeIf{it.isHeld}?.release(); wakeLock=null }
 
+    // ────────────────────────────────────────────────────────────────────────────────
+    // POWER SAVER MODE DETECTION & HANDLING
+    // ────────────────────────────────────────────────────────────────────────────────
+    /**
+     * Register a broadcast receiver to monitor power saver mode changes during a run.
+     * Power saver mode throttles GPS updates and sensors, which directly impacts tracking
+     * accuracy. We detect this state, log it for telemetry, and ensure location requests
+     * remain HIGH_ACCURACY to override any system throttling.
+     */
+    private fun registerPowerSaverModeReceiver() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                powerSaverStatusBroadcastReceiver = object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        if (intent?.action == PowerManager.ACTION_POWER_SAVE_MODE_CHANGED) {
+                            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                            isPhonePowerSaverActive = powerManager.isPowerSaveMode
+                            // Push to companion StateFlow so the UI can observe it live
+                            _isPowerSaverActive.value = isPhonePowerSaverActive
+                            // Once power saver fires during this run it stays flagged for telemetry
+                            // regardless of whether the user later re-disables it.
+                            if (isPhonePowerSaverActive) powerSaverModeDetected = true
+                            
+                            val mode = if (isPhonePowerSaverActive) "ENABLED" else "DISABLED"
+                            Log.w("RunTrackingService", "⚠️ POWER SAVER MODE $mode during run - GPS tracking may be throttled")
+                            
+                            // Re-request location updates immediately so the FusedLocationProvider
+                            // re-evaluates the PRIORITY_HIGH_ACCURACY request under the new battery
+                            // policy.  Without this the existing subscription keeps whatever
+                            // interval the OS last negotiated before power saver was toggled.
+                            if (isTracking) {
+                                Log.d("RunTrackingService", "Power saver changed mid-run — re-requesting location updates")
+                                try {
+                                    fusedLocationClient.removeLocationUpdates(locationCallback)
+                                } catch (e: Exception) {
+                                    Log.w("RunTrackingService", "removeLocationUpdates before re-request failed (non-fatal): ${e.message}")
+                                }
+                                requestLocationUpdates()
+                            }
+                        }
+                    }
+                }
+                
+                val filter = IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+                // Context.RECEIVER_NOT_EXPORTED is an API-33 constant.  On API 31–32 Android
+                // requires the exported flag to be specified but doesn't yet have the named
+                // constant, so we pass the raw value (4) directly.  On API < 31 no flag is needed.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(powerSaverStatusBroadcastReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // API 31–32: flag required but constant not available — pass raw int value 4
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    registerReceiver(powerSaverStatusBroadcastReceiver, filter, 0x4 /* RECEIVER_NOT_EXPORTED */)
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    registerReceiver(powerSaverStatusBroadcastReceiver, filter)
+                }
+                Log.d("RunTrackingService", "Power saver mode broadcast receiver registered")
+            } catch (e: Exception) {
+                Log.e("RunTrackingService", "Failed to register power saver mode receiver (non-fatal): ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Unregister the power saver mode broadcast receiver.
+     * Called during service shutdown to prevent memory leaks.
+     */
+    private fun unregisterPowerSaverModeReceiver() {
+        try {
+            powerSaverStatusBroadcastReceiver?.let {
+                unregisterReceiver(it)
+                Log.d("RunTrackingService", "Power saver mode broadcast receiver unregistered")
+            }
+        } catch (e: Exception) {
+            Log.e("RunTrackingService", "Failed to unregister power saver receiver (non-fatal): ${e.message}")
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         releaseWakeLock()
         stopTimer()  // Stop the periodic timer
+        unregisterPowerSaverModeReceiver()  // Clean up power saver broadcast receiver
         fusedLocationClient.removeLocationUpdates(locationCallback)
         sensorManager.unregisterListener(this)
         textToSpeechHelper.destroy() // Clean up Android TTS

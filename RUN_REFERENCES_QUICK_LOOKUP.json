@@ -1,0 +1,367 @@
+{
+  "metadata": {
+    "title": "AI Run Coach - Run References Quick Lookup",
+    "description": "Quick reference for all files, screens, and strings related to 'Run'",
+    "last_updated": "2026-07-29"
+  },
+  "screens": {
+    "RunSessionScreen": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunSessionScreen.kt",
+      "description": "Main active run screen with route/elite modes",
+      "key_features": [
+        "Real-time coaching",
+        "GPS tracking",
+        "Route recognition",
+        "Pause/stop controls"
+      ],
+      "view_model": "RunSessionViewModel"
+    },
+    "RunSummaryScreen": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/screens/RunSummaryScreen.kt",
+      "description": "Post-run analysis and results",
+      "key_features": [
+        "Summary metrics",
+        "Graphs and charts",
+        "Social sharing",
+        "AI insights"
+      ],
+      "view_model": "RunSummaryViewModel"
+    },
+    "MapMyRunSetupScreen": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/screens/MapMyRunSetupScreen.kt",
+      "description": "Pre-run configuration (route or no-route)",
+      "header_texts": [
+        "MAP MY RUN SETUP",
+        "CONFIGURE YOUR RUN"
+      ],
+      "activity_types": ["RUN", "WALK"],
+      "key_features": [
+        "Distance/time setup",
+        "Activity type toggle",
+        "AI coach toggle",
+        "Group run setup"
+      ]
+    },
+    "RouteSelectionScreen": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/screens/RouteSelectionScreen.kt",
+      "description": "Select generated routes by difficulty",
+      "header_texts": ["SELECT YOUR ROUTE"],
+      "action_buttons": ["START RUN", "Prepare Run on Watch"]
+    },
+    "PreviousRunsScreen": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/screens/PreviousRunsScreen.kt",
+      "description": "Run history/archive view",
+      "features": [
+        "Filter by distance/date",
+        "Personal best indicators",
+        "Garmin import",
+        "Delete runs"
+      ],
+      "view_model": "PreviousRunsViewModel"
+    },
+    "ObserverRunSessionScreen": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/screens/ObserverRunSessionScreen.kt",
+      "description": "Live tracking view for observers",
+      "view_model": "ObserverRunSessionViewModel"
+    },
+    "CoachSettingsScreen": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/screens/CoachSettingsScreen.kt",
+      "description": "AI coach personalization",
+      "settings": [
+        "Coach name",
+        "Voice gender",
+        "Accent",
+        "Coaching tone"
+      ]
+    }
+  },
+  "models": {
+    "RunSession": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/domain/model/RunSession.kt",
+      "description": "Primary run data structure",
+      "critical_fields": [
+        "id",
+        "duration",
+        "distance",
+        "pace",
+        "cadence",
+        "heartRate",
+        "sessionType: String = 'run' | 'walk'",
+        "workoutType",
+        "groupRunId",
+        "externalSource: 'garmin' | 'strava' | null"
+      ]
+    },
+    "RunSetupConfig": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/domain/model/RunSetupConfig.kt",
+      "description": "Pre-run configuration model",
+      "critical_fields": [
+        "activityType: PhysicalActivityType",
+        "targetDistance",
+        "targetTime",
+        "aiCoachEnabled",
+        "isGroupRun",
+        "isWatchMode",
+        "isIntervalWorkout"
+      ]
+    },
+    "User": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/domain/model/User.kt",
+      "description": "User profile with preferences",
+      "critical_fields": [
+        "defaultSessionType: String = 'RUN'",
+        "coachPaceEnabled",
+        "coachNavigationEnabled",
+        "coachElevationEnabled",
+        "coachHeartRateEnabled"
+      ]
+    },
+    "RunState": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/viewmodel/RunSessionViewModel.kt:77",
+      "description": "Real-time run state during active run",
+      "critical_fields": [
+        "time",
+        "distance",
+        "pace",
+        "cadence",
+        "heartRate",
+        "isRunning",
+        "isPaused",
+        "latestCoachMessage",
+        "briefingResponse",
+        "intervalPhase"
+      ]
+    },
+    "IntervalPhase": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/viewmodel/RunSessionViewModel.kt:66",
+      "description": "Interval workout phase tracking",
+      "fields": [
+        "currentInterval",
+        "isWorkPhase",
+        "distanceInCurrentPhase",
+        "timeInCurrentPhase",
+        "targetPace",
+        "targetHeartRateMin/Max"
+      ]
+    },
+    "PhysicalActivityType": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/domain/model/RunSetupConfig.kt:82",
+      "description": "Activity type enum",
+      "values": ["RUN", "WALK"]
+    }
+  },
+  "view_models": {
+    "RunSessionViewModel": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/viewmodel/RunSessionViewModel.kt",
+      "responsibilities": [
+        "Run state management",
+        "GPS tracking coordination",
+        "Coaching generation",
+        "Route recognition",
+        "Watch companion integration"
+      ],
+      "key_methods": [
+        "startRun()",
+        "pauseRun()",
+        "resumeRun()",
+        "stopRun()",
+        "prepareRunOnWatch(...)"
+      ]
+    },
+    "RunSummaryViewModel": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/viewmodel/RunSummaryViewModel.kt",
+      "responsibilities": [
+        "Post-run analysis",
+        "Graph data preparation",
+        "Social sharing",
+        "Run metadata management"
+      ]
+    },
+    "PreviousRunsViewModel": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/viewmodel/PreviousRunsViewModel.kt",
+      "responsibilities": [
+        "Run history fetching",
+        "Filtering",
+        "Weather impact calculation",
+        "Personal best detection"
+      ]
+    }
+  },
+  "services": {
+    "RunTrackingService": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/service/RunTrackingService.kt",
+      "description": "Foreground service for GPS tracking",
+      "responsibilities": [
+        "GPS location collection",
+        "Distance calculation",
+        "Pace calculation",
+        "Cadence detection",
+        "HealthConnect integration",
+        "Offline sync"
+      ]
+    },
+    "GarminWatchManager": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/service/GarminWatchManager.kt",
+      "description": "Watch companion communication",
+      "responsibilities": [
+        "Companion app coordination",
+        "Watch mode setup",
+        "Activity sync"
+      ]
+    }
+  },
+  "components": {
+    "PrepareRunOnWatchButton": {
+      "path": "app/src/main/java/live/airuncoach/airuncoach/ui/components/PrepareRunOnWatchButton.kt",
+      "description": "Reusable button for watch preparation",
+      "states": ["IDLE", "SENDING", "SENT"],
+      "usage_locations": [
+        "RouteSelectionScreen",
+        "MapMyRunSetupScreen"
+      ]
+    }
+  },
+  "ui_strings": {
+    "screen_headers": {
+      "MAP_MY_RUN_SETUP": "MAP MY RUN SETUP",
+      "CONFIGURE_YOUR_RUN": "CONFIGURE YOUR RUN",
+      "SELECT_YOUR_ROUTE": "SELECT YOUR ROUTE"
+    },
+    "buttons": {
+      "START_RUN": "START RUN",
+      "PREPARE_RUN": "Prepare Run",
+      "PREPARE_WALK": "Prepare Walk",
+      "PREPARE_RUN_ON_WATCH": "Prepare Run on Watch",
+      "START_RUN_CAPS": "START RUN"
+    },
+    "activity_types": {
+      "RUN": "RUN",
+      "WALK": "WALK"
+    },
+    "history": {
+      "RUN_HISTORY": "Run History",
+      "IMPORT_RUN_HISTORY": "Import Run History",
+      "NO_RUN_HISTORY": "No Run History"
+    },
+    "setup_help": {
+      "GPS_LOCKED": "GPS locked! Tap 'Start Run' when you're ready.",
+      "CONFIGURE_ROUTE": "Configure your route preferences",
+      "SET_RUN_DETAILS": "Set your run details"
+    }
+  },
+  "enums": {
+    "PhysicalActivityType": {
+      "values": ["RUN", "WALK"]
+    },
+    "ActivityMode": {
+      "location": "MapMyRunSetupScreen.kt:747",
+      "values": ["RUN", "WALK"]
+    },
+    "WatchSendState": {
+      "values": ["IDLE", "SENDING", "SENT"]
+    }
+  },
+  "navigation_flows": {
+    "basic_run": [
+      "Dashboard → MapMyRunSetupScreen (mode='no_route')",
+      "MapMyRunSetupScreen → RunSessionScreen",
+      "RunSessionScreen → RunSummaryScreen"
+    ],
+    "route_run": [
+      "Dashboard → MapMyRunSetupScreen (mode='route')",
+      "MapMyRunSetupScreen → RouteSelectionScreen",
+      "RouteSelectionScreen → RunSessionScreen",
+      "RunSessionScreen → RunSummaryScreen"
+    ],
+    "watch_run": [
+      "Dashboard → MapMyRunSetupScreen",
+      "MapMyRunSetupScreen → 'Prepare Run on Watch'",
+      "Watch executes run",
+      "RunSessionScreen waits for start signal",
+      "Run completes → RunSummaryScreen"
+    ],
+    "history": [
+      "Dashboard → PreviousRunsScreen",
+      "PreviousRunsScreen (tap run) → RunSummaryScreen"
+    ]
+  },
+  "configuration_fields": {
+    "user_default_session_type": {
+      "field": "User.defaultSessionType",
+      "default": "RUN",
+      "description": "User's preferred activity type"
+    },
+    "run_setup_activity_type": {
+      "field": "RunSetupConfig.activityType",
+      "type": "PhysicalActivityType",
+      "description": "Selected activity for this run"
+    },
+    "run_session_type": {
+      "field": "RunSession.sessionType",
+      "type": "String",
+      "values": ["run", "walk"],
+      "description": "Completed run's activity type"
+    }
+  },
+  "external_integrations": {
+    "Garmin": {
+      "features": [
+        "Import historical runs",
+        "Sync with watches",
+        "Enriched data (HR, elevation)"
+      ]
+    },
+    "Strava": {
+      "features": [
+        "Publish runs",
+        "Full GPS export",
+        "Social sharing"
+      ]
+    },
+    "HealthConnect": {
+      "features": [
+        "Export metrics",
+        "System integration"
+      ]
+    }
+  },
+  "search_patterns": {
+    "screens": [
+      "RunSessionScreen",
+      "RunSummaryScreen",
+      "MapMyRunSetupScreen",
+      "RouteSelectionScreen",
+      "PreviousRunsScreen"
+    ],
+    "models": [
+      "RunSession",
+      "RunSetupConfig",
+      "RunState",
+      "IntervalPhase"
+    ],
+    "activity_types": [
+      "PhysicalActivityType.RUN",
+      "PhysicalActivityType.WALK",
+      "ActivityMode.RUN",
+      "ActivityMode.WALK"
+    ],
+    "text_patterns": [
+      "CONFIGURE YOUR RUN",
+      "MAP MY RUN",
+      "SELECT YOUR ROUTE",
+      "START RUN",
+      "Prepare Run",
+      "Run History",
+      "sessionType",
+      "defaultSessionType",
+      "activityType"
+    ]
+  },
+  "related_documentation": {
+    "iOS_AI_COACHING_SESSION_GENERATION_BRIEF": "RunSessionScreen behavior and coaching",
+    "GROUP_RUN_ORGANIZER_FEATURE": "Group run screens and integration",
+    "POST_RUN_ANALYSIS_ROADMAP": "RunSummaryScreen features",
+    "ANDROID_3_CIRCLE_METRICS_SUMMARY": "Performance dashboard",
+    "GPS_LOCATION_TRACKING_ANALYSIS": "Run tracking architecture"
+  }
+}

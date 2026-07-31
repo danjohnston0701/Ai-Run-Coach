@@ -906,7 +906,7 @@ fun PreviousRunDashboard(lastRun: RunSession, onClick: () -> Unit) {
     ) {
         Column(modifier = Modifier.padding(Spacing.lg)) {
             Text(
-                text = "PREVIOUS RUN",
+                text = "PREVIOUS SESSION",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                 color = Colors.textSecondary
             )
@@ -973,7 +973,7 @@ fun PreviousRunDashboard(lastRun: RunSession, onClick: () -> Unit) {
             Spacer(modifier = Modifier.height(Spacing.md))
             
             Text(
-                text = "See previous runs →",
+                text = "See all sessions →",
                 style = AppTextStyles.small,
                 color = Colors.primary
             )
@@ -1076,7 +1076,7 @@ fun PreviousRunsCard(
                     Spacer(modifier = Modifier.width(Spacing.sm))
                     
                     Text(
-                        text = "MOST RECENT RUN",
+                        text = "MOST RECENT SESSION",
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
@@ -1092,7 +1092,7 @@ fun PreviousRunsCard(
                 Spacer(modifier = Modifier.height(Spacing.md))
 
                 Text(
-                    text = "Click to see all previous runs",
+                    text = "Click to see all sessions",
                     style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
                     color = Colors.primary,
                     modifier = Modifier
@@ -1103,7 +1103,7 @@ fun PreviousRunsCard(
                 Spacer(modifier = Modifier.height(Spacing.md))
                 
                 Text(
-                    text = "No previous runs yet. Click to see all previous runs.",
+                    text = "No previous sessions yet. Click to see all sessions.",
                     style = AppTextStyles.body,
                     color = Colors.textMuted,
                     modifier = Modifier

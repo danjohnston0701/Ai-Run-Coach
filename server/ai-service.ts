@@ -868,7 +868,7 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
   // Suppress for training sessions — targetPace is the race goal, not the session's prescribed pace.
   const targetPaceParam = isTrainingSession ? undefined : (params as any).targetPace as string | undefined;
   const spokenTargetPace = formatPaceForTTS(targetPaceParam);
-  let splitTargetContext = '';
+  let splitTargetVerdict = '';
   if (targetPaceParam && splitPace) {
     const tParts = targetPaceParam.split(':').map(Number);
     const sParts = splitPace.split(':').map(Number);
@@ -876,12 +876,16 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
       const targetSec = tParts[0] * 60 + tParts[1];
       const splitSec = sParts[0] * 60 + sParts[1];
       const diffSec = splitSec - targetSec;
-      // Pass raw numbers, let GPT interpret significance
-      splitTargetContext = `\nTarget pace: ${spokenTargetPace}\nSplit pace: ${spokenSplitPace}\nDifference: ${diffSec > 0 ? '+' : ''}${diffSec} seconds/km (${diffSec > 0 ? 'slower' : 'faster'} than target)\nCurrent HR: ${params.heartRate || 'N/A'}\nWorkout type: ${workoutType || 'easy'}\nProgress: ${progress || 'unknown'}%`;
+      // For free runs: give explicit verdict so GPT delivers clear, directive coaching
+      if (diffSec > 20) {
+        splitTargetVerdict = `⚠️ BEHIND TARGET: This split was ${Math.abs(diffSec)}s/km SLOWER than the target of ${spokenTargetPace}. Encourage them to pick up the pace.`;
+      } else if (diffSec < -20) {
+        splitTargetVerdict = `⚠️ AHEAD OF TARGET: This split was ${Math.abs(diffSec)}s/km FASTER than target (${spokenTargetPace}). Gently note they may be going a bit fast.`;
+      } else {
+        splitTargetVerdict = `✅ ON TARGET: Split pace is within ${Math.abs(diffSec)}s/km of target (${spokenTargetPace}). Reinforce they're nailing the pacing.`;
+      }
     }
   }
-
-  const varietySeed = getVarietySeed();
 
   // Build Route Intelligence context block (when known route is matched)
   const routeCtxBlock = params.routeIntelligence
@@ -903,14 +907,14 @@ The runner just completed kilometer ${splitKm} with a split pace of ${spokenSpli
 - Time elapsed: ${timeFormatted}
 - Overall average pace: ${spokenCurrentPace}
 - This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}${hrContext}${cadenceContext}
-${splitTargetContext}
+${splitTargetVerdict ? `\nPACE ASSESSMENT: ${splitTargetVerdict}` : ''}
 ${trainingSessionContext}
 ${routeCtxBlock ? `\n${routeCtxBlock}` : ''}
 ${terrainContext}${paceTrend}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and interpret the data contextually:${splitTargetContext ? ' Consider whether their pace vs target, heart rate, effort level, and workout type suggest they should adjust, maintain, or continue as-is.' : sessionSplitContext ? ' Analyze their pace vs session target and effort level to determine if they should adjust.' : isTrainingSession ? ` Consider how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal and their current effort.` : ' Provide context on their progress and pace trend.'} ${cadenceContext && (workoutType === 'tempo' || workoutType === 'threshold') ? 'Consider whether cadence is relevant to mention. ' : ''}${hasRoute === true && isOnHill ? 'Acknowledge terrain if relevant. ' : ''}${paceTrend ? 'Comment on their pace trend if relevant.' : ''}`;
+Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : sessionSplitContext ? ' how their split compares to the session target pace.' : isTrainingSession ? ` how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${cadenceContext && (workoutType === 'tempo' || workoutType === 'threshold') ? 'If cadence is a concern, include a brief cadence cue. ' : ''}${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
   } else {
     prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
 ${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
@@ -1169,9 +1173,27 @@ export async function generatePhaseCoaching(params: {
     );
 
     let cadenceAssessment: string;
-    // Pass raw cadence data to GPT — let it reason about whether to mention it
-    cadenceInfo = `- Current cadence: ${cadence} spm\n- Personalised target: ${cadenceRange.optimal} spm (range ${cadenceRange.low}–${cadenceRange.high} spm)\n- Runner height: ${runnerHeight ?? 170}cm\n- Deficit/excess: ${cadenceRange.deficit > 0 ? `${cadenceRange.deficit} spm below target` : cadenceRange.deficit < 0 ? `${Math.abs(cadenceRange.deficit)} spm above target` : 'on target'}`;
-    cadenceCoachingDirective = `Cadence data provided above. Decide: Is this cadence a concern? Should it be mentioned? If so, what would be most helpful to this runner?`;
+    let cadenceAction: string;
+
+    if (cadenceRange.isHigh) {
+      cadenceAssessment = `high (personal target: ~${cadenceRange.optimal} spm)`;
+      cadenceAction = `Their cadence of ${cadence} spm is above their personal optimal of ${cadenceRange.optimal} spm — this may indicate overstriding or very short steps. Mention it gently.`;
+    } else if (!cadenceRange.isLow && cadence >= cadenceRange.low) {
+      cadenceAssessment = `on target (personal target: ~${cadenceRange.optimal} spm)`;
+      cadenceAction = `Their cadence of ${cadence} spm is within their personalised optimal range of ${cadenceRange.low}–${cadenceRange.high} spm. Acknowledge it positively if relevant.`;
+    } else if (cadenceRange.deficit > 0 && cadenceRange.deficit <= 10) {
+      cadenceAssessment = `slightly low (personal target: ${cadenceRange.optimal} spm)`;
+      cadenceAction = `Their cadence of ${cadence} spm is ${cadenceRange.deficit} spm below their personal optimal of ${cadenceRange.optimal} spm for their height and current pace. Gently encourage quicker feet — a small increase will improve efficiency without feeling harder.`;
+    } else if (cadenceRange.isLow) {
+      cadenceAssessment = `low (personal target: ${cadenceRange.optimal} spm)`;
+      cadenceAction = `⚠️ Their cadence of ${cadence} spm is ${cadenceRange.deficit} spm below their personal optimal of ${cadenceRange.optimal} spm. For their height (${runnerHeight ?? 170}cm) at this pace, they should target ${cadenceRange.low}–${cadenceRange.high} spm. Coach them: shorten the stride, increase foot turnover, think "quick light feet". This is specific to THEM, not a generic target.`;
+    } else {
+      cadenceAssessment = `good`;
+      cadenceAction = '';
+    }
+
+    cadenceInfo = `- Cadence: ${cadence} spm (${cadenceAssessment})`;
+    cadenceCoachingDirective = cadenceAction;
   }
 
   // Build target pace comparison if available (use spoken format for TTS)
@@ -1289,22 +1311,30 @@ Examples of good output: "Quick right turn onto May Street, looking good!", "Lef
     let paceGuidance = '';
     if (triggerType === 'pace_abandon') {
       paceZone = 'TARGET ABANDONED';
-      paceGuidance = `The runner's target pace is unreachable — they are ${Math.abs(paceDeviationPercent).toFixed(0)}% slower than needed. Projected finish: ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.`;
+      paceGuidance = `The runner's target pace is now unreachable — they are consistently ${Math.abs(paceDeviationPercent).toFixed(0)}% slower than needed. 
+DO NOT nag about the missed target. Instead: acknowledge the effort, suggest they focus on maintaining their CURRENT effort level, and motivate them to finish strong. 
+This should feel supportive, not disappointing. "The target time isn't in the cards today, but you're still putting in great work" kind of energy.`;
     } else if (paceDeviationPercent < -15) {
       paceZone = 'WAY TOO FAST';
-      paceGuidance = `The runner is ${Math.abs(paceDeviationPercent).toFixed(0)}% FASTER than their target pace (${avgPaceFormatted}/km vs ${targetPaceFormatted}/km target). This is a significant surplus.`;
+      paceGuidance = `The runner is going ${Math.abs(paceDeviationPercent).toFixed(0)}% FASTER than their target pace. This is a common mistake — going out too fast leads to hitting the wall later.
+STRONGLY advise them to slow down NOW. Be direct but not alarming. Explain that banking time early almost always backfires. 
+Their current pace is ${avgPaceFormatted}/km but they need ${targetPaceFormatted}/km. Suggest they ease off and settle into rhythm.`;
     } else if (paceDeviationPercent < -10) {
       paceZone = 'TOO FAST';
-      paceGuidance = `The runner is ${Math.abs(paceDeviationPercent).toFixed(0)}% faster than target pace (${avgPaceFormatted}/km vs ${targetPaceFormatted}/km target).`;
+      paceGuidance = `The runner is ${Math.abs(paceDeviationPercent).toFixed(0)}% faster than target pace. They should ease off slightly to avoid burning out.
+Gently suggest pulling back a touch. Their body will thank them in the second half. Current: ${avgPaceFormatted}/km, target: ${targetPaceFormatted}/km.`;
     } else if (paceDeviationPercent > 15) {
       paceZone = 'WELL BEHIND TARGET';
-      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% slower than target pace (${avgPaceFormatted}/km vs ${targetPaceFormatted}/km target). Projected finish: ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.`;
+      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% slower than target. Their projected finish is ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.
+Encourage them to pick it up if they can, but be realistic. If there's a gradient/hill, acknowledge that hills slow pace naturally.`;
     } else if (paceDeviationPercent > 10) {
       paceZone = 'SLIGHTLY BEHIND';
-      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% behind target pace (${avgPaceFormatted}/km vs ${targetPaceFormatted}/km target). Projected finish: ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.`;
+      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% behind target pace. They need to pick it up a little. 
+Projected finish: ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}. Gentle nudge to increase effort.`;
     } else {
       paceZone = 'ON PACE';
-      paceGuidance = `The runner is on target pace (${avgPaceFormatted}/km vs ${targetPaceFormatted}/km target), within ${Math.abs(paceDeviationPercent).toFixed(0)}%.`;
+      paceGuidance = `The runner is RIGHT ON TARGET (within ${Math.abs(paceDeviationPercent).toFixed(0)}% of target pace). 
+Reinforce the good pacing with positive encouragement. Current: ${avgPaceFormatted}/km, target: ${targetPaceFormatted}/km. Tell them they're nailing it!`;
     }
     
     // Gradient context
@@ -1355,8 +1385,6 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
       }
     }
 
-    const paceVarietySeed = getVarietySeed();
-    
     // Declare runnerFirstName early so it can be used in prompt templates
     const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
 
@@ -1606,9 +1634,6 @@ Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight in
   let prompt: string;
   let systemMsg: string;
 
-  // Pick a variety seed to prevent coaching from sounding repetitive
-  const phaseVarietySeed = getVarietySeed();
-
   if (isRunStart) {
     // RUN START: Pure motivational message — no metrics (they haven't run yet!)
     prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
@@ -1657,7 +1682,7 @@ ${elevationInstruction}
 ${cadenceInstruction}
 ${noTerrainRule}${runnerProfileContext}${planContext}
 ${PACE_FORMAT_RULE}
-${phaseVarietySeed}
+${VARIETY_INSTRUCTION}
 ${triggerInstruction}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${runnerFirstName ? ` You may address them as "${runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
@@ -2060,40 +2085,44 @@ ${heartRate ? `|- Heart rate: ${heartRate} bpm` : ''}
 
 Assess whether this runner's cadence is appropriate RIGHT NOW. Consider their biomechanics, pace, and HR. If cadence coaching is warranted, deliver it. If something else matters more, coach that instead. Full autonomy — you're the coach.`;
   
+  // ── CADENCE COACHING TEMPLATE ROUTER ─────────────────────────────────────────
+  // Biomechanics terminology (important — easy to confuse):
+  //   OVERSTRIDING   = cadence TOO LOW  → stride too long, foot lands ahead of CoM,
+  //                    heel-striking, braking force on each step. Fix: shorten stride.
+  //   UNDERSTRIDING  = cadence TOO HIGH → stride too short, shuffling / micro-stepping,
+  //   (spinning)       reduced propulsion per step. Less common, often a fatigue sign.
+  //   ON TARGET      = within personalised optimal range → efficient biomechanics.
+  //
+  // Android sends cadenceProximityTier ("ON_TARGET" | "CLOSE" | "NEEDS_WORK") based on
+  // the live biomechanics model (speed + height + grade). We use isBelowPersonalRange
+  // (derived from that tier) to route to the correct coaching template.
+  // ─────────────────────────────────────────────────────────────────────────────
   let zoneAnalysis = cadenceDataContext;
-  if (true) {  // Using raw cadence data only — GPT will assess
-    zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm with stride length ${strideCm}cm — their foot is landing ahead of their centre of mass, creating a braking force with each step.
+  if (isBelowPersonalRange && !isWithinTolerance) {
+    // Cadence too LOW → classic overstriding: long strides, foot ahead of CoM.
+    zoneAnalysis = `OVERSTRIDING DETECTED: Cadence ${cadence} spm is ${cadenceDeficit} spm below their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) — calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}. NOT a generic 180 spm rule.
 
-Key context:
-- Personalised target: ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) — calculated for their height (${heightCmDisplay ?? 170}cm) at their current pace. NOT a generic target.
-- Overstriding increases knee and shin impact stress
-- The correction: shorten stride, move foot strike closer to beneath the hips
+With a low cadence, each stride is longer than efficient — the foot tends to land ahead of the centre of mass, creating a braking force and increasing impact stress on the knee and shin.
 
-Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment. You know how to coach overstriding — pick what will resonate.`;
-  } else if (isBelowPersonalRange && !isWithinTolerance) {
-    // Only flag as understriding if meaningfully below target (beyond tolerance buffer)
-    zoneAnalysis = `UNDERSTRIDING DETECTED: Cadence ${cadence} spm — ${cadenceDeficit} spm below their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm), calculated for their height (${heightCmDisplay ?? 170}cm) at ${formatPaceForTTS(currentPace)}.
+The correction: shorten the stride, increase turnover, shift foot strike closer to beneath the hips.
 
-This is NOT a generic "everyone should hit 180" situation — this is their specific efficient range. A low turnover stride reduces propulsion and increases vertical oscillation.
+Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment. Arms drive, mental metronome, "light quick feet", foot placement — pick what will land best for this runner.`;
+  } else if (cadenceExcessPercent > 10) {
+    // Cadence significantly TOO HIGH → understriding / spinning: short shuffling steps.
+    // Each step generates less propulsion; can signal fatigue or an overcorrected form.
+    zoneAnalysis = `HIGH CADENCE / UNDERSTRIDING: Cadence ${cadence} spm is ${Math.round(cadenceExcessPercent)}% above their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) for this pace (${formatPaceForTTS(currentPace)}).
 
-Use your coaching expertise to choose the 1-2 most effective, actionable cues to increase their cadence. Arms, mental imagery, foot placement, rhythm — whatever you judge will land best for this runner right now.`;
+A cadence significantly above the biomechanics target suggests the runner is taking too many short, shuffling steps — each generating less forward propulsion. This reduces running economy and often signals fatigue or an overcorrected "spinning" gait.
+
+Personalised context: Height ${heightCmDisplay ?? 170}cm, age ${userAge ?? 'unknown'}. This is their specific efficient range at this pace — not a generic goal.
+
+Coach them to lengthen their stride slightly and drive more powerfully off each step, without overextending.`;
   } else {
-    // Cadence is on or above target. Check if it's significantly above (>10%).
-    // If so, the runner may be overworking and taking too many steps (less economical).
-    // If only slightly above, it's efficient and natural.
-    const cadenceExcessPercent = ((cadence - dynOptimalCadenceTarget) / dynOptimalCadenceTarget) * 100;
-    
-    if (cadenceExcessPercent > 10) {
-      // Significantly above target — may indicate overworking / reduced economy
-      zoneAnalysis = `Cadence ${cadence} spm is ${Math.round(cadenceExcessPercent)}% above their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) for this pace (${formatPaceForTTS(currentPace)}).
+    // Cadence is ON TARGET or only slightly above → efficient biomechanics. Celebrate it
+    // or coach something more useful than cadence (it doesn't need fixing right now).
+    zoneAnalysis = `CADENCE ON TARGET: ${cadence} spm is within their personalised optimal range of ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm (target ${dynOptimalCadenceTarget} spm), calculated for their height (${heightCmDisplay ?? 170}cm) at this pace (${formatPaceForTTS(currentPace)}).
 
-At easy paces, a cadence significantly above target suggests the runner may be taking too many small steps, which can increase energy expenditure and reduce running economy. This could indicate fatigue, anxiety, or an unnatural "spinning" cadence.
-
-Personalised target context: Height ${heightCmDisplay ?? 170}cm, age ${userAge ?? 'unknown'}. NOT a generic goal.`;
-    } else {
-      // On target or only slightly above — efficient
-      zoneAnalysis = `Cadence ${cadence} spm is at or near their personalised working range of ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm (target ${dynOptimalCadenceTarget} spm), calculated for their height (${heightCmDisplay ?? 170}cm) at this pace (${formatPaceForTTS(currentPace)}). This indicates efficient, economical running.`;
-    }
+Their cadence is efficient right now. You may briefly acknowledge it, then pivot to a different coaching cue that adds more value — breathing, posture, arm drive, pacing, mental focus — whatever you judge will most benefit this runner at this moment.`;
   }
   
   const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.

@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.core.net.toUri
 import android.util.Log
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.lifecycle.ViewModel
@@ -109,6 +112,18 @@ class RunSessionViewModel @Inject constructor(
     private val _runState = MutableStateFlow(RunState())
     val runState: StateFlow<RunState> = _runState.asStateFlow()
 
+    // ── Power Saver / Battery Optimisation Warning ─────────────────────────────
+    /**
+     * True when the phone has power saver mode active AND the app is NOT
+     * exempted from battery optimisation.  Observed by RunSessionScreen to
+     * show a persistent warning banner so the user can take action.
+     *
+     * Evaluated once in startRun() and updated live via
+     * RunTrackingService.isPowerSaverActive.
+     */
+    private val _isPowerSaverWarningVisible = MutableStateFlow(false)
+    val isPowerSaverWarningVisible: StateFlow<Boolean> = _isPowerSaverWarningVisible.asStateFlow()
+
     // ── Route Memory Engine ───────────────────────────────────────────────────
     /**
      * Populated asynchronously when the first GPS fix is obtained at run start
@@ -163,6 +178,22 @@ class RunSessionViewModel @Inject constructor(
             RunTrackingService.firstGpsPoint.collect { gpsPoint ->
                 if (gpsPoint != null && _knownRouteMatch.value == null) {
                     checkForKnownRoute(gpsPoint.first, gpsPoint.second)
+                }
+            }
+        }
+
+        // Mirror the service's live power-saver state into the UI warning flag.
+        // The warning is shown whenever power saver is active AND the app is not
+        // exempted from battery optimisation (both conditions together cause throttling).
+        viewModelScope.launch {
+            RunTrackingService.isPowerSaverActive.collect { powerSaverOn ->
+                if (powerSaverOn) {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    // isIgnoringBatteryOptimizations is available API 23+; minSdk >= 23 so no check needed
+                    val isExempt = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+                    _isPowerSaverWarningVisible.value = !isExempt
+                } else {
+                    _isPowerSaverWarningVisible.value = false
                 }
             }
         }
@@ -1446,6 +1477,29 @@ class RunSessionViewModel @Inject constructor(
     }
 
     fun startRun() {
+        // ── Battery optimisation exemption ────────────────────────────────────────
+        // If the app is NOT exempt from Android's battery optimiser, power saver mode
+        // will throttle GPS updates and cause inaccurate pace/distance tracking.
+        // Requesting the exemption prompts the user once with the system dialog;
+        // subsequent runs are silent because the OS remembers the choice.
+        // isIgnoringBatteryOptimizations() is available API 23+; minSdk >= 23.
+        // NOTE: REQUEST_IGNORE_BATTERY_OPTIMIZATIONS is permitted for fitness tracking apps
+        // under Google Play policy (core functionality — continuous background GPS during runs).
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (pm != null && !pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            Log.w("RunSessionViewModel", "⚠️ App is NOT battery-optimisation exempt — requesting exemption before run")
+            try {
+                val exemptIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = "package:${context.packageName}".toUri()
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(exemptIntent)
+            } catch (e: Exception) {
+                Log.w("RunSessionViewModel", "Could not open battery optimisation dialog (non-fatal): ${e.message}")
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────────
+
         // Clear the standby flag and the cached prepared-run — run is now live
         isServicePreparedForWatch = false
         garminWatchManager.clearPendingPreparedRun()
