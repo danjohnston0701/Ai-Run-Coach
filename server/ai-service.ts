@@ -295,151 +295,91 @@ const VARIETY_INSTRUCTION = "Avoid repeating wording or phrasing you've used ear
  * This ensures coaching is RELEVANT to the runner's fitness level, not absolute pace targets.
  * A slow runner at 8:00/km should be coached very differently than a fast runner in recovery.
  */
+/**
+ * Generate coaching context based on SIGNAL HIERARCHY (not hardcoded pace buckets).
+ * 
+ * Priority order:
+ * 1. HR Zone (personalized by max HR, never overridden)
+ * 2. Target pace deviation (when session has a target)
+ * 3. Personal pace benchmarks from runner profile (not population averages)
+ * 4. No data → no directive (silence is better than wrong assumption)
+ * 
+ * Tone is determined by workout TYPE, not absolute pace.
+ */
 const getPaceContextDirective = (
-  recentPaceSecPerKm: number | undefined,
+  currentPaceSecPerKm?: number,
   fitnessLevel?: string,
-  sessionTargetPaceMin?: number,
-  sessionType: string = 'run'
+  targetPaceSecPerKm?: number,
+  workoutType?: string,
+  currentHeartRate?: number,
+  heartRateZone?: number,
+  runnerProfile?: string | null
 ): string => {
-  if (!recentPaceSecPerKm || recentPaceSecPerKm <= 0) {
-    return `ACTIVITY CONTEXT: No recent pace data available. Coach based on EFFORT FEEL (heart rate zone, perceived exertion, breathing) rather than absolute pace targets. Activity: ${sessionType}.`;
+  // ── Signal 1: Heart Rate Zone (always authoritative) ──────────────────────
+  // HR zones are personalized by max HR. Zone 2 IS easy for THIS runner.
+  // Never override this with pace assumptions.
+  if (heartRateZone !== undefined) {
+    const zoneContext = heartRateZone <= 2 
+      ? 'You are in an easy aerobic zone. This is exactly where easy runs should be.'
+      : heartRateZone === 3
+      ? 'You are in tempo zone. Sustain this effort but do not push beyond.'
+      : heartRateZone >= 4
+      ? 'You are in a high-intensity zone. Effort is expected; trust your body.'
+      : 'Monitor your heart rate zone as the primary effort signal.';
+    
+    return `EFFORT CONTEXT: Heart rate is the primary signal for this runner.
+${zoneContext}
+Pace is secondary — it should feel consistent with the heart rate zone. If pace and HR diverge (e.g. fast pace but low HR), trust the HR reading as the more accurate signal of actual effort.`;
   }
 
-  // Convert seconds/km to human-readable pace
-  const paceMin = Math.floor(recentPaceSecPerKm / 60);
-  const paceSec = Math.round(recentPaceSecPerKm % 60);
-  const recentPaceStr = `${paceMin}:${paceSec.toString().padStart(2, '0')}`;
-
-  // Categorize pace zone - adjust thresholds for walking vs running
-  let paceCategory = 'moderate';
-  let paceDescription = 'moderate/steady pace';
-  let typeLabel = 'intermediate runner';
-  let activityLabel = sessionType === 'walk' ? 'walker' : 'runner';
-
-  if (sessionType === 'walk') {
-    // Walking pace thresholds (typically 10:00-18:00/km)
-    if (recentPaceSecPerKm <= 720) {
-      // ≤ 12:00/km — brisk walking
-      paceCategory = 'fast';
-      paceDescription = 'brisk/power walking pace';
-      typeLabel = 'brisk walker';
-    } else if (recentPaceSecPerKm <= 900) {
-      // ≤ 15:00/km — moderate walking
-      paceCategory = 'moderate';
-      paceDescription = 'moderate/steady walking pace';
-      typeLabel = 'steady walker';
+  // ── Signal 2: Target Pace Deviation (when session has a target) ──────────
+  // If there's a target, classify effort by deviation from that target.
+  if (currentPaceSecPerKm !== undefined && targetPaceSecPerKm !== undefined) {
+    const deviationPercent = ((currentPaceSecPerKm - targetPaceSecPerKm) / targetPaceSecPerKm) * 100;
+    
+    if (Math.abs(deviationPercent) <= 5) {
+      return `PACE CONTEXT: On target.
+The runner is holding their target pace. Reinforce consistency and control.`;
+    } else if (deviationPercent > 5) {
+      return `PACE CONTEXT: Running slower than target by ${Math.round(deviationPercent)}%.
+This is acceptable on harder days or when conditions are tough. Coach around effort and conditions, not the pace gap itself.`;
     } else {
-      // > 15:00/km — easy/leisurely walking
-      paceCategory = 'easy';
-      paceDescription = 'easy/leisurely walking pace';
-      typeLabel = 'relaxed walker';
-    }
-  } else {
-    // Running pace thresholds
-    if (recentPaceSecPerKm <= 360) {
-      // ≤ 6:00/km — elite/competitive
-      paceCategory = 'fast';
-      paceDescription = 'competitive/fast pace';
-      typeLabel = 'competitive/elite runner';
-    } else if (recentPaceSecPerKm <= 480) {
-      // ≤ 8:00/km — moderate
-      paceCategory = 'moderate';
-      paceDescription = 'moderate/steady pace';
-      typeLabel = 'intermediate runner';
-    } else if (recentPaceSecPerKm <= 600) {
-      // ≤ 10:00/km — easy/building
-      paceCategory = 'easy';
-      paceDescription = 'easy/conversational pace';
-      typeLabel = 'developing runner';
-    } else {
-      // > 10:00/km — very easy/base building (or slow walker starting as runner)
-      paceCategory = 'very_easy';
-      paceDescription = 'very easy/sustainable pace';
-      typeLabel = 'base-building runner';
+      // currentPace faster than target
+      return `PACE CONTEXT: Running faster than target by ${Math.round(Math.abs(deviationPercent))}%.
+Check if this is intentional (feeling strong) or accidental (went out too fast). For recovery/easy sessions, encourage the runner to ease back and control the effort. For hard sessions, faster is fine if effort is sustainable.`;
     }
   }
 
-  const directives = sessionType === 'walk' ? {
-    fast: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} walks at a brisk pace. They're fit and energetic. Coach accordingly:
-- Brisk walking at ${recentPaceStr}/km is strong aerobic work for them — acknowledge the intensity
-- When they ease off pace on recovery walks (15:00+/km), encourage them to enjoy the relaxation
-- Focus on maintaining good form (posture, arm swing, cadence) rather than pushing harder
-- Celebrate their consistency and steady effort — walking is about sustainable fitness
-- If they want more challenge, suggest longer durations or varied terrain rather than pure speed
-- HEART RATE and EFFORT FEEL are more important than pace — help them build aerobic endurance
-- Recovery walks should feel genuinely easy — coach them to slow down and enjoy the movement`,
+  // ── Signal 3: Personal Benchmarks from Runner Profile ──────────────────
+  // Extract actual running data from the profile (if available).
+  // This is the ONLY valid way to compare paces.
+  if (runnerProfile && currentPaceSecPerKm !== undefined) {
+    // Simple heuristic: if profile contains pace benchmarks, they're embedded as text.
+    // A more robust approach would parse structured data, but for now we signal that
+    // pace context should be inferred from the profile by the AI.
+    return `PACE CONTEXT: Compare current pace to this runner's historical data.
+The runner profile contains their typical paces for easy, tempo, and threshold efforts. Use those as reference — not population benchmarks. If current pace aligns with their easy pace pattern, reinforce it. If it deviates, consider conditions or fatigue.`;
+  }
 
-    moderate: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} maintains a steady, consistent pace. Coach with this perspective:
-- Their steady walking pace (${recentPaceStr}/km) is perfect for building aerobic fitness and endurance
-- EFFORT FEEL and sustainable movement are what matter — not chasing arbitrary pace targets
-- Recovery walks 1-2 minutes slower are perfectly normal and valuable for recovery
-- Encourage strong posture, rhythmic arm movement, and consistent cadence at THIS comfortable pace
-- If pace drops, it usually signals fatigue or conditions — coach around effort level, not pace magnitude
-- Praise consistency and effort management rather than speed — relative effort is what builds fitness
-- Focus on form cues (cadence, posture, breathing) to improve efficiency naturally`,
+  // ── Signal 4: Tone by Workout Type (even without pace data) ──────────────
+  // Personality comes from the session type, not from absolute speed.
+  if (workoutType) {
+    const toneByWorkout: Record<string, string> = {
+      'easy': 'WORKOUT CONTEXT: Easy session. Conversational, relaxed. Never suggest the runner should be faster. Reinforce that this effort is correct.',
+      'recovery': 'WORKOUT CONTEXT: Recovery session. Patient, restorative tone. Any sign of over-effort should be caught early.',
+      'tempo': 'WORKOUT CONTEXT: Tempo/threshold session. Focused, purposeful tone. Coach to sustain effort — not to push beyond current capacity.',
+      'interval': 'WORKOUT CONTEXT: Interval session. Sharp, brief cues. High effort is expected; do not flag elevated HR unless truly alarming.',
+      'long_run': 'WORKOUT CONTEXT: Long run. Patient, steady tone. Flag any early drift above easy effort. Encourage steady pacing and mental resilience.',
+      'free_run': 'WORKOUT CONTEXT: Free run (no target). Observe and reflect. Never imply the runner\'s pace is wrong. Coach based on how they feel and what the session demands.',
+    };
+    
+    return toneByWorkout[workoutType.toLowerCase()] || 
+      'Coach based on effort feel, heart rate, and the demands of the session — not pace magnitude.';
+  }
 
-    easy: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} is building fitness at a sustainable pace. Coach carefully:
-- This pace (${recentPaceStr}/km) IS their appropriate pace for building aerobic base — never suggest it's "slow"
-- Steady, sustainable walking at THIS pace = perfect foundation for fitness development
-- Recovery walks at 1-2 minutes slower pace are excellent — coach them to embrace the slower effort
-- Heart rate zone adherence is MORE important than hitting an absolute pace target
-- Focus coaching on consistency, smooth movement, and enjoying the activity
-- Celebrate their steady effort at THIS pace — it's building the foundation for greater fitness
-- Encourage rhythm and form (steady cadence, relaxed arms) more than pace increases`,
-
-    very_easy: `ACTIVITY CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This ${activityLabel} is building base fitness at a comfortable, sustainable pace:
-- This pace (${recentPaceStr}/km) IS appropriate for their current fitness level — never apologize for it
-- Sessions are about CONSISTENCY, sustainable movement, and building aerobic base — not speed
-- Encourage relaxation, steady cadence, and enjoyable movement at this natural pace
-- "Easy" means sustainable — if they're maintaining steady effort, they're executing perfectly
-- If they naturally walk faster, encourage them to ease back for true recovery sessions
-- Build confidence in their steady pace — it's the foundation for fitness development
-- Reference EFFORT LEVEL and how it FEELS more than any external pace comparison`,
-  } : {
-    fast: `PACE CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This runner is fast. Their fitness level is high. Coach accordingly:
-- When they run at their target pace (${recentPaceStr}/km), they're doing MODERATE effort — don't oversell it
-- When they run SLOWER (e.g., 7:00/km on an easy run), they're deliberately holding back — coach them to RELAX even more
-- "Easy pace" for them is well sub-7:00/km — make sure they understand that easy SHOULD feel easy
-- Recovery runs are 7:30+/km — if they're faster, they're not recovering properly, advise them to back off
-- Reference their FITNESS LEVEL and internal EFFORT FEEL more than absolute pace numbers
-- When pushing hard (intervals, tempo), remind them to hit THEIR targets, not generic benchmarks`,
-
-    moderate: `PACE CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This runner operates in the moderate fitness zone. Coach with this perspective:
-- Their easy pace and moderate pace are only 30-60 seconds apart — EFFORT FEEL and HEART RATE ZONE matter more than pace magnitude
-- "Keeping it easy" at their typical pace is PERFECT for building aerobic base — reinforce consistency and effort feel, not speed
-- If pace drops below their typical (e.g., 8:00/km when they usually run 7:30/km), it likely signals FATIGUE or CONDITIONS — coach around effort/HR, not comparing to pace targets
-- Recovery runs should be 1-2 minutes SLOWER than easy pace — help them truly back off
-- Praise them for hitting THEIR targets, not for running "fast" — relative effort is what matters
-- Focus coaching on CONSISTENCY and EFFORT ZONE adherence rather than pace magnitude`,
-
-    easy: `PACE CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This runner is building fitness. Their typical pace IS their easy/conversational pace. Coach carefully:
-- NEVER imply they are "slow" or need to "speed up" on easy runs — this IS their appropriate pace for building aerobic base
-- This pace (${recentPaceStr}/km) = their aerobic sweet spot. Reinforce it as THEIR zone, not a generic benchmark
-- Easy run = sustainable effort at THIS pace for THIS runner, not faster
-- If they run slower (${Math.ceil(recentPaceSecPerKm / 60) + 1}:00+/km), it's acceptable for recovery — focus on effort feel
-- Heart rate zone adherence is MORE important than hitting an absolute pace target
-- Recovery runs at 1-2 min slower are perfectly normal — coach them to embrace the recovery effort
-- Celebrate their consistency at THIS pace rather than comparing to faster runners' easy pace`,
-
-    very_easy: `PACE CONTEXT: ${typeLabel} - typical pace ${recentPaceStr}/km
-This runner may be building base fitness or have a longer-distance focus. Their pace is appropriate:
-- This pace (${recentPaceStr}/km) IS appropriate for their current fitness level — never apologize for it
-- Sessions are about CONSISTENCY, sustainable effort management, and distance — not absolute speed
-- Coaching should focus on relaxation, cadence consistency, and steady aerobic effort
-- "Easy" means sustainable — if they're hitting their target HEART RATE ZONE at this pace, they're executing perfectly
-- If they naturally run FASTER than their typical pace on recovery runs, coach them to back off and let their body recover
-- Build their confidence in their pace zone — it's the foundation for fitness development
-- Reference their EFFORT LEVEL and how it FEELS more than comparing to any external benchmark`,
-  };
-
-  return directives[paceCategory] || directives.moderate;
+  // ── No data → No directive ──────────────────────────────────────────────
+  // A wrong assumption is worse than silence.
+  return '';
 };
 
 export interface CoachingContext {
@@ -926,12 +866,26 @@ ${VARIETY_INSTRUCTION}
 Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenCurrentPace}) and distance (${formatDistanceForCoaching(distance)}). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
   }
 
+  // Calculate current pace in seconds/km for context directive
+  const currentPaceSecPerKm = (() => {
+    const parts = currentPace.split(':').map(Number);
+    return parts.length === 2 ? parts[0] * 60 + parts[1] : undefined;
+  })();
+
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the runner's experience level and the tone directive below.
 
-${getPaceContextDirective(runHistory?.avgPaceSecondsPerKm || (params as any).recentPaceAvgSecPerKm, fitnessLevel, undefined, sessionType || 'run')}
+${getPaceContextDirective(
+  currentPaceSecPerKm,
+  fitnessLevel,
+  undefined,  // targetPaceSecPerKm (not available in pace updates)
+  workoutType,
+  heartRate,
+  undefined,  // heartRateZone (would need max HR to calculate)
+  params.runnerProfile
+)}
 
 ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
