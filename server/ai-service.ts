@@ -2025,6 +2025,8 @@ export async function generateCadenceCoaching(params: {
     optimalCadenceMin, optimalCadenceMax, optimalStrideLengthMin, optimalStrideLengthMax,
     coachName = 'Coach', coachTone = 'energetic' } = params;
   const cadenceAccentRule = accentDirective((params as any).coachAccent);
+  const fitnessLevel = (params as any).fitnessLevel as string | undefined;
+  const sessionType = (params as any).sessionType as string | undefined;
 
   // Personalised cadence range from biomechanics model (pace + height + age)
   // The values sent from the device (optimalCadenceMin/Max) are also biomechanics-based,
@@ -2144,7 +2146,9 @@ Decide whether cadence coaching is needed right now. If yes, reference their act
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running coach. You understand biomechanics, but you prioritize what matters most RIGHT NOW. Reference actual numbers. Keep it 2-3 sentences spoken aloud. No emojis. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}${runnerProfileBlock(params.runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, an elite ${coachTone} running coach. You understand biomechanics, but you prioritize what matters most RIGHT NOW. Reference actual numbers. Keep it 2-3 sentences spoken aloud. No emojis. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}${runnerProfileBlock(params.runnerProfile)}
+
+${getPaceContextDirective(paceSecPerKm, fitnessLevel, undefined, sessionType || 'run')}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 200,
@@ -3565,6 +3569,10 @@ export async function generateHeartRateCoaching(params: {
   fitnessLevel?: string;
   runnerName?: string;
   runnerProfile?: string | null;
+  // Pace context (iOS sends along with HR data)
+  currentPace?: string;              // e.g., "7:30/km"
+  recentPaceAvgSecPerKm?: number;    // e.g., 450 seconds/km
+  sessionType?: string;              // 'run' or 'walk'
   // Session memory
   topicsDiscussed?: string[];
   topicsNotCovered?: string[];
@@ -3581,6 +3589,15 @@ export async function generateHeartRateCoaching(params: {
   athleteRespondedToLastCue?: boolean;
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
+
+  // Calculate pace in seconds/km for pace context directive
+  const paceSecPerKm = (params as any).recentPaceAvgSecPerKm || (() => {
+    const pace = (params as any).currentPace as string | undefined;
+    if (!pace) return undefined;
+    const parts = pace.split(':').map(Number);
+    return parts.length === 2 ? parts[0] * 60 + parts[1] : undefined;
+  })();
+  const sessionType = (params as any).sessionType as string | undefined;
 
   // Use age-adjusted max HR (Tanaka formula: 208 - 0.7×age) — more accurate than device-reported max
   // This prevents incorrect zone assessment early in runs when actual max HR hasn't been reached yet.
@@ -3678,7 +3695,9 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
+        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}
+
+${paceSecPerKm ? getPaceContextDirective(paceSecPerKm, fitnessLevel, undefined, sessionType || 'run') : ''}` },
         { role: "user", content: prompt }
       ],
       max_tokens: 80,
