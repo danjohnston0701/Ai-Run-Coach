@@ -16500,10 +16500,15 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   //   ANDROID_LATEST_VERSION_CODE – latest versionCode on Play Store
   //   ANDROID_LATEST_VERSION_NAME – human-readable e.g. "1.6.0"
   //   ANDROID_PLAY_STORE_URL      – Play Store listing URL
+  //   ANDROID_RELEASE_NOTE        – one-sentence what's new for the Android app
   //   GARMIN_LATEST_VERSION       – latest Connect IQ companion version e.g. "1.4.0"
+  //   GARMIN_MIN_VERSION          – optional: minimum required companion version (older = show update prompt)
   //   GARMIN_RELEASE_NOTE         – one-sentence what's new for the Garmin app
   //   GARMIN_CONNECT_IQ_STORE_URL – Connect IQ listing URL
-  //   GARMIN_MIN_VERSION          – optional: minimum required companion version (older = show update prompt)
+  //   IOS_LATEST_VERSION          – latest version on App Store e.g. "1.6.0"
+  //   IOS_MIN_VERSION             – minimum required iOS version (older = show update prompt)
+  //   IOS_APP_STORE_URL           – App Store listing URL
+  //   IOS_RELEASE_NOTE            – one-sentence what's new for the iOS app
   app.get("/api/app/version-check", async (req: Request, res: Response) => {
     try {
       res.json({
@@ -16522,6 +16527,13 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
           connectIqStoreUrl: process.env.GARMIN_CONNECT_IQ_STORE_URL ||
                              "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017",
           releaseNote:       process.env.GARMIN_RELEASE_NOTE      || "",
+        },
+        ios: {
+          latestVersion: process.env.IOS_LATEST_VERSION || "1.9.0",
+          minVersion:    process.env.IOS_MIN_VERSION    || "1.0.0",
+          appStoreUrl:   process.env.IOS_APP_STORE_URL  ||
+                         "https://apps.apple.com/app/ai-run-coach/id6568919065",
+          releaseNote:   process.env.IOS_RELEASE_NOTE   || "",
         },
       });
     } catch (error: any) {
