@@ -11652,10 +11652,6 @@ function transformRunForAndroid(run: any) {
         fitnessLevel: req.body.fitnessLevel ?? (user as any)?.fitnessLevel ?? undefined,
         runnerName: req.body.runnerName ?? user?.name ?? undefined,
         runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
-        // Pace context for personalized coaching
-        currentPace: req.body.currentPace,
-        recentPaceAvgSecPerKm: req.body.recentPaceAvgSecPerKm,
-        sessionType: req.body.sessionType,
       });
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
