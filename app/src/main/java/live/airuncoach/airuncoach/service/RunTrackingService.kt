@@ -311,22 +311,32 @@ class RunTrackingService : Service(), SensorEventListener {
 
     // Elevation coaching
     private var lastElevationCoachingTime: Long = 0
-    private var lastHillTopAckTime: Long = 0
-    private var slopeDirection: Int = 0 // 1 = uphill, -1 = downhill, 0 = flat/unknown
+
+    // ── Terrain state machine ────────────────────────────────────────────────
+    // Current classified terrain state (what the runner is on RIGHT NOW).
+    // Values: "flat" | "gradual_climb" | "steep_climb" | "gradual_descent" | "steep_descent" | "rolling"
+    private var currentTerrainState: String = "flat"
+
+    // The grade direction has been sustained for this distance (m) — used to avoid
+    // changing state on momentary GPS spikes.
+    private var pendingTerrainDirection: Int = 0  // 1 = up, -1 = down, 0 = flat
+    private var pendingTerrainDistanceM: Double = 0.0
+
+    // Per-segment accumulators (reset when terrain state changes)
+    private var slopeDirection: Int = 0 // kept for rolling-window compat
     private var slopeDistanceMeters: Double = 0.0
-    private var slopeElevationGain: Double = 0.0 // Total metres gained in current uphill segment
-    private var slopeElevationLoss: Double = 0.0 // Total metres lost in current downhill segment
+    private var slopeElevationGain: Double = 0.0
+    private var slopeElevationLoss: Double = 0.0
+
     private var downhillFinishTriggered: Boolean = false
 
-    // Rolling terrain detection — 1km sliding window to classify terrain type
-    // Tracks gain/loss/direction changes so we can tell the difference between
-    // "genuine hill" (sustained single direction) and "rolling terrain" (undulating)
-    private var rollingWindowGainM: Double = 0.0     // Total gain in the current 1km window
-    private var rollingWindowLossM: Double = 0.0     // Total loss in the current 1km window
-    private var rollingWindowDirectionChanges: Int = 0 // How many times slope direction flipped
-    private var rollingWindowStartKm: Double = 0.0   // Distance at which current window started
-    private var lastRollingTerrainCoachKm: Int = -2  // Last km at which rolling terrain cue fired
-    private var rollingTerrainDetected: Boolean = false // True once rolling pattern confirmed this run
+    // Rolling terrain detection — 1 km sliding window
+    private var rollingWindowGainM: Double = 0.0
+    private var rollingWindowLossM: Double = 0.0
+    private var rollingWindowDirectionChanges: Int = 0
+    private var rollingWindowStartKm: Double = 0.0
+    private var lastRollingTerrainCoachKm: Int = -2
+    private var rollingTerrainDetected: Boolean = false
     // Altitude smoothing - rolling window to filter GPS noise
     private val recentAltitudes = ArrayList<Double>() // Rolling window of recent altitudes
     private var smoothedAltitude: Double? = null // Smoothed altitude from rolling average
@@ -544,8 +554,8 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val LOCATION_UPDATE_INTERVAL = 1000L  // Request GPS every 1 second (matches Garmin frequency)
         private const val LOCATION_FASTEST_INTERVAL = 500L   // Accept updates as fast as 500ms
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
-        private const val ELEVATION_COOLDOWN_MS = 120_000 // 2 minutes
-        private const val HILL_TOP_COOLDOWN_MS = 180_000 // 3 minutes
+        private const val ELEVATION_COOLDOWN_MS = 180_000 // 3 minutes (was 2 min — terrain state changes more slowly)
+        // HILL_TOP_COOLDOWN_MS removed — summit detection replaced by state-based terrain awareness
         private const val HR_COOLDOWN_MS = 180_000 // 3 minutes
         // ── Cadence coaching rate limits ────────────────────────────────────────
         // 1 km minimum distance between any two cadence cues — prevents back-to-
@@ -620,43 +630,36 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val GARMIN_ELEV_WINDOW           = 10  // ~20 seconds at 0.5 Hz
         private const val GARMIN_ELEV_COMMIT_THRESHOLD = 0.5 // Min net change (m) per window to commit to gain/loss
         
-        // ELEVATION-BASED TRIGGERS (Primary) — More reliable than grade % which can be noisy from GPS
-        // Thresholds are deliberately conservative to avoid GPS drift false positives on flat terrain.
-        // A genuine sustained uphill at parkrun pace covers ~300m at 4% = 12m gain — so 15m is a safe bar.
-        private const val UPHILL_ELEVATION_TRIGGER_M = 15.0  // Raised from 10m — needs 15m sustained gain to fire
-        private const val DOWNHILL_ELEVATION_TRIGGER_M = 15.0
-        private const val GENTLE_HILL_ELEVATION_M = 10.0     // Gentle hill awareness for 10m+ gains
-        private const val MODERATE_HILL_ELEVATION_M = 18.0   // Moderate hill for 18m+ gains
-        private const val STEEP_HILL_ELEVATION_M = 28.0      // Steep hill for 28m+ gains
-        
-        // GRADE-BASED TRIGGERS (Secondary) — For context and validation, not primary driver
-        // Raised from 2% to 3% — GPS altitude at ±5m error over 150m = ~3% apparent grade on flat terrain.
-        // So 3% is the reliable lower bound that separates real hills from GPS noise.
-        private const val UPHILL_GRADE_THRESHOLD = 3.0       // Was 2.0 — raised to reduce false positives
-        private const val STEEP_UPHILL_GRADE_THRESHOLD = 5.0 // Was 4.0
-        private const val DOWNHILL_GRADE_THRESHOLD = -3.0    // Was -2.0
-        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -5.0 // Was -4.0
-        
-        // DISTANCE AND COOLDOWN TRIGGERS
-        private const val HILL_TOP_MIN_DISTANCE_M = 200.0    // Min uphill distance before hill-top ack
-        private const val UPHILL_MIN_DISTANCE_M = 200.0      // Min sustained uphill distance before coaching fires
-        private const val DOWNHILL_MIN_DISTANCE_M = 250.0    // Min sustained downhill distance
-        private const val DOWNHILL_FINISH_DISTANCE_KM = 1.0  // Within this distance of finish for downhill_finish
-        
-        // These are now SECONDARY — elevation metres trigger first
-        private const val MIN_ELEVATION_GAIN_M = 12.0
-        private const val MIN_ELEVATION_LOSS_M = 12.0
-        private const val HILL_TOP_MIN_GAIN_M = 10.0
+        // ── TERRAIN STATE CLASSIFICATION ────────────────────────────────────────
+        // Grade thresholds — raised from 2% to 3% because GPS altitude error over 150m
+        // produces ~3% apparent grade on genuinely flat terrain.
+        private const val UPHILL_GRADE_THRESHOLD = 3.0
+        private const val DOWNHILL_GRADE_THRESHOLD = -3.0
+        private const val STEEP_UPHILL_GRADE_THRESHOLD = 5.0
+        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -5.0
 
-        // ROLLING TERRAIN DETECTION — 1km sliding window
-        // If within a 1km window the runner has both >8m of total gain AND >5m of total loss,
-        // AND direction has changed 2+ times, that's rolling terrain — not a hill.
-        // Rolling terrain cue fires at most once per 2km to avoid being repetitive.
-        private const val ROLLING_TERRAIN_MIN_GAIN_M = 8.0   // Min accumulated gain in 1km window
-        private const val ROLLING_TERRAIN_MIN_LOSS_M = 5.0   // Min accumulated loss in 1km window
-        private const val ROLLING_TERRAIN_MIN_DIRECTION_CHANGES = 2  // Min slope reversals in window
-        private const val ROLLING_TERRAIN_WINDOW_KM = 1.0    // Sliding window size (km)
-        private const val ROLLING_TERRAIN_COACH_INTERVAL_KM = 2  // Fire rolling cue at most every 2km
+        // A terrain state must be sustained for at least this distance before the classifier
+        // accepts it as the new state (avoids flipping on brief GPS noise spikes).
+        private const val TERRAIN_STATE_MIN_DISTANCE_M = 150.0
+
+        // Terrain states: flat | gradual_climb | steep_climb | gradual_descent | steep_descent | rolling
+        // Rolling terrain detection — 1 km sliding window
+        private const val ROLLING_TERRAIN_MIN_GAIN_M = 8.0
+        private const val ROLLING_TERRAIN_MIN_LOSS_M = 5.0
+        private const val ROLLING_TERRAIN_MIN_DIRECTION_CHANGES = 2
+        private const val ROLLING_TERRAIN_WINDOW_KM = 1.0
+        private const val ROLLING_TERRAIN_COACH_INTERVAL_KM = 2
+
+        // Standalone terrain coaching only fires after enough elevation in the new state —
+        // prevents coaching 10 m into a hill when the runner has just barely left a flat.
+        private const val STANDALONE_UPHILL_MIN_GAIN_M = 10.0
+        private const val STANDALONE_DOWNHILL_MIN_LOSS_M = 10.0
+
+        // DOWNHILL FINISH — within this distance of the target, a descent gets a "finish" frame
+        private const val DOWNHILL_FINISH_DISTANCE_KM = 1.0
+
+        // Legacy alias kept for any remaining references in downhill-finish logic
+        private const val DOWNHILL_MIN_DISTANCE_M = 150.0
         private const val ALTITUDE_SMOOTHING_WINDOW = 5      // Number of altitude readings to average for smoothing
         
         // How often (ms) the service pushes GPS/metrics to the live session on the server.
@@ -1552,7 +1555,9 @@ class RunTrackingService : Service(), SensorEventListener {
         repDistanceStartKm = 0.0
         lastPhaseTriggerFiredForPhase = null
         lastRepTriggerFiredAtRep = 0
-        lastHillTopAckTime = 0
+        currentTerrainState = "flat"
+        pendingTerrainDirection = 0
+        pendingTerrainDistanceM = 0.0
         slopeDirection = 0
         slopeDistanceMeters = 0.0
         slopeElevationGain = 0.0
@@ -7379,7 +7384,9 @@ class RunTrackingService : Service(), SensorEventListener {
             // ── Physiological response to previous cue
             lastCueHrDelta = lastCueHrDelta,
             lastCuePaceDelta = lastCuePaceDelta,
-            athleteRespondedToLastCue = athleteRespondedToLastCue
+            athleteRespondedToLastCue = athleteRespondedToLastCue,
+            // ── Live terrain state (used by all coaching types as context enrichment)
+            currentTerrainState = currentTerrainState.takeIf { it != "flat" }
         )
     }
 
@@ -7748,138 +7755,137 @@ class RunTrackingService : Service(), SensorEventListener {
         fireEliteCoaching(request, "Elevation")
     }
 
+    /**
+     * State-based terrain awareness — replaces the old event-based hill system.
+     *
+     * Instead of predicting summits or describing what "probably comes next", the coach
+     * describes the terrain the runner is CURRENTLY on.  A standalone coaching message fires
+     * only when a meaningfully different terrain state has been sustained long enough to be real.
+     *
+     * Terrain states: flat | gradual_climb | steep_climb | gradual_descent | steep_descent | rolling
+     *
+     * Two outputs:
+     *  1. `currentTerrainState` — always updated, attached as context to pace/HR/cadence prompts
+     *  2. Standalone TTS message — fires on entry into a new significant terrain state
+     */
     private fun updateElevationCoaching(distanceIncrement: Double, gradePercent: Double, elevationChange: Double) {
         if (!coachingFeaturePrefs.elevationCoachingEnabled) return
-        // Suppress elevation coaching entirely for low-experience runners — terrain analysis is
-        // overwhelming and discouraging when they are still building basic running confidence.
         if (isLowExperienceRunner()) return
+
         val now = System.currentTimeMillis()
         val currentKm = totalDistance / 1000.0
-        val direction = when {
-            gradePercent >= UPHILL_GRADE_THRESHOLD -> 1
+
+        // ── Raw direction for this GPS tick ─────────────────────────────────
+        val rawDirection = when {
+            gradePercent >= UPHILL_GRADE_THRESHOLD   ->  1
             gradePercent <= DOWNHILL_GRADE_THRESHOLD -> -1
-            else -> 0
+            else                                     ->  0
         }
 
-        // ─── Slope segment tracking ───────────────────────────────────────────
-        if (direction == slopeDirection) {
+        // ── Per-segment accumulators ─────────────────────────────────────────
+        if (rawDirection == slopeDirection) {
             slopeDistanceMeters += distanceIncrement
             if (elevationChange > 0) slopeElevationGain += elevationChange
             if (elevationChange < 0) slopeElevationLoss += abs(elevationChange)
         } else {
-            // Direction changed — close out the finished slope segment
-
-            // Hill-top acknowledgement when leaving a sustained uphill
-            if (slopeDirection == 1 &&
-                slopeDistanceMeters >= HILL_TOP_MIN_DISTANCE_M &&
-                slopeElevationGain >= HILL_TOP_MIN_GAIN_M &&
-                now - lastHillTopAckTime > HILL_TOP_COOLDOWN_MS
-            ) {
-                Log.d("ElevationCoaching", "Hill top: climbed ${slopeElevationGain.toInt()}m over ${slopeDistanceMeters.toInt()}m")
-                triggerElevationCoaching("hill_top", gradePercent, slopeDistanceMeters)
-                lastHillTopAckTime = now
-            }
-
-            // ── Rolling terrain window: accumulate the closed segment into the 1km window ──
-            // Reset window if we've moved past ROLLING_TERRAIN_WINDOW_KM since window start
+            // Direction changed — flush closed segment into the rolling window
             if (currentKm - rollingWindowStartKm >= ROLLING_TERRAIN_WINDOW_KM) {
                 rollingWindowGainM = 0.0
                 rollingWindowLossM = 0.0
                 rollingWindowDirectionChanges = 0
                 rollingWindowStartKm = currentKm
             }
-            // Accumulate the closed segment's gain/loss into the rolling window
             rollingWindowGainM += slopeElevationGain
             rollingWindowLossM += slopeElevationLoss
-            if (slopeDirection != 0 && direction != 0 && slopeDirection != direction) {
+            if (slopeDirection != 0 && rawDirection != 0 && slopeDirection != rawDirection) {
                 rollingWindowDirectionChanges++
             }
-
-            // Reset slope tracking for new direction
-            slopeDirection = direction
+            // Open new segment
+            slopeDirection = rawDirection
             slopeDistanceMeters = distanceIncrement
             slopeElevationGain = if (elevationChange > 0) elevationChange else 0.0
             slopeElevationLoss = if (elevationChange < 0) abs(elevationChange) else 0.0
         }
 
-        // ─── Cooldown check ───────────────────────────────────────────────────
-        if (now - lastElevationCoachingTime < ELEVATION_COOLDOWN_MS) return
+        // ── Pending-direction filter: suppress GPS spike flips ───────────────
+        // A new direction must be sustained for TERRAIN_STATE_MIN_DISTANCE_M before we act on it.
+        if (rawDirection == pendingTerrainDirection) {
+            pendingTerrainDistanceM += distanceIncrement
+        } else {
+            pendingTerrainDirection = rawDirection
+            pendingTerrainDistanceM = distanceIncrement
+        }
+        val stateConfirmed = pendingTerrainDistanceM >= TERRAIN_STATE_MIN_DISTANCE_M
 
-        // ─── ROLLING TERRAIN DETECTION ────────────────────────────────────────
-        // Check the 1km window: if we've seen both meaningful gain AND loss with multiple
-        // direction changes, this is undulating terrain — not a sustained hill climb.
-        // Fire a contextual "rolling terrain" cue instead of hill-specific coaching.
-        // This prevents GPS drift on flat terrain from triggering false hill cues, because
-        // GPS drift noise is random (it produces direction changes, not sustained single direction).
-        val isRollingTerrain = rollingWindowGainM >= ROLLING_TERRAIN_MIN_GAIN_M &&
+        // ── Classify and publish terrain state ───────────────────────────────
+        val isRolling = rollingWindowGainM >= ROLLING_TERRAIN_MIN_GAIN_M &&
             rollingWindowLossM >= ROLLING_TERRAIN_MIN_LOSS_M &&
             rollingWindowDirectionChanges >= ROLLING_TERRAIN_MIN_DIRECTION_CHANGES
 
+        currentTerrainState = when {
+            isRolling                                                         -> "rolling"
+            stateConfirmed && gradePercent >= STEEP_UPHILL_GRADE_THRESHOLD   -> "steep_climb"
+            stateConfirmed && gradePercent >= UPHILL_GRADE_THRESHOLD          -> "gradual_climb"
+            stateConfirmed && gradePercent <= STEEP_DOWNHILL_GRADE_THRESHOLD  -> "steep_descent"
+            stateConfirmed && gradePercent <= DOWNHILL_GRADE_THRESHOLD        -> "gradual_descent"
+            else                                                              -> "flat"
+        }
+
+        // ── Standalone coaching message gate ─────────────────────────────────
+        if (now - lastElevationCoachingTime < ELEVATION_COOLDOWN_MS) return
+
         val currentKmInt = currentKm.toInt()
-        if (isRollingTerrain &&
-            currentKmInt >= 1 &&
-            currentKmInt - lastRollingTerrainCoachKm >= ROLLING_TERRAIN_COACH_INTERVAL_KM &&
-            now - lastElevationCoachingTime >= ELEVATION_COOLDOWN_MS
+
+        // Rolling terrain standalone cue (at most once per 2 km)
+        if (isRolling && currentKmInt >= 1 &&
+            currentKmInt - lastRollingTerrainCoachKm >= ROLLING_TERRAIN_COACH_INTERVAL_KM
         ) {
             rollingTerrainDetected = true
             lastRollingTerrainCoachKm = currentKmInt
             lastElevationCoachingTime = now
-            Log.d("ElevationCoaching", "Rolling terrain: ${rollingWindowGainM.toInt()}m gain, " +
-                "${rollingWindowLossM.toInt()}m loss, ${rollingWindowDirectionChanges} direction changes in last ${(currentKm - rollingWindowStartKm).toInt()}km")
+            Log.d("ElevationCoaching", "Rolling terrain standalone: gain=${rollingWindowGainM.toInt()}m " +
+                "loss=${rollingWindowLossM.toInt()}m changes=$rollingWindowDirectionChanges")
             triggerElevationCoaching("rolling_terrain", gradePercent, slopeDistanceMeters)
             return
         }
 
-        // ─── TRUE HILL COACHING ───────────────────────────────────────────────
-        // Only fires when the slope has been sustained in ONE direction long enough to be a real hill.
-        // If rolling terrain is detected in the window, suppress hill-specific cues — the runner
-        // knows it's undulating; calling every small rise a "hill" feels condescending.
-        if (isRollingTerrain && rollingTerrainDetected) {
-            // Already in rolling terrain mode — don't fire separate uphill/downhill cues
+        // Suppress separate climb/descent cues while in confirmed rolling terrain
+        if (isRolling && rollingTerrainDetected) return
+
+        // Climbing standalone cue — only when enough elevation accumulated
+        if (rawDirection == 1 && stateConfirmed &&
+            slopeElevationGain >= STANDALONE_UPHILL_MIN_GAIN_M
+        ) {
+            val eventType = if (gradePercent >= STEEP_UPHILL_GRADE_THRESHOLD) "steep_climb" else "gradual_climb"
+            Log.d("ElevationCoaching", "Terrain standalone [$eventType]: " +
+                "gain=${slopeElevationGain.toInt()}m grade=${gradePercent.toInt()}% dist=${slopeDistanceMeters.toInt()}m")
+            lastElevationCoachingTime = now
+            triggerElevationCoaching(eventType, gradePercent, slopeDistanceMeters)
             return
         }
 
-        // UPHILL coaching: needs sustained gain AND grade (both required to defeat GPS noise)
-        if (direction == 1 && slopeDistanceMeters >= UPHILL_MIN_DISTANCE_M) {
-            val byElevationGain = slopeElevationGain >= UPHILL_ELEVATION_TRIGGER_M
-            val byGrade = gradePercent >= UPHILL_GRADE_THRESHOLD
-            if (byElevationGain && byGrade) {
-                val coachingType = when {
-                    slopeElevationGain >= STEEP_HILL_ELEVATION_M -> "uphill"
-                    slopeElevationGain >= MODERATE_HILL_ELEVATION_M -> "uphill"
-                    else -> "hill_uphill_technique"
-                }
-                Log.d("ElevationCoaching", "Uphill: ${slopeElevationGain.toInt()}m (${gradePercent.toInt()}%) over ${slopeDistanceMeters.toInt()}m")
+        // Descending standalone cue — only when enough elevation lost
+        if (rawDirection == -1 && stateConfirmed &&
+            slopeElevationLoss >= STANDALONE_DOWNHILL_MIN_LOSS_M
+        ) {
+            // Downhill finish special-case
+            val remainingDistanceKm = targetDistance?.let { (it - totalDistance) / 1000.0 }
+            if (!downhillFinishTriggered &&
+                (hasGpsElevation || hasRoute) &&
+                remainingDistanceKm != null &&
+                remainingDistanceKm <= DOWNHILL_FINISH_DISTANCE_KM
+            ) {
+                downhillFinishTriggered = true
                 lastElevationCoachingTime = now
-                triggerElevationCoaching(coachingType, gradePercent, slopeDistanceMeters)
+                Log.d("ElevationCoaching", "Downhill finish: loss=${slopeElevationLoss.toInt()}m remaining=${remainingDistanceKm}km")
+                triggerElevationCoaching("downhill_finish", gradePercent, slopeDistanceMeters)
+                return
             }
-        }
-        // DOWNHILL coaching: needs sustained loss AND grade
-        else if (direction == -1 && slopeDistanceMeters >= DOWNHILL_MIN_DISTANCE_M) {
-            val byElevationLoss = slopeElevationLoss >= DOWNHILL_ELEVATION_TRIGGER_M
-            val byGrade = gradePercent <= DOWNHILL_GRADE_THRESHOLD
-            if (byElevationLoss && byGrade) {
-                val remainingDistanceKm = targetDistance?.let { (it - totalDistance) / 1000.0 }
-                if (!downhillFinishTriggered &&
-                    (hasGpsElevation || hasRoute) &&
-                    remainingDistanceKm != null &&
-                    remainingDistanceKm <= DOWNHILL_FINISH_DISTANCE_KM
-                ) {
-                    downhillFinishTriggered = true
-                    lastElevationCoachingTime = now
-                    Log.d("ElevationCoaching", "Downhill finish: ${slopeElevationLoss.toInt()}m lost, ${remainingDistanceKm}km to go")
-                    triggerElevationCoaching("downhill_finish", gradePercent, slopeDistanceMeters)
-                    return
-                }
-                val coachingType = when {
-                    slopeElevationLoss >= STEEP_HILL_ELEVATION_M -> "downhill"
-                    slopeElevationLoss >= MODERATE_HILL_ELEVATION_M -> "downhill"
-                    else -> "hill_downhill_technique"
-                }
-                Log.d("ElevationCoaching", "Downhill: ${slopeElevationLoss.toInt()}m (${gradePercent.toInt()}%) over ${slopeDistanceMeters.toInt()}m")
-                lastElevationCoachingTime = now
-                triggerElevationCoaching(coachingType, gradePercent, slopeDistanceMeters)
-            }
+            val eventType = if (gradePercent <= STEEP_DOWNHILL_GRADE_THRESHOLD) "steep_descent" else "gradual_descent"
+            Log.d("ElevationCoaching", "Terrain standalone [$eventType]: " +
+                "loss=${slopeElevationLoss.toInt()}m grade=${gradePercent.toInt()}% dist=${slopeDistanceMeters.toInt()}m")
+            lastElevationCoachingTime = now
+            triggerElevationCoaching(eventType, gradePercent, slopeDistanceMeters)
         }
     }
 

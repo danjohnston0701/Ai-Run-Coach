@@ -73,6 +73,10 @@ data class EliteCoachingRequest(
     @SerializedName("runPhase") val runPhase: String? = null,  // EARLY, BUILDING, SUSTAINING, FINISHING
     @SerializedName("isOnHill") val isOnHill: Boolean? = null,
     @SerializedName("isUphill") val isUphill: Boolean? = null,
+    // Current terrain state from the state-based classifier — flat | gradual_climb | steep_climb |
+    // gradual_descent | steep_descent | rolling. Sent with ALL coaching requests so the LLM can
+    // reference terrain without needing a separate elevation-coaching prompt.
+    @SerializedName("currentTerrainState") val currentTerrainState: String? = null,
     @SerializedName("fatigueLevel") val fatigueLevel: String? = null,  // FRESH, MODERATE, FATIGUED
     @SerializedName("recentTechniqueCategories") val recentTechniqueCategories: List<String>? = null,
 
