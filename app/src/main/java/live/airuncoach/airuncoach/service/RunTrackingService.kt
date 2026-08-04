@@ -1056,6 +1056,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var dynamicPhaseIsWorkInterval: Boolean = true  // false for recovery/walk phases
     private var dynamicPhaseDurationMin: Double = 0.0  // planned duration of current phase (0 = distance-based)
 
+    // Interval midpoint tracking — fires a live AI midpoint cue once per work rep
+    private var lastRepMidpointFiredAtRep: Int = -1
+
     // Whether there is an active coaching plan (either system) — used to suppress generic prompts
     private val isCoachingPlanActive: Boolean
         get() = dynamicCoachingPlan != null || sessionInstructions != null
@@ -3887,7 +3890,24 @@ class RunTrackingService : Service(), SensorEventListener {
                         } else {
                             totalPausedMs
                         }
-                        val finalDurationMs = (System.currentTimeMillis() - startTime) - finalPausedMs
+                        // Guard: if startTime == 0 this service instance was restarted (e.g. Android
+                        // OS killed the old instance mid-pause, and the user pressed Stop on the phone
+                        // which delivered ACTION_STOP_TRACKING to a fresh instance).  The companion-
+                        // object _currentRunSession may still hold valid GPS data from the old
+                        // instance, but the instance variables (startTime, pauseStartTime,
+                        // totalPausedMs) have been reset to 0.  Computing (currentTimeMillis - 0)
+                        // would produce a duration equal to the Unix epoch timestamp (~496 hours),
+                        // which is the bug that caused the incorrect "496:03:33" display.
+                        //
+                        // Fallback: use the session's last known duration which was correctly computed
+                        // by the previous instance's timer (watchElapsedSeconds * 1000 or
+                        // getActiveRunDuration()).  This preserves the user's true run time.
+                        val finalDurationMs = if (startTime > 0L) {
+                            (System.currentTimeMillis() - startTime) - finalPausedMs
+                        } else {
+                            Log.w("RunTrackingService", "stopTracking: startTime=0 — service was restarted, falling back to session.duration=${session.duration}ms")
+                            session.duration.coerceAtLeast(0L)
+                        }
 
                         // Snapshot coachingHistory HERE (after the async weather call) so we catch
                         // any live-trigger coroutines that resolved during the weather fetch.
@@ -4433,6 +4453,15 @@ class RunTrackingService : Service(), SensorEventListener {
         audioPlayerHelper.destroy() // Clean up OpenAI TTS audio player
         CoachingAudioQueue.stopAll() // Stop any queued coaching audio
         _latestCoachingText.value = null
+        // Clear the companion-object (static) session state so that a future service
+        // instance cannot accidentally process stale GPS data with its reset startTime=0
+        // and compute a duration equal to System.currentTimeMillis() (the "496 hour" bug).
+        // Only clear if we are NOT currently tracking — if the OS is killing a live session
+        // we should leave the state intact for the START_STICKY restart to find it.
+        if (!isTracking) {
+            _currentRunSession.value = null
+            Log.d("RunTrackingService", "onDestroy: cleared companion _currentRunSession (was not tracking)")
+        }
         // Notify watch the session has ended, then shut down ConnectIQ bridge
         // NOTE: May race with ongoing upload, but sendSessionEnded() is idempotent
         try {
@@ -5669,58 +5698,150 @@ class RunTrackingService : Service(), SensorEventListener {
                 "🏃 Dynamic phase: $previousPhaseName → $resolvedPhaseName " +
                 "(${String.format("%.2f", currentDistanceKm)}km / ${String.format("%.1f", elapsedMinutes)}min) — reactive cooldowns reset")
 
-            // Fire the appropriate trigger for this phase transition.
-            // Priority: rep_start / recovery_start (for repeating phases) → phase_start (for unique phases)
+            // ── Phase transition coaching ─────────────────────────────────────
+            // For repeating interval phases (totalReps > 1): ALWAYS fire a live AI message
+            // via OpenAI so the athlete hears "Rep 3 of 6 — push the effort, 60 seconds"
+            // rather than a pre-written template (or silence if no trigger exists in the plan).
+            //
+            // For non-repeating phases: use the plan's phase_start trigger if present.
             // Bypass the 150m distance gate so transitions always fire for short interval phases.
+            val phaseBaseName = resolvedPhase.name
             val triggerTypeToMatch = when {
                 totalReps > 1 && isRecovery -> listOf("recovery_start", "rep_start", "phase_start")
                 totalReps > 1              -> listOf("rep_start", "phase_start")
                 else                       -> listOf("phase_start", "recovery_start")
             }
 
-            // For repeating phases: use a stable trigger id (not per-rep) so alternativeMessages rotate
-            val phaseBaseName = resolvedPhase.name
+            // Find matching trigger from the plan (may be null for interval phases if AI didn't generate one)
             val phaseStartTrigger = plan.triggers.firstOrNull { t ->
                 t.type in triggerTypeToMatch &&
-                (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName)) &&
+                (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName) ||
+                 // Also match generic rep_start/recovery_start triggers (no phase name in id/condition)
+                 (totalReps > 1 && t.type in listOf("rep_start", "recovery_start") &&
+                  !t.condition.contains("phase ==") &&
+                  !t.id.contains("warmup") && !t.id.contains("cooldown"))) &&
                 // rep_start / recovery_start must fire on EVERY rep — never block via triggerFiredOnce.
-                // phase_start triggers that are "once" (e.g. a warm-up intro) fire only the first time.
                 if (t.frequency == "once" && t.type !in listOf("rep_start", "recovery_start")) {
                     !triggerFiredOnce.contains(t.id)
                 } else true
             }
 
-            if (phaseStartTrigger != null && !hasCoachingFiredThisTick &&
-                canFireCoaching(bypassDistanceGate = true)) {
-                val rawMsg = pickTriggerMessage(
-                    phaseStartTrigger, repNumber, totalReps,
+            if (!hasCoachingFiredThisTick && canFireCoaching(bypassDistanceGate = true)) {
+
+                if (totalReps > 1) {
+                    // ── Interval rep transition: always use live AI ────────────────
+                    // Use the plan's trigger (for its messages/alternativeMessages) or synthesize one.
+                    // fireLiveTriggerMessage passes full interval context (rep number, phase duration,
+                    // targets, live metrics) so OpenAI says "Rep 3 of 6 — hold this for 60 seconds."
+                    val triggerForAI = phaseStartTrigger
+                        ?: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger(
+                            id = if (isRecovery) "recovery_start_auto" else "rep_start_auto",
+                            type = if (isRecovery) "recovery_start" else "rep_start",
+                            condition = "always",
+                            message = if (isRecovery)
+                                "Good work — ease off, let your heart rate come down."
+                            else
+                                "Rep {repNum} of {totalReps} — push the effort.",
+                            frequency = "on_condition",
+                            alternativeMessages = if (isRecovery) listOf(
+                                "Nice rep — recover now, back off and breathe.",
+                                "Good effort — ease right back, let the heart rate settle.",
+                                "Recovery — bring it down and prepare for the next one.",
+                            ) else listOf(
+                                "Rep {repNum} of {totalReps} — commit to this one.",
+                                "Here we go, rep {repNum}. Controlled and strong.",
+                                "{repNum} of {totalReps} — stay relaxed and drive.",
+                            ),
+                            alertType = null,
+                            suppressWhenIntensity = null,
+                        )
+
+                    // Track firing for plan-defined triggers (not synthetic ones)
+                    if (phaseStartTrigger != null) {
+                        if (phaseStartTrigger.frequency == "once") triggerFiredOnce.add(phaseStartTrigger.id)
+                        triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
+                    }
+                    // Reset midpoint tracking for the new work rep
+                    if (!isRecovery) lastRepMidpointFiredAtRep = -1
+
+                    hasCoachingFiredThisTick = true
+                    Log.d("RunTrackingService",
+                        "🏃 Interval ${if (isRecovery) "RECOVERY" else "WORK"} rep $repNumber/$totalReps — live AI rep transition")
+                    fireLiveTriggerMessage(
+                        trigger = triggerForAI,
+                        phaseName = resolvedPhaseName,
+                        phaseHRMin = resolvedPhase.targetHRMin,
+                        phaseHRMax = resolvedPhase.targetHRMax,
+                        phasePaceMin = resolvedPhase.targetPaceMin,
+                        phasePaceMax = resolvedPhase.targetPaceMax,
+                        currentDistanceKm = currentDistanceKm,
+                        plan = plan,
+                        currentPhase = resolvedPhase,
+                    )
+
+                } else if (phaseStartTrigger != null) {
+                    // ── Non-interval phase: use plan trigger (existing behaviour) ─
+                    val rawMsg = pickTriggerMessage(
+                        phaseStartTrigger, repNumber, totalReps,
+                        phaseHRMin = resolvedPhase.targetHRMin,
+                        phaseHRMax = resolvedPhase.targetHRMax,
+                        phasePaceMin = resolvedPhase.targetPaceMin,
+                        phasePaceMax = resolvedPhase.targetPaceMax,
+                    )
+                    val isRepTransitionTrigger = phaseStartTrigger.type in listOf("rep_start", "recovery_start")
+                    if (phaseStartTrigger.frequency == "once" && !isRepTransitionTrigger) {
+                        triggerFiredOnce.add(phaseStartTrigger.id)
+                    }
+                    triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
+                    fireDynamicTrigger(rawMsg, phaseStartTrigger.type, resolvedPhaseName)
+                }
+            }
+        }
+
+        // ── Rep midpoint coaching (interval work phases only) ────────────────
+        // Fires once per work rep at ~50% of its duration — gives the athlete a brief check-in
+        // with seconds remaining, current pace, and whether effort is on target.
+        // This is an always-on coaching opportunity that doesn't require a plan trigger.
+        if (!hasCoachingFiredThisTick && isIntervalPlan &&
+            dynamicPhaseIsWorkInterval && entry.totalReps > 1 &&
+            entry.durationMin > 0 && lastRepMidpointFiredAtRep != repNumber) {
+
+            val phaseElapsedSec = (elapsedMinutes - dynamicPhaseTimeStartMin) * 60.0
+            val phaseTotalSec = entry.durationMin * 60.0
+            val phaseFraction = if (phaseTotalSec > 0) phaseElapsedSec / phaseTotalSec else 0.0
+
+            // Fire between 45%–60% through the rep (once only per rep, guarded by lastRepMidpointFiredAtRep)
+            if (phaseFraction in 0.45..0.60 && canFireCoaching(bypassDistanceGate = true)) {
+                lastRepMidpointFiredAtRep = repNumber
+                val secsRemaining = (phaseTotalSec - phaseElapsedSec).coerceAtLeast(0.0).toInt()
+                val midpointTrigger = live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger(
+                    id = "rep_midpoint_auto",
+                    type = "rep_midpoint",
+                    condition = "always",
+                    message = "Halfway through rep {repNum} — $secsRemaining seconds to go, hold the effort.",
+                    frequency = "on_condition",
+                    alternativeMessages = listOf(
+                        "Halfway — $secsRemaining seconds left on this rep. Stay strong.",
+                        "Midpoint — $secsRemaining seconds remaining. Keep the pace.",
+                        "$secsRemaining seconds left, rep {repNum} — don't let up now.",
+                    ),
+                    alertType = null,
+                    suppressWhenIntensity = null,
+                )
+                hasCoachingFiredThisTick = true
+                Log.d("RunTrackingService",
+                    "⏱️ Rep $repNumber/$totalReps midpoint (${(phaseFraction * 100).toInt()}%) — live AI midpoint cue")
+                fireLiveTriggerMessage(
+                    trigger = midpointTrigger,
+                    phaseName = resolvedPhaseName,
                     phaseHRMin = resolvedPhase.targetHRMin,
                     phaseHRMax = resolvedPhase.targetHRMax,
                     phasePaceMin = resolvedPhase.targetPaceMin,
                     phasePaceMax = resolvedPhase.targetPaceMax,
+                    currentDistanceKm = currentDistanceKm,
+                    plan = plan,
+                    currentPhase = resolvedPhase,
                 )
-                // ── Rep progress prefix ───────────────────────────────────────────
-                // For rep_start (work interval) transitions in multi-rep sessions,
-                // prefix the message with "Rep N of M — " so the athlete always
-                // knows exactly where they are in the set.
-                // Skip if the AI message already includes the rep count (e.g. "4 of 6").
-                val msg = if (phaseStartTrigger.type == "rep_start" && totalReps > 1) {
-                    val alreadyHasCount =
-                        rawMsg.contains(Regex("\\b$repNumber\\s+of\\s+$totalReps\\b", RegexOption.IGNORE_CASE)) ||
-                        rawMsg.contains(Regex("\\brep\\s*$repNumber\\b", RegexOption.IGNORE_CASE))
-                    if (alreadyHasCount) rawMsg else "Rep $repNumber of $totalReps — $rawMsg"
-                } else rawMsg
-
-                // IMPORTANT: Do NOT add rep_start / recovery_start triggers to triggerFiredOnce.
-                // These must fire on every rep transition — the isNewPhase guard above already
-                // prevents them from double-firing within the same phase.
-                // Only non-repeating phase_start triggers (e.g. warm-up intro) should be once-only.
-                val isRepTransitionTrigger = phaseStartTrigger.type in listOf("rep_start", "recovery_start")
-                if (phaseStartTrigger.frequency == "once" && !isRepTransitionTrigger) {
-                    triggerFiredOnce.add(phaseStartTrigger.id)
-                }
-                triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
-                fireDynamicTrigger(msg, phaseStartTrigger.type, resolvedPhaseName)
             }
         }
 
@@ -5743,10 +5864,9 @@ class RunTrackingService : Service(), SensorEventListener {
             }
 
             if (nearPhaseEnd) {
-                val phaseBaseName = resolvedPhase.name
                 val phaseEndTrigger = plan.triggers.firstOrNull { t ->
                     t.type == "phase_end" &&
-                    (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName)) &&
+                    (t.condition.contains(resolvedPhase.name) || t.id.contains(resolvedPhase.name)) &&
                     if (t.frequency == "once") !triggerFiredOnce.contains(t.id) else true
                 }
                 if (phaseEndTrigger != null && canFireCoaching(bypassDistanceGate = true)) {

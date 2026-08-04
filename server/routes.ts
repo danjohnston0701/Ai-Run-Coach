@@ -2353,7 +2353,12 @@ function transformRunForAndroid(run: any) {
           return isNaN(d.getTime()) ? null : d.getTime();
         })();
 
-        if (startedAtMs !== null) {
+        // Sanity check: startedAtMs must be a plausible recent date (after year 2020).
+        // If startedAtMs == 0 (Unix epoch) the Android service had startTime=0 due to a
+        // service-restart bug — in that case the anchor heuristic would mistakenly treat
+        // rawDuration ≈ currentTimeMillis as "correct" and store a Unix-timestamp-as-duration.
+        const MIN_VALID_START_MS = new Date('2020-01-01').getTime(); // 1577836800000
+        if (startedAtMs !== null && startedAtMs >= MIN_VALID_START_MS) {
           const actualElapsedMs = Date.now() - startedAtMs;
           // Pick whichever interpretation is closer to the real elapsed time
           const diffAsMs  = Math.abs(rawDuration - actualElapsedMs);
@@ -2366,6 +2371,16 @@ function transformRunForAndroid(run: any) {
           const treatedAsMs = rawDuration > 86400;
           durationInSeconds = treatedAsMs ? Math.round(rawDuration / 1000) : rawDuration;
           console.log(`[POST /api/runs] Duration normalization (fallback): raw=${rawDuration} → ${durationInSeconds}s (was ${treatedAsMs ? 'ms' : 'seconds'})`);
+        }
+
+        // Final sanity cap: no legitimate run can last more than 24 hours (86400 s).
+        // If durationInSeconds is still impossibly large after normalization, the Android client
+        // sent a corrupted value (e.g. startTime=0 caused duration ≈ Unix-timestamp-in-ms).
+        // In that case, clamp to 0 so the run is saved with an obviously-wrong-but-fixable
+        // zero duration rather than a 496-hour value that looks like a valid long number.
+        if (durationInSeconds > 86400) {
+          console.error(`[POST /api/runs] Duration sanity cap triggered: ${durationInSeconds}s > 86400s — clamping to 0 (raw=${rawDuration}, startedAtMs=${startedAtMs})`);
+          durationInSeconds = 0;
         }
       }
 
@@ -15732,6 +15747,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
           changes: a.changes,
           aiSuggestion: a.aiSuggestion,
           userAccepted: a.userAccepted,
+          status: a.status,
         })),
       });
     } catch (error: any) {
