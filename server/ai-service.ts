@@ -2004,6 +2004,11 @@ export async function generateCadenceCoaching(params: {
   runnerProfile?: string | null;
   // "run" | "walk" — controls whether spm coaching or walking rhythm coaching is delivered
   activityType?: string;
+  // Cross-platform cadence role fields (WALKING_COACHING_SPEC parity with iOS)
+  // exercise_type: "RUNNING" | "WALKING"
+  // cadence_role: "primary_metric" | "context_only"
+  exercise_type?: string;
+  cadence_role?: string;
 }): Promise<string> {
   const { cadence, strideLength, strideZone, currentPace, speed, distance, elapsedTime,
     heartRate, userHeight, userWeight, userAge,
@@ -2012,12 +2017,18 @@ export async function generateCadenceCoaching(params: {
   const cadenceAccentRule = accentDirective((params as any).coachAccent);
 
   // ── WALK SESSION: walking rhythm coaching replaces spm coaching ─────────────
-  // Traditional cadence targets (170-180 spm) are irrelevant for walking. The
-  // walking coach focuses on posture, arm swing, rhythm, and HR — not step frequency.
-  // Cadence is passed as background context only ("the runner is moving at ~X spm")
-  // so the AI can reference it if it's genuinely unusual, but it should NEVER be the
-  // primary coaching topic for walk sessions.
-  if (params.activityType === 'walk') {
+  // Triggered by any of three equivalent signals (Android, iOS, or direct API):
+  //   activityType === 'walk'          (Android naming)
+  //   exercise_type === 'WALKING'      (iOS WALKING_COACHING_SPEC naming)
+  //   cadence_role === 'context_only'  (iOS/spec canonical flag)
+  //
+  // When walk mode is active, cadence is background context only — the coach never
+  // quotes spm targets. Walking rhythm, posture, arm drive, and HR effort are used instead.
+  const isWalkMode = params.activityType === 'walk'
+    || params.exercise_type === 'WALKING'
+    || params.cadence_role === 'context_only';
+
+  if (isWalkMode) {
     const walkDistanceFormatted = formatDistanceForCoaching(distance);
     const walkTimeFormatted = formatElapsedForTTS(elapsedTime);
     const walkPrompt = `You are ${coachName}, a supportive ${coachTone} walking coach.

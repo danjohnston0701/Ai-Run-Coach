@@ -6868,7 +6868,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
                     coachAccent = currentUser?.coachAccent,
-                    activityType = currentActivityType
+                    activityType = currentActivityType,
+                    // Cross-platform fields matching iOS WALKING_COACHING_SPEC
+                    exerciseType = if (currentActivityType == "walk") "WALKING" else "RUNNING",
+                    cadenceRole = if (currentActivityType == "walk") "context_only" else "primary_metric"
                 )
                 val response = apiService.getCadenceCoaching(request)
                 coachingHistory.add(AiCoachingNote(

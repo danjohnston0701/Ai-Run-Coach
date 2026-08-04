@@ -34,7 +34,15 @@ data class CadenceCoachingRequest(
     // "run" | "walk" — cadence coaching is suppressed on device for walks, but the field
     // is included so the server can apply walk-aware coaching if the endpoint is ever
     // called directly (e.g. race walking, recovery walks between intervals).
-    @SerializedName("activityType") val activityType: String? = "run"
+    @SerializedName("activityType") val activityType: String? = "run",
+
+    // Cross-platform cadence role contract (matches iOS WALKING_COACHING_SPEC)
+    // exercise_type: "RUNNING" | "WALKING" — mirrors iOS ExerciseType enum
+    @SerializedName("exercise_type") val exerciseType: String? = "RUNNING",
+    // cadence_role: "primary_metric" | "context_only"
+    //   "context_only" = cadence is background data only; never quote spm targets
+    //   "primary_metric" = standard cadence coaching (running sessions)
+    @SerializedName("cadence_role") val cadenceRole: String? = "primary_metric"
 )
 
 data class CadenceCoachingResponse(
