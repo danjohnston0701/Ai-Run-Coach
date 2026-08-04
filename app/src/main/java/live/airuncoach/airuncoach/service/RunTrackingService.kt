@@ -6731,6 +6731,15 @@ class RunTrackingService : Service(), SensorEventListener {
         // the AI will have designed triggers for it. A separate generic voice firing independently
         // would be context-ignorant and could contradict what the plan just said.
         if (isCoachingPlanActive) return
+
+        // Walk sessions: traditional cadence (steps-per-minute) coaching is not appropriate for
+        // walking. Walkers don't benefit from numerical spm targets the way runners do, and the
+        // coaching feels clinical and unhelpful. Cadence is still recorded and sent to the AI as
+        // context in every coaching request — but standalone "your cadence is X spm" messages are
+        // suppressed. Walking rhythm, posture, arm swing, and HR-based coaching are far more
+        // valuable and are delivered via the technique/elite coaching paths instead.
+        if (currentActivityType == "walk") return
+
         if (currentCadence <= 0) return
         if (totalDistance < 1000) return // Need at least 1km of data
 
@@ -6855,7 +6864,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
-                    coachAccent = currentUser?.coachAccent
+                    coachAccent = currentUser?.coachAccent,
+                    activityType = currentActivityType
                 )
                 val response = apiService.getCadenceCoaching(request)
                 coachingHistory.add(AiCoachingNote(
@@ -7386,7 +7396,9 @@ class RunTrackingService : Service(), SensorEventListener {
             lastCuePaceDelta = lastCuePaceDelta,
             athleteRespondedToLastCue = athleteRespondedToLastCue,
             // ── Live terrain state (used by all coaching types as context enrichment)
-            currentTerrainState = currentTerrainState.takeIf { it != "flat" }
+            currentTerrainState = currentTerrainState.takeIf { it != "flat" },
+            // ── Session type (run vs walk) — controls coaching vocabulary and cadence policy
+            activityType = currentActivityType
         )
     }
 

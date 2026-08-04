@@ -77,6 +77,8 @@ data class EliteCoachingRequest(
     // gradual_descent | steep_descent | rolling. Sent with ALL coaching requests so the LLM can
     // reference terrain without needing a separate elevation-coaching prompt.
     @SerializedName("currentTerrainState") val currentTerrainState: String? = null,
+    // "run" | "walk" — controls coaching vocabulary and suppresses run-specific cues for walks
+    @SerializedName("activityType") val activityType: String? = "run",
     @SerializedName("fatigueLevel") val fatigueLevel: String? = null,  // FRESH, MODERATE, FATIGUED
     @SerializedName("recentTechniqueCategories") val recentTechniqueCategories: List<String>? = null,
 

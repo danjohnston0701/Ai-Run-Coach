@@ -30,7 +30,11 @@ data class CadenceCoachingRequest(
     @SerializedName("coachName") val coachName: String?,
     @SerializedName("coachTone") val coachTone: String?,
     @SerializedName("coachGender") val coachGender: String?,
-    @SerializedName("coachAccent") val coachAccent: String?
+    @SerializedName("coachAccent") val coachAccent: String?,
+    // "run" | "walk" — cadence coaching is suppressed on device for walks, but the field
+    // is included so the server can apply walk-aware coaching if the endpoint is ever
+    // called directly (e.g. race walking, recovery walks between intervals).
+    @SerializedName("activityType") val activityType: String? = "run"
 )
 
 data class CadenceCoachingResponse(

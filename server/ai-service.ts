@@ -2002,12 +2002,53 @@ export async function generateCadenceCoaching(params: {
   coachTone?: string;
   coachAccent?: string;
   runnerProfile?: string | null;
+  // "run" | "walk" — controls whether spm coaching or walking rhythm coaching is delivered
+  activityType?: string;
 }): Promise<string> {
   const { cadence, strideLength, strideZone, currentPace, speed, distance, elapsedTime,
     heartRate, userHeight, userWeight, userAge,
     optimalCadenceMin, optimalCadenceMax, optimalStrideLengthMin, optimalStrideLengthMax,
     coachName = 'Coach', coachTone = 'energetic' } = params;
   const cadenceAccentRule = accentDirective((params as any).coachAccent);
+
+  // ── WALK SESSION: walking rhythm coaching replaces spm coaching ─────────────
+  // Traditional cadence targets (170-180 spm) are irrelevant for walking. The
+  // walking coach focuses on posture, arm swing, rhythm, and HR — not step frequency.
+  // Cadence is passed as background context only ("the runner is moving at ~X spm")
+  // so the AI can reference it if it's genuinely unusual, but it should NEVER be the
+  // primary coaching topic for walk sessions.
+  if (params.activityType === 'walk') {
+    const walkDistanceFormatted = formatDistanceForCoaching(distance);
+    const walkTimeFormatted = formatElapsedForTTS(elapsedTime);
+    const walkPrompt = `You are ${coachName}, a supportive ${coachTone} walking coach.
+
+WALKER DATA:
+- Distance covered: ${walkDistanceFormatted}
+- Time: ${walkTimeFormatted}
+- Current pace: ${formatPaceForTTS(currentPace)}
+${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
+- Step rate (context only): ~${cadence} spm — do NOT mention this number
+
+COACHING TOPIC — choose ONE of the following that fits the moment:
+1. Walking posture: "Stand tall, keep your gaze forward, let your shoulders drop and your arms swing naturally at your sides"
+2. Walking rhythm: Comment on their smooth, settled rhythm — use words like "comfortable", "flowing", "purposeful" — NOT "cadence" or "steps per minute"
+3. Walking arm drive: Bend the elbows slightly at ~90°, swing forward and back (not across the body) — generates forward momentum
+4. Walking efficiency: Push off through the toes at the back of each stride to keep the movement flowing rather than flat-footed
+5. Aerobic effort & HR: ${heartRate ? `At ${heartRate} bpm they are ${heartRate < 100 ? 'well below aerobic zone — they could push a little harder' : heartRate < 130 ? 'in a comfortable aerobic zone — ideal for this walk' : 'working hard — a comfortable conversational effort is the sweet spot for fitness walking'}` : 'encourage finding a pace that feels comfortably brisk — able to hold a conversation, but not strolling'}
+
+Deliver ONE short coaching cue (1-2 sentences, spoken aloud). Sound encouraging and natural. Do NOT mention "cadence", "steps per minute", "spm", or any numerical step targets. No emojis. ${toneDirective(coachTone)}${cadenceAccentRule ? ' ' + cadenceAccentRule : ''}`;
+
+    const walkCompletion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: `You are ${coachName}, a warm, encouraging ${coachTone} walking coach. Walking is its own discipline — focus on movement quality, rhythm, posture, and effort rather than running metrics. Never say "cadence", "spm", or "steps per minute". Keep it 1-2 sentences, spoken aloud.` },
+        { role: "user", content: walkPrompt }
+      ],
+      max_tokens: 120,
+      temperature: 0.8,
+    });
+    return walkCompletion.choices[0].message.content || "You're moving with a great rhythm — keep those arms swinging and stay tall through your stride.";
+  }
 
   // Personalised cadence range from biomechanics model (pace + height + age)
   // The values sent from the device (optimalCadenceMin/Max) are also biomechanics-based,
@@ -5119,6 +5160,10 @@ export interface EliteCoachingParams {
   etaOverTargetPercent?: number;         // how far over target as % (negative = under)
   remainingMeters?: number;              // meters remaining for final triggers
 
+  // Session type — "run" | "walk". Controls coaching vocabulary and suppresses
+  // run-specific cues (cadence targets, pace splits vs walking pace, etc.) for walk sessions.
+  activityType?: string;
+
   // ── Technique coaching — specific category selected by the Android app ──────
   // The app picks a category (e.g. "breathing_rhythm", "mental_smile") from its
   // rotation system and sends the exact coaching cue to deliver here so the AI
@@ -5179,6 +5224,8 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
     trainingPlanId, workoutType, workoutDescription, planGoalType, planWeekNumber, planTotalWeeks
   } = params;
 
+  const isWalkSession = params.activityType === 'walk';
+
   // For Zone 1-2 aerobic/recovery runs, skip speed-focused coaching (final pushes, sprint finishes)
   // FINAL KM is different — if they're in Zone 4-5, that's appropriate for a finishing push
   // Only constrain HR if they're in a recovery/easy zone (Z1-Z2) during the final stage
@@ -5205,14 +5252,22 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
   const _elevGradeKnown = typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5;
   const noTerrainRule = (hasRoute || _elevGradeKnown) ? '' : `\nCRITICAL: No GPS elevation data. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain characteristics.`;
 
+  // Walk session vocabulary policy — injected into every prompt for walk sessions
+  const walkSessionRule = isWalkSession
+    ? `\nWALK SESSION POLICY: This is a WALKING session. Use "walker/walking" vocabulary, NOT "runner/running". NEVER mention cadence targets, spm, steps per minute, or suggest the walker "increase their turnover". Cadence is available as context only. Focus on: movement quality, posture, arm swing, rhythm, aerobic effort, HR zones, and enjoyment. Heart rate coaching is MORE valuable than pace coaching for most walkers.`
+    : '';
+
   // Build runner status block (shared across all types)
-  let status = `Runner Status:
+  let status = `${isWalkSession ? 'Walker' : 'Runner'} Status:
 - Distance: ${formatDistanceForCoaching(distance)}${targetDistance ? ` of ${formatDistanceForCoaching(targetDistance)} (${progress}%)` : ''} — ${remaining} remaining
 - Time: ${timeMin} minutes
 - Current pace: ${spokenPace}
 - Average pace: ${spokenAvgPace}`;
   if (heartRate && heartRate > 0) status += `\n- Heart rate: ${heartRate} bpm`;
-  if (cadence && cadence > 0) status += `\n- Cadence: ${cadence} spm`;
+  // Cadence is context-only for walk sessions — do not coach spm targets for walking
+  if (cadence && cadence > 0) status += isWalkSession
+    ? `\n- Step rate (context only, do NOT coach): ~${cadence} spm`
+    : `\n- Cadence: ${cadence} spm`;
   if (hasRoute && totalElevationGain && totalElevationGain > 0) status += `\n- Elevation climbed: ${Math.round(totalElevationGain)}m`;
   if (hasRoute && typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 2) status += `\n- Current gradient: ${currentGrade.toFixed(1)}%`;
   if (kmSplits && kmSplits.length > 0) status += `\n- Splits: ${kmSplits.map(s => `km${s.km}=${s.pace}`).join(', ')}`;
@@ -5314,6 +5369,32 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
       // We MUST use this category — the rotation system on the device ensures the
       // full library of 40+ coaching types gets used, not just the ones that happen
       // to match generic conditionals.
+
+      // ── Walk session policy ────────────────────────────────────────────────
+      // Cadence-specific technique categories are irrelevant for walking and should
+      // be transparently redirected to walking movement quality instead.
+      const CADENCE_SPECIFIC_CATEGORIES = ['feet_cadence', 'stride_frequency_consistency', 'cadence_turnover'];
+      const isCadenceCategory = techniqueCategory && CADENCE_SPECIFIC_CATEGORIES.includes(techniqueCategory);
+
+      if (isWalkSession && isCadenceCategory) {
+        // Redirect to walking rhythm coaching — same technique slot, different topic
+        const walkRhythmPrompt = `WALK SESSION — Coaching moment: walking rhythm and movement quality.
+
+${status}
+
+This is a WALK session. Coach one of the following walking-specific movement qualities:
+- Walking posture: stand tall, gaze forward, shoulders relaxed and dropped, natural arm swing
+- Walking arm drive: bend elbows ~90°, swing arms forward and back (not across body) — drives forward momentum
+- Walking foot placement: push off through toes at the back of each stride to keep the movement flowing
+- Walking rhythm: a smooth, settled, purposeful rhythm — not marching, not shuffling
+${heartRate ? `- Effort and HR: at ${heartRate} bpm, ${heartRate < 100 ? 'they could push slightly harder for better aerobic benefit' : heartRate < 130 ? 'they\'re in a great aerobic zone — keep it here' : 'they\'re working hard — conversational effort is the sweet spot for fitness walking'}` : ''}
+
+Give 1-2 sentences. Do NOT mention "cadence", "spm", "steps per minute", or any numerical step targets. Sound natural and encouraging.`;
+
+        typePrompt = walkRhythmPrompt;
+        systemExtra = `You are ${coachName}, a supportive ${coachTone} walking coach. Walking is its own discipline — coach movement quality, posture, rhythm, and effort. Never say "cadence", "spm", or "steps per minute".`;
+        break;
+      }
 
       const isAerobicZone = targetHeartRateZone && targetHeartRateZone <= 2;
 
@@ -5649,14 +5730,14 @@ Give the most intense, powerful 1-2 sentence motivational burst possible:
     }
   }
 
-  const prompt = `You are ${coachName}, an ELITE running coach with a ${coachTone} style. You're coaching this runner IN REAL-TIME via audio.
-
+  const prompt = `You are ${coachName}, an ELITE ${isWalkSession ? 'walking' : 'running'} coach with a ${coachTone} style. You're coaching this ${isWalkSession ? 'walker' : 'runner'} IN REAL-TIME via audio.
+${walkSessionRule}
 ${typePrompt}
 ${PACE_FORMAT_RULE}
 
 Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add value.`;
 
-  const systemMsg = `You are ${coachName}, an elite ${coachTone} running coach delivering real-time audio coaching during a run. You combine data-driven insight with elite technique coaching. Reference the runner's actual numbers. Never give empty motivation — every word is backed by data or technique knowledge. ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${runnerProfileBlock(params.runnerProfile)}`;
+  const systemMsg = `You are ${coachName}, an elite ${coachTone} ${isWalkSession ? 'walking' : 'running'} coach delivering real-time audio coaching. You combine data-driven insight with elite technique coaching. Reference actual numbers. Never give empty motivation — every word is backed by data or technique knowledge.${isWalkSession ? ' WALKING SESSION: use "walker/walking" vocabulary. NEVER mention cadence, spm, or step frequency targets.' : ''} ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${runnerProfileBlock(params.runnerProfile)}`;
 
   try {
     const completion = await openai.chat.completions.create({
