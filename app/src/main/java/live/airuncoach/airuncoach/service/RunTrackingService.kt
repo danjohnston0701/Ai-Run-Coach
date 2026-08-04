@@ -6707,7 +6707,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Physiological response
                     lastCueHrDelta = lastCueHrDelta,
                     lastCuePaceDelta = lastCuePaceDelta,
-                    athleteRespondedToLastCue = athleteRespondedToLastCue
+                    athleteRespondedToLastCue = athleteRespondedToLastCue,
+                    // Terrain context — HR coach can contextualise elevated HR against current terrain
+                    // (e.g. "HR high because you're on a steep climb" vs "HR high on flat — check effort")
+                    terrainContext = currentTerrainState.takeIf { it != "flat" }
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(
@@ -7957,7 +7960,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     paceSpreadSeconds = paceSpread,
                     isNegativeSplitting = isNegSplit,
                     fitnessLevel = currentUser?.fitnessLevel,
-                    totalRunsAllTime = runHistoryStats?.totalRunsAllTime
+                    totalRunsAllTime = runHistoryStats?.totalRunsAllTime,
+                    // ── Cross-platform terrain state contract ──────────────────
+                    terrainState = currentTerrainState,
+                    distanceInStateM = slopeDistanceMeters.takeIf { it > 0 },
+                    hasRouteElevationAhead = false  // Route elevation lookahead not yet implemented
                 )
                 val response = apiService.getElevationCoaching(request)
                 coachingHistory.add(AiCoachingNote(

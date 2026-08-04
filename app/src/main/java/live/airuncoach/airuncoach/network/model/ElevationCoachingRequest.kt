@@ -42,7 +42,19 @@ data class ElevationCoachingRequest(
 
     // Runner experience — used to tailor tone (softer for newcomers/beginners with little history)
     @SerializedName("fitnessLevel") val fitnessLevel: String? = null,
-    @SerializedName("totalRunsAllTime") val totalRunsAllTime: Int? = null
+    @SerializedName("totalRunsAllTime") val totalRunsAllTime: Int? = null,
+
+    // ── Cross-platform terrain state contract (matches iOS TERRAIN_AWARENESS_SPEC) ──
+    // terrain_state: the confirmed current state from the 150m-hysteresis classifier.
+    //   Values: flat | rolling | gradual_climb | steep_climb | gradual_descent | steep_descent
+    @SerializedName("terrain_state") val terrainState: String? = null,
+    // distance_in_state_m: metres already travelled in the confirmed terrain state.
+    //   Lets the backend calibrate language ("you've been climbing for 300m" vs "just started").
+    @SerializedName("distance_in_state_m") val distanceInStateM: Double? = null,
+    // has_route_elevation_ahead: true only when route elevation lookahead data exists.
+    //   When false (current Android behaviour) the backend MUST NOT say "the top is coming",
+    //   "enjoy the downhill ahead", or any prediction about future terrain.
+    @SerializedName("has_route_elevation_ahead") val hasRouteElevationAhead: Boolean = false
 )
 
 data class KmSplitElevation(

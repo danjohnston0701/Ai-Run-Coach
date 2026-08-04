@@ -38,5 +38,12 @@ data class HeartRateCoachingRequest(
     // ── Physiological response to last cue ────────────────────────────────────
     @SerializedName("lastCueHrDelta") val lastCueHrDelta: Int? = null,      // bpm change since last cue (negative = fell)
     @SerializedName("lastCuePaceDelta") val lastCuePaceDelta: Int? = null,  // sec/km change since last cue (negative = faster)
-    @SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null
+    @SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null,
+
+    // ── Terrain context (cross-platform parity with iOS TERRAIN_AWARENESS_SPEC) ──
+    // Confirmed terrain state from the 150m-hysteresis classifier so the HR coach
+    // can contextualise elevated HR ("HR high because you're on a steep climb" vs
+    // "HR high on flat terrain — check effort").
+    // Values: flat | rolling | gradual_climb | steep_climb | gradual_descent | steep_descent
+    @SerializedName("terrain_context") val terrainContext: String? = null
 )

@@ -2245,6 +2245,12 @@ export async function getElevationCoaching(params: {
   segmentElevationLoss?: number;
   paceSpreadSeconds?: number;
   isNegativeSplitting?: boolean;
+  // Cross-platform terrain state contract (TERRAIN_AWARENESS_SPEC)
+  // iOS sends: event_type = "terrain_state", terrain_state = "gradual_climb" etc.
+  // Android sends: event_type = "gradual_climb" etc. (state directly as eventType)
+  terrain_state?: string;         // confirmed classifier state from iOS
+  distance_in_state_m?: number;   // metres already in the current terrain state
+  has_route_elevation_ahead?: boolean; // false until route lookahead is implemented
   // Legacy format support
   change?: string;
   grade?: number;
@@ -2254,9 +2260,23 @@ export async function getElevationCoaching(params: {
   const coachName = params.coachName || 'Coach';
   const coachTone = params.coachTone || 'energetic';
   const grade = params.currentGrade ?? params.grade ?? 0;
-  const eventType = params.eventType || params.change || 'uphill';
+
+  // ── Normalise event type across platforms ──────────────────────────────────
+  // iOS wraps state in a "terrain_state" envelope: { event_type: "terrain_state", terrain_state: "gradual_climb" }
+  // Android sends the state directly as event_type: "gradual_climb"
+  // Both are resolved to the same canonical state name for routing below.
+  const rawEventType = params.eventType || params.change || 'uphill';
+  const eventType = (rawEventType === 'terrain_state' && params.terrain_state)
+    ? params.terrain_state
+    : rawEventType;
+
+  // has_route_elevation_ahead: when false (current default for both platforms) the
+  // backend MUST NOT predict future terrain ("the top is coming", "downhill ahead").
+  const hasRouteElevationAhead = params.has_route_elevation_ahead === true;
+
   const distanceKm = formatDistanceForCoaching(params.distance);
   const segmentM = params.segmentDistanceMeters ? Math.round(params.segmentDistanceMeters) : null;
+  const distanceInStateM = params.distance_in_state_m ? Math.round(params.distance_in_state_m) : null;
 
   // Don't give terrain coaching for no-route runs — return empty so no TTS is triggered
   if (params.hasRoute === false) {
@@ -2307,7 +2327,7 @@ export async function getElevationCoaching(params: {
 
   if (eventType === 'gradual_climb' || eventType === 'uphill' || eventType === 'hill_uphill_technique') {
     // Legacy eventType aliases mapped to gradual_climb
-    coachingInstructions = `GRADUAL CLIMB — Runner is currently on a ${Math.abs(grade).toFixed(1)}% incline.${params.segmentElevationGain ? ` They have climbed ${Math.round(params.segmentElevationGain)}m in this segment.` : ''}${segmentM ? ` Segment distance: ${segmentM}m.` : ''}
+    coachingInstructions = `GRADUAL CLIMB — Runner is currently on a ${Math.abs(grade).toFixed(1)}% incline.${params.segmentElevationGain ? ` They have climbed ${Math.round(params.segmentElevationGain)}m in this segment.` : ''}${distanceInStateM ? ` They have been climbing for ${distanceInStateM}m.` : segmentM ? ` Segment distance: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Acknowledge the climb they are ON: grade, metres climbed, how the effort feels relative to their data
@@ -2319,7 +2339,7 @@ COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Reference their actual numbers`;
 
   } else if (eventType === 'steep_climb') {
-    coachingInstructions = `STEEP CLIMB — Runner is on a ${Math.abs(grade).toFixed(1)}% grade.${params.segmentElevationGain ? ` Climbed ${Math.round(params.segmentElevationGain)}m so far in this segment.` : ''}${segmentM ? ` Segment: ${segmentM}m.` : ''}
+    coachingInstructions = `STEEP CLIMB — Runner is on a ${Math.abs(grade).toFixed(1)}% grade.${params.segmentElevationGain ? ` Climbed ${Math.round(params.segmentElevationGain)}m so far in this segment.` : ''}${distanceInStateM ? ` Has been on this steep section for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what follows):
 - Name the challenge directly: "You're on a steep one right now — ${Math.abs(grade).toFixed(0)}% grade"
@@ -2332,7 +2352,7 @@ COACHING FOCUS (current terrain only — do NOT predict what follows):
 
   } else if (eventType === 'gradual_descent' || eventType === 'downhill' || eventType === 'hill_downhill_technique') {
     // Legacy eventType aliases mapped to gradual_descent
-    coachingInstructions = `GRADUAL DESCENT — Runner is currently descending at ${Math.abs(grade).toFixed(1)}%.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${segmentM ? ` Segment: ${segmentM}m.` : ''}
+    coachingInstructions = `GRADUAL DESCENT — Runner is currently descending at ${Math.abs(grade).toFixed(1)}%.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — no predictions about what comes next):
 - Gravity is working FOR them right now — pace naturally picks up, that is correct and expected
@@ -2344,7 +2364,7 @@ COACHING FOCUS (current terrain only — no predictions about what comes next):
 - Reference their actual numbers`;
 
   } else if (eventType === 'steep_descent') {
-    coachingInstructions = `STEEP DESCENT — Runner is on a ${Math.abs(grade).toFixed(1)}% downgrade.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${segmentM ? ` Segment: ${segmentM}m.` : ''}
+    coachingInstructions = `STEEP DESCENT — Runner is on a ${Math.abs(grade).toFixed(1)}% downgrade.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Has been descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what follows):
 - Gravity is helping significantly — pace is naturally fast, that is correct
@@ -2407,6 +2427,14 @@ ${coachingInstructions}
 
 Give a coaching message (2-3 sentences). Sound like you KNOW this route inside and out — reference specific data points from their splits and metrics. This is spoken while running via TTS, so keep it conversational and actionable.`;
 
+  // Future-terrain ban: when has_route_elevation_ahead is false (the current default for both
+  // iOS and Android since route lookahead isn't implemented), the AI must not speculate about
+  // what terrain comes next. This is the key guardrail that prevents "enjoy the downhill
+  // coming up!" messages on climbs that might continue for another kilometre.
+  const futureBanRule = hasRouteElevationAhead
+    ? '- Route elevation lookahead IS available — you MAY reference upcoming terrain changes if the data supports it'
+    : '- CRITICAL: No route elevation lookahead. NEVER predict what terrain comes next. NEVER say "the top is coming", "almost there", "enjoy the downhill ahead", "nearly at the summit", or ANY prediction about future terrain. Describe only what the runner is on RIGHT NOW.';
+
   const systemPrompt = `You are ${coachName}, an elite running coach who specializes in terrain analysis and elevation-based pacing strategy. You've analyzed thousands of runs and can instantly correlate how terrain affects a runner's pace, heart rate, and cadence.
 
 CRITICAL RULES:
@@ -2415,9 +2443,9 @@ CRITICAL RULES:
 - Correlate metrics: "your pace dropped 15 seconds on that climb but your heart rate stayed controlled — that's textbook hill management"
 - Give ONE actionable technique cue specific to the current terrain
 - Keep it to 2-3 sentences maximum — this is spoken while they're running
-- NEVER predict what terrain comes next ("the top is coming", "enjoy the downhill ahead", "nearly there")
 - NEVER use the word "summit" or "crest" as a prediction
 - Descents SPEED UP pace — never say descending slows you down or is harder
+- ${futureBanRule}
 - ${toneDirective(coachTone)}${params.coachAccent ? '\n- ' + accentDirective(params.coachAccent) : ''}` + runnerProfileBlock(params.runnerProfile);
 
   const completion = await openai.chat.completions.create({
@@ -3649,6 +3677,9 @@ export async function generateHeartRateCoaching(params: {
   lastCueHrDelta?: number;
   lastCuePaceDelta?: number;
   athleteRespondedToLastCue?: boolean;
+  // Terrain context — lets HR coach contextualise elevated HR against current terrain
+  // Values: flat | rolling | gradual_climb | steep_climb | gradual_descent | steep_descent
+  terrain_context?: string;
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
 
@@ -3725,6 +3756,21 @@ export async function generateHeartRateCoaching(params: {
     ? `\nHR confidence is MEDIUM — readings are valid but mention the number with normal confidence.\n`
     : '';
 
+  // Build terrain context for HR coaching — an elevated HR on a steep climb is expected
+  // and shouldn't be treated the same as an elevated HR on flat terrain.
+  const terrainContextBlock = (() => {
+    if (!params.terrain_context || params.terrain_context === 'flat') return '';
+    const terrainLabels: Record<string, string> = {
+      gradual_climb: 'currently on a gradual climb (3-5% grade)',
+      steep_climb: 'currently on a steep climb (>5% grade) — elevated HR here is EXPECTED',
+      gradual_descent: 'currently descending gradually — HR should naturally ease',
+      steep_descent: 'currently on a steep descent — HR may stay elevated from prior climb',
+      rolling: 'on rolling terrain — HR will fluctuate with the undulations',
+    };
+    const label = terrainLabels[params.terrain_context] ?? `on ${params.terrain_context} terrain`;
+    return `\nTerrain context: Runner is ${label}. Factor this into your HR assessment — don't penalise a high HR that's appropriate for the current gradient.\n`;
+  })();
+
   const prompt = `You are ${coachName}, a ${coachTone} running coach giving real-time heart rate guidance.
 ${runnerProfileContext ? `\nRunner profile: ${runnerProfileContext}` : ''}
 Current stats (${elapsedMinutes} minutes into run):
@@ -3733,7 +3779,7 @@ Current stats (${elapsedMinutes} minutes into run):
 - Average HR this run: ${avgHR} bpm
 ${targetZone ? `- Target Zone: Zone ${targetZone} (${zoneNames[targetZone]})` : ''}
 ${wellnessContext ? `\nWellness context: ${wellnessContext}` : ''}
-${sensorNote}${sessionMemoryBlock}${physioBlock}
+${terrainContextBlock}${sensorNote}${sessionMemoryBlock}${physioBlock}
 Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their actual heart rate (${currentHR} bpm) and zone (Zone ${currentZone}). ${
   targetZone && currentZone !== targetZone 
     ? currentZone > targetZone 
