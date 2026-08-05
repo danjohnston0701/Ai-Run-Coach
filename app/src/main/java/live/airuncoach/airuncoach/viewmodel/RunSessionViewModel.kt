@@ -638,6 +638,7 @@ class RunSessionViewModel @Inject constructor(
         intervalDistKm: Float?    = null,
         intervalDurSecs: Int?     = null
     ) {
+        val sessionType = runConfig?.activityType?.name?.lowercase() ?: "run"
         garminWatchManager.sendPreparedRun(
             distanceKm        = distanceKm,
             runType           = runType,
@@ -648,9 +649,10 @@ class RunSessionViewModel @Inject constructor(
             targetPace        = targetPace,
             intervalCount     = intervalCount,
             intervalDistKm    = intervalDistKm,
-            intervalDurSecs   = intervalDurSecs
+            intervalDurSecs   = intervalDurSecs,
+            sessionType       = sessionType
         )
-        Log.d("RunSessionViewModel", "prepareRunOnWatch sent: type=$runType dist=${distanceKm}km")
+        Log.d("RunSessionViewModel", "prepareRunOnWatch sent: type=$runType sessionType=$sessionType dist=${distanceKm}km")
         prepareServiceForWatch()
     }
 

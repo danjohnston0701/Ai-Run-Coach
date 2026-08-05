@@ -16,7 +16,18 @@ class DataStreamer {
     private var _altitude = null;
     private var _pendingRequests = 0;
     private var _pendingBatchSessionId = null;  // set when uploadOfflineBatch() starts
-    
+    // "run" | "walk" — set by RunView before prepareSession() so both the
+    // session/start call and the session/end summary carry the correct type.
+    private var _activityType = "run";
+
+    // Called by RunView when it knows the session type (from phone BLE message).
+    function setActivityType(type) {
+        if (type != null && type.length() > 0) {
+            _activityType = type.equals("walk") ? "walk" : "run";
+            Sys.println("DataStreamer: activityType set to " + _activityType);
+        }
+    }
+
     function initialize() {
         // Load auth token from storage — do NOT make any Comm.makeWebRequest calls here.
         // Calling Comm during the initialize() / constructor phase (before getInitialView
@@ -181,10 +192,11 @@ class DataStreamer {
         
         var deviceInfo = Sys.getDeviceSettings();
         var payload = {
-            "sessionId" => _sessionId,
-            "deviceId" => deviceInfo.uniqueIdentifier,
-            "deviceModel" => deviceInfo.partNumber,
-            "activityType" => "running"
+            "sessionId"    => _sessionId,
+            "deviceId"     => deviceInfo.uniqueIdentifier,
+            "deviceModel"  => deviceInfo.partNumber,
+            "activityType" => _activityType.equals("walk") ? "walking" : "running",
+            "sessionType"  => _activityType   // "run" | "walk" — used by server for coaching context
         };
         // Include the planned workout ID so the backend can auto-complete the planned_workout
         // record when the Garmin activity webhook arrives after the run finishes.
@@ -228,6 +240,7 @@ class DataStreamer {
 
         var payload = {
             "sessionId"              => _sessionId,
+            "sessionType"            => _activityType,   // "run" | "walk"
             "summary" => {
                 "totalDistance"          => summary.get("distance"),
                 "totalDuration"          => summary.get("elapsedTime"),

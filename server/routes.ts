@@ -3412,9 +3412,14 @@ function transformRunForAndroid(run: any) {
       // Initialize weatherImpactAnalysis as null (used in learning loop below)
       let weatherImpactAnalysis: string | null = null;
       
-      // Get previous runs for context
+      // Get previous runs for context — filter to same session type (walk vs run)
+      // so a walk session is not compared against run history and vice versa.
+      const currentSessionType = run.sessionType === "walk" ? "walk" : "run";
       const previousRuns = await db.query.runs.findMany({
-        where: eq(runs.userId, userId),
+        where: and(
+          eq(runs.userId, userId),
+          eq(runs.sessionType, currentSessionType)
+        ),
         orderBy: desc(runs.completedAt),
         limit: 10,
       });
@@ -14207,10 +14212,12 @@ function transformRunForAndroid(run: any) {
 
       const user = await storage.getUser(run.userId);
 
+      // Filter by same session type — walk sessions compare to walk history, runs to run history
+      const thisSessionType = (run as any).sessionType === "walk" ? "walk" : "run";
       const previousRuns = await db
         .select()
         .from(runs)
-        .where(eq(runs.userId, run.userId))
+        .where(and(eq(runs.userId, run.userId), eq(runs.sessionType, thisSessionType)))
         .orderBy(desc(runs.completedAt))
         .limit(10);
 
@@ -14222,7 +14229,10 @@ function transformRunForAndroid(run: any) {
       if (body.weather) {
         try {
           const recentRuns = await db.query.runs.findMany({
-            where: eq(runs.userId, run.userId),
+            where: and(
+              eq(runs.userId, run.userId),
+              eq(runs.sessionType, thisSessionType)
+            ),
             orderBy: desc(runs.completedAt),
             limit: 30,
           });

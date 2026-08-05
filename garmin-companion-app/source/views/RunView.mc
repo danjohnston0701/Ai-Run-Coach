@@ -266,6 +266,17 @@ class RunView extends Ui.View {
         if (wt != null) { _prepWorkoutType = wt; }
         if (wd != null) { _prepWorkoutDesc = wd; }
         if (dd != null) { _prepRunDist     = dd.toFloat(); }
+
+        // Session type from phone — "walk" or "run". Propagate to DataStreamer so that
+        // both the session/start and session/end API calls carry the correct type.
+        var st = data.get("sessionType");
+        if (st != null && _dataStreamer != null) {
+            _dataStreamer.setActivityType(st);
+        }
+        if (st != null) {
+            App.Storage.setValue("sessionType", st);
+        }
+
         // Store plannedWorkoutId so DataStreamer can include it in the session/start payload
         // This is the critical link that lets the backend auto-complete the planned workout
         // when the Garmin activity webhook arrives after the run.
@@ -618,7 +629,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.2.1");
+                _phoneLink.sendHello("3.3.0");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -1075,6 +1086,13 @@ class RunView extends Ui.View {
     // ── Sensors / GPS ─────────────────────────────────────────────────────────
 
     function onPosition(info as Pos.Info) as Void {
+        // CRITICAL: Guard against null info on GPS cold start.
+        // Garmin fires the callback immediately after Pos.enableLocationEvents() on a cold
+        // boot with info = null because no satellite data exists yet.  Accessing info.accuracy
+        // on null throws a NullReferenceException -> IQ crash icon.  On a warm GPS (second open)
+        // the callback fires with a valid Pos.Info object (quality >= 1 "Last Known"), so the
+        // null path is never hit -- explaining the consistent first-open / second-open pattern.
+        if (info == null) { return; }
         // Track GPS quality for the GPS-wait overlay
         if (info.accuracy != null) {
             _gpsQuality = info.accuracy;
@@ -1243,72 +1261,69 @@ class RunView extends Ui.View {
         // -- Top row: Duration (left) | Pace (right) --
         if (_isRunning || _isPaused) {
             dc.setColor(0x00CC66, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(lx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.17).toNumber(), Gfx.FONT_XTINY, "DURATION", Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(lx, (h * 0.13).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.23).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else if (_isFinished) {
             // Run just ended — keep duration visible in dimmed green until next run starts
             dc.setColor(0x007744, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(lx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "FINISHED", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.17).toNumber(), Gfx.FONT_XTINY, "FINISHED", Gfx.TEXT_JUSTIFY_CENTER);
             dc.setColor(0xAAAAAA, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(lx, (h * 0.13).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.23).toNumber(), timerFont, _fmtTime(_elapsedTime), Gfx.TEXT_JUSTIFY_CENTER);
         } else {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(lx, (h * 0.10).toNumber(), timerFont, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(lx, (h * 0.20).toNumber(), timerFont, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
         }
 
         dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.07).toNumber(), Gfx.FONT_XTINY, "PACE", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.17).toNumber(), Gfx.FONT_XTINY, "PACE", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.13).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.23).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider top row
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine(cx, (h * 0.05).toNumber(), cx, (h * 0.30).toNumber());
+        dc.drawLine(cx, (h * 0.14).toNumber(), cx, (h * 0.37).toNumber());
 
         // -- Divider 1 --
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine((w * 0.08).toNumber(), (h * 0.31).toNumber(), (w * 0.92).toNumber(), (h * 0.31).toNumber());
+        dc.drawLine((w * 0.08).toNumber(), (h * 0.38).toNumber(), (w * 0.92).toNumber(), (h * 0.38).toNumber());
 
         // -- Middle row: Distance (left) | Cadence (right) --
         dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(lx, (h * 0.41).toNumber(), Gfx.FONT_XTINY, "KM", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, (h * 0.43).toNumber(), metricFont, (_dispDistance / 1000.0).format("%.2f"), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(lx, (h * 0.50).toNumber(), metricFont, (_dispDistance / 1000.0).format("%.2f"), Gfx.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(0xFF8800, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.34).toNumber(), Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.41).toNumber(), Gfx.FONT_XTINY, "SPM", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.43).toNumber(), metricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.50).toNumber(), metricFont, _dispCadence > 0 ? _dispCadence.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine(cx, (h * 0.32).toNumber(), cx, (h * 0.55).toNumber());
+        dc.drawLine(cx, (h * 0.39).toNumber(), cx, (h * 0.62).toNumber());
 
         // -- Divider 2 --
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine((w * 0.08).toNumber(), (h * 0.56).toNumber(), (w * 0.92).toNumber(), (h * 0.56).toNumber());
+        dc.drawLine((w * 0.08).toNumber(), (h * 0.63).toNumber(), (w * 0.92).toNumber(), (h * 0.63).toNumber());
 
         // -- Bottom row: HR (left) | Average pace (right) --
         dc.setColor(0xFF3355, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "HR", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(lx, (h * 0.66).toNumber(), Gfx.FONT_XTINY, "HR", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, (h * 0.68).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(lx, (h * 0.74).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
         var avgPace = (_sampleN > 0 && _sumPace > 0.0) ? _sumPace / _sampleN.toFloat() : 0.0;
         dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.59).toNumber(), Gfx.FONT_XTINY, "AVG PACE", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.66).toNumber(), Gfx.FONT_XTINY, "AVG PACE", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.68).toNumber(), metricFont, _fmtPaceDec(avgPace), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.74).toNumber(), metricFont, _fmtPaceDec(avgPace), Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider row 2
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
-        dc.drawLine(cx, (h * 0.57).toNumber(), cx, (h * 0.80).toNumber());
+        dc.drawLine(cx, (h * 0.64).toNumber(), cx, (h * 0.79).toNumber());
 
-        // Battery sits in the right column but is horizontally centered at rx so it
-        // doesn't create a visual cluster that makes the SPM value look larger.
-        // All four metric values use metricFont identically — consistent on all devices.
-        _drawBatteryIcon(dc, (rx - 11).toNumber(), (h * 0.80).toNumber());
+        // Battery icon removed from grid screen — grid shifted down so top row clears the bezel
 
         _drawStatusBar(dc, cx, w, h);
     }
@@ -1453,7 +1468,7 @@ class RunView extends Ui.View {
 
         var qLabels = ["No signal", "Last known", "Poor", "Usable", "Good"];
         dc.setColor(_gpsQuality >= 3 ? 0x00AA55 : Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.57).toNumber(), Gfx.FONT_XTINY, (_gpsQuality <= 4) ? qLabels[_gpsQuality] : "Searching", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, (h * 0.57).toNumber(), Gfx.FONT_XTINY, (_gpsQuality >= 0 && _gpsQuality <= 4) ? qLabels[_gpsQuality] : "Searching", Gfx.TEXT_JUSTIFY_CENTER);
 
         var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
         dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
@@ -1605,7 +1620,13 @@ class RunView extends Ui.View {
         // createSession() can return null on some devices/firmware (another activity already open,
         // low memory, etc.). Guard against null to prevent an unhandled exception / IQ crash.
         try {
-            _session = Record.createSession({ :name => "AI Run Coach", :sport => Record.SPORT_RUNNING });
+            // Use the correct sport type — walk sessions get SPORT_WALKING for correct FIT file classification.
+            var sport = Record.SPORT_RUNNING;
+            var storedType = App.Storage.getValue("sessionType");
+            if (storedType != null && storedType.equals("walk")) {
+                sport = Record.SPORT_WALKING;
+            }
+            _session = Record.createSession({ :name => "AI Run Coach", :sport => sport });
             if (_session == null) {
                 Sys.println("_startSession: createSession() returned null — running without FIT recording");
                 return;

@@ -838,11 +838,20 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
       )
     : '';
 
+  // Walk/run vocabulary — all user-facing text adapts to session type
+  const isWalkSession = sessionType === 'walk';
+  const personLabel  = isWalkSession ? 'walker'  : 'runner';
+  const actLabel     = isWalkSession ? 'walking' : 'running';
+  const coachLabel   = isWalkSession ? 'walking coach' : 'running coach';
+  const walkPaceNote = isWalkSession
+    ? '\nWALK SESSION: Use walking vocabulary. Never say "run", "running", or "runner". Pace comparisons should reference walking pace norms, not running. Cadence coaching is suppressed.'
+    : '';
+
   let prompt: string;
   if (isSplit && splitKm && splitPace) {
-    prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
-${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
-The runner just completed kilometer ${splitKm} with a split pace of ${spokenSplitPace}.
+    prompt = `You are ${coachName}, an AI ${coachLabel} with a ${coachTone} style.${walkPaceNote}
+${runnerContext ? `\n${isWalkSession ? 'Walker' : 'Runner'} context: ${runnerContext}` : ''}
+The ${personLabel} just completed kilometer ${splitKm} with a split pace of ${spokenSplitPace}.
 - Overall progress: ${formatDistanceForCoaching(distance)} of ${targetDistance ? `${formatDistanceForCoaching(targetDistance)} (${progress}%)` : '?'}
 - Time elapsed: ${timeFormatted}
 - Overall average pace: ${spokenCurrentPace}
@@ -856,9 +865,9 @@ ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
 Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : sessionSplitContext ? ' how their split compares to the session target pace.' : isTrainingSession ? ` how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${cadenceContext && (workoutType === 'tempo' || workoutType === 'threshold') ? 'If cadence is a concern, include a brief cadence cue. ' : ''}${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
   } else {
-    prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
-${runnerContext ? `\nRunner context: ${runnerContext}` : ''}
-500m check-in: Runner is at ${formatDistanceForCoaching(distance)}, pace ${spokenCurrentPace}, ${timeFormatted} elapsed.
+    prompt = `You are ${coachName}, an AI ${coachLabel} with a ${coachTone} style.${walkPaceNote}
+${runnerContext ? `\n${isWalkSession ? 'Walker' : 'Runner'} context: ${runnerContext}` : ''}
+500m check-in: ${isWalkSession ? 'Walker' : 'Runner'} is at ${formatDistanceForCoaching(distance)}, pace ${spokenCurrentPace}, ${timeFormatted} elapsed.
 ${terrainContext}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
@@ -875,7 +884,7 @@ Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenC
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When run history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the runner's experience level and the tone directive below.
+      { role: "system", content: `You are ${coachName}, a ${coachTone} ${coachLabel}. Keep pace updates brief but ALWAYS cite the ${personLabel}'s actual numbers (pace, split time, distance). When ${actLabel} history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the ${personLabel}'s experience level and the tone directive below.${walkPaceNote}
 
 ${getPaceContextDirective(
   currentPaceSecPerKm,
@@ -1071,20 +1080,25 @@ export async function generatePhaseCoaching(params: {
   const timeFormatted = formatElapsedForTTS(elapsedTime);  // "X min Y sec" for TTS
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
   
+  // Activity-aware vocabulary for phase descriptions
+  const isWalkActivity = activityType === 'walk';
+  const pLabel = isWalkActivity ? 'walker' : 'runner';
+  const aLabel = isWalkActivity ? 'walk' : 'run';
+
   const phaseDescriptions: Record<string, string> = {
     // App sends these enum names from CoachingPhase.kt
     // Backend provides facts (phase, progress %) — GPT decides coaching approach
-    EARLY: `The runner is in the early phase of their run (${progress}% complete), warming up and finding their rhythm.`,
-    MID: `The runner is in the middle of their run (${progress}% complete), settling into their pace. They have significant distance remaining.`,
-    LATE: `The runner is in the late phase (${progress}% complete). Physiologically, fatigue may be accumulating.`,
-    FINAL: `The runner is in the final phase (${progress}% complete), approaching the finish line.`,
-    GENERIC: `The runner is ${progress}% through their run.`,
-    STEADY: `The runner is running at a steady pace (${progress}% complete).`,
+    EARLY: `The ${pLabel} is in the early phase of their ${aLabel} (${progress}% complete), warming up and finding their rhythm.`,
+    MID: `The ${pLabel} is in the middle of their ${aLabel} (${progress}% complete), settling into their pace. They have significant distance remaining.`,
+    LATE: `The ${pLabel} is in the late phase (${progress}% complete). Physiologically, fatigue may be accumulating.`,
+    FINAL: `The ${pLabel} is in the final phase (${progress}% complete), approaching the finish line.`,
+    GENERIC: `The ${pLabel} is ${progress}% through their ${aLabel}.`,
+    STEADY: `The ${pLabel} is ${isWalkActivity ? 'walking' : 'running'} at a steady pace (${progress}% complete).`,
     // Legacy keys (in case old server code calls with these)
-    warmUp: `The runner is in the warm-up phase (${progress}% complete), finding their rhythm.`,
-    midRun: `The runner is in the middle of their run (${progress}% complete), with significant distance remaining.`,
-    lateRun: `The runner is in the late phase (${progress}% complete), where fatigue may be a factor.`,
-    finalPush: `The runner is in the final phase (${progress}% complete), approaching the finish.`,
+    warmUp: `The ${pLabel} is in the warm-up phase (${progress}% complete), finding their rhythm.`,
+    midRun: `The ${pLabel} is in the middle of their ${aLabel} (${progress}% complete), with significant distance remaining.`,
+    lateRun: `The ${pLabel} is in the late phase (${progress}% complete), where fatigue may be a factor.`,
+    finalPush: `The ${pLabel} is in the final phase (${progress}% complete), approaching the finish.`,
   };
   
   // ONLY include terrain info when the runner has a planned route
@@ -1362,9 +1376,10 @@ ${progressPercent > 80 ? "They're in the final stretch — be extra motivating!"
 Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.
 Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The runner's name is ${runnerFirstName} — use it naturally but not as a greeting.` : ''}`;
 
-    const paceSystemMsg = `You are ${coachName}, a ${coachTone} running coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings. 
+    const isWalkPace = activityType === 'walk';
+    const paceSystemMsg = `You are ${coachName}, a ${coachTone} ${isWalkPace ? 'walking' : 'running'} coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings.${isWalkPace ? ' This is a WALKING session — use "walker/walking" vocabulary. Never say "run", "runner", or "running".' : ''} 
 
-CRITICAL TERRAIN RULE: If the runner is descending (downhill gradient), their pace NATURALLY SPEEDS UP due to gravity. This is biomechanically correct and expected. DO NOT say descents "slow you down", "make things harder", or imply downhill is negative. If they're faster on descent, that's GOOD — acknowledge it naturally or comment on form control.
+CRITICAL TERRAIN RULE: If the ${isWalkPace ? 'walker' : 'runner'} is descending (downhill gradient), their pace NATURALLY SPEEDS UP due to gravity. This is biomechanically correct and expected. DO NOT say descents "slow you down", "make things harder", or imply downhill is negative. If they're faster on descent, that's GOOD — acknowledge it naturally or comment on form control.
 
 ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
 
@@ -1619,15 +1634,17 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
 
   if (isRunStart) {
     // RUN START: Pure motivational message — no metrics (they haven't run yet!)
-    prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+    const startPersonLabel = isWalkActivity ? 'walker' : 'runner';
+    const startActLabel    = isWalkActivity ? 'walk'   : 'run';
+    prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.${isWalkActivity ? '\nWALK SESSION: Use "walker/walking" vocabulary. Never say "run", "runner", or "running".' : ''}
 
-The runner has just started their ${activityType || 'run'}${targetDistance ? ` — their target is ${formatDistanceForTTS(targetDistance)}` : ''}${targetTime && targetTime > 0 ? ` in ${formatDurationForTTS(targetTime)}` : ''}.
+The ${startPersonLabel} has just started their ${startActLabel}${targetDistance ? ` — their target is ${formatDistanceForTTS(targetDistance)}` : ''}${targetTime && targetTime > 0 ? ` in ${formatDurationForTTS(targetTime)}` : ''}.
 ${noTerrainRule}${runnerProfileContext}${planContext}
-Give a short, energetic motivational message (2-3 sentences) to kick off their run. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics — the run has literally just begun. Just motivate them!
+Give a short, energetic motivational message (2-3 sentences) to kick off their ${startActLabel}. Focus on getting them pumped up and ready to go. Do NOT mention distance covered, pace, cadence, or any metrics — the ${startActLabel} has literally just begun. Just motivate them!
 ${VARIETY_INSTRUCTION}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "Hello". Jump straight into the coaching message.${runnerFirstName ? ` You may use "${runnerFirstName}" naturally but not as a greeting opener.` : ''}`;
 
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Give a brief, energetic send-off to start the ${startActLabel}. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}`;
   } else {
     // DURING RUN: Include metrics
     // Tone, depth, and framing are entirely driven by toneDirective(coachTone),
@@ -1643,16 +1660,17 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "He
       : '';
 
     // Build elevation coaching context (fire even without a planned route if grade is significant)
+    const elPerson = isWalkActivity ? 'Walker' : 'Runner';
     const elevationInstruction = (typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 4)
       ? (currentGrade > 0
-          ? `ELEVATION: Runner is currently on an uphill (${currentGrade.toFixed(1)}% grade). Coach them to shorten stride, drive knees, stay tall — slower pace on hills is normal and expected.`
-          : `ELEVATION: Runner is currently descending (${Math.abs(currentGrade).toFixed(1)}% grade). Remind them to control their stride, avoid braking hard — use the downhill to recover and let gravity help.`)
+          ? `ELEVATION: ${elPerson} is currently on an uphill (${currentGrade.toFixed(1)}% grade). Coach them to ${isWalkActivity ? 'lean slightly forward, shorten steps, and maintain rhythm' : 'shorten stride, drive knees, stay tall'} — slower pace on hills is normal and expected.`
+          : `ELEVATION: ${elPerson} is currently descending (${Math.abs(currentGrade).toFixed(1)}% grade). Remind them to control their stride${isWalkActivity ? ' and keep good posture' : ', avoid braking hard'} — use the downhill to recover and let gravity help.`)
       : '';
 
-    prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+    prompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.${isWalkActivity ? '\nWALK SESSION: Use "walker/walking" vocabulary throughout. Never say "run", "runner", or "running".' : ''}
 
-${is500mCheckin ? 'TRIGGER: First 500m check-in' : `Phase: ${phaseDescriptions[phase]}`}
-Runner Status:
+${is500mCheckin ? `TRIGGER: First 500m check-in` : `Phase: ${phaseDescriptions[phase]}`}
+${isWalkActivity ? 'Walker' : 'Runner'} Status:
 - Distance covered: ${formatDistanceForCoaching(distance)}${targetDistance ? ` of ${formatDistanceForCoaching(targetDistance)} target (${progress}%)` : ''}
 - Time elapsed: ${timeFormatted}
 ${currentPace ? `- Current pace: ${spokenPhasePace}` : ''}
@@ -1673,7 +1691,7 @@ Weave in the runner's actual stats (pace, distance, time, cadence, heart rate) n
 
     // Single clean system message — all tone/personality is driven by toneDirective
     // and the living runner profile. No hardcoded behavioral overrides.
-    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep messages concise (2-3 sentences) and always reference the runner's actual numbers. NEVER start with greetings — jump straight into coaching. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
+    systemMsg = `You are ${coachName}, a ${coachTone} ${activityType || 'running'} coach. Keep messages concise (2-3 sentences) and always reference the ${pLabel}'s actual numbers. NEVER start with greetings — jump straight into coaching.${isWalkActivity ? ' This is a WALK session — use walker/walking vocabulary, never say runner/running.' : ''} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
   }
 
   const completion = await openai.chat.completions.create({

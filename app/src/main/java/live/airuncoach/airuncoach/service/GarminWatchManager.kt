@@ -504,12 +504,14 @@ class GarminWatchManager(
         intervalCount: Int? = null,
         intervalDistKm: Float? = null,
         intervalDurSecs: Int? = null,
-        plannedWorkoutId: String? = null
+        plannedWorkoutId: String? = null,
+        sessionType: String = "run"    // "run" | "walk" — used by watch to classify FIT file and notify backend
     ) {
         val payload = mutableMapOf<String, Any>(
-            "type"     to "preparedRun",
-            "distance" to distanceKm,
-            "runType"  to runType
+            "type"        to "preparedRun",
+            "distance"    to distanceKm,
+            "runType"     to runType,
+            "sessionType" to sessionType   // passed to DataStreamer.setActivityType()
         )
         workoutType?.let      { payload["workoutType"]      = it }
         workoutIntensity?.let { payload["workoutIntensity"] = it }
