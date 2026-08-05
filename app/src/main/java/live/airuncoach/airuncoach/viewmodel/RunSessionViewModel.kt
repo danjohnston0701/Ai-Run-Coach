@@ -85,7 +85,7 @@ data class RunState(
     val isPaused: Boolean = false,
     val isCoachEnabled: Boolean = true,
     val isMuted: Boolean = false,
-    val coachText: String = "GPS locked! Tap 'Start Run' when you're ready.",
+    val coachText: String = "GPS locked! Tap Start when you're ready.",
     val speechState: SpeechState = SpeechState(),
     val wellnessContext: WellnessContext? = null,
     val isLoadingBriefing: Boolean = false,
@@ -973,8 +973,9 @@ class RunSessionViewModel @Inject constructor(
             
             // Skip AI coaching if disabled
             if (!_runState.value.isCoachEnabled) {
+                val sessionVerb = if (runConfig?.activityType?.name.equals("walk", ignoreCase = true)) "Walk" else "Run"
                 _runState.update {
-                    it.copy(coachText = "Ready to run! Tap Start when you're ready.")
+                    it.copy(coachText = "Ready to $sessionVerb! Tap Start when you're ready.")
                 }
                 isPrepareRunInProgress = false
                 return@launch
@@ -1177,9 +1178,10 @@ class RunSessionViewModel @Inject constructor(
                 isPrepareRunInProgress = false
                 // Only update UI if the run was not cancelled
                 if (!isSetupCancelled) {
+                    val sv = if (runConfig?.activityType?.name.equals("walk", ignoreCase = true)) "Walk" else "Run"
                     _runState.update { 
                         it.copy(
-                            coachText = "Ready to run! Tap Start when you're ready.",
+                            coachText = "Ready to $sv! Tap Start when you're ready.",
                             isLoadingBriefing = false
                         )
                     }
@@ -1197,9 +1199,10 @@ class RunSessionViewModel @Inject constructor(
                 isPrepareRunInProgress = false
                 // Only update UI if the run was not cancelled
                 if (!isSetupCancelled && runConfig != null) {
+                    val sv = if (runConfig?.activityType?.name.equals("walk", ignoreCase = true)) "Walk" else "Run"
                     _runState.update { 
                         it.copy(
-                            coachText = "Ready to run! Tap Start when you're ready.",
+                            coachText = "Ready to $sv! Tap Start when you're ready.",
                             isLoadingBriefing = false
                         )
                     }
@@ -1212,25 +1215,36 @@ class RunSessionViewModel @Inject constructor(
         // Reset the cancelled flag when setting a new config - allows a new run attempt
         isSetupCancelled = false
         runConfig = config
-        // Only update coachText if we don't already have a briefing loaded
-        // This prevents overwriting the AI briefing when config is set
-        if (_runState.value.coachText.isEmpty() || 
-            _runState.value.coachText.contains("Ready to run")) {
-            if (config.hasTargetTime) {
-                val targetTimeStr = config.getFormattedTargetTime()
-                val distStr = config.targetDistance?.let { "${it} km" } ?: "your workout"
-                _runState.update { it.copy(
-                    coachText = "Target: $distStr in $targetTimeStr. Ready to start!"
-                )}
-            } else if (config.targetDistance != null) {
-                _runState.update { it.copy(
-                    coachText = "Target: ${config.targetDistance} km. Ready to start!"
-                )}
-            } else {
-                _runState.update { it.copy(
-                    coachText = "Ready to start your ${config.workoutType?.replace("_", " ") ?: "run"}!"
-                )}
+
+        val isWalk = config.activityType.name.equals("walk", ignoreCase = true)
+        val sessionWord = if (isWalk) "walk" else "run"
+
+        // Only update coachText if we don't already have an AI briefing loaded.
+        // "AI briefing" means something was set by prepareRun() — anything other than the
+        // default "GPS locked…" placeholder or a simple readiness prompt.
+        val currentText = _runState.value.coachText
+        val isPlaceholderText = currentText.isEmpty() ||
+            currentText.contains("Start Run", ignoreCase = true) ||
+            currentText.contains("Start Walk", ignoreCase = true) ||
+            currentText.contains("GPS locked", ignoreCase = true) ||
+            currentText.contains("Ready to run", ignoreCase = true)
+
+        if (isPlaceholderText) {
+            val newText = when {
+                config.hasTargetTime -> {
+                    val targetTimeStr = config.getFormattedTargetTime()
+                    val distStr = config.targetDistance?.let { "${it} km" } ?: "your workout"
+                    "Target: $distStr in $targetTimeStr. Ready to start!"
+                }
+                config.targetDistance != null -> {
+                    "Target: ${config.targetDistance} km. Ready to start!"
+                }
+                else -> {
+                    val workoutLabel = config.workoutType?.replace("_", " ") ?: sessionWord
+                    "GPS locked! Tap 'Start ${sessionWord.replaceFirstChar { it.uppercase() }}' when you're ready to ${workoutLabel}."
+                }
             }
+            _runState.update { it.copy(coachText = newText) }
         }
 
         // Initialize interval tracking if this is an interval workout

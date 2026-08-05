@@ -150,6 +150,12 @@ fun RunSessionScreen(
     var showStopConfirm by remember { mutableStateOf(false) }
     // True when the session was opened from "Prepare for Watch" — run screen waits in standby
     var isWatchMode by remember { mutableStateOf(false) }
+    // Derived from RunConfigHolder so ControlButtons can show "Start Walk" vs "Start Run"
+    val sessionActivityType by remember {
+        mutableStateOf(
+            RunConfigHolder.getConfig()?.activityType?.name?.lowercase() ?: "run"
+        )
+    }
 
     val isRunActive = runState.isRunning || runState.isPaused
 
@@ -285,7 +291,7 @@ fun RunSessionScreen(
                     viewModel.cancelRunSetup()
                     onCancel()
                 },
-
+                activityType = sessionActivityType,
             )
         }
 
@@ -2377,6 +2383,7 @@ fun ControlButtons(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onCancel: () -> Unit = {},
+    activityType: String = "run",  // "run" | "walk" — controls Start button label
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2428,7 +2435,11 @@ fun ControlButtons(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
-                // Start Run button - full width
+                // Start button — label adapts to session type
+                val startLabel = when (activityType.lowercase()) {
+                    "walk" -> "Start Walk"
+                    else   -> "Start Run"
+                }
                 Button(
                     onClick = onStart,
                     modifier = Modifier
@@ -2447,7 +2458,7 @@ fun ControlButtons(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Start Run",
+                        text = startLabel,
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.backgroundRoot
                     )
