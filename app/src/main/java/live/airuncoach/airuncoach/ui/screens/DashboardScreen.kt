@@ -163,6 +163,7 @@ fun DashboardScreen(
                 userName = user?.name,
                 profilePicUrl = user?.profilePic,
                 aiCoachName = user?.coachName,
+                sessionType = user?.defaultSessionType ?: "RUN",
                 onProfileClick = onNavigateToProfile
             )
         }
@@ -408,8 +409,9 @@ fun ActiveRunBanner(runSession: RunSession, onResumeRun: () -> Unit) {
 }
 
 @Composable
-fun WelcomeSection(userName: String?, profilePicUrl: String?, aiCoachName: String?, onProfileClick: () -> Unit) {
+fun WelcomeSection(userName: String?, profilePicUrl: String?, aiCoachName: String?, sessionType: String = "RUN", onProfileClick: () -> Unit) {
     val context = LocalContext.current
+    val sessionTypeLabel = if (sessionType.equals("walk", ignoreCase = true)) "walk" else "run"
     
     Row(
         modifier = Modifier
@@ -425,7 +427,7 @@ fun WelcomeSection(userName: String?, profilePicUrl: String?, aiCoachName: Strin
                 color = Colors.primary
             )
             Text(
-                text = "Welcome, Plan your run with ${aiCoachName ?: "your AI Coach"}",
+                text = "Welcome, Plan your $sessionTypeLabel with ${aiCoachName ?: "your AI Coach"}",
                 style = AppTextStyles.body,
                 color = Colors.textSecondary
             )

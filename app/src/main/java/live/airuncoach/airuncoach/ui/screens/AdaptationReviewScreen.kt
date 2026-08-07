@@ -46,19 +46,6 @@ fun AdaptationReviewScreen(
         viewModel.loadPendingAdaptations(planId)
     }
 
-    // Auto-navigate back to coaching plan when all adaptations are handled
-    LaunchedEffect(adaptations.isEmpty(), isLoading) {
-        // Only navigate if:
-        // 1. Adaptations list is empty (all handled)
-        // 2. We're not currently loading (initial load complete)
-        // 3. No error occurred
-        if (adaptations.isEmpty() && !isLoading && errorMessage.isNullOrBlank()) {
-            // Give a tiny delay so user sees the "No pending adaptations" message briefly
-            kotlinx.coroutines.delay(800)
-            onNavigateBack()
-        }
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -105,7 +92,7 @@ fun AdaptationReviewScreen(
                 }
             } else if (adaptations.isEmpty()) {
                 item {
-                    AdaptationEmptyState()
+                    AdaptationEmptyState(onNavigateToPlan = onNavigateBack)
                 }
             } else {
                 item {
@@ -221,7 +208,7 @@ fun AdaptationCard(
                     color = Colors.primary
                 )
                     Text(
-                        text = adaptation.adaptationDate.take(10),
+                        text = adaptation.adaptationDate?.take(10) ?: "Unknown Date",
                         style = AppTextStyles.caption,
                         fontSize = 11.sp,
                         color = Colors.textMuted
@@ -352,11 +339,11 @@ fun AdaptationErrorCard(message: String) {
 }
 
 @Composable
-fun AdaptationEmptyState() {
+fun AdaptationEmptyState(onNavigateToPlan: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 60.dp),
+            .padding(vertical = 40.dp, horizontal = Spacing.md),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.md)
     ) {
@@ -374,8 +361,29 @@ fun AdaptationEmptyState() {
             style = AppTextStyles.body,
             fontSize = 13.sp,
             color = Colors.textMuted,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = Spacing.md)
         )
+
+        Spacer(modifier = Modifier.height(Spacing.lg))
+
+        // Button to navigate to AI coaching plan
+        Button(
+            onClick = onNavigateToPlan,
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(48.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Colors.primary
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = "View AI Coaching Plan",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
     }
 }
 

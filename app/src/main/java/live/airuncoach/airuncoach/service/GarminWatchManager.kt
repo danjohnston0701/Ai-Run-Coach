@@ -541,6 +541,17 @@ class GarminWatchManager(
         sendToWatch(mapOf("type" to "sessionEnded"))
     }
 
+    /**
+     * Immediately acknowledge the watch "stop" command so the watch can cancel
+     * its stop-command retry before the upload finishes (which can take several
+     * seconds). The full "sessionEnded" message is sent later once the run is
+     * saved; this interim ack prevents unnecessary re-transmissions.
+     */
+    fun sendStopAck() {
+        sendToWatch(mapOf("type" to "stopAck"))
+        Log.d(TAG, "Sent stopAck to watch")
+    }
+
     // ── Private ───────────────────────────────────────────────────────────────
 
     private fun sendToWatch(payload: Map<String, Any>) {
@@ -751,6 +762,17 @@ class GarminWatchManager(
                         // Immediately ack the start so the watch cancels its retry timer.
                         // This prevents duplicate start commands from FR55 (BT-drop recovery).
                         sendStartAck()
+                    }
+
+                    // Immediately ack the "stop" command so the watch cancels its stop-retry
+                    // counter before the upload finishes. The full "sessionEnded" message is
+                    // sent by RunTrackingService once the run is saved (may take several seconds).
+                    // Without this early ack the watch would keep retrying and the phone could
+                    // receive duplicate "stop" signals — stopTracking() is idempotent so this is
+                    // safe, but the ack eliminates the unnecessary noise.
+                    if (action == "stop") {
+                        sendStopAck()
+                        Log.d(TAG, "Watch STOP received — sent stopAck immediately")
                     }
 
                     // For all other commands: if no ViewModel or service is listening,

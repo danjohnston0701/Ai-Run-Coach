@@ -265,10 +265,15 @@ fun WorkoutDetailScreen(
                         WorkoutStatCard(label = "Distance", value = "${it}km", icon = R.drawable.icon_target_vector, modifier = Modifier.weight(1f))
                     }
                     run {
-                        val zoneNumber = resolveZoneNumber(workout)
-                        val zoneInfo = HeartRateZones.getZoneInfo(zoneNumber)
-                        val zoneLabel = "Zone $zoneNumber"
-                        val effortLabel = zoneInfo.effort
+                        val isIntervalType = workout.workoutType.lowercase() in
+                                setOf("hill_repeats", "intervals", "fartlek")
+                        val peakZone = resolveZoneNumber(workout, userMaxHR)
+                        val baseZone = if (isIntervalType) resolveBaseZoneNumber(workout, userMaxHR) else peakZone
+                        val peakZoneInfo = HeartRateZones.getZoneInfo(peakZone)
+                        // For interval workouts show the zone range (e.g. "Z2 → Z4"), else single zone
+                        val zoneLabel = if (isIntervalType && baseZone != peakZone)
+                            "Z$baseZone → Z$peakZone" else "Zone $peakZone"
+                        val effortLabel = peakZoneInfo.effort
                         WorkoutStatCard(label = "Intensity", value = zoneLabel, subtitleValue = effortLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
                     }
                     // Spacer if intensity is missing
@@ -291,60 +296,73 @@ fun WorkoutDetailScreen(
 
                 // ── Zone description and pace guidance ─────────────────────────────
                 workout.intensity?.let {
-                    val zoneNumber = resolveZoneNumber(workout)
-                    val zoneInfo = HeartRateZones.getZoneInfo(zoneNumber)
-                    
+                    val isIntervalType = workout.workoutType.lowercase() in
+                            setOf("hill_repeats", "intervals", "fartlek")
+                    val peakZone = resolveZoneNumber(workout, userMaxHR)
+                    val baseZone = if (isIntervalType) resolveBaseZoneNumber(workout, userMaxHR) else peakZone
+                    val zoneInfo = HeartRateZones.getZoneInfo(peakZone)
+
+                    // Section header — for interval workouts explain it's a range
                     Text(
-                        "Intensity Explained",
+                        if (isIntervalType && baseZone != peakZone)
+                            "Session Intensity Range"
+                        else
+                            "Intensity Explained",
                         style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                         color = Colors.textPrimary
                     )
                     Spacer(modifier = Modifier.height(Spacing.sm))
                     Text(
-                        "Intensity zones (1-5) guide your effort level. Zone 1 is very easy recovery pace, Zone 5 is all-out sprint. RPE (Rated Perceived Exertion) is simply how hard the effort feels to you.",
+                        if (isIntervalType && baseZone != peakZone)
+                            "This session moves between zones. The recovery/base phase runs at Zone $baseZone (${HeartRateZones.getZoneInfo(baseZone).effort.lowercase()}), and the work intervals push into Zone $peakZone (${zoneInfo.effort.lowercase()}). Zone 1 is very easy recovery pace, Zone 5 is all-out sprint."
+                        else
+                            "Intensity zones (1-5) guide your effort level. Zone 1 is very easy recovery pace, Zone 5 is all-out sprint. RPE (Rated Perceived Exertion) is simply how hard the effort feels to you.",
                         style = AppTextStyles.small,
                         color = Colors.textSecondary
                     )
                     Spacer(modifier = Modifier.height(Spacing.md))
-                    
+
+                    // Peak zone card (work interval / session zone)
+                    fun zoneColor(z: Int) = when (z) {
+                        1    -> Colors.success
+                        2    -> Colors.primary
+                        3    -> Colors.warning
+                        4, 5 -> Colors.error
+                        else -> Colors.textMuted
+                    }
+
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, zoneInfo.run { 
-                                when(zone) {
-                                    1 -> Colors.success.copy(alpha = 0.3f)
-                                    2 -> Colors.primary.copy(alpha = 0.3f)
-                                    3 -> Colors.warning.copy(alpha = 0.3f)
-                                    4, 5 -> Colors.error.copy(alpha = 0.3f)
-                                    else -> Colors.textMuted.copy(alpha = 0.3f)
-                                }
-                            }, RoundedCornerShape(12.dp)),
-                        colors = CardDefaults.cardColors(containerColor = zoneInfo.run { 
-                            when(zone) {
-                                1 -> Colors.success.copy(alpha = 0.05f)
-                                2 -> Colors.primary.copy(alpha = 0.05f)
-                                3 -> Colors.warning.copy(alpha = 0.05f)
-                                4, 5 -> Colors.error.copy(alpha = 0.05f)
-                                else -> Colors.backgroundSecondary
-                            }
-                        }),
+                            .border(1.dp, zoneColor(peakZone).copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                        colors = CardDefaults.cardColors(containerColor = zoneColor(peakZone).copy(alpha = 0.05f)),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Column(modifier = Modifier.padding(Spacing.lg)) {
-                            Text(zoneInfo.name, style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                            // For interval workouts, label the peak zone as the work interval zone
+                            val cardTitle = if (isIntervalType && baseZone != peakZone)
+                                "${zoneInfo.name} — Work Intervals" else zoneInfo.name
+                            Text(cardTitle, style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                             Spacer(modifier = Modifier.height(Spacing.sm))
-                            
+
                             Text("What it feels like:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                             Text(zoneInfo.description, style = AppTextStyles.small, color = Colors.textSecondary)
-                            
+
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("Pace guidance:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
-                            // Use the session-specific target pace when set — it's more accurate for this
-                            // runner than the generic population-average text. Fall back to static
-                            // guidance only when no specific target has been assigned.
-                            if (!workout.targetPace.isNullOrBlank()) {
+                            // For interval workouts use intervalTargetPace for the work zone;
+                            // for regular workouts use targetPace.
+                            val workPace = if (isIntervalType) workout.intervalTargetPace else workout.targetPace
+                            val basePace = workout.targetPace
+                            if (!workPace.isNullOrBlank()) {
                                 Text(
-                                    "Your target pace for this session: ${workout.targetPace}/km",
+                                    "Work interval target pace: ${workPace}/km",
+                                    style = AppTextStyles.small,
+                                    color = Colors.textSecondary
+                                )
+                            } else if (!basePace.isNullOrBlank() && !isIntervalType) {
+                                Text(
+                                    "Your target pace for this session: ${basePace}/km",
                                     style = AppTextStyles.small,
                                     color = Colors.textSecondary
                                 )
@@ -352,101 +370,173 @@ fun WorkoutDetailScreen(
                                 Text(zoneInfo.paceGuidance, style = AppTextStyles.small, color = Colors.textSecondary)
                             }
 
-                            // Heart rate range — for interval workouts, prefer the per-interval
-                            // HR targets (the work effort zone) over hrZoneMinBpm/hrZoneMaxBpm
-                            // (which represent the session-average / recovery zone).
-                            val isIntervalType = workout.workoutType.lowercase() in
-                                    setOf("hill_repeats", "intervals", "fartlek")
-                            val workIntervalHrMin = if (isIntervalType) workout.intervalHeartRateMin else null
-                            val workIntervalHrMax = if (isIntervalType) workout.intervalHeartRateMax else null
-                            val hrMin = workIntervalHrMin ?: workout.hrZoneMinBpm
-                            val hrMax = workIntervalHrMax ?: workout.hrZoneMaxBpm
+                            // Work-interval HR targets
+                            val workHrMin = if (isIntervalType) workout.intervalHeartRateMin else null
+                            val workHrMax = if (isIntervalType) workout.intervalHeartRateMax else null
+                            val hrMin = workHrMin ?: workout.hrZoneMinBpm
+                            val hrMax = workHrMax ?: workout.hrZoneMaxBpm
                             val storedBpmsValid = hrMin != null && hrMax != null &&
-                                hrMin > 50 && hrMax < 230 && hrMin < hrMax
+                                    hrMin > 50 && hrMax < 230 && hrMin < hrMax
                             if (storedBpmsValid) {
                                 Spacer(modifier = Modifier.height(Spacing.sm))
-                                val hrLabel = if (workIntervalHrMin != null) "Work interval heart rate:" else "Target heart rate:"
+                                val hrLabel = if (workHrMin != null) "Work interval heart rate:" else "Target heart rate:"
                                 Text(hrLabel, style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                                 Text("Keep your HR between $hrMin and $hrMax bpm", style = AppTextStyles.small, color = Colors.textSecondary)
-                                // Also show recovery HR cap for interval workouts
                                 if (isIntervalType && workout.restHeartRateMax != null) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text("Recovery target: HR below ${workout.restHeartRateMax} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
                                 }
                             } else if (userMaxHR > 0) {
-                                // Only show client-side fallback when stored values are truly missing
-                                val fallbackRange = HeartRateZones.getTargetHRRange(zoneNumber, userMaxHR)
+                                val fallbackRange = HeartRateZones.getTargetHRRange(peakZone, userMaxHR)
                                 Spacer(modifier = Modifier.height(Spacing.sm))
-                                Text("Target heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                                val hrLabel = if (isIntervalType) "Work interval heart rate:" else "Target heart rate:"
+                                Text(hrLabel, style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                                 Text("Keep your HR between ${fallbackRange.first} and ${fallbackRange.last} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
+                                if (isIntervalType && workout.restHeartRateMax != null) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Recovery target: HR below ${workout.restHeartRateMax} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
+                                }
                             }
-                            
+
                             Spacer(modifier = Modifier.height(Spacing.sm))
                             Text("Benefits:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                             Text(zoneInfo.benefits, style = AppTextStyles.small, color = Colors.textSecondary)
+                        }
+                    }
+
+                    // For interval workouts, show a second mini-card for the base/recovery zone
+                    if (isIntervalType && baseZone != peakZone) {
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        val baseInfo = HeartRateZones.getZoneInfo(baseZone)
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, zoneColor(baseZone).copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                            colors = CardDefaults.cardColors(containerColor = zoneColor(baseZone).copy(alpha = 0.05f)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(Spacing.lg)) {
+                                Text("${baseInfo.name} — Warm-up / Recovery", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                                Spacer(modifier = Modifier.height(Spacing.sm))
+                                Text("What it feels like:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                                Text(baseInfo.description, style = AppTextStyles.small, color = Colors.textSecondary)
+                                if (!workout.targetPace.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(Spacing.sm))
+                                    Text("Pace guidance:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                                    Text("Base / recovery pace: ${workout.targetPace}/km", style = AppTextStyles.small, color = Colors.textSecondary)
+                                }
+                                // Recovery HR cap
+                                if (workout.restHeartRateMax != null) {
+                                    Spacer(modifier = Modifier.height(Spacing.sm))
+                                    Text("Recovery heart rate:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+                                    Text("HR below ${workout.restHeartRateMax} bpm", style = AppTextStyles.small, color = Colors.textSecondary)
+                                }
+                            }
                         }
                     }
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
 
-            // ── Zone comparison chart (for Zone 2 focus) ──────────────────────
+            // ── Zone comparison chart ──────────────────────────────────────────
             workout.intensity?.let {
-                val zoneNumber = resolveZoneNumber(workout)
-                if (zoneNumber == 2) {
-                    Text("How Zone 2 Compares", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                    Spacer(modifier = Modifier.height(Spacing.sm))
-                    
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(Spacing.lg)) {
-                            // Zone 1
-                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Zone 1", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.success)
-                                    Text("Recovery", style = AppTextStyles.small, color = Colors.textMuted)
-                                }
-                                Text(calculateZonePaceRange(1, workout.targetPace), style = AppTextStyles.small, color = Colors.textSecondary)
+                val isIntervalType = workout.workoutType.lowercase() in
+                        setOf("hill_repeats", "intervals", "fartlek")
+                val peakZone = resolveZoneNumber(workout, userMaxHR)
+                val baseZone = if (isIntervalType) resolveBaseZoneNumber(workout, userMaxHR) else peakZone
+
+                // Build the list of zones to show based on session type
+                // Interval workouts: show full range from baseZone..peakZone plus one zone above
+                // Regular workouts: show zone-1, zone (highlighted), zone+1 (clamped to 1-5)
+                val zonesToShow: List<Int> = if (isIntervalType && baseZone != peakZone) {
+                    // Show from baseZone-1 (if ≥1) through peakZone+1 (if ≤5)
+                    val low  = (baseZone - 1).coerceAtLeast(1)
+                    val high = (peakZone + 1).coerceAtMost(5)
+                    (low..high).toList()
+                } else {
+                    listOf(
+                        (peakZone - 1).coerceAtLeast(1),
+                        peakZone,
+                        (peakZone + 1).coerceAtMost(5)
+                    ).distinct()
+                }
+
+                val sectionTitle = if (isIntervalType && baseZone != peakZone)
+                    "How Zone $baseZone–$peakZone Compare"
+                else
+                    "How Zone $peakZone Compares"
+
+                Text(sectionTitle, style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                Spacer(modifier = Modifier.height(Spacing.sm))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(Spacing.lg)) {
+                        val zoneNames = mapOf(
+                            1 to ("Recovery" to Colors.success),
+                            2 to ("Aerobic/Endurance" to Colors.primary),
+                            3 to ("Tempo" to Colors.warning),
+                            4 to ("VO2 Max" to Colors.error),
+                            5 to ("Maximum Effort" to Colors.error)
+                        )
+                        // Reference pace: for interval work zone use intervalTargetPace; base uses targetPace
+                        val workPaceRef = if (isIntervalType && !workout.intervalTargetPace.isNullOrBlank())
+                            workout.intervalTargetPace else workout.targetPace
+
+                        zonesToShow.forEachIndexed { idx, z ->
+                            if (idx > 0) {
+                                Spacer(modifier = Modifier.height(Spacing.md))
+                                HorizontalDivider(color = Colors.backgroundSecondary, thickness = 0.5.dp)
+                                Spacer(modifier = Modifier.height(Spacing.md))
                             }
-                            
-                            Spacer(modifier = Modifier.height(Spacing.md))
-                            HorizontalDivider(color = Colors.backgroundSecondary, thickness = 0.5.dp)
-                            Spacer(modifier = Modifier.height(Spacing.md))
-                            
-                            // Zone 2 (highlighted)
-                            Row(
-                                modifier = Modifier
+
+                            val (zoneSub, zoneColor) = zoneNames[z] ?: ("" to Colors.textMuted)
+                            val isWorkZone    = z == peakZone && isIntervalType && baseZone != peakZone
+                            val isBaseZone    = z == baseZone && isIntervalType && baseZone != peakZone
+                            val isSessionZone = z == peakZone && !isIntervalType
+
+                            val label = when {
+                                isWorkZone    -> "Zone $z — WORK INTERVALS"
+                                isBaseZone    -> "Zone $z — RECOVERY"
+                                isSessionZone -> "Zone $z (YOUR SESSION)"
+                                else          -> "Zone $z"
+                            }
+
+                            // For the work zone use intervalTargetPace; for base/recovery use targetPace
+                            val paceRef = if (isWorkZone) workPaceRef else workout.targetPace
+                            val highlighted = isWorkZone || isSessionZone || (isBaseZone)
+
+                            val rowModifier = if (highlighted)
+                                Modifier
                                     .fillMaxWidth()
-                                    .background(Colors.primary.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-                                    .padding(Spacing.md),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                                    .background(zoneColor.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                                    .padding(Spacing.md)
+                            else
+                                Modifier.fillMaxWidth()
+
+                            Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Zone 2 (YOUR SESSION)", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
-                                    Text("Aerobic/Endurance", style = AppTextStyles.small, color = Colors.textMuted)
+                                    Text(label,
+                                        style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                                        color = zoneColor)
+                                    Text(zoneSub, style = AppTextStyles.small, color = Colors.textMuted)
                                 }
-                                Text(calculateZonePaceRange(2, workout.targetPace), style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.primary)
-                            }
-                            
-                            Spacer(modifier = Modifier.height(Spacing.md))
-                            HorizontalDivider(color = Colors.backgroundSecondary, thickness = 0.5.dp)
-                            Spacer(modifier = Modifier.height(Spacing.md))
-                            
-                            // Zone 3
-                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Zone 3", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.warning)
-                                    Text("Tempo", style = AppTextStyles.small, color = Colors.textMuted)
-                                }
-                                Text(calculateZonePaceRange(3, workout.targetPace), style = AppTextStyles.small, color = Colors.textSecondary)
+                                Text(
+                                    calculateZonePaceRange(z, paceRef),
+                                    style = if (highlighted)
+                                        AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold)
+                                    else
+                                        AppTextStyles.small,
+                                    color = if (highlighted) zoneColor else Colors.textSecondary
+                                )
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(Spacing.lg))
                 }
+                Spacer(modifier = Modifier.height(Spacing.lg))
             }
 
             // ── Instructions ──────────────────────────────────────────────────
@@ -469,7 +559,7 @@ fun WorkoutDetailScreen(
             }
 
             // ── Structure breakdown ───────────────────────────────────────────
-            if (workout.workoutType == "intervals" || workout.workoutType == "tempo") {
+            if (workout.workoutType in setOf("intervals", "tempo", "fartlek", "hill_repeats")) {
                 WorkoutStructureSection(workout)
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
@@ -881,13 +971,26 @@ fun WorkoutStructureSection(workout: WorkoutDetails) {
     val structure: List<Triple<String, String, Color>> = when (workout.workoutType) {
         "intervals" -> listOf(
             Triple("Warm-up", "10 min easy (Zone 2)", Colors.success),
-            Triple("Work intervals", workout.instructions ?: "Repeat as prescribed", Colors.error),
-            Triple("Cool-down", "5 min easy", Colors.success)
+            Triple("Work intervals", "High intensity repeats — Zone 4", Colors.error),
+            Triple("Recovery", "Easy jog between intervals (Zone 2)", Colors.success),
+            Triple("Cool-down", "5 min easy (Zone 2)", Colors.success)
         )
         "tempo" -> listOf(
             Triple("Warm-up", "10 min easy (Zone 2)", Colors.success),
-            Triple("Tempo", "${workout.instructions ?: "Sustained effort"} (Zone 4)", Colors.warning),
-            Triple("Cool-down", "5 min easy", Colors.success)
+            Triple("Tempo block", "Sustained effort — Zone 3–4", Colors.warning),
+            Triple("Cool-down", "5 min easy (Zone 2)", Colors.success)
+        )
+        "fartlek" -> listOf(
+            Triple("Warm-up", "Easy running to start — Zone 2", Colors.success),
+            Triple("Surges", "Variable pace bursts — Zone 3 to Zone 4", Colors.error),
+            Triple("Float recovery", "Return to easy pace between surges — Zone 2", Colors.primary),
+            Triple("Cool-down", "Easy finish — Zone 2", Colors.success)
+        )
+        "hill_repeats" -> listOf(
+            Triple("Warm-up", "10 min easy on flat (Zone 2)", Colors.success),
+            Triple("Hill repeats", "Hard uphill effort — Zone 4–5", Colors.error),
+            Triple("Recovery", "Easy walk/jog back down (Zone 1–2)", Colors.success),
+            Triple("Cool-down", "5 min easy (Zone 2)", Colors.success)
         )
         else -> emptyList()
     }
@@ -912,34 +1015,47 @@ fun WorkoutStructureSection(workout: WorkoutDetails) {
 }
 
 /**
- * Resolve the HR zone number (1-5) for display and HR range calculations.
+ * Resolve the PEAK HR zone number (1-5) for display and HR range calculations.
  *
  * For INTERVAL workouts (hill_repeats, intervals, fartlek):
- *  - hrZoneNumber represents the session-average / recovery zone, NOT the work effort zone.
- *    Using it as primary would show "Zone 2" for a hill repeats session where the work
- *    intervals run at 145-160 bpm (Zone 3-4). So for interval workouts we skip it and
- *    read the effort from the intensity field first, then fall back to type defaults.
+ *  - hrZoneNumber and the intensity string represent the session-average / base/recovery zone
+ *    (e.g. "z2" for a fartlek that peaks at zone 4). We skip both and instead:
+ *    1. Derive the peak zone from intervalHeartRateMax + userMaxHR if available.
+ *    2. Fall back to workout-type defaults (zone 4 for fartlek/intervals/hill_repeats).
  *
  * For NON-INTERVAL workouts:
  *  - hrZoneNumber is the session zone — use it as highest priority.
  *  - Fall back to intensity string, then workout-type defaults.
- *
- * This fixes the "Zone 2 on a hill repeats session" bug.
  */
-fun resolveZoneNumber(workout: WorkoutDetails): Int {
+fun resolveZoneNumber(workout: WorkoutDetails, userMaxHR: Int = 190): Int {
     val isIntervalWorkout = workout.workoutType.lowercase() in
             setOf("hill_repeats", "intervals", "fartlek")
 
     if (!isIntervalWorkout) {
         // Non-interval: hrZoneNumber IS the session zone — use it first
         workout.hrZoneNumber?.let { if (it in 1..5) return it }
-    }
 
-    // "z1"-"z5" intensity string correctly encodes the overall session effort for all types
-    workout.intensity?.let { intensity ->
-        Regex("z([1-5])", RegexOption.IGNORE_CASE).find(intensity)
-            ?.groupValues?.get(1)?.toIntOrNull()
-            ?.let { return it }
+        // Parse "z1"-"z5" from intensity string
+        workout.intensity?.let { intensity ->
+            Regex("z([1-5])", RegexOption.IGNORE_CASE).find(intensity)
+                ?.groupValues?.get(1)?.toIntOrNull()
+                ?.let { return it }
+        }
+    } else {
+        // Interval workouts: derive PEAK zone from work-interval HR if available
+        workout.intervalHeartRateMax?.let { intervalHrMax ->
+            if (intervalHrMax in 50..230) {
+                val hrPercent = intervalHrMax.toDouble() / userMaxHR * 100
+                return when {
+                    hrPercent >= 90 -> 5
+                    hrPercent >= 80 -> 4
+                    hrPercent >= 70 -> 3
+                    hrPercent >= 60 -> 2
+                    else            -> 1
+                }
+            }
+        }
+        // No interval HR data — fall through to type defaults below
     }
 
     // Workout type default
@@ -951,6 +1067,32 @@ fun resolveZoneNumber(workout: WorkoutDetails): Int {
         "fartlek"                   -> 4
         else                        -> 2
     }
+}
+
+/**
+ * Resolve the BASE/RECOVERY zone for interval workouts.
+ *
+ * For fartlek / intervals / hill_repeats the server-supplied intensity string ("z2", "z1", etc.)
+ * encodes the warm-up / recovery pace — not the peak. This helper reads that base zone so the
+ * UI can display the full range (e.g. "Zone 2 → Zone 4").
+ *
+ * For non-interval workouts, falls back to resolveZoneNumber().
+ */
+fun resolveBaseZoneNumber(workout: WorkoutDetails, userMaxHR: Int = 190): Int {
+    val isIntervalWorkout = workout.workoutType.lowercase() in
+            setOf("hill_repeats", "intervals", "fartlek")
+
+    if (!isIntervalWorkout) return resolveZoneNumber(workout, userMaxHR)
+
+    // For interval workouts the intensity string IS the base/recovery zone
+    workout.intensity?.let { intensity ->
+        Regex("z([1-5])", RegexOption.IGNORE_CASE).find(intensity)
+            ?.groupValues?.get(1)?.toIntOrNull()
+            ?.let { return it }
+    }
+
+    // Default base zone for all interval types is zone 2
+    return 2
 }
 
 /**
