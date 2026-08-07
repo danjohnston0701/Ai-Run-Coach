@@ -1097,9 +1097,13 @@ class RunSessionViewModel @Inject constructor(
                     // Debug: Log what we received from the API
                     Log.d("RunSessionViewModel", "Pre-run briefing response - audio: ${briefing.audio?.take(50)}, format: ${briefing.format}, briefing: ${briefing.briefing?.take(100)}")
                     
-                    // Build full display text from structured AI response
-                    val displayText = briefing.getFullBriefingText()
-                    val speechText = briefing.getSpeechText()
+                    val isWalk = runConfig?.activityType == PhysicalActivityType.WALK
+                    
+                    // Build full display text from structured AI response.
+                    // activityType="walk" is sent in the request so the API generates walk-specific
+                    // text and Polly audio — no client-side text replacement needed.
+                    val displayText = briefing.getFullBriefingText(isWalk = isWalk)
+                    val speechText = briefing.getSpeechText(isWalk = isWalk)
 
                     // ── Coaching plan pre-run brief (primary audio for coached sessions) ──
                     // When an AI coaching plan is active, its preRunBrief is the most valuable
@@ -2122,3 +2126,4 @@ class RunSessionViewModel @Inject constructor(
         speechRecognizerHelper.destroy()
     }
 }
+

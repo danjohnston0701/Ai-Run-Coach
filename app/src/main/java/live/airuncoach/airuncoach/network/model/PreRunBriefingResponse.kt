@@ -22,7 +22,7 @@ data class PreRunBriefingResponse(
      * Build the full briefing text from all available fields.
      * Prefers structured AI fields (briefing, intensityAdvice, etc.) over raw text.
      */
-    fun getFullBriefingText(): String {
+    fun getFullBriefingText(isWalk: Boolean = false): String {
         // If we have structured AI fields, compose them
         val hasStructuredFields = !briefing.isNullOrBlank() || !intensityAdvice.isNullOrBlank()
 
@@ -46,14 +46,14 @@ data class PreRunBriefingResponse(
         // Fallback to raw text field
         if (!text.isNullOrBlank()) return text
 
-        return "Ready to run! Tap Start when you're ready."
+        return if (isWalk) "Ready to walk! Tap Start when you're ready." else "Ready to run! Tap Start when you're ready."
     }
 
     /**
      * Build a shorter text suitable for TTS speech.
      * Includes briefing + intensity advice but skips verbose readiness insights.
      */
-    fun getSpeechText(): String {
+    fun getSpeechText(isWalk: Boolean = false): String {
         val parts = mutableListOf<String>()
 
         if (!briefing.isNullOrBlank()) parts.add(briefing)
@@ -64,6 +64,6 @@ data class PreRunBriefingResponse(
         // Fallback to text field
         if (!text.isNullOrBlank()) return text
 
-        return "Ready to run. Let's go!"
+        return if (isWalk) "Ready to walk. Let's go!" else "Ready to run. Let's go!"
     }
 }
