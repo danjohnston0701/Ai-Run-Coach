@@ -695,23 +695,9 @@ function buildGpsRouteElite(
   const sp = mapped[0];
   const ep = mapped[mapped.length - 1];
 
-  let kmMarkers = "";
-  if (paceData && paceData.length > 1) {
-    paceData.forEach((pd, idx) => {
-      if (idx === 0) return;
-      const trackIdx = Math.min(Math.floor(((idx) / paceData.length) * mapped.length), mapped.length - 1);
-      const pt = mapped[trackIdx];
-      kmMarkers += `
-        <circle cx="${pt.px}" cy="${pt.py}" r="10" fill="${C.bgCard}" stroke="${C.border}" stroke-width="1.5" opacity="0.9"/>
-        <text x="${pt.px}" y="${pt.py + 4}" font-family="${FONT}" font-size="9" font-weight="700" fill="${C.textMid}" text-anchor="middle">${idx}</text>
-      `;
-    });
-  }
-
   return `
     ${glowRoute}
     ${routeSvg}
-    ${kmMarkers}
     <circle cx="${sp.px}" cy="${sp.py}" r="12" fill="${C.green}" stroke="${C.bgCard}" stroke-width="4"/>
     <circle cx="${sp.px}" cy="${sp.py}" r="5" fill="${C.bgCard}"/>
     <circle cx="${ep.px}" cy="${ep.py}" r="12" fill="${C.red}" stroke="${C.bgCard}" stroke-width="4"/>
@@ -809,7 +795,7 @@ function buildMercatorRouteSvg(
 
   // White casing under the route — matches the crisp look of the app summary map
   const polyPts = mapped.map(p => `${p.x},${p.y}`).join(" ");
-  const glowSvg = `<polyline points="${polyPts}" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
+  const glowSvg = `<polyline points="${polyPts}" fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
   let routeSvg = "";
 
   if (ptPaces && ptPaces.length === mapped.length) {
@@ -818,23 +804,10 @@ function buildMercatorRouteSvg(
       const segPace = (ptPaces[i] + ptPaces[i + 1]) / 2;
       const color = paceToGradientColor(segPace, fast, slow);
       const a = mapped[i], b = mapped[i + 1];
-      routeSvg += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="6" stroke-linecap="round"/>`;
+      routeSvg += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="12" stroke-linecap="round"/>`;
     }
   } else {
-    routeSvg = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>`;
-  }
-
-  // km markers — only draw if paceData looks like km splits (≤ 50 entries)
-  // Raw pace samples can have hundreds of entries and must NOT be used as km markers.
-  let kmMarkers = "";
-  if (paceData && paceData.length > 1 && paceData.length <= 50) {
-    paceData.forEach((_pd, idx) => {
-      if (idx === 0) return;
-      const mIdx = Math.min(Math.round((idx / paceData.length) * mapped.length), mapped.length - 1);
-      const pt = mapped[mIdx];
-      kmMarkers += `<circle cx="${pt.x}" cy="${pt.y}" r="12" fill="white" stroke="#ccc" stroke-width="1.5"/>
-        <text x="${pt.x}" y="${(pt.y + 4).toFixed(1)}" font-family="${FONT}" font-size="11" font-weight="700" fill="#333" text-anchor="middle">${idx}</text>`;
-    });
+    routeSvg = `<polyline points="${polyPts}" fill="none" stroke="#00D4FF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
 
   const sp = mapped[0];
@@ -843,7 +816,6 @@ function buildMercatorRouteSvg(
   return `
     ${glowSvg}
     ${routeSvg}
-    ${kmMarkers}
     <circle cx="${sp.x}" cy="${sp.y}" r="14" fill="${C.green}" stroke="white" stroke-width="3"/>
     <circle cx="${sp.x}" cy="${sp.y}" r="5"  fill="white"/>
     <circle cx="${ep.x}" cy="${ep.y}" r="14" fill="${C.red}"   stroke="white" stroke-width="3"/>

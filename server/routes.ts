@@ -103,7 +103,27 @@ import {
 } from "./intelligent-route-generation";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  
+
+  // ==================== ANDROID APP LINKS ====================
+  // Digital Asset Links — required for Android App Links (verified domain ownership).
+  // Google Play Console checks this URL to confirm the app is authorised to handle
+  // links for airuncoach.live. Must be served with Content-Type: application/json.
+  app.get("/.well-known/assetlinks.json", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "application/json");
+    res.json([
+      {
+        relation: ["delegate_permission/common.handle_all_urls"],
+        target: {
+          namespace: "android_app",
+          package_name: "live.airuncoach.airuncoach",
+          sha256_cert_fingerprints: [
+            "C2:39:48:B9:28:2C:8E:C5:39:69:37:36:64:5B:8F:CB:20:A6:F6:41:9C:AC:E3:DE:54:92:7A:73:F2:2E:0D:25",
+          ],
+        },
+      },
+    ]);
+  });
+
   // ==================== GARMIN OAUTH BRIDGE ====================
   app.use(garminOAuthRouter);
   
