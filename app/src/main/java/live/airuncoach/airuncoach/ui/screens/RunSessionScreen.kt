@@ -151,11 +151,10 @@ fun RunSessionScreen(
     // True when the session was opened from "Prepare for Watch" — run screen waits in standby
     var isWatchMode by remember { mutableStateOf(false) }
     // Derived from RunConfigHolder so ControlButtons can show "Start Walk" vs "Start Run"
-    val sessionActivityType by remember {
-        mutableStateOf(
-            RunConfigHolder.getConfig()?.activityType?.name?.lowercase() ?: "run"
-        )
-    }
+    // IMPORTANT: This MUST be derived dynamically (not stored in remember) so it updates
+    // when the config is set via setRunConfig(). The issue was that remember {} captured
+    // the value once at composition, preventing updates when the user changed the session type.
+    val sessionActivityType = RunConfigHolder.getConfig()?.activityType?.name?.lowercase() ?: "run"
 
     val isRunActive = runState.isRunning || runState.isPaused
 
@@ -484,7 +483,8 @@ fun RunSessionScreen(
                             aiCoachMessage = null, // Already shown above
                             aiSpeaking = runState.latestCoachMessage != null || runState.isLoadingBriefing,
                             isRunning = runState.isRunning,
-                            isLoadingBriefing = runState.isLoadingBriefing
+                            isLoadingBriefing = runState.isLoadingBriefing,
+                            activityType = sessionActivityType
                         )
 
                         // 3️⃣ Route Map (NEW ELITE VERSION)
@@ -514,6 +514,7 @@ fun RunSessionScreen(
                             insightText = null, // Already shown above
                             aiSpeaking = runState.latestCoachMessage != null
                                     || runState.isLoadingBriefing,
+                            activityType = sessionActivityType,
                             isRunning = runState.isRunning,
                             isLoadingBriefing = runState.isLoadingBriefing
                         )
@@ -765,10 +766,16 @@ fun GarminElitePlusDashboard(
     aiSpeaking: Boolean,
     isRunning: Boolean,
     isLoadingBriefing: Boolean,
+    activityType: String = "run",
     modifier: Modifier = Modifier
 ) {
     val hr = heartRateStr.toIntOrNull()?.takeIf { it > 0 }
-    val cadence = cadenceStr.toIntOrNull()?.takeIf { it > 0 }
+    // Cadence is only relevant for running, not walking
+    val cadence = if (activityType.lowercase() == "run") {
+        cadenceStr.toIntOrNull()?.takeIf { it > 0 }
+    } else {
+        null
+    }
     val paceSec = parsePaceToSeconds(paceStr).takeIf { it > 0 }
 
     val effortMode = when {
@@ -1249,6 +1256,7 @@ fun FreeRunEliteDashboard(
     aiSpeaking: Boolean,
     isRunning: Boolean,
     isLoadingBriefing: Boolean,
+    activityType: String = "run",
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -1324,12 +1332,30 @@ fun FreeRunEliteDashboard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    MetricRing(
-                        label = "Cadence",
-                        value = cadenceStr,
-                        unit = "",
-                        baseColor = Color(0xFFFBBF24) // Yellow - was teal
-                    )
+                    // CADENCE — only shown for runs, not walks
+                    if (activityType.lowercase() == "run") {
+                        MetricRing(
+                            label = "Cadence",
+                            value = cadenceStr,
+                            unit = "",
+                            baseColor = Color(0xFFFBBF24) // Yellow - was teal
+                        )
+                    } else {
+                        // For walks, show a placeholder or different metric
+                        Box(
+                            modifier = Modifier
+                                .size(120.dp)
+                                .clip(CircleShape)
+                                .background(Colors.backgroundSecondary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "—",
+                                style = AppTextStyles.h3,
+                                color = Colors.textMuted
+                            )
+                        }
+                    }
 
                     // AVG PACE
                     MetricRing(

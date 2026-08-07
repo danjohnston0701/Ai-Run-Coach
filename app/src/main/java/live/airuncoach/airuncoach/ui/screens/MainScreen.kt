@@ -255,6 +255,7 @@ fun MainScreen(
         ) {
             composable(Screen.Home.route) { backStackEntry ->
                 val dashboardViewModel: DashboardViewModel = hiltViewModel()
+                val user by dashboardViewModel.user.collectAsState()
                 // Use backStackEntry as refresh key - it changes when navigating back
                 val refreshKey = backStackEntry.lifecycle.currentState.hashCode()
                 DashboardScreen(
@@ -264,8 +265,9 @@ fun MainScreen(
                         val h = dashboardViewModel.targetHours.value
                         val m = dashboardViewModel.targetMinutes.value
                         val s = dashboardViewModel.targetSeconds.value
+                        val sessionType = user?.defaultSessionType ?: "RUN"
                         // For route mode: always default to AI Coach disabled
-                        navController.navigate("map_my_run_setup/route/$dist/$timeOn/$h/$m/$s/false")
+                        navController.navigate("map_my_run_setup/route/$dist/$timeOn/$h/$m/$s/false/$sessionType")
                     },
                     onNavigateToFreeRunSetup = {
                         val dist = dashboardViewModel.targetDistance.value
@@ -274,8 +276,9 @@ fun MainScreen(
                         val m = dashboardViewModel.targetMinutes.value
                         val s = dashboardViewModel.targetSeconds.value
                         val aiCoach = dashboardViewModel.isAiCoachEnabled.value
+                        val sessionType = user?.defaultSessionType ?: "RUN"
                         // For free run mode: preserve dashboard preference
-                        navController.navigate("map_my_run_setup/no_route/$dist/$timeOn/$h/$m/$s/$aiCoach")
+                        navController.navigate("map_my_run_setup/no_route/$dist/$timeOn/$h/$m/$s/$aiCoach/$sessionType")
                     },
                     onNavigateToRunSession = {
                         navController.navigate("run_session") {
@@ -366,7 +369,7 @@ fun MainScreen(
                 )
             }
             // Map My Run Setup Screen (the beautiful redesigned one!)
-            composable("map_my_run_setup/{mode}/{dist}/{timeOn}/{h}/{m}/{s}/{aiCoach}") { backStackEntry ->
+            composable("map_my_run_setup/{mode}/{dist}/{timeOn}/{h}/{m}/{s}/{aiCoach}/{sessionType}") { backStackEntry ->
                 val mode = backStackEntry.arguments?.getString("mode") ?: "route"
                 val dist = backStackEntry.arguments?.getString("dist")?.toFloatOrNull() ?: 5f
                 val timeOn = backStackEntry.arguments?.getString("timeOn")?.toBooleanStrictOrNull() ?: false
@@ -374,6 +377,7 @@ fun MainScreen(
                 val m = backStackEntry.arguments?.getString("m")?.toIntOrNull() ?: 0
                 val s = backStackEntry.arguments?.getString("s")?.toIntOrNull() ?: 0
                 val aiCoach = backStackEntry.arguments?.getString("aiCoach")?.toBooleanStrictOrNull() ?: false
+                val sessionType = backStackEntry.arguments?.getString("sessionType") ?: "RUN"
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(navController.graph.id)
                 }
@@ -394,6 +398,7 @@ fun MainScreen(
                     initialMinutes = m,
                     initialSeconds = s,
                     initialAiCoachEnabled = aiCoach,
+                    initialSessionType = sessionType,
                     onNavigateBack = { navController.popBackStack() },
                     onGenerateRoute = { distance, hasTime, hours, minutes, seconds, _, _, latitude, longitude, aiCoach ->
                         // Guard against double-taps - only allow one navigation at a time
@@ -421,10 +426,11 @@ fun MainScreen(
                         // Navigate to check_route_availability - it will handle the API check itself
                         navController.navigate("check_route_availability")
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, activityTypeString ->
                         // Create RunSetupConfig and start run without route — preserve social settings
+                        val activityType = if (activityTypeString.equals("walk", ignoreCase = true)) PhysicalActivityType.WALK else PhysicalActivityType.RUN
                         val config = RunSetupConfig(
-                            activityType = PhysicalActivityType.RUN,
+                            activityType = activityType,
                             targetDistance = distance,
                             hasTargetTime = hasTime,
                             targetHours = hours,
@@ -1235,7 +1241,7 @@ fun MainScreen(
                     onGenerateRoute = { _, _, _, _, _, _, _, _, _, _ ->
                         // Group runs don't support route generation - ignore this callback
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _ ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, _ ->
                         // Create RunSetupConfig with group run context
                         val config = RunSetupConfig(
                             activityType = PhysicalActivityType.RUN,

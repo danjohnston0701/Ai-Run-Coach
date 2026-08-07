@@ -57,6 +57,7 @@ fun MapMyRunSetupScreen(
     initialMinutes: Int = 0,
     initialSeconds: Int = 0,
     initialAiCoachEnabled: Boolean = false,
+    initialSessionType: String = "RUN",
     isGroupRun: Boolean = false,
     groupRunId: String? = null,
     onNavigateBack: () -> Unit = {},
@@ -81,8 +82,9 @@ fun MapMyRunSetupScreen(
         liveTrackingEnabled: Boolean,
         liveTrackingObservers: List<String>,
         isGroupRun: Boolean,
-        groupRunParticipants: List<String>
-    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> }
+        groupRunParticipants: List<String>,
+        activityType: String
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
@@ -97,7 +99,8 @@ fun MapMyRunSetupScreen(
     val friendsState by friendsViewModel.friendsState.collectAsState()
 
     // Minor metadata
-    var activityMode by remember { mutableStateOf(ActivityMode.RUN) }
+    val defaultActivityMode = if (initialSessionType.equals("walk", ignoreCase = true)) ActivityMode.WALK else ActivityMode.RUN
+    var activityMode by remember { mutableStateOf(defaultActivityMode) }
 
     // Core inputs
     var targetDistance by remember { mutableStateOf(initialDistance) }
@@ -440,7 +443,8 @@ fun MapMyRunSetupScreen(
                                             isLiveTrackingEnabled,
                                             watchObservers,
                                             isGroupRunEnabled,
-                                            groupRunParticipants
+                                            groupRunParticipants,
+                                            if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
                                         )
                                     }
                                 )
@@ -499,7 +503,8 @@ fun MapMyRunSetupScreen(
                                             isLiveTrackingEnabled,
                                             phoneObservers,
                                             isGroupRunEnabled,
-                                            groupRunParticipants
+                                            groupRunParticipants,
+                                            if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
                                         )
                                     }
                                 )
@@ -557,7 +562,8 @@ fun MapMyRunSetupScreen(
                                     isLiveTrackingEnabled,
                                     finalObservers,
                                     isGroupRunEnabled,
-                                    groupRunParticipants
+                                    groupRunParticipants,
+                                    if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
                                 )
                             }
                         )
@@ -1100,7 +1106,7 @@ private fun GroupRunSection(
                 // Group Run toggle + expandable participant picker
                 Column {
                     SocialRowToggle(
-                        title = "Group Run",
+                        title = "Group Session",
                         subtitle = "Invite friends to join",
                         enabled = groupRunEnabled,
                         onToggle = { onToggleGroupRun(it) }
