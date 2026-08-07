@@ -10,6 +10,19 @@ base.lang = eng
 base.excludeAnnotations = debug;background
 
 # All supported devices - must match manifest.xml product list exactly
+# Last updated: 2026-08-07 (87 devices, API 3.2.0+)
+
+# Fenix 5 Plus series
+fenix5plus.sourcePath = $(base.sourcePath)
+fenix5plus.resourcePath = $(base.resourcePath)
+
+fenix5splus.sourcePath = $(base.sourcePath)
+fenix5splus.resourcePath = $(base.resourcePath)
+
+fenix5xplus.sourcePath = $(base.sourcePath)
+fenix5xplus.resourcePath = $(base.resourcePath)
+
+# Fenix 6 series
 fenix6.sourcePath = $(base.sourcePath)
 fenix6.resourcePath = $(base.resourcePath)
 
@@ -25,6 +38,7 @@ fenix6spro.resourcePath = $(base.resourcePath)
 fenix6xpro.sourcePath = $(base.sourcePath)
 fenix6xpro.resourcePath = $(base.resourcePath)
 
+# Fenix 7 series
 fenix7.sourcePath = $(base.sourcePath)
 fenix7.resourcePath = $(base.resourcePath)
 
@@ -37,26 +51,109 @@ fenix7x.resourcePath = $(base.resourcePath)
 fenix7pro.sourcePath = $(base.sourcePath)
 fenix7pro.resourcePath = $(base.resourcePath)
 
+fenix7pronowifi.sourcePath = $(base.sourcePath)
+fenix7pronowifi.resourcePath = $(base.resourcePath)
+
 fenix7spro.sourcePath = $(base.sourcePath)
 fenix7spro.resourcePath = $(base.resourcePath)
 
 fenix7xpro.sourcePath = $(base.sourcePath)
 fenix7xpro.resourcePath = $(base.resourcePath)
 
+fenix7xpronowifi.sourcePath = $(base.sourcePath)
+fenix7xpronowifi.resourcePath = $(base.resourcePath)
+
+# Fenix 8 series
+fenix843mm.sourcePath = $(base.sourcePath)
+fenix843mm.resourcePath = $(base.resourcePath)
+
+fenix847mm.sourcePath = $(base.sourcePath)
+fenix847mm.resourcePath = $(base.resourcePath)
+
+fenix8pro47mm.sourcePath = $(base.sourcePath)
+fenix8pro47mm.resourcePath = $(base.resourcePath)
+
+fenix8solar47mm.sourcePath = $(base.sourcePath)
+fenix8solar47mm.resourcePath = $(base.resourcePath)
+
+fenix8solar51mm.sourcePath = $(base.sourcePath)
+fenix8solar51mm.resourcePath = $(base.resourcePath)
+
+# Fenix E
+fenixe.sourcePath = $(base.sourcePath)
+fenixe.resourcePath = $(base.resourcePath)
+
+# Epix Gen 2 series
+epix2.sourcePath = $(base.sourcePath)
+epix2.resourcePath = $(base.resourcePath)
+
+epix2pro42mm.sourcePath = $(base.sourcePath)
+epix2pro42mm.resourcePath = $(base.resourcePath)
+
+epix2pro47mm.sourcePath = $(base.sourcePath)
+epix2pro47mm.resourcePath = $(base.resourcePath)
+
+epix2pro51mm.sourcePath = $(base.sourcePath)
+epix2pro51mm.resourcePath = $(base.resourcePath)
+
+# Enduro series
+enduro.sourcePath = $(base.sourcePath)
+enduro.resourcePath = $(base.resourcePath)
+
+enduro3.sourcePath = $(base.sourcePath)
+enduro3.resourcePath = $(base.resourcePath)
+
+# Forerunner series
 fr55.sourcePath = $(base.sourcePath)
 fr55.resourcePath = $(base.resourcePath)
+
+fr165.sourcePath = $(base.sourcePath)
+fr165.resourcePath = $(base.resourcePath)
+
+fr165m.sourcePath = $(base.sourcePath)
+fr165m.resourcePath = $(base.resourcePath)
 
 fr245.sourcePath = $(base.sourcePath)
 fr245.resourcePath = $(base.resourcePath)
 
+fr245m.sourcePath = $(base.sourcePath)
+fr245m.resourcePath = $(base.resourcePath)
+
 fr255.sourcePath = $(base.sourcePath)
 fr255.resourcePath = $(base.resourcePath)
+
+fr255m.sourcePath = $(base.sourcePath)
+fr255m.resourcePath = $(base.resourcePath)
+
+fr255s.sourcePath = $(base.sourcePath)
+fr255s.resourcePath = $(base.resourcePath)
+
+fr255sm.sourcePath = $(base.sourcePath)
+fr255sm.resourcePath = $(base.resourcePath)
 
 fr265.sourcePath = $(base.sourcePath)
 fr265.resourcePath = $(base.resourcePath)
 
+fr265s.sourcePath = $(base.sourcePath)
+fr265s.resourcePath = $(base.resourcePath)
+
+fr57042mm.sourcePath = $(base.sourcePath)
+fr57042mm.resourcePath = $(base.resourcePath)
+
+fr57047mm.sourcePath = $(base.sourcePath)
+fr57047mm.resourcePath = $(base.resourcePath)
+
+fr645m.sourcePath = $(base.sourcePath)
+fr645m.resourcePath = $(base.resourcePath)
+
+fr745.sourcePath = $(base.sourcePath)
+fr745.resourcePath = $(base.resourcePath)
+
 fr945.sourcePath = $(base.sourcePath)
 fr945.resourcePath = $(base.resourcePath)
+
+fr945lte.sourcePath = $(base.sourcePath)
+fr945lte.resourcePath = $(base.resourcePath)
 
 fr955.sourcePath = $(base.sourcePath)
 fr955.resourcePath = $(base.resourcePath)
@@ -64,14 +161,83 @@ fr955.resourcePath = $(base.resourcePath)
 fr965.sourcePath = $(base.sourcePath)
 fr965.resourcePath = $(base.resourcePath)
 
-vivoactive4.sourcePath = $(base.sourcePath)
-vivoactive4.resourcePath = $(base.resourcePath)
+fr970.sourcePath = $(base.sourcePath)
+fr970.resourcePath = $(base.resourcePath)
 
-vivoactive5.sourcePath = $(base.sourcePath)
-vivoactive5.resourcePath = $(base.resourcePath)
+# Instinct series
+instinct2.sourcePath = $(base.sourcePath)
+instinct2.resourcePath = $(base.resourcePath)
 
+instinct2s.sourcePath = $(base.sourcePath)
+instinct2s.resourcePath = $(base.resourcePath)
+
+instinct2x.sourcePath = $(base.sourcePath)
+instinct2x.resourcePath = $(base.resourcePath)
+
+instinctcrossover.sourcePath = $(base.sourcePath)
+instinctcrossover.resourcePath = $(base.resourcePath)
+
+instinctcrossoveramoled.sourcePath = $(base.sourcePath)
+instinctcrossoveramoled.resourcePath = $(base.resourcePath)
+
+instincte40mm.sourcePath = $(base.sourcePath)
+instincte40mm.resourcePath = $(base.resourcePath)
+
+instincte45mm.sourcePath = $(base.sourcePath)
+instincte45mm.resourcePath = $(base.resourcePath)
+
+instinct3amoled45mm.sourcePath = $(base.sourcePath)
+instinct3amoled45mm.resourcePath = $(base.resourcePath)
+
+instinct3amoled50mm.sourcePath = $(base.sourcePath)
+instinct3amoled50mm.resourcePath = $(base.resourcePath)
+
+instinct3solar45mm.sourcePath = $(base.sourcePath)
+instinct3solar45mm.resourcePath = $(base.resourcePath)
+
+# MARQ series
+marqadventurer.sourcePath = $(base.sourcePath)
+marqadventurer.resourcePath = $(base.resourcePath)
+
+marqathlete.sourcePath = $(base.sourcePath)
+marqathlete.resourcePath = $(base.resourcePath)
+
+marqaviator.sourcePath = $(base.sourcePath)
+marqaviator.resourcePath = $(base.resourcePath)
+
+marqcaptain.sourcePath = $(base.sourcePath)
+marqcaptain.resourcePath = $(base.resourcePath)
+
+marqcommander.sourcePath = $(base.sourcePath)
+marqcommander.resourcePath = $(base.resourcePath)
+
+marqdriver.sourcePath = $(base.sourcePath)
+marqdriver.resourcePath = $(base.resourcePath)
+
+marqexpedition.sourcePath = $(base.sourcePath)
+marqexpedition.resourcePath = $(base.resourcePath)
+
+marqgolfer.sourcePath = $(base.sourcePath)
+marqgolfer.resourcePath = $(base.resourcePath)
+
+marq2.sourcePath = $(base.sourcePath)
+marq2.resourcePath = $(base.resourcePath)
+
+marq2aviator.sourcePath = $(base.sourcePath)
+marq2aviator.resourcePath = $(base.resourcePath)
+
+# Venu series
 venu.sourcePath = $(base.sourcePath)
 venu.resourcePath = $(base.resourcePath)
+
+venud.sourcePath = $(base.sourcePath)
+venud.resourcePath = $(base.resourcePath)
+
+venusq.sourcePath = $(base.sourcePath)
+venusq.resourcePath = $(base.resourcePath)
+
+venusqm.sourcePath = $(base.sourcePath)
+venusqm.resourcePath = $(base.resourcePath)
 
 venu2.sourcePath = $(base.sourcePath)
 venu2.resourcePath = $(base.resourcePath)
@@ -79,5 +245,42 @@ venu2.resourcePath = $(base.resourcePath)
 venu2plus.sourcePath = $(base.sourcePath)
 venu2plus.resourcePath = $(base.resourcePath)
 
+venu2s.sourcePath = $(base.sourcePath)
+venu2s.resourcePath = $(base.resourcePath)
+
+venusq2.sourcePath = $(base.sourcePath)
+venusq2.resourcePath = $(base.resourcePath)
+
+venusq2m.sourcePath = $(base.sourcePath)
+venusq2m.resourcePath = $(base.resourcePath)
+
 venu3.sourcePath = $(base.sourcePath)
 venu3.resourcePath = $(base.resourcePath)
+
+venu3s.sourcePath = $(base.sourcePath)
+venu3s.resourcePath = $(base.resourcePath)
+
+venu441mm.sourcePath = $(base.sourcePath)
+venu441mm.resourcePath = $(base.resourcePath)
+
+venu445mm.sourcePath = $(base.sourcePath)
+venu445mm.resourcePath = $(base.resourcePath)
+
+venux1.sourcePath = $(base.sourcePath)
+venux1.resourcePath = $(base.resourcePath)
+
+# Vivoactive series
+vivoactive3m.sourcePath = $(base.sourcePath)
+vivoactive3m.resourcePath = $(base.resourcePath)
+
+vivoactive4.sourcePath = $(base.sourcePath)
+vivoactive4.resourcePath = $(base.resourcePath)
+
+vivoactive4s.sourcePath = $(base.sourcePath)
+vivoactive4s.resourcePath = $(base.resourcePath)
+
+vivoactive5.sourcePath = $(base.sourcePath)
+vivoactive5.resourcePath = $(base.resourcePath)
+
+vivoactive6.sourcePath = $(base.sourcePath)
+vivoactive6.resourcePath = $(base.resourcePath)

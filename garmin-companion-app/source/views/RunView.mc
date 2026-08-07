@@ -90,6 +90,18 @@ class RunView extends Ui.View {
     private const START_RETRY_MAX      = 3;   // max 3 retries
     private const START_RETRY_INTERVAL = 20;  // 20 x 250ms = 5s between retries
 
+    // ── Stop-command retry ───────────��────────────────────────────────────────
+    // After the watch sends "command:stop" to the phone, it retries if no
+    // confirmation arrives (stopAck or sessionEnded). This is the primary fix for
+    // the "run not completing on phone when finished on watch" bug — ConnectIQ
+    // transmit is fire-and-forget; if the single "stop" packet is dropped the
+    // phone service keeps running forever and the run is never saved.
+    // Retry is cancelled when the phone sends stopAck or sessionEnded.
+    private var _stopRetryCount     = 0;
+    private var _stopRetryTick      = 0;
+    private const STOP_RETRY_MAX      = 6;   // max 6 retries (30s total)
+    private const STOP_RETRY_INTERVAL = 20;  // 20 x 250ms = 5s between retries
+
     // Watch GPS cache
     private var _lastGpsLat    = null;
     private var _lastGpsLng    = null;
@@ -462,6 +474,11 @@ class RunView extends Ui.View {
         Sensor.enableSensorEvents(null);
         // Always notify phone, always stop local recording
         _phoneLink.sendCommand("stop");
+        // Arm stop-command retry: resend "stop" every STOP_RETRY_INTERVAL ticks
+        // until the phone confirms with "sessionEnded" or "stopAck". Recovers from
+        // BT delivery failures (ConnectIQ transmit is fire-and-forget).
+        _stopRetryCount = STOP_RETRY_MAX;
+        _stopRetryTick  = 0;
         _stopSession();
 
         // ── Save offline buffer so it uploads when phone reconnects ──────────
@@ -766,8 +783,17 @@ class RunView extends Ui.View {
             // Single haptic pulse so the runner knows a cue was delivered.
             _vibeShort();
 
+        } else if (t.equals("stopAck")) {
+            // Phone confirmed it received the "stop" command — cancel retry immediately.
+            // The full sessionEnded message will follow once the upload completes.
+            _stopRetryCount = 0;
+            _stopRetryTick  = 0;
+            Sys.println("Phone stopAck received — stop retry cancelled");
+
         } else if (t.equals("sessionEnded")) {
             // Phone ended the session (Scenario A) - clean up all watch resources.
+            _stopRetryCount   = 0;      // Phone confirmed session ended — cancel stop retry
+            _stopRetryTick    = 0;
             _isRunning        = false;
             _isPaused         = false;
             _isFinished       = true;   // Keep duration visible after run ends
@@ -811,6 +837,21 @@ class RunView extends Ui.View {
                 _startRetryCount -= 1;
                 _phoneLink.sendCommand("start");
                 Sys.println(">>> startRun retry — " + _startRetryCount + " remaining");
+            }
+        }
+
+        // ── Stop-command retry (BT drop recovery) ──────────────────────────────
+        // If the watch-issued "stop" command was dropped, the phone session stays
+        // open indefinitely and the run is never saved. Retry every
+        // STOP_RETRY_INTERVAL ticks until the phone acks with stopAck or
+        // sessionEnded. Applies for BOTH phone-controlled and standalone runs.
+        if (_isFinished && _stopRetryCount > 0) {
+            _stopRetryTick += 1;
+            if (_stopRetryTick >= STOP_RETRY_INTERVAL) {
+                _stopRetryTick  = 0;
+                _stopRetryCount -= 1;
+                _phoneLink.sendCommand("stop");
+                Sys.println(">>> finishRun retry — " + _stopRetryCount + " remaining");
             }
         }
 
