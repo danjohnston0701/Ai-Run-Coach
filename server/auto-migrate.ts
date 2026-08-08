@@ -345,8 +345,20 @@ export async function runAutoMigrations(): Promise<void> {
       name: "live_run_sessions.viewer_count",
       sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS viewer_count INTEGER DEFAULT 0",
     },
+    {
+      name: "live_run_sessions.observer_count",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS observer_count INTEGER DEFAULT 0",
+    },
+    {
+      name: "live_run_sessions.invite_code",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS invite_code VARCHAR(8) UNIQUE",
+    },
+    {
+      name: "idx_live_run_sessions_invite_code",
+      sql: "CREATE INDEX IF NOT EXISTS idx_live_run_sessions_invite_code ON live_run_sessions(invite_code)",
+    },
 
-    // ── observer_invitations — full table for email-based live-run invites ────
+    // ─��� observer_invitations — full table for email-based live-run invites ────
     // Created to support non-registered users receiving email invitations to
     // watch a live run session.  Must be run before any email invite is sent.
     {
@@ -377,6 +389,14 @@ export async function runAutoMigrations(): Promise<void> {
     {
       name: "idx_observer_invitations_session",
       sql: "CREATE INDEX IF NOT EXISTS idx_observer_invitations_session ON observer_invitations(session_id)",
+    },
+    {
+      name: "observer_invitations.invite_code",
+      sql: "ALTER TABLE observer_invitations ADD COLUMN IF NOT EXISTS invite_code VARCHAR(8) UNIQUE",
+    },
+    {
+      name: "idx_observer_invitations_invite_code",
+      sql: "CREATE INDEX IF NOT EXISTS idx_observer_invitations_invite_code ON observer_invitations(invite_code)",
     },
     // ── group_run_participants.completed_at ──────────────────────────────────
     // Track when each participant finishes their run

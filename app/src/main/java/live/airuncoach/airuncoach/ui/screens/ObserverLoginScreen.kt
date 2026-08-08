@@ -15,7 +15,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -123,12 +122,12 @@ fun ObserverLoginScreen(
             // Icon + header
             Text("👟", fontSize = 40.sp)
             Text(
-                "Enter Your Invite Token",
+                "Enter Your Invite Code",
                 style = AppTextStyles.h3,
                 color = Colors.textPrimary
             )
             Text(
-                "You were sent a token in the invite email. Paste it below to join the live run.",
+                "Enter the 8-character invite code from your email, or paste the full token link.",
                 style = AppTextStyles.body,
                 color = Colors.textMuted
             )
@@ -172,13 +171,13 @@ fun ObserverLoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Primary CTA
+            // Primary CTA — enabled for valid codes (8 or 64 chars)
             Button(
                 onClick = { viewModel.validateAndLoadSession(token) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                enabled = token.isNotBlank(),
+                enabled = token.length == 8 || token.length == 64,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Colors.primary,
                     disabledContainerColor = Colors.primary.copy(alpha = 0.4f)
@@ -203,7 +202,11 @@ fun ObserverLoginScreen(
 }
 
 /**
- * Monospace token input with character counter.
+ * Invite code input supporting both 8-char short codes and 64-char tokens.
+ * 
+ * Valid inputs:
+ * - 8 uppercase alphanumeric: A2B3C4D5 (new short code)
+ * - 64 hex characters: f7a3b2c9... (legacy token)
  */
 @Composable
 fun TokenInputField(
@@ -212,17 +215,31 @@ fun TokenInputField(
     modifier: Modifier = Modifier,
     isLoading: Boolean = false
 ) {
+    val isValid = value.length == 8 || value.length == 64
+    
     Column(modifier = modifier) {
         TextField(
             value = value,
             onValueChange = { raw ->
-                // Tokens are hex strings — only allow alphanumeric
-                onValueChange(raw.filter { it.isLetterOrDigit() }.lowercase())
+                // For short codes (8 chars): uppercase alphanumeric only
+                // For tokens (64 chars): lowercase hex
+                // Allow user to type naturally, we'll normalize it
+                val filtered = raw.filter { it.isLetterOrDigit() }
+                
+                // If short code (8 chars): uppercase for display
+                // If token (64 chars): lowercase for consistency
+                val normalized = if (filtered.length <= 8) {
+                    filtered.uppercase()
+                } else {
+                    filtered.lowercase()
+                }
+                
+                onValueChange(normalized.take(64)) // Cap at 64 chars max
             },
             modifier = Modifier.fillMaxWidth(),
             placeholder = {
                 Text(
-                    "Paste your 64-character token here",
+                    "Invite code (8 chars) or paste token",
                     style = AppTextStyles.body,
                     color = Colors.textMuted,
                     fontSize = 13.sp
@@ -242,11 +259,11 @@ fun TokenInputField(
                 fontSize = 12.sp
             ),
             trailingIcon = when {
-                value.isNotBlank() && value.length == 64 -> {
+                value.isNotBlank() && isValid -> {
                     {
                         Icon(
                             Icons.Default.CheckCircle,
-                            contentDescription = "Token looks good",
+                            contentDescription = "Code looks good",
                             tint = Color(0xFF4CAF50),
                             modifier = Modifier.size(20.dp)
                         )
@@ -269,9 +286,14 @@ fun TokenInputField(
         )
 
         if (value.isNotBlank()) {
-            val countColor = if (value.length == 64) Color(0xFF4CAF50) else Colors.textMuted
+            val description = when (value.length) {
+                8 -> "Invite code (8/8 chars) ✓"
+                64 -> "Token (64/64 chars) ✓"
+                else -> "${value.length} / 8–64 characters"
+            }
+            val countColor = if (isValid) Color(0xFF4CAF50) else Colors.textMuted
             Text(
-                "${value.length} / 64 characters${if (value.length == 64) " ✓" else ""}",
+                description,
                 style = AppTextStyles.caption,
                 color = countColor,
                 fontSize = 11.sp,

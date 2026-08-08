@@ -95,16 +95,22 @@ export interface IStorage {
   
   // Live Sessions
   getLiveSession(id: string): Promise<LiveRunSession | undefined>;
+  getLiveSessionByInviteCode(code: string): Promise<LiveRunSession | undefined>;
   getUserLiveSession(userId: string): Promise<LiveRunSession | undefined>;
   createLiveSession(session: any): Promise<LiveRunSession>;
   updateLiveSession(id: string, data: Partial<LiveRunSession>): Promise<LiveRunSession | undefined>;
+  updateLiveSessionWithGpsAccumulation(id: string, gpsPoint: { lat: number; lng: number; timestamp?: number; altitude?: number } | null, otherData?: Partial<LiveRunSession>): Promise<LiveRunSession | undefined>;
   endLiveSession(sessionKey: string): Promise<void>;
   inviteObserver(sessionId: string, observerId: string): Promise<LiveRunSession | undefined>;
+  incrementObserverCount(sessionId: string): Promise<void>;
+  decrementObserverCount(sessionId: string): Promise<void>;
+  setObserverCount(sessionId: string, count: number): Promise<void>;
   checkFriendship(userId1: string, userId2: string): Promise<boolean>;
   
   // Observer Invitations (for non-registered users)
   createObserverInvitation(data: { sessionId: string; runnerId: string; email: string }): Promise<ObserverInvitation>;
   getObserverInvitation(token: string): Promise<ObserverInvitation | undefined>;
+  getObserverInvitationByCode(code: string): Promise<ObserverInvitation | undefined>;
   updateObserverInvitation(id: string, updates: Partial<ObserverInvitation>): Promise<ObserverInvitation | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   
@@ -807,6 +813,19 @@ export class DatabaseStorage implements IStorage {
     return session || undefined;
   }
 
+  /**
+   * Look up a live session by invite code (case-insensitive)
+   * Used when observer enters the short 8-char code to join
+   */
+  async getLiveSessionByInviteCode(code: string): Promise<LiveRunSession | undefined> {
+    const normalized = (code || "").toUpperCase().trim();
+    const [session] = await db
+      .select()
+      .from(liveRunSessions)
+      .where(sql`UPPER(${liveRunSessions.inviteCode}) = ${normalized}`);
+    return session || undefined;
+  }
+
   async getUserLiveSession(userId: string): Promise<LiveRunSession | undefined> {
     const [session] = await db.select().from(liveRunSessions).where(
       and(eq(liveRunSessions.userId, userId), eq(liveRunSessions.isActive, true))
@@ -825,6 +844,53 @@ export class DatabaseStorage implements IStorage {
       .where(eq(liveRunSessions.id, id))
       .returning();
     return session || undefined;
+  }
+
+  /**
+   * Update live session with GPS track accumulation
+   * Appends new GPS point to the existing track without losing prior points
+   * @param id Session ID
+   * @param gpsPoint Single GPS point: { lat, lng, timestamp, altitude? }
+   * @param otherData Other fields to update
+   */
+  async updateLiveSessionWithGpsAccumulation(
+    id: string,
+    gpsPoint: { lat: number; lng: number; timestamp?: number; altitude?: number } | null,
+    otherData: Partial<LiveRunSession> = {}
+  ): Promise<LiveRunSession | undefined> {
+    // Get current session to preserve existing GPS track
+    const session = await this.getLiveSession(id);
+    if (!session) return undefined;
+
+    // Accumulate GPS track
+    let updatedGpsTrack = (session.gpsTrack as any[] | null) || [];
+    
+    if (gpsPoint) {
+      // Avoid duplicate points (within 1 second and 1 meter)
+      const lastPoint = updatedGpsTrack[updatedGpsTrack.length - 1];
+      const isDuplicate = lastPoint && 
+        Math.abs((gpsPoint.timestamp || 0) - (lastPoint.timestamp || 0)) < 1000 &&
+        Math.sqrt(
+          Math.pow((gpsPoint.lat - lastPoint.lat) * 111000, 2) +
+          Math.pow((gpsPoint.lng - lastPoint.lng) * 111000, 2)
+        ) < 1; // ~1 meter
+      
+      if (!isDuplicate) {
+        updatedGpsTrack.push(gpsPoint);
+      }
+    }
+
+    // Update session with accumulated track
+    const [updated] = await db.update(liveRunSessions)
+      .set({ 
+        ...otherData,
+        gpsTrack: updatedGpsTrack,
+        lastSyncedAt: new Date() 
+      })
+      .where(eq(liveRunSessions.id, id))
+      .returning();
+    
+    return updated || undefined;
   }
 
   async endLiveSession(sessionKey: string): Promise<void> {
@@ -862,6 +928,34 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
+  /**
+   * Increment the observer count for a session
+   * Called when an observer joins/starts viewing
+   */
+  async incrementObserverCount(sessionId: string): Promise<void> {
+    await db.update(liveRunSessions)
+      .set({ observerCount: sql`COALESCE(${liveRunSessions.observerCount}, 0) + 1` })
+      .where(eq(liveRunSessions.id, sessionId));
+  }
+
+  /**
+   * Decrement the observer count for a session (when they leave/disconnect)
+   */
+  async decrementObserverCount(sessionId: string): Promise<void> {
+    await db.update(liveRunSessions)
+      .set({ observerCount: sql`GREATEST(0, COALESCE(${liveRunSessions.observerCount}, 0) - 1)` })
+      .where(eq(liveRunSessions.id, sessionId));
+  }
+
+  /**
+   * Set the observer count for a session
+   */
+  async setObserverCount(sessionId: string, count: number): Promise<void> {
+    await db.update(liveRunSessions)
+      .set({ observerCount: Math.max(0, count) })
+      .where(eq(liveRunSessions.id, sessionId));
+  }
+
   async checkFriendship(userId1: string, userId2: string): Promise<boolean> {
     const [friendship] = await db.select()
       .from(friends)
@@ -881,7 +975,9 @@ export class DatabaseStorage implements IStorage {
     runnerId: string;
     email: string;
   }): Promise<ObserverInvitation> {
+    const { generateInviteCode } = await import("./invite-code-generator");
     const token = crypto.randomBytes(32).toString("hex");
+    const inviteCode = generateInviteCode();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
     const [invitation] = await db
@@ -889,6 +985,7 @@ export class DatabaseStorage implements IStorage {
       .values({
         ...data,
         token,
+        inviteCode,
         expiresAt,
         status: "sent",
         createdAt: new Date(),
@@ -903,6 +1000,20 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(observerInvitations)
       .where(eq(observerInvitations.token, token));
+    return invitation || undefined;
+  }
+
+  /**
+   * Look up an observer invitation by short code (case-insensitive)
+   * @param code The 8-character invite code (case-insensitive)
+   */
+  async getObserverInvitationByCode(code: string): Promise<ObserverInvitation | undefined> {
+    const { normalizeInviteCode } = await import("./invite-code-generator");
+    const normalized = normalizeInviteCode(code);
+    const [invitation] = await db
+      .select()
+      .from(observerInvitations)
+      .where(sql`UPPER(${observerInvitations.inviteCode}) = ${normalized}`);
     return invitation || undefined;
   }
 

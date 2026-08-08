@@ -4446,7 +4446,10 @@ function transformRunForAndroid(run: any) {
       const userId = req.user!.userId;
       const { runnerName } = req.body;
       const { randomBytes } = await import("node:crypto");
+      const { generateInviteCode } = await import("./invite-code-generator");
+      
       const observeToken = randomBytes(32).toString("hex");
+      const inviteCode = generateInviteCode(); // Generate a shareable 8-char code for this session
 
       const session = await storage.createLiveSession({
         userId,
@@ -4454,9 +4457,16 @@ function transformRunForAndroid(run: any) {
         isActive: true,
         startedAt: new Date(),
         observeToken,
+        inviteCode, // Store the invite code on the session for lookup
       });
 
-      return res.json({ id: session.id, success: true });
+      // Return session ID + invite code so runner can share it in-app
+      // This is the same code that will be in the email invite links
+      return res.json({ 
+        id: session.id, 
+        success: true,
+        inviteCode: session.inviteCode, // ← NEW: Include code for in-app sharing
+      });
     } catch (err: any) {
       console.error("[live-sessions] create failed:", err);
       return res.status(500).json({ success: false, error: err.message });
@@ -4465,11 +4475,41 @@ function transformRunForAndroid(run: any) {
 
   app.get("/api/live-sessions/:sessionId", async (req: Request, res: Response) => {
     try {
-      const session = await storage.getLiveSession(req.params.sessionId);
+      const { recordObserverActivity, getObserverCount } = await import("./observer-tracking");
+      
+      const sessionId = req.params.sessionId;
+      const session = await storage.getLiveSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: "Session not found" });
       }
-      res.json(session);
+
+      // Track observer activity (passive counting based on polling)
+      // Use client IP as unique identifier for non-authenticated observers,
+      // or user ID for authenticated observers (if available)
+      const clientId = req.user?.userId || req.ip || "unknown";
+      const observerCount = recordObserverActivity(sessionId, clientId);
+
+      // Enrich response with route polyline if this is a routed run
+      let responseSession: any = session;
+      if (session.routeId) {
+        try {
+          const route = await storage.getRoute(session.routeId);
+          if (route && (route as any).polyline) {
+            // Add polyline to response (snake_case for consistency)
+            responseSession = {
+              ...session,
+              routePolyline: (route as any).polyline,
+            };
+          }
+        } catch (err) {
+          console.warn(`[Live Sessions] Failed to fetch route polyline for route ${session.routeId}:`, err);
+        }
+      }
+
+      // Add current observer count to response
+      responseSession.observer_count = observerCount;
+
+      res.json(responseSession);
     } catch (error: any) {
       console.error("Get live session error:", error);
       res.status(500).json({ error: "Failed to get session" });
@@ -4488,13 +4528,57 @@ function transformRunForAndroid(run: any) {
 
   app.put("/api/live-sessions/sync", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { sessionId, ...data } = req.body;
+      const { sessionId, currentLat, currentLng, gpsPoint, ...otherData } = req.body;
+      
       if (sessionId) {
-        const session = await storage.updateLiveSession(sessionId, data);
-        res.json(session);
+        // Extract GPS point from request (could be 'gpsPoint' or 'currentLat/currentLng')
+        let gpsPointToAppend = null;
+        if (gpsPoint) {
+          gpsPointToAppend = gpsPoint;
+        } else if (currentLat !== undefined && currentLng !== undefined) {
+          gpsPointToAppend = {
+            lat: currentLat,
+            lng: currentLng,
+            timestamp: Date.now(),
+          };
+        }
+
+        // Update session with GPS accumulation
+        const session = await storage.updateLiveSessionWithGpsAccumulation(
+          sessionId,
+          gpsPointToAppend,
+          {
+            ...otherData,
+            currentLat: currentLat ?? undefined,
+            currentLng: currentLng ?? undefined,
+          }
+        );
+
+        if (!session) {
+          return res.status(404).json({ error: "Session not found" });
+        }
+
+        // Enrich response with route polyline if this is a routed run
+        let responseSession = session;
+        if (session.routeId) {
+          try {
+            const route = await storage.getRoute(session.routeId);
+            if (route && (route as any).polyline) {
+              // Add polyline to response (snake_case for consistency)
+              responseSession = {
+                ...session,
+                routePolyline: (route as any).polyline,
+              };
+            }
+          } catch (err) {
+            console.warn(`[Live Sessions] Failed to fetch route polyline for route ${session.routeId}:`, err);
+          }
+        }
+
+        res.json(responseSession);
       } else {
         const session = await storage.createLiveSession({
-          ...data,
+          ...otherData,
           userId: req.user!.userId,
         });
         res.json(session);
@@ -4660,16 +4744,18 @@ function transformRunForAndroid(run: any) {
           trimmedEmail,
           runner.name || "A runner",
           sessionId,
-          invitation.token
+          invitation.token,
+          invitation.inviteCode // Include short code
         );
 
-        console.log(`[Live Sessions] Sent email invitation to ${trimmedEmail} for session ${sessionId}. Email sent: ${emailSent}, registered: ${!!existingUser}`);
+        console.log(`[Live Sessions] Sent email invitation to ${trimmedEmail} for session ${sessionId} (code: ${invitation.inviteCode}). Email sent: ${emailSent}, registered: ${!!existingUser}`);
 
         return res.json({
           success: true,
           type: "email",
           emailSent,
           invitationToken: invitation.token,
+          inviteCode: invitation.inviteCode, // Return short code to client
         });
       } else {
         return res.status(400).json({ error: "friendId or email is required" });
@@ -4801,18 +4887,58 @@ function transformRunForAndroid(run: any) {
   });
 
   // Public endpoint for non-registered observers to access live sessions
-  app.get("/api/observe/:token", async (req: Request, res: Response) => {
+  // Accepts either a 64-char token (legacy) or 8-char short code (new)
+  app.get("/api/observe/:code", async (req: Request, res: Response) => {
     try {
-      const { token } = req.params;
+      const { code } = req.params;
+      const { checkRateLimit } = await import("./rate-limit");
+      const { isValidInviteCodeFormat, normalizeInviteCode } = await import("./invite-code-generator");
 
-      // Get invitation by token
-      const invitation = await storage.getObserverInvitation(token);
-      if (!invitation) {
+      let session = undefined;
+      let invitation = undefined;
+
+      // Check if it's a short invite code (8 chars, no ambiguous chars) or a legacy token
+      if (isValidInviteCodeFormat(code)) {
+        // It's a short invite code — look it up with rate limiting
+        const normalized = normalizeInviteCode(code);
+        
+        // Get client IP for rate limiting
+        const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+        
+        // Check rate limit
+        if (checkRateLimit(clientIp, normalized)) {
+          return res.status(429).json({
+            error: "Too many attempts",
+            message: "You've made too many attempts. Please try again later.",
+            retryAfter: 60,
+          });
+        }
+
+        // Try to find code at session level first (runner shared directly)
+        session = await storage.getLiveSessionByInviteCode(normalized);
+        
+        // Fall back to invitation level (for email invites)
+        if (!session) {
+          invitation = await storage.getObserverInvitationByCode(normalized);
+        }
+      } else if (code.length === 64) {
+        // It's a 64-character token (legacy format)
+        invitation = await storage.getObserverInvitation(code);
+      } else {
+        return res.status(400).json({ error: "Invalid invite code or token format" });
+      }
+
+      // Resolve session from either direct code or invitation
+      if (!session && invitation) {
+        session = await storage.getLiveSession(invitation.sessionId);
+      }
+
+      if (!session) {
         return res.status(404).json({ error: "Invalid or expired link" });
       }
 
-      // Check if token is expired
-      if (invitation.expiresAt && invitation.expiresAt < new Date()) {
+      // Check if token/invitation is expired (only for invitation-based codes)
+      if (invitation && invitation.expiresAt && invitation.expiresAt < new Date()) {
         return res.status(410).json({
           error: "Link expired",
           isExpired: true,
@@ -4820,19 +4946,33 @@ function transformRunForAndroid(run: any) {
         });
       }
 
-      // Load session data
-      const session = await storage.getLiveSession(invitation.sessionId);
-      if (!session) {
-        return res.status(404).json({ error: "Run session not found or has ended" });
+      // Check if session is still active
+      if (!session.isActive) {
+        return res.status(410).json({
+          error: "Run session has ended",
+          isExpired: true,
+          message: "Sorry, this live run session has ended.",
+        });
       }
 
-      // Mark invitation as viewed
-      await storage.updateObserverInvitation(invitation.id, { viewedAt: new Date() });
+      // Mark invitation as viewed (if invitation-based)
+      if (invitation) {
+        await storage.updateObserverInvitation(invitation.id, { viewedAt: new Date() });
+      }
+
+      // Track observer activity (passive counting)
+      const { recordObserverActivity } = await import("./observer-tracking");
+      const clientId = req.ip || req.connection.remoteAddress || "unknown";
+      const observerCount = recordObserverActivity(session.id, clientId);
 
       // Return session data for observer
       res.json({
-        sessionData: session,
+        sessionData: {
+          ...session,
+          observer_count: observerCount, // Include live observer count
+        },
         isExpired: false,
+        inviteCode: (invitation?.inviteCode) || (session as any).inviteCode, // Include the code for reference
       });
     } catch (error: any) {
       console.error("Get observe session error:", error);

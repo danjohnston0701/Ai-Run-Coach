@@ -584,6 +584,8 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   kmSplits: jsonb("km_splits"),
   observers: jsonb("observers"),  // JSON array of { userId, status, invitedAt }
   viewerCount: integer("viewer_count").default(0),  // Active viewer count (users who /join)
+  observerCount: integer("observer_count").default(0),  // Count of active distinct observers
+  inviteCode: varchar("invite_code").unique(),  // Session-level 8-char invite code for runners to share
   lastSyncedAt: timestamp("last_synced_at").defaultNow(),
 });
 
@@ -609,6 +611,7 @@ export const observerInvitations = pgTable("observer_invitations", {
   runnerId: varchar("runner_id").notNull().references(() => users.id),
   email: varchar("email").notNull(),
   token: varchar("token").notNull().unique(),
+  inviteCode: varchar("invite_code").notNull().unique(),  // Short 8-char alphanumeric code (case-insensitive)
   status: text("status").default("sent"),  // 'sent', 'viewed', 'expired'
   createdAt: timestamp("created_at").defaultNow(),
   expiresAt: timestamp("expires_at"),
