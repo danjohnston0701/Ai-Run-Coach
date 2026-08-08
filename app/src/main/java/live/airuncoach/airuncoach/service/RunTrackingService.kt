@@ -5359,6 +5359,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     lastCueHrDelta = hrDeltaSnap,
                     lastCuePaceDelta = paceDeltaSnap,
                     athleteRespondedToLastCue = respondedSnap,
+                    // Activity type — tells GPT to use walk/run vocabulary
+                    activityType = currentActivityType,
                 )
 
                 val response = withTimeoutOrNull(3_500L) {

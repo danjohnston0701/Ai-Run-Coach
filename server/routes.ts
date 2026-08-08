@@ -12334,7 +12334,9 @@ function transformRunForAndroid(run: any) {
   app.post("/api/garmin-companion/session/end", companionAuthMiddleware, async (req: Request, res: Response) => {
     try {
       const { userId } = (req as any).companionUser;
-      const { sessionId, summary, kmSplits } = req.body;
+      const { sessionId, summary, kmSplits, sessionType: rawSessionType } = req.body;
+      // Normalise the session type — watch sends "walk" | "run", fallback to "run"
+      const sessionType = String(rawSessionType ?? "").toLowerCase().trim() === "walk" ? "walk" : "run";
       
       if (!sessionId) {
         return res.status(400).json({ error: "Session ID required" });
@@ -12550,7 +12552,8 @@ function transformRunForAndroid(run: any) {
             elevationGain: stats.totalAscent ?? null,
             elevationLoss: stats.totalDescent ?? null,
             elevation: stats.totalAscent ?? null,
-            name: `Garmin Watch Run`,
+            name: sessionType === "walk" ? `Garmin Watch Walk` : `Garmin Watch Run`,
+            sessionType,
             runDate: now.toISOString().split('T')[0],
             runTime: now.toTimeString().split(' ')[0].slice(0, 5),
             completedAt: now,
@@ -12618,7 +12621,13 @@ function transformRunForAndroid(run: any) {
     try {
       const { userId } = (req as any).companionUser;
       const { sessionId } = req.params;
-      const { points, distanceM, durationSec, totalAscent } = req.body;
+      const { points, distanceM, durationSec, totalAscent, sessionType: batchRawSessionType } = req.body;
+      // sessionType may be provided by the watch (if watch app sends it), or we fall back
+      // to the companion session's activityType ("walking"|"running") stored at session/start.
+      let batchSessionType: string | null = null;
+      if (batchRawSessionType) {
+        batchSessionType = String(batchRawSessionType).toLowerCase().trim() === "walk" ? "walk" : "run";
+      }
 
       if (!points || !Array.isArray(points) || points.length === 0) {
         return res.status(400).json({ error: "No points provided" });
@@ -12683,6 +12692,22 @@ function transformRunForAndroid(run: any) {
       if (!existingRun) {
         console.log(`[Offline Batch] No run found for session ${sessionId} — creating run from batch (phone-less or service-failed run)`);
 
+        // Resolve sessionType for this batch — prefer explicit body field, fall back to the
+        // companion session's activityType stored at session/start ("walking"|"running").
+        let resolvedBatchSessionType = batchSessionType;
+        if (!resolvedBatchSessionType) {
+          const [batchSession] = await db.select({ activityType: garminCompanionSessions.activityType })
+            .from(garminCompanionSessions)
+            .where(and(eq(garminCompanionSessions.sessionId, sessionId), eq(garminCompanionSessions.userId, userId)))
+            .limit(1);
+          if (batchSession) {
+            const at = String(batchSession.activityType ?? "").toLowerCase().trim();
+            resolvedBatchSessionType = (at === "walk" || at === "walking") ? "walk" : "run";
+          } else {
+            resolvedBatchSessionType = "run";
+          }
+        }
+
         // Derive basic summary from batch data if not provided in body
         const distKm   = distanceM  ? distanceM  / 1000 : 0;
         const durSec   = durationSec || 0;
@@ -12719,7 +12744,8 @@ function transformRunForAndroid(run: any) {
           cadence:        avgCad,
           elevationGain:  totalAscent ?? null,
           elevation:      totalAscent ?? null,
-          name:           'Garmin Watch Run',
+          name:           resolvedBatchSessionType === "walk" ? 'Garmin Watch Walk' : 'Garmin Watch Run',
+          sessionType:    resolvedBatchSessionType,
           runDate:        now.toISOString().split('T')[0],
           runTime:        now.toTimeString().split(' ')[0].slice(0, 5),
           completedAt:    now,

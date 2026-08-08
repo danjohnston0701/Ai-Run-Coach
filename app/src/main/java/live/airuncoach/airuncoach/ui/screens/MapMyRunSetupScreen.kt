@@ -396,13 +396,7 @@ fun MapMyRunSetupScreen(
                                     sendState = watchSendState,
                                     onPrepare = {
                                         watchSendState = WatchSendState.SENDING
-                                        // Prepare watch
-                                        runSessionViewModel.prepareRunOnWatch(
-                                            distanceKm = targetDistance,
-                                            runType = "free"
-                                        )
-                                        watchSendState = WatchSendState.SENT
-                                        
+
                                         // Auto-flush any pending email before building config
                                         val watchPending = liveTrackingPendingEmail.trim()
                                         val watchObservers = if (watchPending.contains("@") && watchPending.isNotEmpty()
@@ -431,8 +425,17 @@ fun MapMyRunSetupScreen(
                                             isGroupRun = isGroupRunEnabled,
                                             groupRunParticipants = groupRunParticipants
                                         )
+                                        // Set config BEFORE preparing watch so that
+                                        // prepareRunOnWatch() reads the correct sessionType
                                         runSessionViewModel.setRunConfig(config)
                                         runSessionViewModel.fetchWellnessData()
+
+                                        // Prepare watch — now reads correct activityType from runConfig
+                                        runSessionViewModel.prepareRunOnWatch(
+                                            distanceKm = targetDistance,
+                                            runType = "free"
+                                        )
+                                        watchSendState = WatchSendState.SENT
                                         
                                         onStartRunWithoutRoute(
                                             targetDistance,

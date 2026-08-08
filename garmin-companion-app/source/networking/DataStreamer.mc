@@ -322,6 +322,7 @@ class DataStreamer {
         }
         var payload = {
             "sessionId"   => sessionId,
+            "sessionType" => _activityType,   // "walk" | "run" — so server saves correct type
             "points"      => points,
             "distanceM"   => (distanceM   != null) ? distanceM   : 0.0,
             "durationSec" => (durationSec != null) ? durationSec : 0,

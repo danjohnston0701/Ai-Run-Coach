@@ -403,6 +403,9 @@ data class SessionTriggerLiveRequest(
     @com.google.gson.annotations.SerializedName("lastCueHrDelta") val lastCueHrDelta: Int? = null,
     @com.google.gson.annotations.SerializedName("lastCuePaceDelta") val lastCuePaceDelta: Int? = null,
     @com.google.gson.annotations.SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null,
+
+    // Activity type — "walk" or "run" — controls coach vocabulary in GPT prompts
+    @com.google.gson.annotations.SerializedName("activityType") val activityType: String? = null,
 )
 
 data class RecentSplit(

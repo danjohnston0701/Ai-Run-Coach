@@ -484,32 +484,39 @@ export async function generatePreRunCoaching(params: {
   runnerProfile?: string | null;
 }): Promise<string> {
   const { distance, elevationGain, elevationLoss, difficulty, activityType, weather, coachName, coachTone, coachAccent } = params;
-  
+  const isWalkBrief = activityType && activityType.toLowerCase() === 'walk';
+  const briefActivityLabel = isWalkBrief ? 'walk' : 'run';
+  const briefCoachLabel    = isWalkBrief ? 'walking coach' : 'running coach';
+  const briefPersonLabel   = isWalkBrief ? 'walker' : 'runner';
+  const briefWalkProhibition = isWalkBrief
+    ? ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running-specific term. This person is WALKING. Say "walker", "walking", "walk pace" instead.'
+    : '';
+
   const weatherInfo = weather 
     ? `Weather: ${weather.temp || 'N/A'}°C, ${weather.condition || 'clear'}, wind ${weather.windSpeed || 0} km/h.`
     : 'Weather data unavailable.';
   
-  const prompt = `You are ${coachName}, an AI running coach. Your coaching style is ${coachTone}.
+  const prompt = `You are ${coachName}, an AI ${briefCoachLabel}. Your coaching style is ${coachTone}.${briefWalkProhibition}
 
-Generate a brief pre-run briefing (2-3 sentences max) for this upcoming ${activityType}:
+Generate a brief pre-${briefActivityLabel} briefing (2-3 sentences max) for this upcoming ${briefActivityLabel}:
 - Distance: ${formatDistanceForTTS(distance)}
 - Difficulty: ${difficulty}
 - Elevation gain: ${Math.round(elevationGain || 0)}m, loss: ${Math.round(elevationLoss || 0)}m
 - ${weatherInfo}
 
-Be encouraging, specific to the conditions, and give one actionable tip. Speak naturally as if talking directly to the runner.`;
+Be encouraging, specific to the conditions, and give one actionable tip. Speak naturally as if talking directly to the ${briefPersonLabel}.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Keep responses brief, encouraging, and actionable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock((params as any).runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} ${briefCoachLabel}. Keep responses brief, encouraging, and actionable.${briefWalkProhibition} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock((params as any).runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 120,
     temperature: 0.8,
   });
 
-  return completion.choices[0].message.content || "Take it easy at the start and find your rhythm. Good luck!";
+  return completion.choices[0].message.content || (isWalkBrief ? "Take it easy at the start and settle into your walking rhythm. Enjoy your walk!" : "Take it easy at the start and find your rhythm. Good luck!");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -728,6 +735,15 @@ export async function generatePaceUpdate(params: {
     }
   }
   
+  // Walk/run vocabulary — established early so paceTrend and other context strings use it
+  const isWalkSession = sessionType === 'walk';
+  const personLabel  = isWalkSession ? 'walker'  : 'runner';
+  const actLabel     = isWalkSession ? 'walking' : 'running';
+  const coachLabel   = isWalkSession ? 'walking coach' : 'running coach';
+  const walkProhibition = isWalkSession
+    ? '\nWALK SESSION — CRITICAL: NEVER say "run", "running", "runner", "sprint", "race pace", or any running-specific term in your response. This person is WALKING. Always say "walker", "walking", "walk pace". Cadence coaching is suppressed — do NOT mention cadence targets or stride rate.'
+    : '';
+
   // Build pace trend context for splits
   let paceTrend = '';
   if (isSplit && kmSplits && kmSplits.length >= 2) {
@@ -737,11 +753,11 @@ export async function generatePaceUpdate(params: {
       const currTime = lastTwo[1].time;
       const diff = currTime - prevTime;
       if (diff > 10) {
-        paceTrend = 'Runner is slowing down compared to previous kilometer. ';
+        paceTrend = `${isWalkSession ? 'Walker' : 'Runner'} is slowing down compared to previous kilometer. `;
       } else if (diff < -10) {
-        paceTrend = 'Runner is speeding up compared to previous kilometer. ';
+        paceTrend = `${isWalkSession ? 'Walker' : 'Runner'} is speeding up compared to previous kilometer. `;
       } else {
-        paceTrend = 'Runner is maintaining consistent pace. ';
+        paceTrend = `${isWalkSession ? 'Walker' : 'Runner'} is maintaining consistent pace. `;
       }
     }
   }
@@ -752,12 +768,12 @@ export async function generatePaceUpdate(params: {
   // Only ban terrain mentions if we genuinely have no elevation data AND no current grade signal.
   const hasGradeData = currentGrade !== undefined && currentGrade !== null && Math.abs(currentGrade) > 0.5;
   const noTerrainRule = (hasRoute || hasGradeData) ? '' : `
-CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain characteristics — you have no information about the terrain. Focus only on pace, effort, form, and motivation.`;
+CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'run'}. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain characteristics — you have no information about the terrain. Focus only on pace, effort, form, and motivation.`;
   
-  // Build runner profile + history context
+  // Build runner/walker profile + history context
   const runnerFirstNamePace = runnerName ? runnerName.split(' ')[0] : null;
   let runnerContext = '';
-  if (runnerFirstNamePace) runnerContext += `Runner: ${runnerFirstNamePace}. `;
+  if (runnerFirstNamePace) runnerContext += `${isWalkSession ? 'Walker' : 'Runner'}: ${runnerFirstNamePace}. `;
   if (fitnessLevel) runnerContext += `Fitness level: ${fitnessLevel}. `;
   if (runHistory) {
     runnerContext += buildRunHistoryContext(runHistory, currentPace);
@@ -801,7 +817,7 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
     : '';
 
   const trainingSessionContext = isTrainingSession
-    ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the runner's coaching plan — NOT a race or goal attempt. Do NOT compare their pace to their long-term race goal. Instead, frame the coaching around what this session is building.${sessionSplitContext}`
+    ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the ${personLabel}'s coaching plan — NOT a race or goal attempt. Do NOT compare their pace to their long-term race goal. Instead, frame the coaching around what this session is building.${sessionSplitContext}`
     : '';
 
   // Compute target pace comparison for split coaching (so AI can tell runner if they're on track)
@@ -838,24 +854,18 @@ CRITICAL: No GPS elevation data available for this run. Do NOT mention hills, te
       )
     : '';
 
-  // Walk/run vocabulary — all user-facing text adapts to session type
-  const isWalkSession = sessionType === 'walk';
-  const personLabel  = isWalkSession ? 'walker'  : 'runner';
-  const actLabel     = isWalkSession ? 'walking' : 'running';
-  const coachLabel   = isWalkSession ? 'walking coach' : 'running coach';
-  const walkPaceNote = isWalkSession
-    ? '\nWALK SESSION: Use walking vocabulary. Never say "run", "running", or "runner". Pace comparisons should reference walking pace norms, not running. Cadence coaching is suppressed.'
-    : '';
+  // Walk/run vocabulary — already defined above (moved earlier so paceTrend etc. can use it)
+  // walkProhibition is the hard prohibition injected at top of every prompt for walk sessions
 
   let prompt: string;
   if (isSplit && splitKm && splitPace) {
-    prompt = `You are ${coachName}, an AI ${coachLabel} with a ${coachTone} style.${walkPaceNote}
+    prompt = `You are ${coachName}, an AI ${coachLabel} with a ${coachTone} style.${walkProhibition}
 ${runnerContext ? `\n${isWalkSession ? 'Walker' : 'Runner'} context: ${runnerContext}` : ''}
 The ${personLabel} just completed kilometer ${splitKm} with a split pace of ${spokenSplitPace}.
 - Overall progress: ${formatDistanceForCoaching(distance)} of ${targetDistance ? `${formatDistanceForCoaching(targetDistance)} (${progress}%)` : '?'}
 - Time elapsed: ${timeFormatted}
 - Overall average pace: ${spokenCurrentPace}
-- This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}${hrContext}${cadenceContext}
+- This split pace: ${spokenSplitPace}${targetPaceParam ? `\n- Target pace: ${spokenTargetPace}` : ''}${hrContext}${isWalkSession ? '' : cadenceContext}
 ${splitTargetVerdict ? `\nPACE ASSESSMENT: ${splitTargetVerdict}` : ''}
 ${trainingSessionContext}
 ${routeCtxBlock ? `\n${routeCtxBlock}` : ''}
@@ -863,16 +873,16 @@ ${terrainContext}${paceTrend}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : sessionSplitContext ? ' how their split compares to the session target pace.' : isTrainingSession ? ` how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${cadenceContext && (workoutType === 'tempo' || workoutType === 'threshold') ? 'If cadence is a concern, include a brief cadence cue. ' : ''}${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
+Give a brief (1-2 sentences) split update. ${routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${spokenSplitPace}) and${splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : sessionSplitContext ? ' how their split compares to the session target pace.' : isTrainingSession ? ` how this split relates to the ${workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${!isWalkSession && cadenceContext && (workoutType === 'tempo' || workoutType === 'threshold') ? 'If cadence is a concern, include a brief cadence cue. ' : ''}${hasRoute === true && isOnHill ? 'Acknowledge the hill effort. ' : ''}${paceTrend ? 'Comment on their pace trend.' : ''}`;
   } else {
-    prompt = `You are ${coachName}, an AI ${coachLabel} with a ${coachTone} style.${walkPaceNote}
+    prompt = `You are ${coachName}, an AI ${coachLabel} with a ${coachTone} style.${walkProhibition}
 ${runnerContext ? `\n${isWalkSession ? 'Walker' : 'Runner'} context: ${runnerContext}` : ''}
 500m check-in: ${isWalkSession ? 'Walker' : 'Runner'} is at ${formatDistanceForCoaching(distance)}, pace ${spokenCurrentPace}, ${timeFormatted} elapsed.
 ${terrainContext}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenCurrentPace}) and distance (${formatDistanceForCoaching(distance)}). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+Give a very brief (1-2 sentences) ${isWalkSession ? 'walking' : 'pace'} check-in. MUST cite their pace (${spokenCurrentPace}) and distance (${formatDistanceForCoaching(distance)}). ${hasRoute === true && isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
   }
 
   // Calculate current pace in seconds/km for context directive
@@ -884,7 +894,7 @@ Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${spokenC
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} ${coachLabel}. Keep pace updates brief but ALWAYS cite the ${personLabel}'s actual numbers (pace, split time, distance). When ${actLabel} history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the ${personLabel}'s experience level and the tone directive below.${walkPaceNote}
+      { role: "system", content: `You are ${coachName}, a ${coachTone} ${coachLabel}. Keep ${isWalkSession ? 'walk' : 'pace'} updates brief but ALWAYS cite the ${personLabel}'s actual numbers (pace, split time, distance). When ${actLabel} history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(hasRoute || (typeof currentGrade === 'number' && Math.abs(currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the ${personLabel}'s experience level and the tone directive below.${walkProhibition}
 
 ${getPaceContextDirective(
   currentPaceSecPerKm,
@@ -908,8 +918,16 @@ ${toneDirective(coachTone)}${accentRule ? ' ' + accentRule : ''}${runnerProfileB
 
 export async function generateRunSummary(runData: any, runnerProfile?: string | null, userId?: string | null): Promise<any> {
   const sessionType = runData.sessionType === "walk" ? "walk" : "run";
-  const prompt = `Analyze this run and provide a brief summary with highlights, struggles, and tips:
-Run Data:
+  const isWalkSummary = sessionType === "walk";
+  const summaryCoachLabel  = isWalkSummary ? 'walking coach' : 'running coach';
+  const summaryPersonLabel = isWalkSummary ? 'walker' : 'runner';
+  const summaryActivity    = isWalkSummary ? 'walk' : 'run';
+  const summaryWalkProhibition = isWalkSummary
+    ? ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running term in your response. Use "walk", "walking", "walker", "walking pace" throughout.'
+    : '';
+
+  const prompt = `Analyze this ${summaryActivity} and provide a brief summary with highlights, struggles, and tips:
+${isWalkSummary ? 'Walk' : 'Run'} Data:
 - Distance: ${runData.distance}km
 - Duration: ${runData.duration} minutes
 - Average Pace: ${runData.avgPace}
@@ -917,13 +935,13 @@ Run Data:
 - Session Type: ${sessionType}
 - Weather: ${JSON.stringify(runData.weather || {})}
 
-Use ${sessionType} terminology throughout. For a walk, say walking/walker/walking pace rather than running/runner/running pace.
+Use ${summaryActivity} terminology throughout. ${isWalkSummary ? 'This is a WALK session. Say "walking"/"walker"/"walking pace" — NEVER say "running"/"runner"/"run".' : 'Say "running"/"runner"/"run pace".'}
 Provide response as JSON with fields: highlights (array), struggles (array), tips (array), overallScore (1-10), summary (string)`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are an expert running coach providing post-run analysis. Respond only with valid JSON.${runnerProfileBlock(runnerProfile)}` },
+      { role: "system", content: `You are an expert ${summaryCoachLabel} providing post-${summaryActivity} analysis. Respond only with valid JSON.${summaryWalkProhibition}${runnerProfileBlock(runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 500,
@@ -940,7 +958,13 @@ Provide response as JSON with fields: highlights (array), struggles (array), tip
     const content = completion.choices[0].message.content || "{}";
     return JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
   } catch {
-    return {
+    return isWalkSummary ? {
+      highlights: ["Completed your walk!"],
+      struggles: [],
+      tips: ["Keep up the great work!"],
+      overallScore: 7,
+      summary: "Great effort on your walk today!"
+    } : {
       highlights: ["Completed your run!"],
       struggles: [],
       tips: ["Keep up the great work!"],
@@ -1184,13 +1208,13 @@ export async function generatePhaseCoaching(params: {
       const currentSec = currentParts[0] * 60 + currentParts[1];
       const diffSec = currentSec - targetSec;
       if (diffSec > 30) {
-        paceVerdict = `Pace gap: runner is ${Math.abs(diffSec)} seconds/km slower than their target pace.`;
+        paceVerdict = `Pace gap: ${pLabel} is ${Math.abs(diffSec)} seconds/km slower than their target pace.`;
       } else if (diffSec > 10) {
-        paceVerdict = `Pace gap: runner is ${Math.abs(diffSec)} seconds/km behind their target pace.`;
+        paceVerdict = `Pace gap: ${pLabel} is ${Math.abs(diffSec)} seconds/km behind their target pace.`;
       } else if (diffSec < -10) {
-        paceVerdict = `Pace note: runner is ${Math.abs(diffSec)} seconds/km ahead of their target pace.`;
+        paceVerdict = `Pace note: ${pLabel} is ${Math.abs(diffSec)} seconds/km ahead of their target pace.`;
       } else {
-        paceVerdict = `Pace note: runner is within ${Math.abs(diffSec)} seconds/km of their target pace — very close.`;
+        paceVerdict = `Pace note: ${pLabel} is within ${Math.abs(diffSec)} seconds/km of their target pace — very close.`;
       }
       paceComparisonInfo += `\n  → ${paceVerdict}`;
     }
@@ -1222,7 +1246,12 @@ export async function generatePhaseCoaching(params: {
   // Only suppress terrain when there is genuinely no elevation data at all.
   const _hasGradeData = currentGrade !== undefined && Math.abs(currentGrade ?? 0) > 0.5;
   const noTerrainRule = (hasRoute || _hasGradeData) ? '' : `
-CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain — you have no information about it. Focus only on pace, effort, form, and motivation.`;
+CRITICAL: No GPS elevation data for this ${isWalkActivity ? 'walk' : 'run'}. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain — you have no information about it. Focus only on pace, effort, form, and motivation.`;
+
+  // Walk prohibition for this function — used throughout
+  const phaseWalkProhibition = isWalkActivity
+    ? ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", "race pace", or any running-specific term. Say "walker", "walking", "walk pace" instead. Cadence coaching is suppressed — do NOT mention cadence targets.'
+    : '';
 
   // NAVIGATION TURN: Short, punchy direction delivered in coach's voice
   if (triggerType === 'navigation_turn' && navigationInstruction) {
@@ -1230,19 +1259,19 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
       ? `The next turn is in approximately ${navigationDistance} metres. `
       : '';
     
-    const navPrompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+    const navPrompt = `You are ${coachName}, an AI ${isWalkActivity ? 'walking' : 'running'} coach with a ${coachTone} style.${phaseWalkProhibition}
 
-The runner is following a mapped route and needs a navigation direction:
+The ${pLabel} is following a mapped route and needs a navigation direction:
 Navigation instruction: "${navigationInstruction}"
 ${distContext}
-Runner context: ${formatDistanceForCoaching(distance)} into their run, pace ${currentPace || 'unknown'}.
+${isWalkActivity ? 'Walker' : 'Runner'} context: ${formatDistanceForCoaching(distance)} into their ${isWalkActivity ? 'walk' : 'run'}, pace ${currentPace || 'unknown'}.
 
 Deliver this navigation direction naturally in your coaching voice. Keep it to 1 SHORT sentence (max 15 words). 
 You MUST include the actual direction (left, right, straight, etc.) and street name if given. 
-Be concise — the runner needs to hear this quickly. Add a tiny bit of coach personality but prioritise clarity.
+Be concise — the ${pLabel} needs to hear this quickly. Add a tiny bit of coach personality but prioritise clarity.
 Examples of good output: "Quick right turn onto May Street, looking good!", "Left here onto Dublin Road, keep that rhythm!"`;
 
-    const navSystemMsg = `You are ${coachName}, a ${coachTone} running coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
+    const navSystemMsg = `You are ${coachName}, a ${coachTone} ${isWalkActivity ? 'walking' : 'running'} coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable.${phaseWalkProhibition} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
 
     const navCompletion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -1275,33 +1304,34 @@ Examples of good output: "Quick right turn onto May Street, looking good!", "Lef
     const targetTimeSec = targetTime ? Math.round(targetTime % 60) : 0;
     
     // Determine pace zone for the prompt
+    const pacePerson = isWalkActivity ? 'walker' : 'runner';
     let paceZone = '';
     let paceGuidance = '';
     if (triggerType === 'pace_abandon') {
       paceZone = 'TARGET ABANDONED';
-      paceGuidance = `The runner's target pace is now unreachable — they are consistently ${Math.abs(paceDeviationPercent).toFixed(0)}% slower than needed. 
+      paceGuidance = `The ${pacePerson}'s target pace is now unreachable — they are consistently ${Math.abs(paceDeviationPercent).toFixed(0)}% slower than needed. 
 DO NOT nag about the missed target. Instead: acknowledge the effort, suggest they focus on maintaining their CURRENT effort level, and motivate them to finish strong. 
 This should feel supportive, not disappointing. "The target time isn't in the cards today, but you're still putting in great work" kind of energy.`;
     } else if (paceDeviationPercent < -15) {
       paceZone = 'WAY TOO FAST';
-      paceGuidance = `The runner is going ${Math.abs(paceDeviationPercent).toFixed(0)}% FASTER than their target pace. This is a common mistake — going out too fast leads to hitting the wall later.
-STRONGLY advise them to slow down NOW. Be direct but not alarming. Explain that banking time early almost always backfires. 
+      paceGuidance = `The ${pacePerson} is going ${Math.abs(paceDeviationPercent).toFixed(0)}% FASTER than their target pace. This is a common mistake — going out too fast leads to fatigue later.
+STRONGLY advise them to slow down NOW. Be direct but not alarming. Explain that going out too fast almost always backfires. 
 Their current pace is ${avgPaceFormatted}/km but they need ${targetPaceFormatted}/km. Suggest they ease off and settle into rhythm.`;
     } else if (paceDeviationPercent < -10) {
       paceZone = 'TOO FAST';
-      paceGuidance = `The runner is ${Math.abs(paceDeviationPercent).toFixed(0)}% faster than target pace. They should ease off slightly to avoid burning out.
+      paceGuidance = `The ${pacePerson} is ${Math.abs(paceDeviationPercent).toFixed(0)}% faster than target pace. They should ease off slightly to avoid burning out.
 Gently suggest pulling back a touch. Their body will thank them in the second half. Current: ${avgPaceFormatted}/km, target: ${targetPaceFormatted}/km.`;
     } else if (paceDeviationPercent > 15) {
       paceZone = 'WELL BEHIND TARGET';
-      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% slower than target. Their projected finish is ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.
+      paceGuidance = `The ${pacePerson} is ${paceDeviationPercent.toFixed(0)}% slower than target. Their projected finish is ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.
 Encourage them to pick it up if they can, but be realistic. If there's a gradient/hill, acknowledge that hills slow pace naturally.`;
     } else if (paceDeviationPercent > 10) {
       paceZone = 'SLIGHTLY BEHIND';
-      paceGuidance = `The runner is ${paceDeviationPercent.toFixed(0)}% behind target pace. They need to pick it up a little. 
+      paceGuidance = `The ${pacePerson} is ${paceDeviationPercent.toFixed(0)}% behind target pace. They need to pick it up a little. 
 Projected finish: ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}. Gentle nudge to increase effort.`;
     } else {
       paceZone = 'ON PACE';
-      paceGuidance = `The runner is RIGHT ON TARGET (within ${Math.abs(paceDeviationPercent).toFixed(0)}% of target pace). 
+      paceGuidance = `The ${pacePerson} is RIGHT ON TARGET (within ${Math.abs(paceDeviationPercent).toFixed(0)}% of target pace). 
 Reinforce the good pacing with positive encouragement. Current: ${avgPaceFormatted}/km, target: ${targetPaceFormatted}/km. Tell them they're nailing it!`;
     }
     
@@ -1309,8 +1339,8 @@ Reinforce the good pacing with positive encouragement. Current: ${avgPaceFormatt
     let gradientContext = '';
     if (typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 2) {
       gradientContext = currentGrade > 0 
-        ? `TERRAIN: Runner is climbing (${currentGrade.toFixed(1)}% grade). Slower pace on climbs is NORMAL and EXPECTED. Acknowledge the effort required but don't criticise the pace.`
-        : `TERRAIN: Runner is descending (${Math.abs(currentGrade).toFixed(1)}% grade). Downhill SPEEDS UP pace naturally — this is biomechanically easier. DO NOT say descents "slow you down" or "make things harder". If pace is faster downhill, that's expected physics, not a red flag.`;
+        ? `TERRAIN: ${isWalkActivity ? 'Walker' : 'Runner'} is climbing (${currentGrade.toFixed(1)}% grade). Slower pace on climbs is NORMAL and EXPECTED. Acknowledge the effort required but don't criticise the pace.`
+        : `TERRAIN: ${isWalkActivity ? 'Walker' : 'Runner'} is descending (${Math.abs(currentGrade).toFixed(1)}% grade). Downhill SPEEDS UP pace naturally — this is biomechanically easier. DO NOT say descents "slow you down" or "make things harder". If pace is faster downhill, that's expected physics, not a red flag.`;
     }
     
     // Rolling vs average trend
@@ -1323,18 +1353,18 @@ Reinforce the good pacing with positive encouragement. Current: ${avgPaceFormatt
       }
     }
 
-    // Plateau detection: if the runner has been behind target for multiple consecutive cues,
+    // Plateau detection: if the walker/runner has been behind target for multiple consecutive cues,
     // shift coaching tone to acceptance+effort rather than nagging about the unachievable target
     const consecutiveBehindCues = (params as any).consecutiveBehindCues ?? 0;
     let plateauContext = '';
     if (consecutiveBehindCues >= 3 && paceDeviationPercent > 10) {
-      plateauContext = `PLATEAU DETECTED: The runner has received ${consecutiveBehindCues} consecutive cues that they're behind target without improving. 
-STOP nagging about the target. Switch to: acknowledge the effort they ARE putting in, encourage them to maintain their current effort level, and give them a different focus (cadence, form, or mental game). Be supportive and forward-looking.`;
+      plateauContext = `PLATEAU DETECTED: The ${pacePerson} has received ${consecutiveBehindCues} consecutive cues that they're behind target without improving. 
+STOP nagging about the target. Switch to: acknowledge the effort they ARE putting in, encourage them to maintain their current effort level, and give them a different focus (${isWalkActivity ? 'form or mental game' : 'cadence, form, or mental game'}). Be supportive and forward-looking.`;
     }
 
-    // Cadence coaching for pace section — personalised to runner's height, age, and current speed
+    // Cadence coaching for pace section — suppressed for walk sessions
     let paceCadenceNote = '';
-    if (cadence && cadence > 0) {
+    if (!isWalkActivity && cadence && cadence > 0) {
       const paceSecPerKmPace = (() => {
         const avgPaceStr = formatSecondsAsPace(currentAvgPaceSecondsPerKm);
         const parts = avgPaceStr.split(':').map(Number);
@@ -1356,10 +1386,10 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
     // Declare runnerFirstName early so it can be used in prompt templates
     const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
 
-    const pacePrompt = `You are ${coachName}, an AI ${activityType || 'running'} coach with a ${coachTone} style.
+    const pacePrompt = `You are ${coachName}, an AI ${isWalkActivity ? 'walking' : 'running'} coach with a ${coachTone} style.${phaseWalkProhibition}
 
 PACE COACHING — ${paceZone}
-The runner is ${progressPercent.toFixed(0)}% through their ${targetDistance ? formatDistanceForTTS(targetDistance) : 'run'}, having covered ${formatDistanceForTTS(distance)}.
+The ${pacePerson} is ${progressPercent.toFixed(0)}% through their ${targetDistance ? formatDistanceForTTS(targetDistance) : isWalkActivity ? 'walk' : 'run'}, having covered ${formatDistanceForTTS(distance)}.
 - Average pace: ${avgPaceFormatted}/km
 - Target pace: ${targetPaceFormatted}/km  
 - Recent pace (last 500m): ${rollingPaceFormatted}/km
@@ -1374,10 +1404,10 @@ ${VARIETY_INSTRUCTION}
 Give 2-3 sentences of pace coaching. Be specific about the numbers — tell them their actual pace and what they need.
 ${progressPercent > 80 ? "They're in the final stretch — be extra motivating!" : ""}
 Do NOT use markdown, emojis, or bullet points — this will be spoken aloud.
-Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The runner's name is ${runnerFirstName} — use it naturally but not as a greeting.` : ''}`;
+Do NOT start with any greeting like "Hey there", "Hey!", "Hi!". Jump straight into the pace coaching.${runnerFirstName ? ` The ${pacePerson}'s name is ${runnerFirstName} — use it naturally but not as a greeting.` : ''}`;
 
-    const isWalkPace = activityType === 'walk';
-    const paceSystemMsg = `You are ${coachName}, a ${coachTone} ${isWalkPace ? 'walking' : 'running'} coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings.${isWalkPace ? ' This is a WALKING session — use "walker/walking" vocabulary. Never say "run", "runner", or "running".' : ''} 
+    const isWalkPace = isWalkActivity;
+    const paceSystemMsg = `You are ${coachName}, a ${coachTone} ${isWalkPace ? 'walking' : 'running'} coach giving pace guidance. Be specific with pace numbers (use "X minutes Y seconds per kilometre" format, not "X:YY"). Keep it concise (2-3 sentences). NEVER start with greetings.${isWalkPace ? ' WALK SESSION — use "walker/walking" vocabulary. NEVER say "run", "runner", or "running".' : ''} 
 
 CRITICAL TERRAIN RULE: If the ${isWalkPace ? 'walker' : 'runner'} is descending (downhill gradient), their pace NATURALLY SPEEDS UP due to gravity. This is biomechanically correct and expected. DO NOT say descents "slow you down", "make things harder", or imply downhill is negative. If they're faster on descent, that's GOOD — acknowledge it naturally or comment on form control.
 
@@ -1393,7 +1423,7 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
       temperature: 0.7,
     });
 
-    let paceMessage = paceCompletion.choices[0].message.content || `You're running ${avgPaceFormatted} per kilometre, target is ${targetPaceFormatted}.`;
+    let paceMessage = paceCompletion.choices[0].message.content || (isWalkActivity ? `You're walking at ${avgPaceFormatted} per kilometre, target is ${targetPaceFormatted}.` : `You're running ${avgPaceFormatted} per kilometre, target is ${targetPaceFormatted}.`);
     
     // ── Safety check: Correct any backwards descent messaging ──────────────────
     // If the runner is descending and the LLM somehow generated the wrong physics,
@@ -1412,7 +1442,7 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
           paceMessage = paceMessage
             .replace(/descend.*slow.*down/gi, `downhill naturally speeds you up`)
             .replace(/downhill.*slow.*down/gi, `downhill helps you go faster`)
-            .replace(/going.*down.*harder/gi, `downhill makes running easier`)
+            .replace(/going.*down.*harder/gi, `downhill makes ${isWalkActivity ? 'walking' : 'running'} easier`)
             .replace(/descent.*makes.*harder/gi, `descent uses gravity to your advantage`);
         }
       }
@@ -1433,24 +1463,24 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
 
   // Name
   if (runnerFirstName) {
-    runnerProfileContext += `\nRunner's name: ${runnerFirstName}. Use naturally and occasionally — not every sentence.`;
+    runnerProfileContext += `\n${isWalkActivity ? 'Walker' : 'Runner'}'s name: ${runnerFirstName}. Use naturally and occasionally — not every sentence.`;
   }
 
   // Fitness level — known or inferred from run history
-  // IMPORTANT: when fitness level is not set, we NEVER know this runner's capacity.
-  // Even someone with 50 runs may have been going slowly — we cannot assume capability.
+  // IMPORTANT: when fitness level is not set, we NEVER know this person's capacity.
+  // Even someone with 50 sessions may have been going slowly — we cannot assume capability.
   // Always err toward encouragement when fitness level is absent.
   if (fitnessLevel) {
     runnerProfileContext += `\nFitness level: ${fitnessLevel}.`;
   } else if (totalRunsAllTime === 0 || totalRunsAllTime === null || totalRunsAllTime === undefined) {
-    runnerProfileContext += `\nFitness level: unknown — this is their first recorded run. Target pace (if set) is aspirational; treat pace gaps as context, not a performance benchmark.`;
+    runnerProfileContext += `\nFitness level: unknown — this is their first recorded ${isWalkActivity ? 'walk' : 'run'}. Target pace (if set) is aspirational; treat pace gaps as context, not a performance benchmark.`;
   } else if (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 5) {
-    runnerProfileContext += `\nFitness level: unknown — only ${totalRunsAllTime} run(s) completed so far. Still establishing baseline fitness. Pace targets should be treated as directional goals.`;
+    runnerProfileContext += `\nFitness level: unknown — only ${totalRunsAllTime} ${isWalkActivity ? 'walk' : 'run'}(s) completed so far. Still establishing baseline fitness. Pace targets should be treated as directional goals.`;
   } else if (typeof totalRunsAllTime === 'number' && totalRunsAllTime <= 15) {
-    runnerProfileContext += `\nFitness level: unknown — ${totalRunsAllTime} runs completed but capacity not yet confirmed by profile data.`;
+    runnerProfileContext += `\nFitness level: unknown — ${totalRunsAllTime} ${isWalkActivity ? 'walks' : 'runs'} completed but capacity not yet confirmed by profile data.`;
   } else if (typeof totalRunsAllTime === 'number') {
-    // 16+ runs and still no fitness level — notable gap in profile data
-    runnerProfileContext += `\nFitness level: not set (${totalRunsAllTime} runs recorded). Runner's aerobic capacity is unconfirmed by profile data.`;
+    // 16+ sessions and still no fitness level — notable gap in profile data
+    runnerProfileContext += `\nFitness level: not set (${totalRunsAllTime} ${isWalkActivity ? 'walks' : 'runs'} recorded). Aerobic capacity is unconfirmed by profile data.`;
   }
 
   // ── Age & Physical calibration block ────────────────────────────────────
@@ -1460,18 +1490,18 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
   // these calibrations within the chosen toneDirective.
 
   if (runnerAge) {
-    let ageNote = `\nRunner's age: ${runnerAge}.`;
+    let ageNote = `\n${isWalkActivity ? 'Walker' : 'Runner'}'s age: ${runnerAge}.`;
 
     if (runnerAge < 20) {
-      ageNote += ` Young runner — high aerobic capacity and recovery potential. Can sustain intense training.`;
+      ageNote += ` Young ${pLabel} — high aerobic capacity and recovery potential. Can sustain intense training.`;
     } else if (runnerAge <= 35) {
       ageNote += ` Prime athletic years (26–35) — typically peak aerobic capacity and recovery.`;
     } else if (runnerAge <= 50) {
-      ageNote += ` Active adult runner (36–50). Recovery is slower than younger years. Training commitment alongside life responsibilities is notable.`;
+      ageNote += ` Active adult ${pLabel} (36–50). Recovery is slower than younger years. Training commitment alongside life responsibilities is notable.`;
     } else if (runnerAge <= 65) {
-      ageNote += ` Mature runner (50s–60s). Aerobic capacity and pace ceilings are physiologically different to younger runners. Effort and consistency typically define performance more than raw speed.`;
+      ageNote += ` Mature ${pLabel} (50s–60s). Aerobic capacity and pace ceilings are physiologically different to younger people. Effort and consistency typically define performance more than raw speed.`;
     } else {
-      ageNote += ` Senior runner (65+). Running at this age represents sustained cardiovascular commitment. Physiological pace ceilings are significantly lower than younger age groups.`;
+      ageNote += ` Senior ${pLabel} (65+). ${isWalkActivity ? 'Walking' : 'Running'} at this age represents sustained cardiovascular commitment. Physiological pace ceilings are significantly lower than younger age groups.`;
     }
 
     runnerProfileContext += ageNote;
@@ -1480,7 +1510,7 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
     // When age is unknown, never apply directness or performance pressure based on assumed youth.
     // Default to a warm, accessible coaching posture — if they turn out to be young and fit,
     // the coaching will feel generous; if they're older, we haven't caused harm.
-    runnerProfileContext += `\nRunner's age: not provided. Without knowing their age, assume a conservative coaching posture — be warm and encouraging rather than direct or demanding. Avoid any language that implies they "should" be hitting a certain pace for their age.`;
+    runnerProfileContext += `\n${isWalkActivity ? 'Walker' : 'Runner'}'s age: not provided. Without knowing their age, assume a conservative coaching posture — be warm and encouraging rather than direct or demanding. Avoid any language that implies they "should" be hitting a certain pace for their age.`;
   }
 
   // BMI — affects cardiovascular load per km and how pace targets should be interpreted
@@ -1498,14 +1528,14 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
     } else if (bmi < 30) {
       bmiNote += ` Above-average body mass (BMI ${bmi.toFixed(1)}) — cardiovascular demand per km is measurably higher than standard pace tables assume.`;
     } else if (bmi < 35) {
-      bmiNote += ` High body mass (BMI ${bmi.toFixed(1)}) — cardiovascular load per km is substantially elevated. Standard pace targets are not directly applicable to this runner's physical capacity.`;
+      bmiNote += ` High body mass (BMI ${bmi.toFixed(1)}) — cardiovascular load per km is substantially elevated. Standard pace targets are not directly applicable to this ${pLabel}'s physical capacity.`;
     } else {
       bmiNote += ` Very high body mass (BMI ${bmi.toFixed(1)}) — each kilometre represents significant cardiovascular effort. Pace metrics alone do not reflect the physical work being done.`;
     }
 
     // Combined age + BMI context: provides GPT with information to calibrate coaching appropriately
     if (runnerAge && runnerAge >= 50 && bmi >= 28) {
-      bmiNote += ` Note: This runner is 50+ years old with above-average body mass, meaning physiological effort is elevated and recovery needs are higher.`;
+      bmiNote += ` Note: This ${pLabel} is 50+ years old with above-average body mass, meaning physiological effort is elevated and recovery needs are higher.`;
     }
 
     runnerProfileContext += bmiNote;
@@ -1569,7 +1599,7 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
   const phaseTrainingPlanId = (params as any).trainingPlanId as string | undefined;
   if (phaseTrainingPlanId && planGoalType) {
     const goalLabel = planGoalType.replace(/_/g, ' ').toUpperCase();
-    planContext = `\nCoaching Programme Context: This is a scheduled workout in the runner's AI coaching plan`;
+    planContext = `\nCoaching Programme Context: This is a scheduled workout in the ${pLabel}'s AI coaching plan`;
     if (planWeekNumber && planTotalWeeks) {
       planContext += ` (Week ${planWeekNumber} of ${planTotalWeeks})`;
     }
@@ -1588,7 +1618,7 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
   // no performance expectations. This is the safest possible coaching state.
   const hasCompletelyUnknownProfile = !fitnessLevel && !runnerAge && (!runnerWeight || !runnerHeight);
   if (hasCompletelyUnknownProfile) {
-    runnerProfileContext += `\n\nIMPORTANT — incomplete runner profile: This runner has not provided fitness level, age, or body composition data. We know nothing about their physical capacity, background, or health status. Apply ZERO performance pressure. Use only encouragement, acknowledgement of effort, and gentle guidance. Never tell them to "push harder", "pick it up", or frame their pace as a problem. Treat every coaching message as if this might be their first run ever.`;
+    runnerProfileContext += `\n\nIMPORTANT — incomplete profile: This ${pLabel} has not provided fitness level, age, or body composition data. We know nothing about their physical capacity, background, or health status. Apply ZERO performance pressure. Use only encouragement, acknowledgement of effort, and gentle guidance. Never tell them to "push harder", "pick it up", or frame their pace as a problem. Treat every coaching message as if this might be their first ${isWalkActivity ? 'walk' : 'run'} ever.`;
   }
 
   // "No baseline" flag — true whenever fitness level is not set.
@@ -1609,14 +1639,14 @@ ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirec
     if (!isNaN(tMin) && !isNaN(tSec)) {
       const targetSecPerKm = tMin * 60 + tSec;
       if (targetSecPerKm < 300) {
-        // Sub 5:00/km — elite territory, almost certainly aspirational for a new runner
-        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is elite-level performance. For a runner without an established baseline, this is highly aspirational — treat it as a long-term goal, not a standard for today's run. Do not frame the pace gap as underperformance.`;
+        // Sub 5:00/km — elite territory, almost certainly aspirational
+        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is elite-level performance. Without an established baseline, this is highly aspirational — treat it as a long-term goal, not a standard for today's ${isWalkActivity ? 'walk' : 'run'}. Do not frame the pace gap as underperformance.`;
       } else if (targetSecPerKm < 360) {
         // 5:00–6:00/km — strong competitive pace, unlikely for most beginners
-        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is competitive. Without an established fitness baseline, this is aspirational — today's run is about building capacity, not hitting this pace. Treat the gap as normal and expected.`;
+        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is competitive. Without an established fitness baseline, this is aspirational — today's ${isWalkActivity ? 'walk' : 'run'} is about building capacity, not hitting this pace. Treat the gap as normal and expected.`;
       } else if (targetSecPerKm < 420) {
         // 6:00–7:00/km — solid recreational pace, achievable but not guaranteed for a first-timer
-        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is a solid recreational runner's pace. Without prior baseline data, this is directional rather than prescriptive — any gap is informational, not a verdict.`;
+        targetFeasibilityNote = `\nTarget pace note: Their target pace (${targetPace}/km) is a solid recreational pace. Without prior baseline data, this is directional rather than prescriptive — any gap is informational, not a verdict.`;
       }
       // 7:00/km+ for a new runner is reasonable — no extra note needed
     }
@@ -1651,7 +1681,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "He
     // runnerProfileBlock(runnerProfile), and runnerProfileContext (factual context).
     // No hardcoded behavior here — the AI calibrates from those signals.
     const triggerInstruction = is500mCheckin
-      ? `This is the runner's first check-in at 500m. Give a brief initial read on how the run is going (2-3 sentences), weaving in their actual pace and distance.`
+      ? `This is the ${pLabel}'s first check-in at 500m. Give a brief initial read on how the ${isWalkActivity ? 'walk' : 'run'} is going (2-3 sentences), weaving in their actual pace and distance.`
       : `Give a brief (2-3 sentences) phase-appropriate coaching message.`;
 
     // Build cadence coaching instruction (actionable, not just informational)
@@ -1687,7 +1717,7 @@ ${VARIETY_INSTRUCTION}
 ${triggerInstruction}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${runnerFirstName ? ` You may address them as "${runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
-Weave in the runner's actual stats (pace, distance, time, cadence, heart rate) naturally — this should feel like a real coach watching their performance, not generic encouragement. CRITICAL: Pace values are already fully formatted — do NOT reformat them.${targetPace ? (hasNoBaseline ? ` Mention their current pace naturally. They have a target pace but no established baseline — treat the gap as context, not a verdict. Focus on the run itself, not the shortfall.` : ` Comment on their pace relative to target (${paceVerdict}).`) : ''}${targetTime && targetTime > 0 ? (hasNoBaseline ? ` Their goal is ${formatDurationForTTS(targetTime)} — reference it lightly if it fits, but don't make projected finish time the centrepiece.` : ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.`) : ''}${cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ''}${elevationInstruction ? ' Acknowledge the elevation context.' : ''}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ''}`;
+Weave in the ${pLabel}'s actual stats (pace, distance, time${isWalkActivity ? '' : ', cadence'}, heart rate) naturally — this should feel like a real coach watching their performance, not generic encouragement. CRITICAL: Pace values are already fully formatted — do NOT reformat them.${targetPace ? (hasNoBaseline ? ` Mention their current pace naturally. They have a target pace but no established baseline — treat the gap as context, not a verdict. Focus on the ${isWalkActivity ? 'walk' : 'run'} itself, not the shortfall.` : ` Comment on their pace relative to target (${paceVerdict}).`) : ''}${targetTime && targetTime > 0 ? (hasNoBaseline ? ` Their goal is ${formatDurationForTTS(targetTime)} — reference it lightly if it fits, but don't make projected finish time the centrepiece.` : ` Address whether they are on track for their ${formatDurationForTTS(targetTime)} target time.`) : ''}${!isWalkActivity && cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ''}${elevationInstruction ? ' Acknowledge the elevation context.' : ''}${hasRoute === true && !elevationInstruction ? ' Consider terrain if relevant.' : ''}`;
 
     // Single clean system message — all tone/personality is driven by toneDirective
     // and the living runner profile. No hardcoded behavioral overrides.
@@ -1873,11 +1903,19 @@ export async function generateStruggleCoaching(params: {
   targetHeartRateZone?: number; // 1-5; if Zone 1-2, struggle coaching is not relevant
   runnerProfile?: string | null;
   // Training plan session type — when set, reframes struggle coaching around training objective
-  // (e.g. "easy run fatigue is normal", "tempo effort naturally gets tough here")
   workoutType?: string;
+  // Activity type — "run" or "walk" — determines coach vocabulary
+  activityType?: string;
+  sessionType?: string;
 }): Promise<string> {
   const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory, targetHeartRateZone } = params;
   const workoutTypeStruggle = (params as any).workoutType as string | undefined;
+  const isWalkStruggle = (params.activityType ?? params.sessionType ?? '') === 'walk';
+  const sPersonLabel  = isWalkStruggle ? 'walker'  : 'runner';
+  const sCoachLabel   = isWalkStruggle ? 'walking coach' : 'running coach';
+  const sWalkProhibition = isWalkStruggle
+    ? ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running-specific term. Say "walker", "walking", "walk pace" instead. Cadence coaching is suppressed.'
+    : '';
   
   // For Zone 1-2 runs (aerobic/recovery focus), pace drops are intentional to build aerobic base
   if (targetHeartRateZone && targetHeartRateZone <= 2) {
@@ -1905,15 +1943,15 @@ export async function generateStruggleCoaching(params: {
   // Only suppress terrain when there is genuinely no elevation data at all.
   const _hasGradeData = currentGrade !== undefined && Math.abs(currentGrade ?? 0) > 0.5;
   const noTerrainRule = (hasRoute || _hasGradeData) ? '' : `
-CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain — you have no information about it. Focus only on pace, effort, form, and motivation.`;
+CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain — you have no information about it. Focus only on pace, effort, form, and motivation.`;
   
   const spokenCurrentPaceStruggle = formatPaceForTTS(currentPace);
   const spokenBaselinePace = formatPaceForTTS(baselinePace);
 
-  // Build runner profile + history context for struggle coaching
+  // Build walker/runner profile + history context for struggle coaching
   const runnerFirstNameStruggle = runnerName ? runnerName.split(' ')[0] : null;
   let struggleRunnerContext = '';
-  if (runnerFirstNameStruggle) struggleRunnerContext += `Runner: ${runnerFirstNameStruggle}. `;
+  if (runnerFirstNameStruggle) struggleRunnerContext += `${isWalkStruggle ? 'Walker' : 'Runner'}: ${runnerFirstNameStruggle}. `;
   if (fitnessLevel) struggleRunnerContext += `Fitness level: ${fitnessLevel}. `;
   if (runHistory) {
     // Specifically flag if this pace drop is normal for them or unusual
@@ -1922,7 +1960,7 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
       if (dropDiff > 5) {
         struggleRunnerContext += `This pace drop (${Math.round(paceDropPercent)}%) is larger than their typical drop (${Math.round(runHistory.avgPaceDropPercent)}%) — they're struggling more than usual. `;
       } else {
-        struggleRunnerContext += `Pace drops of this size are normal for this runner (avg ${Math.round(runHistory.avgPaceDropPercent)}%). `;
+        struggleRunnerContext += `Pace drops of this size are normal for this ${sPersonLabel} (avg ${Math.round(runHistory.avgPaceDropPercent)}%). `;
       }
     }
     if (runHistory.avgDistanceKm) {
@@ -1930,9 +1968,9 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
       if (distDiff > 0.5) struggleRunnerContext += `They're already further than their recent average of ${formatDistanceForCoaching(runHistory.avgDistanceKm)} — this is new territory. `;
     }
     if (runHistory.consistencyTrend === 'improving') {
-      struggleRunnerContext += `Their recent runs show an improving trend — they have the fitness to push through. `;
+      struggleRunnerContext += `Their recent ${isWalkStruggle ? 'walks' : 'runs'} show an improving trend — they have the fitness to push through. `;
     } else if (runHistory.consistencyTrend === 'declining') {
-      struggleRunnerContext += `They've been having tougher runs recently — be supportive and suggest adjusting effort. `;
+      struggleRunnerContext += `They've been having tougher ${isWalkStruggle ? 'walks' : 'runs'} recently — be supportive and suggest adjusting effort. `;
     }
   }
 
@@ -1942,9 +1980,9 @@ CRITICAL: No GPS elevation data for this run. Do NOT mention hills, terrain, ele
     ? `\nTraining Session Context: This is a SCHEDULED TRAINING SESSION (${workoutTypeStruggle.replace(/_/g, ' ')} workout) — NOT a race. A pace drop here may be normal training fatigue. Frame your message around the training purpose: acknowledge the effort but remind them what this session is building. Do NOT imply they are failing a race or time goal.`
     : '';
 
-  const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
-${struggleRunnerContext ? `\nRunner context: ${struggleRunnerContext}` : ''}
-The runner is struggling. Their pace has dropped ${Math.round(paceDropPercent)}% from their baseline.
+  const prompt = `You are ${coachName}, an AI ${sCoachLabel} with a ${coachTone} style.${sWalkProhibition}
+${struggleRunnerContext ? `\n${isWalkStruggle ? 'Walker' : 'Runner'} context: ${struggleRunnerContext}` : ''}
+The ${sPersonLabel} is struggling. Their pace has dropped ${Math.round(paceDropPercent)}% from their baseline.
 - Current pace: ${spokenCurrentPaceStruggle} (baseline was ${spokenBaselinePace})
 - Distance: ${formatDistanceForCoaching(distance)}
 - Time: ${timeMin} minutes
@@ -1952,19 +1990,19 @@ ${terrainContext}
 ${trainingStruggleContext}
 ${noTerrainRule}
 ${PACE_FORMAT_RULE}
-Give a brief (1-2 sentences) supportive message tailored to this runner's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
+Give a brief (1-2 sentences) supportive message tailored to this ${sPersonLabel}'s fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: `You are ${coachName}, a ${coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
+      { role: "system", content: `You are ${coachName}, a ${coachTone} ${sCoachLabel}. Be supportive during tough moments — always reference actual data. Keep it brief.${sWalkProhibition} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
       { role: "user", content: prompt }
     ],
     max_tokens: 100,
     temperature: 0.7,
   });
 
-  return completion.choices[0].message.content || "I can see you're working hard. Take a breath and find your rhythm again.";
+  return completion.choices[0].message.content || (isWalkStruggle ? "I can see you're working hard. Take a breath, ease back your walking pace, and keep going." : "I can see you're working hard. Take a breath and find your rhythm again.");
 }
 
 // Cadence/Stride Coaching - analyzes overstriding/understriding
@@ -3492,7 +3530,7 @@ ${coachingPlanContext}
 ${weatherAdvantage}
 
 ${wellnessContext ? `CURRENT WELLNESS STATUS (from Garmin):${wellnessContext}
-${readinessGuidance}` : `NO WELLNESS DATA AVAILABLE — The runner does not have a Garmin device connected or no wellness data has been synced today. Do NOT mention body readiness, recovery status, fatigue, body battery, sleep quality, HRV, stress levels, or any wellness/biometric data. Simply skip wellness entirely in your response.`}
+${readinessGuidance}` : `NO WELLNESS DATA AVAILABLE — This ${isWalk ? 'walker' : 'runner'} does not have a Garmin device connected or no wellness data has been synced today. Do NOT mention body readiness, recovery status, fatigue, body battery, sleep quality, HRV, stress levels, or any wellness/biometric data. Simply skip wellness entirely in your response.`}
 
 Based on this data, provide:
 ${coachingPlanContext ? `1. "briefing": 2-3 SHORT SENTENCES (max 35 words). This is a COACHED WORKOUT — lead with the workout type and its purpose in the plan (week ${planWeekNumber} of ${planTotalWeeks}). Include key context like distance, weather, or readiness if relevant. ${PACE_FORMAT_RULE}
@@ -3513,7 +3551,7 @@ CRITICAL RULES:
 - For ${activityLabelShout} marked "${activityLabelShout} (No planned route)" - do NOT mention terrain, elevation, hills, or route characteristics.
 ${!wellnessContext ? '- CRITICAL: No Garmin or wellness data is connected. Do NOT mention body readiness, recovery, fatigue, body battery, sleep, stress, HRV, or any biometric data.' : ''}
 - NEVER start with generic greetings like "Hey there!" — jump straight in.
-- Be conversational as if speaking directly to the runner. Use "you" and "your."
+- Be conversational as if speaking directly to the ${isWalk ? 'walker' : 'runner'}. Use "you" and "your."${isWalk ? ' WALK SESSION — never say "run", "runner", "running" in your output.' : ''}
 ${coachAccent ? `- Write using natural ${coachAccent} English phrasing. The text will be spoken aloud by a ${coachAccent} voice.` : ''}
 
 Respond as JSON with fields: briefing, intensityAdvice, weatherAdvice, warnings (array), ${hasRoute === true ? 'routeInsight' : 'readinessInsight'}`;
@@ -3533,18 +3571,18 @@ Respond as JSON with fields: briefing, intensityAdvice, weatherAdvice, warnings 
     const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
     
     return {
-      briefing: parsed.briefing || "Ready for your run! Let's get started.",
+      briefing: parsed.briefing || (isWalk ? "Ready for your walk! Let's get started." : "Ready for your run! Let's get started."),
       intensityAdvice: parsed.intensityAdvice || "Listen to your body today.",
       weatherAdvice: parsed.weatherAdvice || undefined,
       warnings: parsed.warnings || [],
-      readinessInsight: parsed.readinessInsight || (hasRoute ? undefined : "Your body is ready for this run."),
+      readinessInsight: parsed.readinessInsight || (hasRoute ? undefined : isWalk ? "Your body is ready for this walk." : "Your body is ready for this run."),
       routeInsight: parsed.routeInsight || (hasRoute ? terrainDescription : undefined),
       weatherAdvantage: weatherAdvantage || undefined,
     };
   } catch (error) {
     console.error("Error generating wellness-aware briefing:", error);
     return {
-      briefing: "Ready for your run! Take it easy at the start and find your rhythm.",
+      briefing: isWalk ? "Ready for your walk! Take it easy at the start and settle into your walking rhythm." : "Ready for your run! Take it easy at the start and find your rhythm.",
       intensityAdvice: "Start conservatively and adjust based on how you feel.",
       weatherAdvice: undefined,
       warnings: [],
@@ -5007,11 +5045,11 @@ CRITICAL COACHING INSTRUCTIONS:
       messages: [
         { 
           role: "system", 
-          content: `You are ${coachName}, an expert running coach with deep knowledge of exercise physiology, training methodology, and athlete psychology. 
+          content: `You are ${coachName}, an expert ${sessionType === 'walk' ? 'walking coach' : 'running coach'} with deep knowledge of exercise physiology, training methodology, and athlete psychology.${sessionType === 'walk' ? ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running-specific term in your analysis. This person WALKED. Use "walk", "walking", "walker", "walking pace" throughout.' : ''}
 
 YOUR COACHING PHILOSOPHY:
 - Interpret data in the context of their training journey, not just report numbers
-- Identify patterns and trends that reveal their running style, strengths, and areas to develop
+- Identify patterns and trends that reveal their ${sessionType === 'walk' ? 'walking' : 'running'} style, strengths, and areas to develop
 - Balance honest feedback with motivation and recognition of effort
 - Provide specific, actionable guidance they can use immediately
 - Explain the "why" behind your recommendations - help them understand their body and fitness
@@ -5019,7 +5057,7 @@ YOUR COACHING PHILOSOPHY:
 RESPONSE STYLE:
 - Write conversationally, as if you're having a coaching session with them
 - Use their actual performance data to back up your observations
-- Reference their previous runs when analyzing patterns
+- Reference their previous ${sessionType === 'walk' ? 'walks' : 'runs'} when analyzing patterns
 - Make personalized recommendations based on their fitness level and goals
 
 Respond only with valid JSON. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`
@@ -6344,10 +6382,12 @@ export async function generateSessionTriggerMessage(params: {
   gpsConfidence?: string;
   cadenceConfidence?: string;
 
-  // ── Physiological response to last cue ────────────────────────────────────
+  // ── Physiological response to last cue ──────────���─────────────────────────
   lastCueHrDelta?: number;
   lastCuePaceDelta?: number;
   athleteRespondedToLastCue?: boolean;
+  // Activity type — "walk" or "run" — controls coach vocabulary
+  activityType?: string;
 }): Promise<string> {
   const {
     triggerId, triggerType, triggerCondition,
@@ -6369,6 +6409,12 @@ export async function generateSessionTriggerMessage(params: {
   const hrTrendDirection   = params.hrTrendDirection;
   const paceTrendDirection = params.paceTrendDirection;
   const isAthleteAlreadyResponding = params.isAthleteAlreadyResponding ?? false;
+  const isTriggerWalk = (params.activityType ?? '') === 'walk';
+  const triggerCoachLabel = isTriggerWalk ? 'walking coach' : 'running coach';
+  const triggerPersonLabel = isTriggerWalk ? 'walker' : 'athlete';
+  const triggerWalkProhibition = isTriggerWalk
+    ? '\nWALK SESSION — CRITICAL: NEVER say "run", "running", "runner", "sprint", or any running-specific terminology in your coaching message. This person is WALKING. Use "walker", "walking", "walk pace". Cadence coaching is suppressed.'
+    : '';
 
   // ── Format current metrics ─────���───────────────────────────────────────────
   const paceFormatted = currentPaceSecPerKm ? formatPaceForPrompt(currentPaceSecPerKm) : "unknown";
@@ -6450,7 +6496,7 @@ export async function generateSessionTriggerMessage(params: {
   ].filter(Boolean).join('\n');
 
   // ── Build the prompt ───────────────────────────────────────────────────────
-  const prompt = `You are ${coachName}, an elite AI running coach. A coaching trigger just fired during a live training session.
+  const prompt = `You are ${coachName}, an elite AI ${triggerCoachLabel}. A coaching trigger just fired during a live training session.${triggerWalkProhibition}
 
 ━━ SESSION CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Session type: ${sessionType.replace(/_/g, ' ')}
@@ -6511,10 +6557,10 @@ Deliver ONE message (max 20 words, spoken aloud) that reacts to what is ACTUALLY
 - Write "heart rate" never "HR"
 ${PACE_FORMAT_RULE}`;
 
-  const systemPrompt = `You are ${coachName}, a ${coachTone} running coach with full knowledge of this athlete's training session objectives.
-You have been given the complete session context above — use it. A tempo run trigger is not the same as an easy run trigger. An interval session rep 3 of 5 message should acknowledge where they are in the session.
+  const systemPrompt = `You are ${coachName}, a ${coachTone} ${triggerCoachLabel} with full knowledge of this ${triggerPersonLabel}'s training session objectives.${triggerWalkProhibition}
+You have been given the complete session context above — use it. A tempo trigger is not the same as an easy session trigger. An interval session rep 3 of 5 message should acknowledge where they are in the session.
 The message will be read aloud by TTS — keep it under 20 words, natural speech, specific to the actual numbers given.
-NEVER give generic feedback like "great work!" or "keep it up" — that tells the athlete nothing.
+NEVER give generic feedback like "great work!" or "keep it up" — that tells the ${triggerPersonLabel} nothing.
 ${toneDirective(coachTone)}${accentDirective(coachAccent)}${runnerProfileBlock(runnerProfile)}`;
 
   const completion = await openai.chat.completions.create({
