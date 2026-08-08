@@ -5948,6 +5948,120 @@ function stripInappropriateTriggers(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// enforceClosingStagesGate
+//
+// Post-processing enforcement: ensures that after 500m remaining, ONLY these
+// trigger types fire: final_500m, final_250m, final_100m, session_complete.
+// All other triggers must include "remaining_m > 500" in their condition
+// to prevent coaching clutter in the final push.
+//
+// This is a critical UX rule: Wayne and Claire both received pace_trend
+// prompts after the final 250m, which broke immersion. This gate prevents it.
+// ───────────────────────────────────────────────────────────────────��─────────
+function enforceClosingStagesGate(
+  triggers: SessionCoachingTrigger[]
+): SessionCoachingTrigger[] {
+  const FINAL_STAGE_ALLOWED_TYPES = new Set([
+    "final_500m",
+    "final_250m",
+    "final_100m",
+    "session_complete",
+  ]);
+
+  return triggers.map(trigger => {
+    const isAllowedInFinalStage = FINAL_STAGE_ALLOWED_TYPES.has(trigger.type);
+
+    // If it's a final-stage-only trigger, leave it as-is
+    if (isAllowedInFinalStage) {
+      return trigger;
+    }
+
+    // For all other triggers, ensure they don't fire in the closing stages
+    const conditionLower = trigger.condition.toLowerCase();
+
+    // If the condition already includes a remaining_m > 500 check, we're good
+    if (conditionLower.includes("remaining_m > 500") || conditionLower.includes("remaining_m>500")) {
+      return trigger;
+    }
+
+    // If the condition is "always", we need to add the gate
+    if (trigger.condition === "always" || conditionLower === "always") {
+      console.log(`[enforceClosingStagesGate] Gating trigger '${trigger.id}' (type: ${trigger.type}) to not fire when remaining_m <= 500`);
+      return {
+        ...trigger,
+        condition: "remaining_m > 500",
+      };
+    }
+
+    // For all other conditions, append the remaining_m > 500 gate
+    // Use AND to combine conditions
+    const newCondition = `${trigger.condition} AND remaining_m > 500`;
+    console.log(`[enforceClosingStagesGate] Adding closing-stage gate to trigger '${trigger.id}': "${trigger.condition}" → "${newCondition}"`);
+    return {
+      ...trigger,
+      condition: newCondition,
+    };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ensureClosingStageMilestones
+//
+// Post-processing guarantee: ensures that for distance-based sessions,
+// the final_100m and session_complete triggers ALWAYS exist.
+// If AI didn't generate them, we inject sensible defaults.
+//
+// Critical: Wayne & Claire never got final_100m or distance_complete prompts.
+// This function guarantees they're always there.
+// ─────────────────────────────────────────────────────────────────────────────
+function ensureClosingStageMilestones(
+  triggers: SessionCoachingTrigger[],
+  targetDistanceKm: number
+): SessionCoachingTrigger[] {
+  // Check which final-stage triggers already exist
+  const hasType = (type: string) => triggers.some(t => t.type === type);
+
+  const final100mExists = hasType("final_100m");
+  const sessionCompleteExists = hasType("session_complete");
+
+  let updated = [...triggers];
+
+  // Inject final_100m if missing
+  if (!final100mExists && targetDistanceKm > 0) {
+    console.log(`[ensureClosingStageMilestones] Injecting missing final_100m trigger`);
+    updated.push({
+      id: "final_100m_mandatory",
+      type: "final_100m",
+      condition: "remaining_m <= 100",
+      message: "Final 100 metres — give it everything you've got!",
+      frequency: "once",
+      alertType: "vibrate",
+      alternativeMessages: [
+        "Last 100 metres — finish strong!",
+        "100 metres to go — push hard to the line!",
+        "Final sprint — you've got this!",
+        "One hundred metres left — go all in!",
+      ],
+    });
+  }
+
+  // Inject session_complete if missing
+  if (!sessionCompleteExists && targetDistanceKm > 0) {
+    console.log(`[ensureClosingStageMilestones] Injecting missing session_complete trigger`);
+    updated.push({
+      id: "session_complete_mandatory",
+      type: "session_complete",
+      condition: `distance >= ${targetDistanceKm}`,
+      message: `That's your ${targetDistanceKm} kilometre run done — brilliant effort today. Well done.`,
+      frequency: "once",
+      alertType: "none",
+    });
+  }
+
+  return updated;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // generateSessionCoaching
 //
 // Unified AI function that generates a complete, bespoke coaching plan for ANY
@@ -6786,6 +6900,25 @@ IMPORTANT — breathing_cue and technique_review cues must NEVER be generic. The
 - Breathing cue: connect the breathing reminder to how the athlete should be feeling AT THIS POINT in the session. E.g. early in a run: "Breathing should feel almost conversational right now — if you're puffing, ease back a touch." Mid-run: "Let the breath lead your rhythm — two steps in, two steps out, keep it dialled."
 - alternativeMessages for breathing and form cues MUST give the athlete a DIFFERENT coaching insight each time — varied focus (jaw, shoulders, arms, foot strike, posture) not just the same cue reworded.
 
+CLOSING STAGES TRIGGER GATE — CRITICAL FOR FINAL EXPERIENCE:
+After the runner crosses into the final 500m (remaining_m <= 500), ONLY these trigger types are allowed:
+- final_500m: announces the final 500m push (fires once when remaining_m <= 500)
+- final_250m: announces the final 250m sprint (fires once when remaining_m <= 250)
+- final_100m: announces the final 100m (fires once when remaining_m <= 100)
+- session_complete: end-of-session summary (fires when distance >= targetDistance)
+
+NO other triggers (pace_trend, hr_zone alerts, breathing cues, form cues, cadence checks, periodic cues) may fire when remaining_m <= 500.
+These closing-stage-only triggers are the athlete's final coaching touches — they deserve undivided focus on the finish line, not analysis or corrections.
+
+To enforce this rule:
+- All periodic triggers (breathing, form, cadence) MUST have condition: "remaining_m > 500 AND ..." OR be designed to naturally cease before 500m remains.
+- All reactive triggers (hr_zone, pace_drift, etc.) MUST have condition: "remaining_m > 500 AND ..." to prevent firing in the final stretch.
+- ONLY the 4 trigger types listed above (final_500m, final_250m, final_100m, session_complete) are exempt from this gate.
+
+Example for a reactive trigger that checks pace:
+❌ Wrong: condition: "pace > targetPaceMax AND elapsed_min > 3"
+✅ Right: condition: "pace > targetPaceMax AND elapsed_min > 3 AND remaining_m > 500"
+
 MULTI-PHASE EFFORT SESSIONS (sessions that change HR zone or intensity mid-run):
 If the session instructions describe a progression (e.g. "steady Zone 2 for first 2.5 km then push into Zone 3 for the last 1.5 km"), you MUST:
 1. Create SEPARATE PHASES for each effort level — each with its own targetHRMin and targetHRMax set to the correct BPM values for that phase.
@@ -7016,11 +7149,22 @@ FINAL REMINDER — NON-NEGOTIABLE:
     const rawTriggers: SessionCoachingTrigger[] = parsed.triggers ?? [];
     const filteredTriggers = stripInappropriateTriggers(rawTriggers, coachingPolicy);
 
+    // ── Post-processing: enforce closing stages gate ──────────────────────────
+    // After 500m remaining, ONLY final_500m, final_250m, final_100m, and
+    // session_complete triggers are allowed. This prevents coaching clutter
+    // (like pace_trend) in the final push. (Fixes: Wayne & Claire issue)
+    const gatedTriggers = enforceClosingStagesGate(filteredTriggers);
+
+    // ── Post-processing: guarantee final_100m and session_complete triggers ─────
+    // If OpenAI forgot to include final_100m or session_complete, inject defaults.
+    // These are MANDATORY for distance-based sessions. (Fixes: Wayne & Claire missing prompts)
+    const withMandatoryMilestones = ensureClosingStageMilestones(gatedTriggers, targetDistanceKm);
+
     // ── Post-processing: guarantee rep_start / recovery_start triggers for interval sessions ──
     // If OpenAI didn't include these (which were historically missing from the vocabulary),
     // inject sensible defaults so the runtime always announces rep transitions.
     const guaranteedTriggers = ensureIntervalTriggers(
-      filteredTriggers,
+      withMandatoryMilestones,
       primaryConstraint,
       intervalCount ?? null,
       intervalHRMin ?? null,
