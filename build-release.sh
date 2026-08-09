@@ -52,7 +52,7 @@ success "Keystore verified at: $KEYSTORE_PATH"
 # Read current version from build.gradle.kts
 section "Reading Current Version"
 VERSION_CODE=$(grep -m 1 "versionCode = " "$PROJECT_DIR/app/build.gradle.kts" | grep -o '[0-9]*' | head -1)
-VERSION_NAME=$(grep -m 1 "versionName = " "$PROJECT_DIR/app/build.gradle.kts" | grep -oP '"\K[^"]+')
+VERSION_NAME=$(grep -m 1 "versionName = " "$PROJECT_DIR/app/build.gradle.kts" | sed 's/.*versionName = "\([^"]*\)".*/\1/')
 echo -e "  Version Code: ${BLUE}$VERSION_CODE${NC}"
 echo -e "  Version Name: ${BLUE}$VERSION_NAME${NC}"
 
