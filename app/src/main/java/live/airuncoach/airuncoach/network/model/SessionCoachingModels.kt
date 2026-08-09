@@ -121,7 +121,9 @@ data class SessionCoachingContext(
  */
 data class PrepareCoachingRequest(
     /** True when the user has a Garmin watch paired and connected. */
-    val hasWatchConnected: Boolean?
+    val hasWatchConnected: Boolean?,
+    /** The activity type for this session - "run" or "walk" */
+    @com.google.gson.annotations.SerializedName("sessionType") val sessionType: String = "run"
 )
 
 /**

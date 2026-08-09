@@ -354,11 +354,16 @@ export function registerSessionCoachingRoutes(app: Express) {
           : req.body?.hasWatchConnected === false ? false
           : undefined;
 
+        // sessionType — passed by Android to indicate if this is a "run" or "walk" session
+        // Used to generate walk-specific pre-run briefing and coaching language
+        const sessionType: string = req.body?.sessionType ?? "run";
+
         const plan = await getOrGenerateSessionCoaching({
           userId,
           plannedWorkoutId: workoutId,
           forceRegenerate,
           hasWatchConnected,
+          sessionType,
         });
 
         return res.json({

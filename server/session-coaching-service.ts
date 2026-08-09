@@ -561,12 +561,15 @@ export interface SessionCoachingRequest {
   // pass it here so OpenAI receives a definitive HR-monitor availability signal
   // rather than falling back to historical run inference.
   hasWatchConnected?: boolean;
+  // Session activity type — whether this workout is a "run" or "walk"
+  // Used for walk-specific pre-run briefing and coaching language (defaults to "run")
+  sessionType?: string;
 }
 
 export async function getOrGenerateSessionCoaching(
   request: SessionCoachingRequest
 ): Promise<SessionCoachingPlan> {
-  const { userId, plannedWorkoutId, forceRegenerate = false, hasWatchConnected } = request;
+  const { userId, plannedWorkoutId, forceRegenerate = false, hasWatchConnected, sessionType = "run" } = request;
 
   // Current plan schema version — bump this whenever the plan format changes in a way that
   // requires existing cached plans to be regenerated (e.g. new fields, prompt improvements).
@@ -747,6 +750,7 @@ export async function getOrGenerateSessionCoaching(
   // 5. Build GenerateSessionCoachingParams from DB workout data
   const params: GenerateSessionCoachingParams = {
     sessionType:           workout.workoutType,
+    activityType:          sessionType,  // "run" or "walk" passed by the Android app
     sessionGoal:           workout.sessionGoal ?? "general_fitness",
     targetDurationMinutes: (() => {
       if (workout.duration && workout.duration > 0) return Math.round(workout.duration / 60);

@@ -1,0 +1,107 @@
+================================================================================
+TERRAIN COACHING LOGIC — Downhill Physics Fix
+================================================================================
+
+BEFORE FIX:
+───────────────────────────────────────────────────────────────────────────────
+
+  LLM Context:     "pace naturally speeds up downhill"
+         ↓
+  [LLM 0.7°C]  → Sometimes ignores context (temperature/variance)
+         ↓
+  Output:          "descending slows you down"  ❌ WRONG PHYSICS
+         ↓
+  Runner:          Confused — that's backwards!
+
+
+AFTER FIX:
+───────────────────────────────────────────────────────────────────────────────
+
+  Gradient Context:      "DO NOT say descents 'slow you down'"
+  System Message:        "CRITICAL TERRAIN RULE: Downhill SPEEDS UP..."
+  Post-Processing:       Regex safety net catches backwards logic
+         ↓
+  [LLM 0.7°C]  → Now has explicit + repeated directives + safety net
+         ↓
+  Output:          "downhill naturally speeds you up"  ✅ CORRECT PHYSICS
+         ↓
+  Runner:          Clear, accurate coaching
+
+
+GRADIENT CLASSIFICATION:
+────────────────────────────────────────────────────────────────────────��──────
+
+  Positive Grade (Climbing):       Slower pace = EXPECTED ✓
+  Negative Grade (Descending):     Faster pace = EXPECTED ✓
+  Flat Grade:                      No adjustment needed
+
+
+EXAMPLES — OLD vs NEW:
+───────────────────────────────────────────────────────────────────────────────
+
+  OLD ❌                           NEW ✅
+  ─────────────────────────────────────────────────────────────────────────────
+  "descending slows you down"      "downhill uses gravity to help you"
+  
+  "hills make it harder"           "climbing naturally slows pace — focus form"
+  
+  "descent is tough"               "downhill recovery zone — control stride"
+
+
+SAFETY NET EXAMPLES:
+───────────────────────────────────────────────────────────────────────────────
+
+  If LLM generates:                Post-processing corrects to:
+  ─────────────────────────────────────────────────────────────────────────────
+  "descending slows you down"      "downhill naturally speeds you up"
+  
+  "going downhill is harder"       "downhill makes running easier"
+  
+  "descent makes it tough"         "descent uses gravity to your advantage"
+
+
+PHYSICS NOTES:
+───────────────────────────────────────────────────────────────────────────────
+
+  ✓ Downhill = Lower gravitational resistance + momentum = Faster pace
+  ✓ Uphill   = Higher gravitational resistance = Slower pace (biomechanically)
+  ✓ Effort   = Same effort level produces DIFFERENT paces on different grades
+  ✓ Fairness = Pace variance must be evaluated ELEVATION-AWARE
+  
+  Mistake: "You were slower on this hill" (ignores biomechanics)
+  Correct: "Your pace dropped as expected on the climb — solid effort"
+
+
+FILE CHANGES:
+───────────────────────────────────────────────────────────────────────────────
+
+  server/ai-service.ts:
+    Line 1294-1300:  Gradient context with explicit "DO NOT" rule
+    Line 1365-1367:  CRITICAL TERRAIN RULE in system message
+    Line 1381-1415:  Post-processing regex safety checks
+
+
+TEST CASE — Paul's Run:
+───────────────────────────────────────────────────────────────────────────────
+
+  Grade Data:        -8.27% (descending at ~8°)
+  Steepest Descent:  -82.8°
+  
+  OLD Message (KM 1):   ❌ "descending can slow you down a bit"
+  
+  NEW Message (KM 1):   ✅ "downhill naturally helps your pace"
+  Message (KM 3):       ✅ "especially cruising downhill" (already correct)
+  
+  Consistency:          ✅ Both messages now aligned
+
+
+RULESET SUMMARY:
+───────────────────────────────────────────────────────────────────────────────
+
+  1. Gradient Context    → Explicit "DO NOT" directives
+  2. System Prompt       → CRITICAL TERRAIN RULE directive  
+  3. Post-Processing     → Regex safety net as fallback
+  
+  Three-layer defense against terrain coaching errors ✓
+
+================================================================================

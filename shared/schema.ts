@@ -1379,6 +1379,9 @@ export const plannedWorkouts = pgTable("planned_workouts", {
   // isEnrichmentPending: true when the session was created under the new architecture and hasn't been enriched yet.
   // Used to show placeholder copy to the user until enrichment fires.
   isEnrichmentPending: boolean("is_enrichment_pending").default(false),
+  // Session activity type — whether this workout is a "run" or "walk"
+  // Used for AI coaching generation and pre-run briefing (defaults to "run")
+  sessionType: text("session_type").notNull().default("run"),
 
   createdAt: timestamp("created_at").defaultNow(),
 });

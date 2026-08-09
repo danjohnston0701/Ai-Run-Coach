@@ -390,14 +390,14 @@ class RunSessionViewModel @Inject constructor(
      *
      * If coaching for this workoutId was already generated in this session, skips silently.
      */
-    fun generateCoachingForWorkout(workoutId: String) {
+    fun generateCoachingForWorkout(workoutId: String, sessionType: String = "run") {
         // Skip if already generated for this workout
         if (coachingGeneratedForWorkoutId == workoutId &&
             _coachingGenerationState.value == CoachingGenerationState.READY) {
             Log.d("RunSessionViewModel", "Coaching already generated for $workoutId — skipping")
             return
         }
-        generateCoachingInternal(workoutId, force = false)
+        generateCoachingInternal(workoutId, sessionType = sessionType, force = false)
     }
 
     /**
@@ -408,14 +408,14 @@ class RunSessionViewModel @Inject constructor(
      * transitions, missing interval cues, or an Irish female voice speaking as a British
      * male). The server will generate a fresh plan and the stale cache is overwritten.
      */
-    fun regenerateCoachingForWorkout(workoutId: String) {
+    fun regenerateCoachingForWorkout(workoutId: String, sessionType: String = "run") {
         Log.d("RunSessionViewModel", "Force-regenerating AI coaching plan for $workoutId")
         activeSessionCoachingPlan = null
         coachingGeneratedForWorkoutId = null
-        generateCoachingInternal(workoutId, force = true)
+        generateCoachingInternal(workoutId, sessionType = sessionType, force = true)
     }
 
-    private fun generateCoachingInternal(workoutId: String, force: Boolean) {
+    private fun generateCoachingInternal(workoutId: String, sessionType: String = "run", force: Boolean) {
         viewModelScope.launch {
             _coachingGenerationState.value = CoachingGenerationState.GENERATING
             Log.d("RunSessionViewModel", "${if (force) "Force-generating" else "Generating"} AI coaching for workout $workoutId...")
@@ -427,7 +427,7 @@ class RunSessionViewModel @Inject constructor(
                 val response = apiService.prepareSessionCoaching(
                     workoutId       = workoutId,
                     forceRegenerate = force,
-                    body            = PrepareCoachingRequest(hasWatchConnected = isWatchConnected)
+                    body            = PrepareCoachingRequest(hasWatchConnected = isWatchConnected, sessionType = sessionType)
                 )
                 if (response.isSuccessful) {
                     val body = response.body()

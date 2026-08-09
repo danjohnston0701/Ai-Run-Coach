@@ -6116,6 +6116,7 @@ function ensureClosingStageMilestones(
 
 export interface GenerateSessionCoachingParams {
   sessionType: string;          // "easy", "intervals", "tempo", "long_run", "hill_repeats", "walk_run", etc.
+  activityType?: string;        // "run" or "walk" — the activity mode for the session
   sessionGoal: string;          // "speed", "endurance", "recovery", "threshold", "power"
   targetDurationMinutes: number;
   targetDistanceKm: number;
@@ -6678,6 +6679,7 @@ export async function generateSessionCoaching(
 ): Promise<SessionCoachingPlan> {
   const {
     sessionType,
+    activityType = "run",
     sessionGoal,
     targetDurationMinutes,
     targetDistanceKm,
@@ -6876,7 +6878,9 @@ Session Details:
 ${primaryConstraintBlock}
 ${sessionInstructions ? `\nSession Instructions from Training Plan:\n${sessionInstructions}` : ""}`.trim();
 
-  const systemPrompt = `You are ${coachName}, an AI running coach. You design live coaching plans that execute during a GPS training session.
+  const systemPrompt = `You are ${coachName}, an AI ${activityType === "walk" ? "walking" : "running"} coach. You design live coaching plans that execute during a GPS training session.
+
+${activityType === "walk" ? "CRITICAL: This is a WALK session. NEVER use running terminology. Use 'walk', 'walking', 'walker', 'pace' instead of 'run', 'running', 'runner', 'running pace'. The athlete is WALKING, not running. Reference the walking experience throughout." : ""}
 
 The plan runs in real time: a live engine evaluates your trigger conditions against the athlete's sensor data every second and fires your messages through text-to-speech the instant conditions are met.
 
@@ -7224,7 +7228,7 @@ FINAL REMINDER — NON-NEGOTIABLE:
       sessionGoal:   parsed.sessionGoal   ?? sessionGoal,
       coachingTone:  parsed.coachingTone  ?? coachTone,
       cueingStrategy: parsed.cueingStrategy ?? derivedStrategy,
-      preRunBrief:   parsed.preRunBrief   ?? `Get ready for your ${sessionType.replace(/_/g, " ")} session.`,
+      preRunBrief:   parsed.preRunBrief   ?? `Get ready for your ${sessionType.replace(/_/g, " ")} ${activityType} session.`,
       whyThisSession: parsed.whyThisSession ?? "Building your running fitness.",
       phases:   parsed.phases   ?? [],
       triggers: guaranteedTriggers,
@@ -7446,7 +7450,7 @@ function buildFallbackSessionCoaching(
     sessionType, sessionGoal,
     coachingTone: tone,
     cueingStrategy: strategy,
-    preRunBrief: `Today's session is a ${targetDistanceKm}km ${sessionType.replace(/_/g, " ")}. ${
+    preRunBrief: `Today's session is a ${targetDistanceKm}km ${sessionType.replace(/_/g, " ")} ${activityType}. ${
       targetPaceMin ? `Target pace: ${formatPaceForPrompt(targetPaceMin)}–${formatPaceForPrompt(targetPaceMax)}.` : ""
     } Focus on consistent effort throughout.`,
     whyThisSession: `This session builds your ${sessionGoal.replace(/_/g, " ")} and improves running fitness.`,

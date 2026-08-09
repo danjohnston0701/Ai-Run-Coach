@@ -1,0 +1,73 @@
+================================================================================
+GOOGLE PLAY STORE RELEASE BUILD - August 5, 2024
+================================================================================
+
+BUILD INFORMATION
+-----------------
+App:              AI Run Coach
+Package:          live.airuncoach.airuncoach
+Version:          2.0.3
+Version Code:     45
+Build Type:       Release (bundleRelease)
+Build Status:     ✅ SUCCESSFUL
+
+BUILD DETAILS
+-------------
+Build Duration:   6 minutes 3 seconds
+Gradle Version:   9.1.0
+Tasks Executed:   60 actionable tasks (55 executed, 5 up-to-date)
+
+OUTPUT ARTIFACTS
+----------------
+File:             app-release.aab
+Location:         app/build/outputs/bundle/release/app-release.aab
+Size:             20 MB
+SHA256:           b4261da351d7e10fbdd9b06a0b1e4d852a962d8ed8bc836e2e48e51e96a1bbd2
+
+SIGNING CONFIGURATION
+---------------------
+✅ Release keystore configured in local.properties
+✅ Code signing applied automatically
+✅ R8 minification & code shrinking enabled
+✅ ProGuard obfuscation rules applied
+
+BUILD INCLUDES
+--------------
+✅ All activity/fragments compiled
+✅ All Compose UI updated
+✅ Firebase integration
+✅ Google Play Billing library
+✅ Garmin/Strava/Health integrations
+✅ Hilt dependency injection
+✅ Room database migrations
+
+NEXT STEPS - UPLOAD TO GOOGLE PLAY CONSOLE
+-------------------------------------------
+1. Go to: https://play.google.com/console
+2. Select "AI Run Coach" app
+3. Navigate to Release → Production
+4. Click "Create New Release"
+5. Upload the AAB file:
+   /Users/danieljohnston/AndroidStudioProjects/AiRunCoach/app/build/outputs/bundle/release/app-release.aab
+6. Update release notes
+7. Review and rollout
+
+TESTING THE BUILD (Optional)
+-----------------------------
+# Install on connected device (requires AAB → APK conversion)
+bundletool build-apks \
+  --bundle=app/build/outputs/bundle/release/app-release.aab \
+  --output=app-release.apks \
+  --connected-device
+
+bundletool install-apks --apks=app-release.apks
+
+NOTES
+-----
+- Configuration cache can speed up future builds
+- Some Gradle features deprecated in current version
+- All lint checks passed (vitals only)
+- No R8 minification errors
+
+BUILD COMPLETE ✅
+================================================================================

@@ -85,7 +85,7 @@ fun WorkoutDetailScreen(
     // Trigger AI coaching generation as soon as the screen opens
     LaunchedEffect(workout.id) {
         if (workout.workoutType != "rest") {
-            runSessionViewModel.generateCoachingForWorkout(workout.id)
+            runSessionViewModel.generateCoachingForWorkout(workout.id, sessionType = workout.sessionType)
         }
     }
 

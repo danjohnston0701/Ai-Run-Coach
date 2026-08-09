@@ -1,0 +1,473 @@
+================================================================================
+PRE-RUN BRIEFING SYSTEM - CODEBASE SEARCH FINDINGS
+================================================================================
+
+SEARCH COMPLETED: iOS App Codebase for Pre-Run Brief/Briefing Display
+
+DATE: 2026-08-04
+SCOPE: 
+  ✓ Swift files (.swift)
+  ✓ TypeScript/React files (.ts, .tsx)
+  ✓ Server-side integration points
+  ✓ API endpoints and data models
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+1. ✅ PRE-RUN BRIEFING SYSTEM EXISTS
+   ───────────────────────────────────
+   The app implements a sophisticated AI-powered pre-run briefing system where
+   coaches generate personalized 2-4 sentence coaching messages specific to each
+   training session.
+
+2. ✅ COMPONENTS SHOWING BRIEFINGS
+   ──────────────────────────────────
+   
+   SERVER-SIDE:
+   • session-coaching-service.ts:308 - generateSessionInstructions()
+     - Generates AI-created pre-run brief + session structure
+     - Determines optimal coaching tone per session
+     - Caches result in database
+   
+   CLIENT-SIDE:
+   • Home.tsx (lines ~1250-1400)
+     - PreRunModal component for free runs
+     - Shows run setup (distance, time, AI coach toggle)
+     - Brief display: NOT currently implemented for free runs
+   
+   • PreEvent.tsx (lines 1-568)
+     - Event-specific pre-run setup screen
+     - Shows route map, distance, difficulty, elevation
+     - Brief display: NOT currently implemented
+   
+   • RunSession.tsx
+     - Main running screen
+     - Uses phase-based real-time coaching (not pre-run brief)
+
+3. ✅ API CALLS TO FETCH BRIEFING
+   ──────────────────────────────────
+   
+   PRIMARY ENDPOINT:
+   GET /api/workouts/:workoutId/session-instructions
+   
+   Location: server/routes-session-coaching.ts (lines 22-111)
+   
+   Response includes:
+   {
+     preRunBrief: string,              // ← The 2-4 sentence brief
+     sessionStructure: {
+       type: string,                   // "intervals", "tempo", etc.
+       goal: string,                   // "speed", "endurance", "recovery"
+       phases: Array<{...}>,           // Warmup, main, cooldown
+       coachingTriggers: Array<{...}>  // Coaching cues per phase
+     },
+     aiDeterminedTone: string,
+     coachingStyle: {...},
+     insightFilters: {...}
+   }
+
+4. ✅ COACH MESSAGING BEFORE RUN
+   ──────────────────────────────────
+   
+   TWO-PHASE COACHING SYSTEM:
+   
+   PHASE 1: PRE-RUN (Before user starts)
+   ───────────────────────────��────────
+   Location: server/session-coaching-service.ts (lines 308-441)
+   
+   • generateSessionInstructions()
+     - Fetches runner profile (athletic grade, fitness level, history)
+     - Fetches session context (type, goal, intensity, duration)
+     - Fetches last run coaching insight (previous feedback)
+   
+   • AI Tone Determination (lines 90-149)
+     - Analyzes runner + session + history
+     - Returns: optimal tone, intensity, encouragement level
+     - Can override user preference for specific sessions
+   
+   • AI Brief Generation (lines 353-409)
+     - Prompt asks: "Write a specific, motivating pre-run briefing"
+     - System: elite running coach perspective
+     - Returns: 2-4 sentence, session-specific coaching message
+   
+   PHASE 2: REAL-TIME (During run)
+   ─────────────────────────────────
+   • Uses phase-based coaching statements
+   • Triggered by: km splits, pace, HR, effort
+   • Subject to 90-second cooldown between non-milestones
+
+5. ✅ PRE-RUN SCREENS
+   ───────────────────
+   
+   FREE RUN SETUP:
+   Path: Home → "Start Session" → Pre-Run Modal
+   - Distance slider
+   - Time input (h:m:s)
+   - AI Coach toggle
+   - Live Tracking toggle
+   - "Start Run" button
+   
+   EVENT SETUP:
+   Path: Events → Select Event → PreEvent Screen
+   - Route map (Leaflet)
+   - Event details (distance, difficulty, elevation)
+   - Target Time toggle + input
+   - AI Coach toggle
+   - "Start Run" button
+   
+   TRAINING PLAN SETUP:
+   Path: Training Plans → Select Workout → [TBD]
+   - Should show preRunBrief from session instructions
+   - Should show phases and coaching triggers
+   - Client display location: NOT YET IMPLEMENTED
+
+6. ✅ AI BRIEF GENERATION DETAILS
+   ────────────────────────────────
+   
+   INPUTS ANALYZED:
+   • Runner: athletic grade, fitness, experience, preferences, history
+   • Session: type, goal, intensity, duration, distance, intervals
+   • Context: last run feedback, coach recommendations, adaptation allowed
+   
+   AI OUTPUTS:
+   • preRunBrief: "2-4 sentence motivating brief specific to this session"
+   • sessionStructure: phases with targets and coaching triggers
+   • aiDeterminedTone: optimal tone choice (8 options available)
+   • coachingStyle: encouragement level, detail depth, technical depth
+   • toneReasoning: explanation of why this tone was chosen
+   
+   TONE OPTIONS:
+   - light_fun
+   - direct
+   - motivational
+   - calm
+   - serious
+   - playful
+   - instructive
+
+7. ✅ COACHING COOLDOWN SYSTEM
+   ─────────────────────────────
+   
+   File: server/coaching-cooldown.ts (202 lines)
+   
+   MILESTONES (Always Fire):
+   • Km splits (honors user's split interval setting)
+   • 500m check-in (first 500m)
+   • Final 500m, Final 100m
+   • Interval transitions
+   • Navigation turns
+   
+   NON-MILESTONES (Subject to Cooldown):
+   • Phase coaching
+   • Effort coaching
+   • Pace deviation
+   • HR coaching
+   • Cadence coaching
+   
+   COOLDOWN TIMES:
+   • 90 seconds between non-milestone cues
+   • 45 seconds of silence after any milestone
+
+================================================================================
+MISSING IMPLEMENTATIONS
+================================================================================
+
+1. FREE RUN PRE-BRIEF DISPLAY
+   ──────────────────────────
+   ❌ Pre-run brief not fetched for free runs
+   ❌ Home.tsx modal doesn't show AI-generated brief
+   
+   TODO:
+   • Fetch session instructions in Home modal
+   • Display preRunBrief before "Start Run"
+   • Show session structure (phases, targets)
+
+2. EVENT PRE-BRIEF DISPLAY
+   ────────────────────────
+   ❌ Pre-run brief not fetched for events
+   ❌ PreEvent.tsx doesn't show AI-generated brief
+   
+   TODO:
+   • Fetch session instructions in PreEvent page
+   • Display preRunBrief in event setup
+   • Show phases and coaching triggers
+
+3. TRAINING PLAN PRE-RUN SCREEN
+   ─────────────────────────────
+   ❌ Client-side display location not implemented
+   
+   TODO:
+   • Create pre-run screen for training plan workouts
+   • Fetch /api/workouts/:workoutId/session-instructions
+   • Display brief, phases, coaching style
+
+4. iOS NATIVE IMPLEMENTATION
+   ──────────────────────────
+   ❌ No native SwiftUI component for brief display
+   ✓ Only Strava integration in Swift (post-run sharing)
+   
+   Current: Web-based (React) app
+   
+   TODO (if native iOS app):
+   • Create SwiftUI view for PreRunBrief
+   • Implement coaching tone UI (emoji/color coding)
+   • Mirror API calls from web version
+
+================================================================================
+ARCHITECTURE OVERVIEW
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     USER STARTS RUN                             │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │ Free Run or Plan?│
+                    └────┬─────────┬──┘
+         ┌──────────────┘         └──────────────┐
+         │                                       │
+    ┌────▼─────────┐               ┌──────▼──────────┐
+    │  FREE RUN    │               │  TRAINING PLAN  │
+    │  (Home.tsx)  │               │     (TBD UI)    │
+    └────┬─────────┘               └──────┬──────────┘
+         │                                │
+         │ Configure:                     │ Fetch:
+         │ • Distance                     │ GET /api/workouts/
+         │ • Time                         │     :workoutId/
+         │ • AI Coach                     │     session-instructions
+         │ • Live Tracking                │
+         │                               │
+         └────────────┬─────────┬────────┘
+                      │ Start   │
+                      │ Run     │
+              ┌───────▼────┬────▼────┐
+              │   SHOW     │   SHOW  │
+              │  SESSION   │ PRERUN  │
+              │ STRUCTURE  │ BRIEF   │
+              │ (MISSING)  │(MISSING)│
+              └───────┬────┴────┬────┘
+                      │         │
+              ┌───────▼─────────▼─────┐
+              │   USER STARTS RUNNING  │
+              │   (RunSession.tsx)     │
+              └───────┬────────────────┘
+                      │
+                      │ Real-Time Coaching
+                      │ (Phase-based)
+                      │
+              ┌───────▼──────────┐
+              │  COACHING CUES   │
+              │  (During Run)    │
+              │  • Km splits     │
+              │  • Pace feedback │
+              │  • HR coaching   │
+              │  • Effort cues   │
+              └──────────────────┘
+
+================================================================================
+FILES & LOCATIONS
+================================================================================
+
+SERVER-SIDE (Pre-Run Brief Generation):
+  ✓ server/routes-session-coaching.ts (111 lines)
+    - GET /api/workouts/:workoutId/session-instructions endpoint
+    
+  ✓ server/session-coaching-service.ts (850+ lines)
+    - generateSessionInstructions() [line 308]
+    - generateAiSessionDesign() [line 345]
+    - determineSessonCoachingTone() [line 58]
+    - buildFallbackBrief() [line 446]
+    
+  ✓ server/src/models/SessionCoaching.ts (171 lines)
+    - SessionCoaching interface
+    - CoachingPhase interface
+    - CoachingTrigger interface
+    
+  ✓ server/coaching-cooldown.ts (202 lines)
+    - checkCooldown() function
+    - Cooldown state management
+
+CLIENT-SIDE (UI Components):
+  ✓ client/src/pages/Home.tsx (~2000 lines)
+    - PreRunModal component [~1250-1400]
+    - handleStartSession() [line 1179]
+    - handleConfirmPreRun() [line 1206]
+    
+  ✓ client/src/pages/PreEvent.tsx (568 lines)
+    - Full pre-event screen with map
+    - handleStartRun() [line 256]
+    
+  ✓ client/src/pages/RunSession.tsx (~3000 lines)
+    - Main running screen
+    - Real-time coaching system
+    
+  ✓ client/src/lib/coachSettings.ts (191 lines)
+    - Coach personalization settings
+    - Voice preferences
+
+iOS NATIVE:
+  ⚠️ ios/StravaViews.swift (449 lines)
+    - Strava integration only
+    - No pre-run brief component
+    
+  ⚠️ ios/StravaViewModel.swift (281 lines)
+    - Strava API calls only
+
+================================================================================
+DATA FLOW EXAMPLE
+================================================================================
+
+TRAINING PLAN WORKOUT SCENARIO:
+
+1. User taps "Prepare for Workout" on tempo session
+2. System calls generateSessionInstructions(userId, workoutId, {
+     workoutType: "tempo",
+     intensity: "z4",
+     distance: 5,
+     duration: 30 * 60,
+     sessionGoal: "threshold_development"
+   })
+
+3. Server fetches:
+   • User: athleticGrade="elite", coachTone="motivational"
+   • Last run: "Struggled with pace control - stayed too fast early"
+   • Runner profile: "adaptive AI allowed, elite athlete"
+
+4. AI generates brief:
+   "Today's 5km tempo run builds your threshold pace and pace discipline.
+    Focus on a controlled effort from the start — avoid the early-pace
+    trap. This session teaches lactate tolerance. Trust the pacing plan."
+
+5. AI generates structure:
+   - Phases: warmup (1km), tempo_block (3km), cooldown (1km)
+   - Triggers at each phase start/end
+   - Coaching cues: under 20 words, active voice
+
+6. Result cached and returned:
+   {
+     preRunBrief: "Today's 5km...",
+     sessionStructure: {...},
+     aiDeterminedTone: "direct",
+     coachingStyle: {
+       encouragementLevel: "low",
+       detailDepth: "detailed",
+       technicalDepth: "advanced"
+     }
+   }
+
+7. Client displays brief in Pre-Run Setup Screen (IMPLEMENTATION NEEDED)
+
+8. User starts running → RunSession component loads
+
+9. Real-time coaching begins using phase-based statements
+
+================================================================================
+SUMMARY STATISTICS
+================================================================================
+
+COMPONENTS FOUND: 8
+  ✓ 2 Swift files (limited - Strava only)
+  ✓ 4 React components (Home, PreEvent, RunSession, coachSettings)
+  ✓ 2 Server-side main files (routes, service)
+
+API ENDPOINTS: 1 primary + 1 secondary
+  ✓ GET /api/workouts/:workoutId/session-instructions
+  ✓ GET /api/runs/:id/comprehensive-analysis (includes brief)
+
+DATABASE TABLES: 1
+  ✓ sessionInstructions (linked to plannedWorkouts)
+
+AI MODELS: 2
+  ✓ gpt-4o-mini for tone determination
+  ✓ gpt-4o-mini for brief + structure generation
+
+TONE VARIATIONS: 7-8 available
+  ✓ light_fun, direct, motivational, calm, serious, playful, instructive
+
+COACH VOICES: 6 accents × 2 genders = 12 voice options
+  ✓ British, Australian, American, Irish, Scottish, New Zealand
+  ✓ Male/Female variants
+
+COACHING COOLDOWN: 90 seconds (non-milestones)
+  ✓ Prevents coaching overload during runs
+
+================================================================================
+IMPLEMENTATION STATUS
+================================================================================
+
+✅ COMPLETE:
+  • Pre-run brief AI generation system
+  • Session structure design
+  • Tone determination logic
+  • API endpoint for fetching briefs
+  • Fallback brief generation
+  • Database storage
+  • Server-side caching
+  • Real-time coaching during runs
+  • Coaching cooldown system
+  • Coach voice/accent settings
+
+❌ INCOMPLETE / NOT IMPLEMENTED:
+  • Free run brief display (Home.tsx modal)
+  • Event brief display (PreEvent.tsx screen)
+  • Training plan pre-run screen
+  • Brief UI components
+  • Phase structure visualization
+  • Coaching trigger visualization
+  • Native iOS SwiftUI implementation
+
+⚠️ PARTIAL:
+  • iOS native components (Strava only)
+  • Training plan integration (API ready, UI TBD)
+
+================================================================================
+RECOMMENDATIONS
+================================================================================
+
+PRIORITY 1: Display Briefs in Existing Screens
+  1. Home.tsx: Fetch + display brief in pre-run modal
+  2. PreEvent.tsx: Fetch + display brief in event setup
+  3. Create session structure UI (phases, targets)
+
+PRIORITY 2: Training Plan Integration
+  1. Create TrainingPlanPreRun.tsx component
+  2. Fetch session instructions
+  3. Display brief + phases before run
+
+PRIORITY 3: iOS Native
+  1. Create SwiftUI components for brief display
+  2. Mirror web app functionality
+  3. Implement coach voice personalization
+
+PRIORITY 4: Enhanced UX
+  1. Add coaching tone indicator (icon/color/emoji)
+  2. Show session structure visualization
+  3. Display estimated difficulty/duration
+  4. Add "Why this session?" explanation
+
+================================================================================
+DOCUMENTATION GENERATED
+================================================================================
+
+1. PRE_RUN_BRIEFING_ANALYSIS.md (Comprehensive, 500+ lines)
+   - All components, APIs, models, flows
+   - Detailed code references with line numbers
+   - Data model definitions
+   - AI prompt examples
+
+2. PRE_RUN_BRIEF_QUICK_REFERENCE.md (Quick guide, 300+ lines)
+   - What/where/how of pre-run briefs
+   - Testing examples
+   - Integration checklist
+   - File reference table
+
+3. PRE_RUN_BRIEF_FINDINGS_SUMMARY.txt (This file, 400+ lines)
+   - Executive summary of findings
+   - Architecture overview
+   - Implementation status
+   - Recommendations
+
+================================================================================
+END OF FINDINGS SUMMARY
+================================================================================
