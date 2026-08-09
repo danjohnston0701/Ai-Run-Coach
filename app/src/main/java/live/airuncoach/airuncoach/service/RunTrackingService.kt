@@ -7131,14 +7131,19 @@ class RunTrackingService : Service(), SensorEventListener {
                         // Include user's voice preferences so server-side Polly TTS selects the
                         // closest matching voice to the user's configured coach voice — this keeps
                         // the opening brief consistent with all subsequent coaching audio.
-                        val audioResponse = apiService.getStartRunAudio(
-                            live.airuncoach.airuncoach.network.model.StartRunAudioRequest(
-                                motivationalText = startPrompt,
-                                coachAccent = currentUser?.coachAccent,
-                                coachGender = currentUser?.coachGender,
-                                coachName   = currentUser?.coachName
-                            )
+                        val audioRequest = live.airuncoach.airuncoach.network.model.StartRunAudioRequest(
+                            motivationalText = startPrompt,
+                            coachAccent = currentUser?.coachAccent,
+                            coachGender = currentUser?.coachGender,
+                            coachName   = currentUser?.coachName,
+                            activityType = currentActivityType
                         )
+                        
+                        val audioResponse = if (currentActivityType == "walk") {
+                            apiService.getStartWalkAudio(audioRequest)
+                        } else {
+                            apiService.getStartRunAudio(audioRequest)
+                        }
 
                         if (audioResponse.audio != null && audioResponse.format != null) {
                             Log.d("RunTrackingService", "Start coaching audio via Polly TTS (plan=${planPreRunBrief != null}, accent=${currentUser?.coachAccent}, gender=${currentUser?.coachGender})")

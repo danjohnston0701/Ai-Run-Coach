@@ -1092,12 +1092,16 @@ class RunSessionViewModel @Inject constructor(
                         workoutDescription = runConfig?.workoutDescription
                     )
                     
-                    val briefing = apiService.getPreRunBriefing(request)
+                    // Use the correct endpoint based on activity type (run vs. walk)
+                    val isWalk = runConfig?.activityType == PhysicalActivityType.WALK
+                    val briefing = if (isWalk) {
+                        apiService.getPreWalkBriefing(request)
+                    } else {
+                        apiService.getPreRunBriefing(request)
+                    }
                     
                     // Debug: Log what we received from the API
-                    Log.d("RunSessionViewModel", "Pre-run briefing response - audio: ${briefing.audio?.take(50)}, format: ${briefing.format}, briefing: ${briefing.briefing?.take(100)}")
-                    
-                    val isWalk = runConfig?.activityType == PhysicalActivityType.WALK
+                    Log.d("RunSessionViewModel", "Pre-${if (isWalk) "walk" else "run"} briefing response - audio: ${briefing.audio?.take(50)}, format: ${briefing.format}, briefing: ${briefing.briefing?.take(100)}")
                     
                     // Build full display text from structured AI response.
                     // activityType="walk" is sent in the request so the API generates walk-specific

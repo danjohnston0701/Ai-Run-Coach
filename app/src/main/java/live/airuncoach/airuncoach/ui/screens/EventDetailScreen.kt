@@ -165,11 +165,17 @@ fun EventDetailScreen(
                     coachTone = user?.coachTone
                 )
                 
-                val response = apiService.getPreRunBriefing(request)
+                // Use the correct endpoint based on activity type (run vs. walk)
+                val isWalk = event.eventType.equals("walk", ignoreCase = true)
+                val response = if (isWalk) {
+                    apiService.getPreWalkBriefing(request)
+                } else {
+                    apiService.getPreRunBriefing(request)
+                }
                 briefingText = response.text
                 briefingAudio = response.audio
                 
-                Log.d("EventDetail", "✅ Generated pre-run briefing")
+                Log.d("EventDetail", "✅ Generated pre-${if (isWalk) "walk" else "run"} briefing")
                 
             } catch (e: Exception) {
                 Log.e("EventDetail", "❌ Failed to generate briefing: ${e.message}", e)

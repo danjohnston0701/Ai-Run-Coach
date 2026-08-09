@@ -12,7 +12,8 @@ data class StartRunAudioRequest(
     @SerializedName("motivationalText") val motivationalText: String,
     @SerializedName("coachAccent")      val coachAccent: String? = null,   // e.g. "irish", "british", "australian"
     @SerializedName("coachGender")      val coachGender: String? = null,   // "male" | "female"
-    @SerializedName("coachName")        val coachName: String? = null      // e.g. "Saoirse", "James"
+    @SerializedName("coachName")        val coachName: String? = null,      // e.g. "Saoirse", "James"
+    @SerializedName("activityType")     val activityType: String = "run"    // "run" | "walk"
 )
 
 /**

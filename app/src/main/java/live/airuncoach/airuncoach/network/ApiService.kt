@@ -166,8 +166,14 @@ interface ApiService {
     @POST("/api/coaching/pre-run-briefing-audio")
     suspend fun getPreRunBriefing(@Body request: PreRunBriefingRequest): PreRunBriefingResponse
 
+    @POST("/api/coaching/pre-walk-briefing-audio")
+    suspend fun getPreWalkBriefing(@Body request: PreRunBriefingRequest): PreRunBriefingResponse
+
     @POST("/api/coaching/start-run-audio")
     suspend fun getStartRunAudio(@Body request: StartRunAudioRequest): StartRunAudioResponse
+
+    @POST("/api/coaching/start-walk-audio")
+    suspend fun getStartWalkAudio(@Body request: StartRunAudioRequest): StartRunAudioResponse
 
     /**
      * Pre-generates Polly TTS audio for a batch of coaching trigger messages.
