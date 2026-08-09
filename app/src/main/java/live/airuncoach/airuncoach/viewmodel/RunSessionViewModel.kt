@@ -1555,6 +1555,8 @@ class RunSessionViewModel @Inject constructor(
                 action = RunTrackingService.ACTION_START_TRACKING
                 // Pass target distance and time to service if configured
                 runConfig?.let {
+                    // Pass activity type (run vs. walk) so in-session coaching uses correct terminology
+                    putExtra(RunTrackingService.EXTRA_SESSION_TYPE, it.activityType.name.lowercase())
                     it.targetDistance?.let { dist -> putExtra(RunTrackingService.EXTRA_TARGET_DISTANCE, dist.toDouble()) }
                     // Calculate target time in milliseconds if set
                     if (it.hasTargetTime) {
