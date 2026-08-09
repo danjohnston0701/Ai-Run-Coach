@@ -627,25 +627,36 @@ export interface RunHistoryStats {
  * Build a concise natural-language context string from run history stats.
  * Compares current pace to their recent average so the AI can comment meaningfully.
  */
-function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string): string {
+function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string, isWalkSession?: boolean): string {
   if (!history || history.runsAnalysed === 0) return '';
 
-  let ctx = `Based on their last ${history.runsAnalysed} runs: avg pace ${history.avgPaceFormatted}/km`;
+  // Don't compare walk pace to run pace history (and vice versa) — they're completely different baselines
+  // A 24 min/km walk is normal; a 24 min/km run would be walking-pace. Skip the comparison if activity type
+  // suggests this history is from a different activity type.
+  // (In future, we should pass activity-specific history from the backend instead)
+  const walkSession = isWalkSession ?? false;
+  const historyLikelihyWalkData = history.avgPaceSecondsPerKm > 900; // >15 min/km suggests walk data
+  const mismatch = (walkSession && !historyLikelihyWalkData) || (!walkSession && historyLikelihyWalkData);
 
-  if (currentPace && history.avgPaceSecondsPerKm > 0) {
+  let ctx = `Based on their last ${history.runsAnalysed} ${walkSession ? 'walks' : 'runs'}: avg pace ${history.avgPaceFormatted}/km`;
+
+  if (currentPace && history.avgPaceSecondsPerKm > 0 && !mismatch) {
     // Parse current pace to seconds
     const parts = currentPace.replace('/km', '').split(':');
     if (parts.length === 2) {
       const currentSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
       const diff = currentSec - history.avgPaceSecondsPerKm;
       if (diff < -10) {
-        ctx += ` — they're running ${Math.abs(Math.round(diff))}s/km FASTER than their usual pace (performing above average today)`;
+        ctx += ` — they're ${walkSession ? 'walking' : 'running'} ${Math.abs(Math.round(diff))}s/km FASTER than their usual pace (performing above average today)`;
       } else if (diff > 10) {
-        ctx += ` — they're running ${Math.round(diff)}s/km SLOWER than their usual pace`;
+        ctx += ` — they're ${walkSession ? 'walking' : 'running'} ${Math.round(diff)}s/km SLOWER than their usual pace`;
       } else {
-        ctx += ` — they're running close to their typical pace`;
+        ctx += ` — they're ${walkSession ? 'walking' : 'running'} close to their typical pace`;
       }
     }
+  } else if (mismatch) {
+    // Activity type mismatch — don't make pace comparisons
+    ctx += ` (note: this history is from ${walkSession ? 'runs' : 'walks'}, not ${walkSession ? 'walks' : 'runs'})`;
   }
 
   if (history.bestPaceFormatted) ctx += `. PB: ${history.bestPaceFormatted}/km`;
@@ -776,7 +787,7 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
   if (runnerFirstNamePace) runnerContext += `${isWalkSession ? 'Walker' : 'Runner'}: ${runnerFirstNamePace}. `;
   if (fitnessLevel) runnerContext += `Fitness level: ${fitnessLevel}. `;
   if (runHistory) {
-    runnerContext += buildRunHistoryContext(runHistory, currentPace);
+    runnerContext += buildRunHistoryContext(runHistory, currentPace, isWalkSession);
   }
 
   const spokenCurrentPace = currentPace ? formatPaceForTTS(currentPace) : null;  // overall average pace - already includes "per kilometer"
