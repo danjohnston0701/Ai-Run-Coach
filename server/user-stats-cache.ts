@@ -188,10 +188,10 @@ export async function recomputeForUser(userId: string): Promise<void> {
     }
   }
 
-  // 5K, 10K, Half Marathon, Marathon: best performance from either:
-  // 1. A dedicated run in the distance band (e.g., a 5K-only run)
-  // 2. A split/segment from a longer run (e.g., 5K split from a 10K run)
-  // We check both and use whichever has the faster pace.
+  // 5K, 10K, Half Marathon, Marathon: ONLY awarded from a dedicated run whose
+  // actual logged distance falls within the distance band (e.g., a 5K-only run).
+  // We do NOT infer these from a fastest-km split of an unrelated run — a fast
+  // single km does not equal a genuine PB at a distance the user never ran.
   // runs.duration is in SECONDS → multiply × 1000 to store as milliseconds
   // so that pb_*_duration_ms column names are accurate.
   for (const dist of PB_DISTANCES.filter(d => d.key !== '1k' && d.key !== 'mile')) {
@@ -215,50 +215,11 @@ export async function recomputeForUser(userId: string): Promise<void> {
       .orderBy(runs.avgPace)   // fastest (lowest) pace first ("4:00" < "5:00" alphabetically ✓)
       .limit(1);
 
-    let bestRun: { id: string; duration: number | null; completedAt: Date | null } | null = pbRun ?? null;
-    let bestPaceSecsPerKm: number | null = null;
-
-    if (bestRun?.duration) {
-      bestPaceSecsPerKm = bestRun.duration;  // duration in seconds, divide by km for pace
-    }
-
-    // ── Check splits from all runs (fastest segment of this distance) ────────
-    // Find the fastest pace segment matching this distance category
-    const splitRows = await db.execute<{ id: string; completed_at: Date | null; pace_seconds: number }>(sql`
-      SELECT
-        r.id,
-        r.completed_at,
-        SPLIT_PART(elem->>'pace', ':', 1)::numeric * 60
-          + SPLIT_PART(elem->>'pace', ':', 2)::numeric AS pace_seconds
-      FROM runs r,
-      LATERAL jsonb_array_elements(r.km_splits) AS elem
-      WHERE r.user_id = ${userId}
-        AND r.km_splits IS NOT NULL
-        AND jsonb_typeof(r.km_splits) = 'array'
-        AND (elem->>'pace') LIKE '%:%'
-      ORDER BY pace_seconds ASC
-      LIMIT 1
-    `);
-
-    const bestSplit = splitRows.rows?.[0];
-    
-    // If we have a split and it's faster than the dedicated run, use the split
-    if (bestSplit && (!bestPaceSecsPerKm || bestSplit.pace_seconds < bestPaceSecsPerKm)) {
-      bestRun = {
-        id: bestSplit.id,
-        duration: null,  // Will use pace_seconds directly
-        completedAt: bestSplit.completed_at ? toDate(bestSplit.completed_at as any) : null,
-      };
-      bestPaceSecsPerKm = bestSplit.pace_seconds;
-    }
-
-    // ── Store the winner in cache ─────────────────────────────────────────
-    if (bestRun && bestPaceSecsPerKm !== null) {
-      // Duration = time to cover this distance segment in milliseconds
-      const durationMs = Math.round(bestPaceSecsPerKm * dist.minKm * 1000);
-      pbUpdates[cols.durationCol] = durationMs;
-      pbUpdates[cols.runIdCol]    = bestRun.id;
-      pbUpdates[cols.dateCol]     = bestRun.completedAt ?? null;
+    // ── Store the winner in cache (or blank it if no such run exists) ────────
+    if (pbRun?.duration) {
+      pbUpdates[cols.durationCol] = pbRun.duration * 1000;
+      pbUpdates[cols.runIdCol]    = pbRun.id;
+      pbUpdates[cols.dateCol]     = pbRun.completedAt ?? null;
     } else {
       pbUpdates[cols.durationCol] = null;
       pbUpdates[cols.runIdCol]    = null;

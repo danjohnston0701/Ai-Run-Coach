@@ -394,18 +394,24 @@ private fun AiCoachReviewSection(review: String, updatedAt: String? = null) {
     }
 }
 
+// Fixed display order for every distance category the app tracks PBs for.
+// Every category is always shown; ones the user hasn't completed render as "Not set".
+private val ALL_PB_CATEGORIES = listOf("1K", "Mile", "5K", "10K", "20K", "Half Marathon", "Marathon")
+
 @Composable
 private fun PersonalRecordsSection(
     personalBests: List<live.airuncoach.airuncoach.viewmodel.PersonalBest>
 ) {
-    // Only show PBs that actually exist
-    val existingPbs = personalBests.filter { it.duration > 0 && it.distance > 0 }
-    
-    if (existingPbs.isEmpty()) {
+    // Only treat entries with a real completed time as actual PBs
+    val pbByCategory = personalBests
+        .filter { it.duration > 0 && it.distance > 0 }
+        .associateBy { it.category }
+
+    if (pbByCategory.isEmpty()) {
         EmptyStateCard(message = "No personal records yet.\nComplete some runs to see your personal bests!")
         return
     }
-    
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -414,9 +420,9 @@ private fun PersonalRecordsSection(
             .padding(vertical = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        existingPbs.forEachIndexed { index, pb ->
-            PersonalBestRow(label = pb.category, pb = pb)
-            if (index < existingPbs.size - 1) {
+        ALL_PB_CATEGORIES.forEachIndexed { index, category ->
+            PersonalBestRow(label = category, pb = pbByCategory[category])
+            if (index < ALL_PB_CATEGORIES.size - 1) {
                 HorizontalDivider(
                     modifier = Modifier
                         .fillMaxWidth()
