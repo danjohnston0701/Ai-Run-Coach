@@ -45,5 +45,8 @@ data class HeartRateCoachingRequest(
     // can contextualise elevated HR ("HR high because you're on a steep climb" vs
     // "HR high on flat terrain — check effort").
     // Values: flat | rolling | gradual_climb | steep_climb | gradual_descent | steep_descent
-    @SerializedName("terrain_context") val terrainContext: String? = null
+    @SerializedName("terrain_context") val terrainContext: String? = null,
+
+    // "run" | "walk" — controls walk/run vocabulary in the generated coaching line
+    @SerializedName("activityType") val activityType: String? = null
 )

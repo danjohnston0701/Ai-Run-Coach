@@ -8466,11 +8466,11 @@ private fun DataTabFlagship(
 
         // ==================== STEPS SECTION ====================
         item {
-            // Total steps: Simple formula = avg_cadence (spm) × duration (minutes)
-            // Prefer stored totalSteps from server, otherwise calculate from cadence
-            val totalSteps = if (run.totalSteps != null && run.totalSteps > 0) {
-                run.totalSteps
-            } else if (run.cadence > 0) {
+            // Total steps: always estimate from avg cadence (spm) × duration (minutes).
+            // The device/server-reported totalSteps is unreliable (iOS + Garmin step
+            // counts have been consistently and significantly wrong), so we no longer
+            // trust it — this estimate is far closer to reality.
+            val totalSteps = if (run.cadence > 0) {
                 val durationMinutes = run.duration / 60_000.0
                 (run.cadence * durationMinutes).toInt()
             } else {

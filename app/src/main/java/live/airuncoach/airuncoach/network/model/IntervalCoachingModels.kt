@@ -69,7 +69,11 @@ data class IntervalCoachingRequest(
 
     // User identity — allows server to inject the living AI runner profile
     @SerializedName("userId")
-    val userId: String? = null
+    val userId: String? = null,
+
+    // "run" | "walk" — controls walk/run vocabulary in the generated coaching line
+    @SerializedName("activityType")
+    val activityType: String? = null
 )
 
 /**

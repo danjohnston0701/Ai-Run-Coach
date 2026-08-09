@@ -11988,13 +11988,13 @@ function transformRunForAndroid(run: any) {
       const cooldown = await checkCooldown('hr-coaching', req.body, coachingUserId);
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
 
-      const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes } = req.body;
-      
+      const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, activityType } = req.body;
+
       // Get user's coach settings
       const user = await storage.getUser(req.user!.userId);
       const coachName = user?.coachName || 'Coach';
       const baseTone = user?.coachTone || 'encouraging';
-      
+
       // Get today's wellness for context
       const today = new Date().toISOString().split('T')[0];
       let wellness: any = undefined;
@@ -12039,8 +12039,9 @@ function transformRunForAndroid(run: any) {
         fitnessLevel: req.body.fitnessLevel ?? (user as any)?.fitnessLevel ?? undefined,
         runnerName: req.body.runnerName ?? user?.name ?? undefined,
         runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
+        activityType,
       });
-      
+
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
       try {

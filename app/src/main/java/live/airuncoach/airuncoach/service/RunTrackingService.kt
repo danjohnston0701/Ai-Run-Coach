@@ -6712,7 +6712,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     athleteRespondedToLastCue = athleteRespondedToLastCue,
                     // Terrain context — HR coach can contextualise elevated HR against current terrain
                     // (e.g. "HR high because you're on a steep climb" vs "HR high on flat — check effort")
-                    terrainContext = currentTerrainState.takeIf { it != "flat" }
+                    terrainContext = currentTerrainState.takeIf { it != "flat" },
+                    activityType = currentActivityType
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 coachingHistory.add(AiCoachingNote(

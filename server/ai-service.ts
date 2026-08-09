@@ -1795,6 +1795,7 @@ export async function generateIntervalCoaching(params: {
   planGoalType?: string;
   planWeekNumber?: number;
   planTotalWeeks?: number;
+  activityType?: string;
 }): Promise<string> {
   const {
     intervalNumber,
@@ -1812,8 +1813,9 @@ export async function generateIntervalCoaching(params: {
     runnerName
   } = params;
 
+  const isWalkInterval = params.activityType === 'walk';
   const phaseProgress = Math.round((distanceInPhaseKm / phaseDurationTargetKm) * 100);
-  const phaseName = isWorkPhase ? 'work interval' : 'recovery jog';
+  const phaseName = isWorkPhase ? 'work interval' : (isWalkInterval ? 'recovery walk' : 'recovery jog');
   const phaseVerb = isWorkPhase ? 'push' : 'recover';
   const phaseEmphasis = isWorkPhase 
     ? 'This is your work interval — focus on the target pace and effort zone.'
@@ -1840,7 +1842,7 @@ export async function generateIntervalCoaching(params: {
     paceContext = `Target pace for this ${phaseName}: ${targetPace}/km. Current pace: ${currentPace}/km.`;
   }
 
-  const prompt = `You are ${coachName}, an AI running coach with a ${coachTone} style.
+  const prompt = `You are ${coachName}, an AI ${isWalkInterval ? 'walking' : 'running'} coach with a ${coachTone} style.
 
 INTERVAL COACHING — ${intervalNumber > 1 ? `Rep ${intervalNumber}` : 'Rep 1 (Establish pace)'} ${isWorkPhase ? 'WORK' : 'RECOVERY'}
 ${phaseProgress}% through the ${phaseName}.
@@ -1864,12 +1866,7 @@ ${(() => {
 
 Give 1–2 punchy, direct sentences. ${isWorkPhase ? 'Push them hard but safely.' : 'Help them recover and prepare for the next effort. If it fits, remind them how this session serves their training goal.'}`;
 
-  const systemMsg = buildCoachingSystemPrompt({
-    coachName,
-    coachTone,
-    activityType: 'interval running',
-    runnerProfile: params.runnerProfile,
-  });
+  const systemMsg = `You are ${coachName}, an AI ${isWalkInterval ? 'walking' : 'running'} coach with a ${coachTone} style, delivering live interval coaching mid-session.${isWalkInterval ? ' WALK SESSION — CRITICAL: NEVER say "run", "running", "runner", "sprint", or any running-specific term. Say "walker", "walking", "walk pace" instead.' : ''} ${toneDirective(coachTone)}${params.coachAccent ? ' ' + accentDirective(params.coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -2338,6 +2335,12 @@ export async function getElevationCoaching(params: {
   const coachName = params.coachName || 'Coach';
   const coachTone = params.coachTone || 'energetic';
   const grade = params.currentGrade ?? params.grade ?? 0;
+  const isWalkElevation = params.activityType === 'walk';
+  const elevPersonCap = isWalkElevation ? 'Walker' : 'Runner';
+  const elevPersonLower = isWalkElevation ? 'walker' : 'runner';
+  const elevWalkProhibition = isWalkElevation
+    ? '\n- WALK SESSION — CRITICAL: NEVER say "run", "running", "runner", "sprint", or any running-specific term. Say "walker", "walking", "walk pace" instead. Do NOT give spm/cadence targets or stride-shortening cues — instead coach posture, arm drive, and breathing for walking.'
+    : '';
 
   // ── Normalise event type across platforms ──────────────────────────────────
   // iOS wraps state in a "terrain_state" envelope: { event_type: "terrain_state", terrain_state: "gradual_climb" }
@@ -2405,7 +2408,7 @@ export async function getElevationCoaching(params: {
 
   if (eventType === 'gradual_climb' || eventType === 'uphill' || eventType === 'hill_uphill_technique') {
     // Legacy eventType aliases mapped to gradual_climb
-    coachingInstructions = `GRADUAL CLIMB — Runner is currently on a ${Math.abs(grade).toFixed(1)}% incline.${params.segmentElevationGain ? ` They have climbed ${Math.round(params.segmentElevationGain)}m in this segment.` : ''}${distanceInStateM ? ` They have been climbing for ${distanceInStateM}m.` : segmentM ? ` Segment distance: ${segmentM}m.` : ''}
+    coachingInstructions = `GRADUAL CLIMB — ${elevPersonCap} is currently on a ${Math.abs(grade).toFixed(1)}% incline.${params.segmentElevationGain ? ` They have climbed ${Math.round(params.segmentElevationGain)}m in this segment.` : ''}${distanceInStateM ? ` They have been climbing for ${distanceInStateM}m.` : segmentM ? ` Segment distance: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Acknowledge the climb they are ON: grade, metres climbed, how the effort feels relative to their data
@@ -2417,7 +2420,7 @@ COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Reference their actual numbers`;
 
   } else if (eventType === 'steep_climb') {
-    coachingInstructions = `STEEP CLIMB — Runner is on a ${Math.abs(grade).toFixed(1)}% grade.${params.segmentElevationGain ? ` Climbed ${Math.round(params.segmentElevationGain)}m so far in this segment.` : ''}${distanceInStateM ? ` Has been on this steep section for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
+    coachingInstructions = `STEEP CLIMB — ${elevPersonCap} is on a ${Math.abs(grade).toFixed(1)}% grade.${params.segmentElevationGain ? ` Climbed ${Math.round(params.segmentElevationGain)}m so far in this segment.` : ''}${distanceInStateM ? ` Has been on this steep section for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what follows):
 - Name the challenge directly: "You're on a steep one right now — ${Math.abs(grade).toFixed(0)}% grade"
@@ -2430,7 +2433,7 @@ COACHING FOCUS (current terrain only — do NOT predict what follows):
 
   } else if (eventType === 'gradual_descent' || eventType === 'downhill' || eventType === 'hill_downhill_technique') {
     // Legacy eventType aliases mapped to gradual_descent
-    coachingInstructions = `GRADUAL DESCENT — Runner is currently descending at ${Math.abs(grade).toFixed(1)}%.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
+    coachingInstructions = `GRADUAL DESCENT — ${elevPersonCap} is currently descending at ${Math.abs(grade).toFixed(1)}%.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — no predictions about what comes next):
 - Gravity is working FOR them right now — pace naturally picks up, that is correct and expected
@@ -2442,7 +2445,7 @@ COACHING FOCUS (current terrain only — no predictions about what comes next):
 - Reference their actual numbers`;
 
   } else if (eventType === 'steep_descent') {
-    coachingInstructions = `STEEP DESCENT — Runner is on a ${Math.abs(grade).toFixed(1)}% downgrade.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Has been descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
+    coachingInstructions = `STEEP DESCENT — ${elevPersonCap} is on a ${Math.abs(grade).toFixed(1)}% downgrade.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Has been descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what follows):
 - Gravity is helping significantly — pace is naturally fast, that is correct
@@ -2455,20 +2458,20 @@ COACHING FOCUS (current terrain only — do NOT predict what follows):
 - Reference their actual numbers`;
 
   } else if (eventType === 'downhill_finish') {
-    coachingInstructions = `DOWNHILL FINISH — Runner is descending towards the finish line at ${Math.abs(grade).toFixed(1)}%.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m so far.` : ''}
+    coachingInstructions = `DOWNHILL FINISH — ${elevPersonCap} is descending towards the finish at ${Math.abs(grade).toFixed(1)}%.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m so far.` : ''}
 
 COACHING FOCUS:
 - This is the final descent — the finish is ahead, gravity is an ally RIGHT NOW
-- Channel the descent energy into a strong controlled finish — not a panic sprint
-- Keep cadence high, stay light, let the hill carry them forward
-- If they have anything left: now is the time to open up the stride and commit
-- Remind them what they've achieved on this run — reference the distance/elevation numbers
+${isWalkElevation
+  ? '- Channel the descent into a strong, controlled finish — steady confident steps, not a scramble\n- Stay light, let the hill carry the momentum, keep good posture through to the end\n- If they have energy left: now is the time to pick up the walking pace and commit'
+  : '- Channel the descent energy into a strong controlled finish — not a panic sprint\n- Keep cadence high, stay light, let the hill carry them forward\n- If they have anything left: now is the time to open up the stride and commit'}
+- Remind them what they've achieved on this ${elevPersonLower === 'walker' ? 'walk' : 'run'} — reference the distance/elevation numbers
 - Energy should be HIGH and motivating — this is the finish!`;
 
   } else if (eventType === 'rolling_terrain') {
     const gainM = params.segmentElevationGain ? Math.round(params.segmentElevationGain) : (params.totalElevationGain ? Math.round(params.totalElevationGain) : null);
     const lossM = params.segmentElevationLoss ? Math.round(params.segmentElevationLoss) : (params.totalElevationLoss ? Math.round(params.totalElevationLoss) : null);
-    coachingInstructions = `ROLLING / UNDULATING TERRAIN — Runner is on rolling terrain (alternating small rises and dips).
+    coachingInstructions = `ROLLING / UNDULATING TERRAIN — ${elevPersonCap} is on rolling terrain (alternating small rises and dips).
 ${gainM !== null && lossM !== null ? `The terrain has delivered approximately ${gainM}m of climbing and ${lossM}m of descent — classic undulating route.` : ''}
 
 COACHING FOCUS (no predictions — describe what is happening NOW):
@@ -2482,22 +2485,24 @@ COACHING FOCUS (no predictions — describe what is happening NOW):
 - Reference their actual numbers`;
 
   } else if (eventType === 'flat_terrain') {
-    coachingInstructions = `FLAT TERRAIN — Runner is on flat ground right now.
+    coachingInstructions = `FLAT TERRAIN — ${elevPersonCap} is on flat ground right now.
 
 COACHING FOCUS:
 - Flat terrain is ideal for rhythm, pace consistency, and finding flow
-- If pace is consistent (spread < 15s): "your splits are rock solid — that's disciplined running"
+- If pace is consistent (spread < 15s): "your splits are rock solid — that's disciplined ${isWalkElevation ? 'walking' : 'running'}"
 - If negative splitting: exceptional — call it out
 - If pace is drifting (spread > 20s): on flat terrain there's no excuse — suggest a form reset or effort check
-- Flat running technique cue: cadence 170-180, tall posture through hips, relaxed shoulders, arms swinging forward not across
+${isWalkElevation
+  ? '- Flat walking technique cue: tall posture through hips, relaxed shoulders, arms swinging forward not across, purposeful stride'
+  : '- Flat running technique cue: cadence 170-180, tall posture through hips, relaxed shoulders, arms swinging forward not across'}
 - Reference their actual numbers`;
 
   } else {
-    coachingInstructions = `TERRAIN UPDATE — Runner is on ${eventType} terrain at ${distanceKm}.
+    coachingInstructions = `TERRAIN UPDATE — ${elevPersonCap} is on ${eventType} terrain at ${distanceKm}.
 Give concise terrain-specific coaching based on their current metrics and split data. Do NOT predict what terrain comes next.`;
   }
 
-  const prompt = `The runner is at ${distanceKm} into their run.
+  const prompt = `The ${elevPersonLower} is at ${distanceKm} into their ${isWalkElevation ? 'walk' : 'run'}.
 ${terrainOverview}
 ${metricsStatus}
 ${splitAnalysis}
@@ -2513,17 +2518,17 @@ Give a coaching message (2-3 sentences). Sound like you KNOW this route inside a
     ? '- Route elevation lookahead IS available — you MAY reference upcoming terrain changes if the data supports it'
     : '- CRITICAL: No route elevation lookahead. NEVER predict what terrain comes next. NEVER say "the top is coming", "almost there", "enjoy the downhill ahead", "nearly at the summit", or ANY prediction about future terrain. Describe only what the runner is on RIGHT NOW.';
 
-  const systemPrompt = `You are ${coachName}, an elite running coach who specializes in terrain analysis and elevation-based pacing strategy. You've analyzed thousands of runs and can instantly correlate how terrain affects a runner's pace, heart rate, and cadence.
+  const systemPrompt = `You are ${coachName}, an elite ${isWalkElevation ? 'walking' : 'running'} coach who specializes in terrain analysis and elevation-based pacing strategy. You've analyzed thousands of ${isWalkElevation ? 'walks' : 'runs'} and can instantly correlate how terrain affects a ${elevPersonLower}'s pace, heart rate${isWalkElevation ? '' : ', and cadence'}.
 
 CRITICAL RULES:
 - Reference SPECIFIC numbers from their data — never be generic
 - Sound like you can SEE the route and FEEL the terrain THEY ARE ON RIGHT NOW
 - Correlate metrics: "your pace dropped 15 seconds on that climb but your heart rate stayed controlled — that's textbook hill management"
 - Give ONE actionable technique cue specific to the current terrain
-- Keep it to 2-3 sentences maximum — this is spoken while they're running
+- Keep it to 2-3 sentences maximum — this is spoken while they're ${isWalkElevation ? 'walking' : 'running'}
 - NEVER use the word "summit" or "crest" as a prediction
 - Descents SPEED UP pace — never say descending slows you down or is harder
-- ${futureBanRule}
+- ${futureBanRule}${elevWalkProhibition}
 - ${toneDirective(coachTone)}${params.coachAccent ? '\n- ' + accentDirective(params.coachAccent) : ''}` + runnerProfileBlock(params.runnerProfile);
 
   const completion = await openai.chat.completions.create({
@@ -3758,8 +3763,14 @@ export async function generateHeartRateCoaching(params: {
   // Terrain context — lets HR coach contextualise elevated HR against current terrain
   // Values: flat | rolling | gradual_climb | steep_climb | gradual_descent | steep_descent
   terrain_context?: string;
+  activityType?: string;
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
+  const isWalkHR = params.activityType === 'walk';
+  const hrPersonLabel = isWalkHR ? 'walker' : 'runner';
+  const hrWalkProhibition = isWalkHR
+    ? ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running-specific term. Say "walker", "walking", "walk pace" instead.'
+    : '';
 
   // Use age-adjusted max HR (Tanaka formula: 208 - 0.7×age) — more accurate than device-reported max
   // This prevents incorrect zone assessment early in runs when actual max HR hasn't been reached yet.
@@ -3846,15 +3857,15 @@ export async function generateHeartRateCoaching(params: {
       rolling: 'on rolling terrain — HR will fluctuate with the undulations',
     };
     const label = terrainLabels[params.terrain_context] ?? `on ${params.terrain_context} terrain`;
-    return `\nTerrain context: Runner is ${label}. Factor this into your HR assessment — don't penalise a high HR that's appropriate for the current gradient.\n`;
+    return `\nTerrain context: The ${hrPersonLabel} is ${label}. Factor this into your HR assessment — don't penalise a high HR that's appropriate for the current gradient.\n`;
   })();
 
-  const prompt = `You are ${coachName}, a ${coachTone} running coach giving real-time heart rate guidance.
-${runnerProfileContext ? `\nRunner profile: ${runnerProfileContext}` : ''}
-Current stats (${elapsedMinutes} minutes into run):
+  const prompt = `You are ${coachName}, a ${coachTone} ${isWalkHR ? 'walking' : 'running'} coach giving real-time heart rate guidance.${hrWalkProhibition}
+${runnerProfileContext ? `\n${isWalkHR ? 'Walker' : 'Runner'} profile: ${runnerProfileContext}` : ''}
+Current stats (${elapsedMinutes} minutes into ${isWalkHR ? 'walk' : 'run'}):
 - Heart Rate: ${currentHR} bpm (${percentMax}% of age-adjusted max)
 - Current Zone: Zone ${currentZone} (${zoneNames[currentZone]})
-- Average HR this run: ${avgHR} bpm
+- Average HR this ${isWalkHR ? 'walk' : 'run'}: ${avgHR} bpm
 ${targetZone ? `- Target Zone: Zone ${targetZone} (${zoneNames[targetZone]})` : ''}
 ${wellnessContext ? `\nWellness context: ${wellnessContext}` : ''}
 ${terrainContextBlock}${sensorNote}${sessionMemoryBlock}${physioBlock}
@@ -3872,7 +3883,7 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
+        { role: "system", content: `You are ${coachName}, giving brief real-time HR coaching. Always cite the ${hrPersonLabel}'s actual heart rate and zone. Keep it to 1-2 short sentences.${hrWalkProhibition} ${toneDirective(coachTone)}${coachAccent ? ' ' + accentDirective(coachAccent) : ''}${runnerProfileBlock(params.runnerProfile)}` },
         { role: "user", content: prompt }
       ],
       max_tokens: 80,
@@ -5449,7 +5460,7 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
       rolling: 'rolling / undulating terrain',
     };
     const terrainLabel = terrainLabels[params.currentTerrainState] ?? params.currentTerrainState;
-    status += `\n\nTerrain context: Runner is currently on ${terrainLabel}. `;
+    status += `\n\nTerrain context: The ${isWalkSession ? 'walker' : 'runner'} is currently on ${terrainLabel}. `;
     if (params.currentTerrainState.includes('climb')) {
       status += 'Climbing slows pace — a pace drop on this terrain is normal and expected.';
     } else if (params.currentTerrainState.includes('descent')) {
@@ -5546,18 +5557,18 @@ Give 1-2 sentences. Do NOT mention "cadence", "spm", "steps per minute", or any 
         const isHR          = techniqueCategory.startsWith('hr_');
 
         let systemPersona: string;
-        if (isBreathing)        systemPersona = 'You are an expert in running breathing mechanics. Coach exactly the breathing technique specified — specific, actionable, spoken aloud while running.';
-        else if (isMental)      systemPersona = 'You are a sports psychologist and running coach specialising in mental toughness. Deliver the mental coaching cue naturally as if mid-run conversation.';
-        else if (isRecovery)    systemPersona = 'You are a running coach specialising in in-run recovery and tension release. Guide the runner through the specific recovery action.';
-        else if (isHill)        systemPersona = 'You are a hill running specialist. Coach the specific hill technique the runner needs right now.';
-        else if (isPacing)      systemPersona = 'You are an elite pacing and race strategy coach. Deliver the specific pacing cue with context from their current run data.';
-        else if (isHydration)   systemPersona = 'You are a sports nutrition and hydration coach. Give the hydration/fueling cue conversationally while the runner is mid-run.';
-        else if (isWeather)     systemPersona = 'You are a running coach specialising in environmental adaptation. Coach the weather-specific strategy for today\'s conditions.';
-        else if (isBodySignal)  systemPersona = 'You are a running coach and physiotherapist. Coach the body awareness cue — help the runner tune in to their body\'s signals.';
+        if (isBreathing)        systemPersona = isWalkSession ? 'You are an expert in walking breathing mechanics. Coach exactly the breathing technique specified — specific, actionable, spoken aloud while walking.' : 'You are an expert in running breathing mechanics. Coach exactly the breathing technique specified — specific, actionable, spoken aloud while running.';
+        else if (isMental)      systemPersona = isWalkSession ? 'You are a sports psychologist and walking coach specialising in mental toughness. Deliver the mental coaching cue naturally as if mid-walk conversation.' : 'You are a sports psychologist and running coach specialising in mental toughness. Deliver the mental coaching cue naturally as if mid-run conversation.';
+        else if (isRecovery)    systemPersona = isWalkSession ? 'You are a walking coach specialising in in-session recovery and tension release. Guide the walker through the specific recovery action.' : 'You are a running coach specialising in in-run recovery and tension release. Guide the runner through the specific recovery action.';
+        else if (isHill)        systemPersona = isWalkSession ? 'You are a hill walking specialist. Coach the specific hill technique the walker needs right now.' : 'You are a hill running specialist. Coach the specific hill technique the runner needs right now.';
+        else if (isPacing)      systemPersona = isWalkSession ? 'You are an elite walking pace and effort coach. Deliver the specific pacing cue with context from their current session data.' : 'You are an elite pacing and race strategy coach. Deliver the specific pacing cue with context from their current run data.';
+        else if (isHydration)   systemPersona = isWalkSession ? 'You are a sports nutrition and hydration coach. Give the hydration/fueling cue conversationally while the walker is mid-walk.' : 'You are a sports nutrition and hydration coach. Give the hydration/fueling cue conversationally while the runner is mid-run.';
+        else if (isWeather)     systemPersona = isWalkSession ? 'You are a walking coach specialising in environmental adaptation. Coach the weather-specific strategy for today\'s conditions.' : 'You are a running coach specialising in environmental adaptation. Coach the weather-specific strategy for today\'s conditions.';
+        else if (isBodySignal)  systemPersona = isWalkSession ? 'You are a walking coach and physiotherapist. Coach the body awareness cue — help the walker tune in to their body\'s signals.' : 'You are a running coach and physiotherapist. Coach the body awareness cue — help the runner tune in to their body\'s signals.';
         else if (isHR)          systemPersona = 'You are a heart rate and training zone specialist. Deliver the HR-focused coaching cue referencing their current heart rate data.';
-        else                    systemPersona = 'You specialize in running biomechanics and form coaching. Deliver one highly specific, actionable technique cue — never generic.';
+        else                    systemPersona = isWalkSession ? 'You specialize in walking biomechanics and form coaching. Deliver one highly specific, actionable technique cue — never generic.' : 'You specialize in running biomechanics and form coaching. Deliver one highly specific, actionable technique cue — never generic.';
 
-        typePrompt = `COACHING TYPE: Running technique — ${categoryLabel}
+        typePrompt = `COACHING TYPE: ${isWalkSession ? 'Walking' : 'Running'} technique — ${categoryLabel}
 ${recentCatContext}
 
 ${status}
@@ -5567,10 +5578,10 @@ ASSIGNED TECHNIQUE AREA: ${categoryLabel}
 COACHING CUE TO DELIVER: "${techniqueHint}"
 
 Your task: Turn this coaching cue into a natural, conversational 2-3 sentence spoken coaching message.
-
+${isWalkSession ? 'This is a WALK session — NEVER say "run", "running", "runner", or "sprint". Say "walk", "walking", "walker" instead.\n' : ''}
 Rules:
 1. Coach ONLY the "${categoryLabel}" area — do NOT switch to a different technique.
-2. Make it specific and immediately actionable — the runner should be able to apply it in the next 10 seconds.
+2. Make it specific and immediately actionable — the ${isWalkSession ? 'walker' : 'runner'} should be able to apply it in the next 10 seconds.
 3. Reference at least one real data point from their run (pace, HR, distance, elapsed time) to make it feel personalised.
 4. Do NOT say "great job" or give generic praise — just coach the technique.
 5. Keep it natural and conversational — this is spoken aloud while the runner is moving.
@@ -5613,7 +5624,7 @@ Give a 2-3 sentence conversational coaching message. Reference at least one data
         // Pick pseudo-randomly based on elapsed time so different cues fire at different points
         const pick = genericAreas[Math.floor(elapsedTime / 120) % genericAreas.length];
 
-        typePrompt = `COACHING TYPE: Running form check — ${pick.area}.
+        typePrompt = `COACHING TYPE: ${isWalkSession ? 'Walking' : 'Running'} form check — ${pick.area}.
 
 ${status}
 ${noTerrainRule}
@@ -5635,13 +5646,13 @@ Give a 2-3 sentence conversational coaching message. Make it immediately actiona
         ? `\nZONE 2 AEROBIC MILESTONE: Every kilometer at this steady effort is building your aerobic base. You're accumulating time in the mitochondrial adaptation zone. This sustainable effort is where real endurance is built.`
         : '';
       
-      typePrompt = `COACHING TYPE: Milestone celebration — runner just hit ${milestonePercent}% of their target distance!
+      typePrompt = `COACHING TYPE: Milestone celebration — ${isWalkSession ? 'walker' : 'runner'} just hit ${milestonePercent}% of their target distance!
 
 ${status}
 ${noTerrainRule}
 ${aerobicMilestoneContext}
 
-The runner just reached ${milestonePercent}% of ${formatDistanceForCoaching(distance)}.
+The ${isWalkSession ? 'walker' : 'runner'} just reached ${milestonePercent}% of ${formatDistanceForCoaching(distance)}.
 
 Context for your response:
 - Progress: ${milestonePercent}% done
@@ -5655,18 +5666,20 @@ Give a 2-3 sentence message that fits this moment. Reference their actual number
     }
 
     case 'positive_reinforcement':
-      typePrompt = `COACHING TYPE: Positive reinforcement — the runner is executing well!
+      typePrompt = `COACHING TYPE: Positive reinforcement — the ${isWalkSession ? 'walker' : 'runner'} is executing well!
 
 ${status}
 ${noTerrainRule}
 
-The runner deserves recognition for strong execution:
-${consecutiveConsistentSplits && consecutiveConsistentSplits >= 3 ? `- They've run ${consecutiveConsistentSplits} consecutive consistent splits — excellent pacing discipline!` : ''}
-${isNegativeSplitting ? '- They are NEGATIVE SPLITTING (getting faster as the run progresses) — this is elite-level pacing!' : ''}
+The ${isWalkSession ? 'walker' : 'runner'} deserves recognition for strong execution:
+${consecutiveConsistentSplits && consecutiveConsistentSplits >= 3 ? `- They've ${isWalkSession ? 'walked' : 'run'} ${consecutiveConsistentSplits} consecutive consistent splits — excellent pacing discipline!` : ''}
+${isNegativeSplitting ? `- They are NEGATIVE SPLITTING (getting faster as the ${isWalkSession ? 'walk' : 'run'} progresses) — this is elite-level pacing!` : ''}
 ${fastestSplitKm && fastestSplitPace ? `- Their fastest split was km ${fastestSplitKm} at ${formatPaceForTTS(fastestSplitPace)} — call this out!` : ''}
 
 Give a 2-3 sentence message that reinforces what's working. Reference real data. This is about substance, not generic praise.`;
-      systemExtra = "Acknowledge what they're doing well with specifics, not empty praise. Connect it to running quality if you choose.";
+      systemExtra = isWalkSession
+        ? "Acknowledge what they're doing well with specifics, not empty praise. Connect it to walking quality if you choose."
+        : "Acknowledge what they're doing well with specifics, not empty praise. Connect it to running quality if you choose.";
       break;
 
     case 'target_eta': {
@@ -5711,10 +5724,10 @@ Give a trend-aware coaching message (2-3 sentences):
 ${paceTrendDirection === 'slowing' ? `- Acknowledge the gradual slowdown without alarming them
 - Give a specific technique cue to arrest the fade (e.g., "reset your form — drop your shoulders, pump your arms, quicken your feet")
 - Remind them of their target or what good pacing looks like` :
-  paceTrendDirection === 'speeding_up' ? `- Reinforce the positive trend — they're running smart
+  paceTrendDirection === 'speeding_up' ? `- Reinforce the positive trend — they're ${isWalkSession ? 'walking' : 'running'} smart
 - Caution against going too fast too early if they're under 60% done
 - If they're past 60%, encourage the push` :
-  `- Praise the consistency — this is disciplined running
+  `- Praise the consistency — this is disciplined ${isWalkSession ? 'walking' : 'running'}
 - Give a quick form or mental cue to maintain`}
 
 Reference their actual split data.`;
@@ -5771,7 +5784,7 @@ ${heartRate ? `- Heart rate: ${heartRate} bpm` : ''}
 
 Deliver ONE concise coaching cue, MAXIMUM 15 WORDS. Spoken aloud — no percentages, no pace analysis. Just a clear, encouraging action word for what the terrain requires RIGHT NOW.
 NEVER say "X% climb" or "X metres of climb" — just describe what they should do.`;
-      systemExtra = `You are a running coach. Keep it SHORT — max 15 words. One clear action. Natural speech. No data analysis.`;
+      systemExtra = `You are a ${isWalkSession ? 'walking' : 'running'} coach. Keep it SHORT — max 15 words. One clear action. Natural speech. No data analysis.`;
       break;
     }
 
@@ -5783,14 +5796,14 @@ NEVER say "X% climb" or "X metres of climb" — just describe what they should d
       // Aerobic base building context
       const aerobicBaseContext = `
 AEROBIC BASE BUILDING:
-This steady-state Zone 2 work is building the foundation for all your faster running. Here's why it matters:
+This steady-state Zone 2 work is building the foundation for all your faster ${isWalkSession ? 'walking' : 'running'}. Here's why it matters:
 - Increases mitochondrial density in your muscles (more aerobic power)
 - Improves capillary density (better oxygen delivery)
 - Trains your body to burn fat efficiently (sustainable energy source)
 - Increases stroke volume (your heart pumps more blood per beat)
 - Allows faster paces to feel easier later (your "easy" pace will speed up naturally)
 
-Elite runners spend 80% of their training time at easy/aerobic paces for exactly this reason. You're not wasting time here — you're building the engine that makes speed possible.`;
+${isWalkSession ? 'Elite walkers spend most of their training time at exactly this brisk, sustainable effort for this reason.' : 'Elite runners spend 80% of their training time at easy/aerobic paces for exactly this reason.'} You're not wasting time here — you're building the engine that makes speed possible.`;
       
       typePrompt = `COACHING TYPE: Heart rate focus check for Zone 2 aerobic session.
 
@@ -5833,13 +5846,26 @@ ${status}
 ${noTerrainRule}
 ${targetContext ? `Context: ${targetContext}` : ''}
 
-The runner has ${remainingMeters || 500} meters to the finish. Give a 2-3 sentence message that fits this moment — energy level, target status, what they need to hear.`;
-      systemExtra = 'This is the home stretch. Coach with intensity and conviction. Reference real data.';
+The ${isWalkSession ? 'walker' : 'runner'} has ${remainingMeters || 500} meters to the finish. Give a 2-3 sentence message that fits this moment — energy level, target status, what they need to hear.`;
+      systemExtra = isWalkSession
+        ? 'This is the home stretch. Coach with warmth and conviction — a strong, purposeful finish, not a race. Reference real data.'
+        : 'This is the home stretch. Coach with intensity and conviction. Reference real data.';
       break;
     }
 
     case 'final_100m': {
-      typePrompt = `COACHING TYPE: Final 100 meters
+      typePrompt = isWalkSession
+        ? `COACHING TYPE: Final 100 meters
+
+The walker has approximately 100 meters to the finish. THIS IS IT.
+${targetContext100}
+
+Give the most uplifting, powerful 1-2 sentence send-off possible:
+- "100 meters! Finish tall, finish strong!"
+- This is pure encouragement. No data, no technique. Just raw, passionate coaching.
+- Make them feel like a champion crossing the finish line.
+- Keep it SHORT — NEVER say "run", "running", "runner", or "sprint". They are WALKING.`
+        : `COACHING TYPE: Final 100 meters
 
 The runner has approximately 100 meters to the finish. THIS IS IT.
 ${targetContext100}
@@ -5849,7 +5875,9 @@ Give the most intense, powerful 1-2 sentence motivational burst possible:
 - This is pure adrenaline. No data, no technique. Just raw, passionate coaching.
 - Make them feel like a champion crossing the finish line.
 - Keep it SHORT — they're sprinting.`;
-      systemExtra = 'This is the final 100m. Maximum intensity. 1-2 sentences of pure fire. Sound like a coach screaming at the finish line.';
+      systemExtra = isWalkSession
+        ? 'This is the final 100m of the walk. Maximum warmth and encouragement. 1-2 sentences of pure fire. Sound like a coach cheering at the finish line — never running/sprint language.'
+        : 'This is the final 100m. Maximum intensity. 1-2 sentences of pure fire. Sound like a coach screaming at the finish line.';
       break;
     }
   }
@@ -6065,10 +6093,13 @@ function enforceClosingStagesGate(
 // ─────────────────────────────────────────────────────────────────────────────
 function ensureClosingStageMilestones(
   triggers: SessionCoachingTrigger[],
-  targetDistanceKm: number
+  targetDistanceKm: number,
+  activityType?: string
 ): SessionCoachingTrigger[] {
   // Check which final-stage triggers already exist
   const hasType = (type: string) => triggers.some(t => t.type === type);
+  const isWalk = activityType === "walk";
+  const activityLabel = isWalk ? "walk" : "run";
 
   const final100mExists = hasType("final_100m");
   const sessionCompleteExists = hasType("session_complete");
@@ -6085,7 +6116,12 @@ function ensureClosingStageMilestones(
       message: "Final 100 metres — give it everything you've got!",
       frequency: "once",
       alertType: "vibrate",
-      alternativeMessages: [
+      alternativeMessages: isWalk ? [
+        "Last 100 metres — finish strong!",
+        "100 metres to go — keep that pace to the line!",
+        "Final stretch — you've got this!",
+        "One hundred metres left — go all in!",
+      ] : [
         "Last 100 metres — finish strong!",
         "100 metres to go — push hard to the line!",
         "Final sprint — you've got this!",
@@ -6101,7 +6137,7 @@ function ensureClosingStageMilestones(
       id: "session_complete_mandatory",
       type: "session_complete",
       condition: `distance >= ${targetDistanceKm}`,
-      message: `That's your ${targetDistanceKm} kilometre run done — brilliant effort today. Well done.`,
+      message: `That's your ${targetDistanceKm} kilometre ${activityLabel} done — brilliant effort today. Well done.`,
       frequency: "once",
       alertType: "none",
     });
@@ -6933,11 +6969,13 @@ The athlete cannot see their phone screen and does not stare at their watch. THE
 - session_complete: up to 35 words — wrap the session with substance: total distance or time, average effort level, what went well, what to take from it. The athlete just finished — this is their coach's verdict.
 - phase_start: up to 25 words — athlete needs to know what phase they're in, what the target is, and what to expect next.
 
-CADENCE TRIGGERS: Include cadence coaching in ALL session types — running cadence is a universal efficiency metric regardless of pace or effort goal.
+${activityType === "walk" ? `WALKING RHYTHM TRIGGERS: Do NOT include spm/cadence-target triggers — cadence coaching is suppressed for walk sessions.
+- Instead, include 1–2 "technique_review" triggers (frequency "periodic", frequencySeconds 240-300) coaching walking rhythm, posture, and arm drive — e.g. "Stand tall, relax your shoulders, and let your arms swing naturally" or "Keep that purposeful rhythm — quick, light steps".
+- NEVER mention "cadence", "spm", "steps per minute", or a numeric step-rate target in these messages. Use {cadence} in the trigger condition only if needed for a technique-review timing check — never speak the number aloud.` : `CADENCE TRIGGERS: Include cadence coaching in ALL session types — running cadence is a universal efficiency metric regardless of pace or effort goal.
 - For tempo/threshold/interval/race sessions: fire if cadence drops significantly below 170–180 spm, e.g. condition "cadence < 170 AND elapsed_min > 5", frequency "periodic", frequencySeconds 180.
 - For easy/recovery/long_run sessions: fire if cadence is very low (e.g. cadence < 160), as a form coaching cue — not a performance correction.
 - Include at least 1–2 cadence triggers in every plan.
-- MANDATORY: Every technique_review / cadence trigger message MUST include {cadence} so the athlete knows their actual number. NEVER give a cadence cue without the number — "cadence a bit low" tells the athlete nothing. Always state what they're doing AND what they should aim for. Example: "Cadence at {cadence} steps per minute — aim for closer to 170 to keep things efficient." alternativeMessages must also include {cadence}.
+- MANDATORY: Every technique_review / cadence trigger message MUST include {cadence} so the athlete knows their actual number. NEVER give a cadence cue without the number — "cadence a bit low" tells the athlete nothing. Always state what they're doing AND what they should aim for. Example: "Cadence at {cadence} steps per minute — aim for closer to 170 to keep things efficient." alternativeMessages must also include {cadence}.`}
 
 POSITIVE CHECK-IN TRIGGERS (the coaching gap you MUST fill):
 The most common failure mode is a plan that only alerts when things go wrong (HR too high, HR too low).
@@ -6947,12 +6985,12 @@ Great coaching also acknowledges when the athlete is EXECUTING WELL. You must in
   Example (2 km of 5 km target): "Two of five kilometres done — heart rate at {hr}, right in the zone. Pace tracking nicely. Looking strong, keep this up."
   Example (3 km of 5 km target, HR slightly high): "Three of five done. Heart rate at {hr}, just above the {targetHRMax} ceiling — ease back slightly and stay controlled."
   alternativeMessages for km-split triggers should each provide the same data in different phrasing/emphasis — NEVER strip the data variables out.
-- A halfway trigger (frequency: "once") that summarises effort so far: how long they've been running, heart rate trend (in zone or straying), pace assessment, and encouragement for the second half.
+- A halfway trigger (frequency: "once") that summarises effort so far: how long they've been ${activityType === "walk" ? "walking" : "running"}, heart rate trend (in zone or straying), pace assessment, and encouragement for the second half.
 - A final 500m trigger (remaining_m <= 500, frequency: "once") that acknowledges how the session has gone and primes them for the finish.
 - These are PROGRESS TRIGGERS and must use frequency: "once" so they fire exactly once at each milestone.
 
 FORM + BREATHING CUES (periodic, every 3–5 minutes):
-Include at least 2 periodic coaching cues that cover running form and breathing — these are universal to all session types.
+Include at least 2 periodic coaching cues that cover ${activityType === "walk" ? "walking form" : "running form"} and breathing — these are universal to all session types.
 These use frequency: "periodic" with frequencySeconds of 180–300, condition: "elapsed_min > 5".
 They keep the athlete mentally engaged and technically consistent throughout the session.
 
@@ -7219,7 +7257,7 @@ FINAL REMINDER — NON-NEGOTIABLE:
     // ── Post-processing: guarantee final_100m and session_complete triggers ─────
     // If OpenAI forgot to include final_100m or session_complete, inject defaults.
     // These are MANDATORY for distance-based sessions. (Fixes: Wayne & Claire missing prompts)
-    const withMandatoryMilestones = ensureClosingStageMilestones(gatedTriggers, targetDistanceKm);
+    const withMandatoryMilestones = ensureClosingStageMilestones(gatedTriggers, targetDistanceKm, activityType);
 
     // ── Post-processing: guarantee rep_start / recovery_start triggers for interval sessions ──
     // If OpenAI didn't include these (which were historically missing from the vocabulary),

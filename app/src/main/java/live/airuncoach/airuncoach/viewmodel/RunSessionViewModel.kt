@@ -1391,9 +1391,10 @@ class RunSessionViewModel @Inject constructor(
                             readinessRecommendation = it.readinessRecommendation
                         )
                     },
-                    userId = sessionManager.getUserId()
+                    userId = sessionManager.getUserId(),
+                    activityType = config.activityType?.name?.lowercase()
                 )
-                
+
                 // Call the API
                 val response = apiService.getIntervalCoaching(coachingRequest)
                 
