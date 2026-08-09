@@ -10969,6 +10969,51 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // ── Start Walk Audio Endpoint (activity-type-specific version) ──
+  app.post("/api/coaching/start-walk-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { motivationalText } = req.body;
+      
+      if (!motivationalText || motivationalText.trim().length === 0) {
+        return res.status(400).json({ error: "Missing motivationalText" });
+      }
+
+      // Get user's coach settings
+      const user = await storage.getUser(req.user!.userId);
+      const coachGender = user?.coachGender || 'female';
+      const coachTone = user?.coachTone || 'energetic';
+      const coachAccent = user?.coachAccent || 'british';
+      const coachName = user?.coachName || 'Coach';
+
+      // Generate Polly TTS instructions for the start walk announcement
+      const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+
+      // Generate TTS audio
+      const aiService = await import("./ai-service");
+      const audioBuffer = await aiService.generateTTS(
+        motivationalText,
+        "default",  // voice (not used for Polly, but kept for API compatibility)
+        ttsInstructions,
+        coachAccent,
+        coachGender
+      );
+
+      // Return as base64 for mobile playback
+      const base64Audio = audioBuffer.toString('base64');
+
+      console.log(`[Start Walk Audio] Generated TTS for: "${motivationalText.substring(0, 50)}..." (accent: ${coachAccent}, tone: ${coachTone})`);
+
+      res.json({
+        audio: base64Audio,
+        format: 'mp3',
+        text: motivationalText
+      });
+    } catch (error: any) {
+      console.error("[Start Walk Audio] TTS generation error:", error);
+      res.status(500).json({ error: "Failed to generate start walk audio" });
+    }
+  });
+
   // ── Batch TTS pre-generation ────────────────────────────────────────────────
   // Pre-generates Polly audio for ALL coaching trigger messages at "Prepare Run" time
   // so that every in-run coaching cue plays instantly with the Polly voice (no Android TTS
@@ -11181,6 +11226,168 @@ function transformRunForAndroid(run: any) {
       });
     } catch (error: any) {
       console.error("Pre-run briefing audio error:", error);
+      res.status(500).json({ error: "Failed to generate briefing audio" });
+    }
+  });
+
+  // ── Walk Briefing Endpoint (activity-type-specific version) ──
+  app.post("/api/coaching/pre-walk-briefing-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, 
+              weather: clientWeather, targetPace, targetTime, wellness: clientWellness, 
+              turnInstructions, startLocation,
+              // Training plan / coached-workout context
+              trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks,
+              workoutType, workoutIntensity, workoutDescription } = req.body;
+      
+      // Get user's coach settings
+      const user = await storage.getUser(req.user!.userId);
+      const coachGender = user?.coachGender || 'female';
+      const coachTone = user?.coachTone || 'energetic';
+      const coachAccent = user?.coachAccent || 'british';
+      const coachName = user?.coachName || 'Coach';
+      const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
+      const audioBriefingTTSInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+      
+      // Fetch weather if not provided
+      let weather = clientWeather;
+      const userTimezoneId = clientWeather?.userTimezoneId;  // Extract timezone from client
+      if (!weather && startLocation?.lat && startLocation?.lng) {
+        try {
+          const weatherRes = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${startLocation.lat}&longitude=${startLocation.lng}&current_weather=true`
+          );
+          if (weatherRes.ok) {
+            const data = await weatherRes.json();
+            weather = {
+              temp: Math.round(data.current_weather?.temperature || 20),
+              condition: data.current_weather?.weathercode <= 3 ? 'clear' : 'cloudy',
+              windSpeed: Math.round(data.current_weather?.windspeed || 0),
+              userTimezoneId: userTimezoneId,  // Preserve timezone even when fetching weather
+            };
+          }
+        } catch (e) {
+          console.log('Weather fetch for audio briefing failed');
+        }
+      }
+      
+      // Fetch wellness data if not provided
+      let wellnessData: any = clientWellness || {};
+      if (!clientWellness) {
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const todayWellness = await db.query.garminWellnessMetrics.findFirst({
+            where: (m, { and, eq }) => and(
+              eq(m.userId, req.user!.userId),
+              eq(m.date, today)
+            ),
+          });
+          if (todayWellness) {
+            wellnessData = {
+              bodyBattery: todayWellness.bodyBatteryCurrent,
+              sleepHours: todayWellness.totalSleepSeconds ? Math.round(todayWellness.totalSleepSeconds / 3600) : undefined,
+              stressQualifier: todayWellness.stressQualifier,
+              readinessScore: todayWellness.readinessScore,
+            };
+          }
+        } catch (e) {
+          console.log('Wellness fetch for audio briefing failed');
+        }
+      }
+      
+      // Fetch weather impact data — analyze user's historical walks to personalise briefing
+      let weatherImpact: any;
+      try {
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const allRecentRuns = await storage.getUserRuns(req.user!.userId, { limit: 500, offset: 0 });
+        const runsWithWeather = allRecentRuns.filter((r: any) =>
+          r.completedAt &&
+          new Date(r.completedAt) >= ninetyDaysAgo &&
+          (r.distance ?? 0) > 0.5 &&
+          !!r.weatherData &&
+          (!r.externalSource || r.externalSource === 'airuncoach')
+        );
+        weatherImpact = await calculateWeatherImpact(req.user!.userId, runsWithWeather);
+      } catch (e: any) {
+        console.warn('[Pre-walk briefing] Weather impact analysis failed (non-fatal):', e?.message || e);
+        // Continue without weather impact - briefing still works without it
+      }
+      
+      const aiService = await import("./ai-service");
+      
+      // Use the AI-powered briefing function for intelligent, personalized content
+      // Force activityType to 'walk' for walk-specific briefing
+      const aiBriefing = await aiService.generateWellnessAwarePreRunBriefing({
+        distance: distance || 5,
+        elevationGain: elevationGain || 0,
+        elevationLoss: elevationLoss || 0,
+        maxGradientDegrees: maxGradientDegrees || 0,
+        difficulty: difficulty || 'unknown',
+        activityType: 'walk',  // Force walk for this endpoint
+        weather,
+        coachName,
+        coachTone,
+        coachAccent,
+        wellness: wellnessData,
+        hasRoute: hasRoute || false,
+        targetTime: targetTime || null,
+        targetPace: targetPace || null,
+        weatherImpact,
+        userTimezoneId: userTimezoneId,
+        runnerName: req.body.runnerName || user?.name || undefined,
+        fitnessLevel: user?.fitnessLevel || undefined,
+        runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
+        // Training plan context — enables workout-specific coaching briefings
+        trainingPlanId,
+        planGoalType,
+        planWeekNumber,
+        planTotalWeeks,
+        workoutType,
+        workoutIntensity,
+        workoutDescription,
+      });
+      
+      // Build natural speech text from ALL AI response fields
+      const speechParts: string[] = [];
+      if (aiBriefing.briefing) speechParts.push(aiBriefing.briefing);
+      // For route walks: include route terrain insight; for free walks: include readiness insight
+      if (aiBriefing.routeInsight) speechParts.push(aiBriefing.routeInsight);
+      else if (aiBriefing.readinessInsight) speechParts.push(aiBriefing.readinessInsight);
+      if (aiBriefing.intensityAdvice) speechParts.push(aiBriefing.intensityAdvice);
+      if (aiBriefing.weatherAdvantage) speechParts.push(aiBriefing.weatherAdvantage);
+      // Include warnings if any
+      if (aiBriefing.warnings && aiBriefing.warnings.length > 0) {
+        speechParts.push(aiBriefing.warnings.join('. '));
+      }
+      const speechText = speechParts.join(' ');
+      
+      // Generate TTS audio from AI-generated text (Polly Neural or OpenAI fallback)
+      let base64Audio: string | null = null;
+      try {
+        const audioBuffer = await aiService.generateTTS(speechText, voice, audioBriefingTTSInstructions, coachAccent, coachGender);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Pre-walk briefing TTS failed, returning text only:", ttsError);
+      }
+      
+      // Return both structured AI fields AND audio
+      res.json({
+        // AI-generated structured fields (for on-screen display)
+        briefing: aiBriefing.briefing,
+        intensityAdvice: aiBriefing.intensityAdvice,
+        warnings: aiBriefing.warnings,
+        readinessInsight: aiBriefing.routeInsight || aiBriefing.readinessInsight,
+        weatherAdvantage: aiBriefing.weatherAdvantage,
+        // OpenAI TTS audio
+        audio: base64Audio,
+        format: 'mp3',
+        voice,
+        // Combined text for fallback
+        text: speechText,
+      });
+    } catch (error: any) {
+      console.error("Pre-walk briefing audio error:", error);
       res.status(500).json({ error: "Failed to generate briefing audio" });
     }
   });
