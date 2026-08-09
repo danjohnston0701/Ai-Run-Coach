@@ -677,6 +677,7 @@ class RunSessionViewModel @Inject constructor(
 
         // Use the pre-generated coaching brief if available
         val preRunBrief = activeSessionCoachingPlan?.preRunBrief
+        val sessionType = runConfig?.activityType?.name?.lowercase() ?: "run"
 
         garminWatchManager.sendPreparedRun(
             distanceKm       = distanceKm,
@@ -688,11 +689,12 @@ class RunSessionViewModel @Inject constructor(
             intervalCount    = intervalCount,
             intervalDistKm   = intervalDistKm,
             intervalDurSecs  = intervalDurSecs,
-            plannedWorkoutId = workoutId
+            plannedWorkoutId = workoutId,
+            sessionType      = sessionType
         )
 
         _watchSendState.value = live.airuncoach.airuncoach.ui.components.WatchSendState.SENT
-        Log.d("RunSessionViewModel", "prepareRunOnWatchWithCoaching sent: workout=$workoutId type=$workoutType, coachingReady=${activeSessionCoachingPlan != null}")
+        Log.d("RunSessionViewModel", "prepareRunOnWatchWithCoaching sent: workout=$workoutId type=$workoutType sessionType=$sessionType, coachingReady=${activeSessionCoachingPlan != null}")
         // Pre-start service in standby so it can handle the watch "start" command from background
         prepareServiceForWatch()
     }

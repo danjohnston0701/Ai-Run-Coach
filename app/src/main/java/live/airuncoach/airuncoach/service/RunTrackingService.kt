@@ -1408,7 +1408,8 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // CRITICAL: Call startForeground IMMEDIATELY to avoid ANR
         try {
-            startForeground(NOTIFICATION_ID, createNotification("Starting run...", "Initializing GPS"))
+            val startingLabel = if (currentActivityType == "walk") "Starting walk..." else "Starting run..."
+            startForeground(NOTIFICATION_ID, createNotification(startingLabel, "Initializing GPS"))
             Log.d("RunTrackingService", "Foreground service started successfully")
         } catch (e: Exception) {
             Log.e("RunTrackingService", "Failed to start foreground service", e)

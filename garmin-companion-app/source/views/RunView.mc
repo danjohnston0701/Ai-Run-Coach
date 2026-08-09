@@ -730,6 +730,17 @@ class RunView extends Ui.View {
             if (wt   != null) { _prepWorkoutType = wt; }
             if (tp   != null) { _prepTargetPace  = tp; _coachTargetPace = tp; _coachTargetPaceSec = _parsePace(tp); _isCoached = true; }
             if (wd   != null) { _prepWorkoutDesc = wd; }
+
+            // Session type from phone — "walk" or "run". Propagate to DataStreamer so that
+            // session/start, session/end, and the FIT recording's sport type all match what
+            // the user actually selected. This is the live path (setCoachingMode is dead code —
+            // only ever called from the unused StartView), so it MUST be handled here.
+            var st = data.get("sessionType");
+            if (st != null) {
+                App.Storage.setValue("sessionType", st);
+                if (_dataStreamer != null) { _dataStreamer.setActivityType(st); }
+            }
+
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
             }

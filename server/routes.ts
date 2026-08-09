@@ -7400,6 +7400,11 @@ function transformRunForAndroid(run: any) {
           
           // Create initial webhook event log entry
           const activityType = (activity.activityType || 'RUNNING').toUpperCase();
+          // Garmin's own activity classification (RUNNING/WALKING/TRAIL_WALK/FITNESS_WALKING/etc.)
+          // must map to our sessionType so walk activities synced via the Health API webhook
+          // don't silently default to "run" (the runs table's schema default) and get run-worded
+          // AI coaching/summaries for what was actually a walk.
+          const sessionType = activityType.includes('WALK') ? 'walk' : 'run';
           const isRunOrWalk = [
             'RUNNING', 'WALKING', 'TRAIL_RUNNING', 'TREADMILL_RUNNING', 
             'INDOOR_WALKING', 'WHEELCHAIR_PUSH_WALK', 'WHEELCHAIR_PUSH_RUN',
@@ -7599,6 +7604,7 @@ function transformRunForAndroid(run: any) {
                 elevationGain: activity.totalElevationGainInMeters,
                 elevationLoss: activity.totalElevationLossInMeters,
                 difficulty: activityType === 'TRAIL_RUNNING' || activityType === 'TRAIL_WALK' ? 'hard' : 'moderate',
+                sessionType,
                 startLat: activity.startingLatitudeInDegree,
                 startLng: activity.startingLongitudeInDegree,
                 name: activity.activityName || `${activityType.replace(/_/g, ' ')} from Garmin`,
