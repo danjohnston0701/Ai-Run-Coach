@@ -246,9 +246,9 @@ class GarminWatchManager(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val channel = NotificationChannel(
                     NOTIF_CHANNEL_ID,
-                    "Watch Run",
+                    "Watch Session",
                     NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "Shows when a Garmin watch run is in progress" }
+                ).apply { description = "Shows when a Garmin watch session is in progress" }
                 nm.createNotificationChannel(channel)
             }
             // Tap notification → open app
@@ -258,10 +258,13 @@ class GarminWatchManager(
                 mainClass ?: Intent(),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
+            // This is the watch-only bootstrap path (bare "start" with no phone-side ViewModel
+            // listening) — the activity type isn't reliably present on this message, so the text
+            // stays activity-neutral rather than guess and risk saying "run" for a walk session.
             val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
                 .setSmallIcon(R.drawable.notification_icon)
-                .setContentTitle("Garmin Watch Run in Progress")
-                .setContentText("Your run is being recorded. Open Ai Run Coach to see your summary when you're done.")
+                .setContentTitle("Garmin Watch Session in Progress")
+                .setContentText("Your session is being recorded. Open Ai Run Coach to see your summary when you're done.")
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setContentIntent(tapIntent)

@@ -370,7 +370,7 @@ fun ActiveRunBanner(runSession: RunSession, onResumeRun: () -> Unit) {
                 
                 Column {
                     Text(
-                        text = "RUN IN PROGRESS",
+                        text = if (runSession.sessionType == "walk") "WALK IN PROGRESS" else "RUN IN PROGRESS",
                         style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold),
                         color = Colors.primary
                     )

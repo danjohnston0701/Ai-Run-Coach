@@ -29,5 +29,8 @@ data class StruggleUpdate(
     @SerializedName("expected_metrics_filters") val expectedMetricsFilters: InsightFilters? = null,
     // Coaching plan session type — tells the AI this is a training run, not a race/goal attempt.
     // Reframes the coaching message around the training objective rather than race goal pace.
-    @SerializedName("workoutType") val workoutType: String? = null
+    @SerializedName("workoutType") val workoutType: String? = null,
+    // "run" | "walk" — was previously never sent, so struggle coaching always defaulted to
+    // running vocabulary for walk sessions. See RunTrackingService.currentActivityType.
+    @SerializedName("activityType") val activityType: String? = null
 )

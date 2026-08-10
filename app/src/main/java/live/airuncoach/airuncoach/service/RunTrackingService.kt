@@ -3885,8 +3885,20 @@ class RunTrackingService : Service(), SensorEventListener {
         uploadScope.launch {
             coroutineScope {
                 try {
-                    // Get end weather and finalize run
-                    weatherAtEnd = weatherRepository.getCurrentWeather()
+                    // Get end weather and finalize run. Non-fatal: mirrors the guard already
+                    // used around the start-of-run fetch (weatherAtStart, above) — if this call
+                    // throws (network hiccup, location unavailable, etc.) the run must still
+                    // finalize/upload/navigate. An unguarded throw here previously aborted this
+                    // whole block silently: _currentRunSession never flipped to isActive=false,
+                    // uploadRunToBackend() never ran, and _uploadComplete never fired — leaving
+                    // RunSessionScreen's navigation LaunchedEffect waiting forever. The visible
+                    // symptom was the phone's timer freezing (stopTimer() already ran above,
+                    // synchronously) while the screen never advanced to the run summary.
+                    try {
+                        weatherAtEnd = weatherRepository.getCurrentWeather()
+                    } catch (e: Exception) {
+                        Log.w("RunTrackingService", "Failed to fetch end weather (non-fatal): ${e.message}")
+                    }
                     _currentRunSession.value?.let { session ->
                         // If the run was stopped while paused, pauseStartTime is still set but
                         // hasn't been added to totalPausedMs yet (that only happens in resumeTracking).
@@ -3943,6 +3955,15 @@ class RunTrackingService : Service(), SensorEventListener {
                         // a second record.  The server is therefore the authoritative dedup layer.
                         uploadRunToBackend(finalSession)
                     }
+                } catch (e: Exception) {
+                    // Safety net: any other unexpected failure while finalizing/uploading must
+                    // not leave the phone screen stuck forever waiting for a navigation signal
+                    // that will never come. Mark the session inactive and surface a local ID so
+                    // RunSessionScreen can still navigate — the sync queue / server dedup guard
+                    // reconciles the record later if the upload itself didn't complete.
+                    Log.e("RunTrackingService", "stopTracking: unexpected error finalizing/uploading run — navigating with local ID as fallback", e)
+                    _currentRunSession.value = _currentRunSession.value?.copy(isActive = false)
+                    _uploadComplete.value = _currentRunSession.value?.id
                 } finally {
                     // Only stop the service after upload completes or fails
                     releaseWakeLock()
@@ -4270,15 +4291,19 @@ class RunTrackingService : Service(), SensorEventListener {
         try {
             val channelId = "garmin_run_started"
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val isWalk = currentActivityType == "walk"
 
+            // Channel name/description are set once at creation and persist in system settings
+            // regardless of activity type on any later session, so keep them activity-neutral —
+            // only the per-notification title/text below vary per session.
             if (nm.getNotificationChannel(channelId) == null) {
                 nm.createNotificationChannel(
                     android.app.NotificationChannel(
                         channelId,
-                        "Watch Run Started",
+                        "Watch Session Started",
                         android.app.NotificationManager.IMPORTANCE_HIGH
                     ).apply {
-                        description = "Confirms the phone started recording when your watch started a run"
+                        description = "Confirms the phone started recording when your watch started a session"
                         enableVibration(true)
                     }
                 )
@@ -4295,8 +4320,8 @@ class RunTrackingService : Service(), SensorEventListener {
             )
 
             val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
-                .setContentTitle("🏃 Run Started")
-                .setContentText("Your phone is recording. Enjoy your run!")
+                .setContentTitle(if (isWalk) "🚶 Walk Started" else "🏃 Run Started")
+                .setContentText(if (isWalk) "Your phone is recording. Enjoy your walk!" else "Your phone is recording. Enjoy your run!")
                 .setSmallIcon(R.drawable.notification_icon)
                 .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
@@ -4304,7 +4329,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 .build()
 
             nm.notify(NOTIF_ID_WATCH_RUN_STARTED, notification)
-            Log.d("RunTrackingService", "⌚ Run started notification posted")
+            Log.d("RunTrackingService", "⌚ Session started notification posted")
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Failed to post run started notification: ${e.message}")
         }
@@ -6329,7 +6354,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     sessionCoachingIntensity = sessionCoachingIntensity,
                     sessionStructure = sessionInstructions?.sessionStructure,
                     expectedMetricsFilters = sessionInstructions?.insightFilters,
-                    workoutType = planWorkoutType  // Tells AI this is a training session (not a race)
+                    workoutType = planWorkoutType,  // Tells AI this is a training session (not a race)
+                    activityType = currentActivityType
                 )
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
@@ -6416,7 +6442,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Lets the AI compare the split against the session's prescribed effort,
                     // not the long-term race goal pace.
                     sessionTargetPaceMin = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMin,
-                    sessionTargetPaceMax = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMax
+                    sessionTargetPaceMax = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMax,
+                    activityType = currentActivityType
                 )
                 val response = apiService.getPaceUpdate(update)
                 coachingHistory.add(AiCoachingNote(
@@ -7170,11 +7197,21 @@ class RunTrackingService : Service(), SensorEventListener {
     
     /**
      * Generate a start prompt tailored to the user's coaching tone preference.
+     * Branches on currentActivityType — this is a local fallback used when the server-side
+     * (already activity-aware) generation fails, so it must not default to running language
+     * for a walk session. See RunTrackingService.currentActivityType.
      */
     private fun generateStartPromptByTone(tone: String): String {
+        val isWalk = currentActivityType == "walk"
         return when (tone.lowercase()) {
             "technical" -> {
-                val prompts = listOf(
+                val prompts = if (isWalk) listOf(
+                    "Focus on posture, steady rhythm, optimize your stride.",
+                    "Maintain steady effort, monitor your pace.",
+                    "Execute your walking technique, control your effort.",
+                    "Optimize pace, focus on rhythm and efficiency.",
+                    "Engage core, maintain form, control your pace."
+                ) else listOf(
                     "Focus on form, steady cadence, optimize your stride.",
                     "Maintain steady effort, monitor your pace zones.",
                     "Execute your running technique, control your effort.",
@@ -7184,7 +7221,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 prompts.random()
             }
             "calm" -> {
-                val prompts = listOf(
+                val prompts = if (isWalk) listOf(
+                    "Breathe easy, enjoy the moment, you've got this.",
+                    "Find your rhythm, settle into a comfortable pace.",
+                    "Take it easy, trust the process, relax.",
+                    "Ease into it, trust your body, breathe.",
+                    "Let's flow, stay composed, find your groove."
+                ) else listOf(
                     "Breathe easy, enjoy the moment, you've got this.",
                     "Find your rhythm, settle into a comfortable pace.",
                     "Take it easy, trust your training, relax.",
@@ -7194,7 +7237,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 prompts.random()
             }
             "motivational" -> {
-                val prompts = listOf(
+                val prompts = if (isWalk) listOf(
+                    "This is your moment — let's make it count!",
+                    "Push yourself, chase greatness, give it your all!",
+                    "You're stronger than you think — prove it today!",
+                    "Go all in, embrace the challenge, own it!",
+                    "This is your time — show what you're made of!"
+                ) else listOf(
                     "This is your moment — let's crush it!",
                     "Push hard, chase greatness, leave it all out there!",
                     "You're stronger than you think — prove it today!",
@@ -7204,7 +7253,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 prompts.random()
             }
             "playful" -> {
-                val prompts = listOf(
+                val prompts = if (isWalk) listOf(
+                    "Let's have fun out there, one foot after another!",
+                    "Time to play, bring your energy, enjoy the walk!",
+                    "Make it fun, smile and go, walking is awesome!",
+                    "Let's go, have a blast, enjoy every step!",
+                    "Have fun, be silly, embrace the joy of walking!"
+                ) else listOf(
                     "Let's have fun out there, one foot after another!",
                     "Time to play, bring your energy, enjoy the run!",
                     "Make it fun, smile and go, running is awesome!",
@@ -7214,7 +7269,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 prompts.random()
             }
             else -> { // "encouraging" or default
-                val prompts = listOf(
+                val prompts = if (isWalk) listOf(
+                    "Let's go! You've got this.",
+                    "You're ready — let's walk.",
+                    "Trust the process — let's go.",
+                    "Great start — keep it going.",
+                    "You've got everything you need."
+                ) else listOf(
                     "Let's go! You've got this.",
                     "You're ready — let's run.",
                     "Trust your training — let's go.",
@@ -7228,72 +7289,146 @@ class RunTrackingService : Service(), SensorEventListener {
     
     /**
      * Fallback function: generic start prompts when AI generation fails.
+     * Branches on currentActivityType for the same reason generateStartPromptByTone does —
+     * this is the last-resort local fallback, so it's the one place a forgotten walk branch
+     * is guaranteed to be heard by the user.
      */
     private fun fireStartCoachingFallback() {
-        val prompts = listOf(
+        val isWalk = currentActivityType == "walk"
+        val prompts = if (isWalk) listOf(
+            // Action & Energy
+            "Let's go! You've got this.",
+            "Time to move — let's walk!",
+            "Here we go — let's do this!",
+            "Walk strong, walk happy!",
+            "Let's make this walk count!",
+
+            // Confidence
+            "You've got this — own it.",
+            "You're ready — let's walk.",
+            "Trust the process — let's go.",
+            "This is your moment — make it yours.",
+            "You've got everything you need.",
+
+            // Rhythm & Form
+            "Find your rhythm — stay smooth.",
+            "Relax and settle in — you've got this.",
+            "Breathe deep, walk strong.",
+            "Focus on posture — the rest will come.",
+            "One step at a time — that's all.",
+
+            // Mindset
+            "Stay present — walk now.",
+            "Clear your mind — just walk.",
+            "Think less, walk more.",
+            "This is your time — enjoy it.",
+            "Let go and walk free.",
+
+            // Encouragement
+            "Great start — keep it going.",
+            "You're moving — stay with it.",
+            "Every step counts — let's go.",
+            "Progress, not perfection — let's walk.",
+            "You've started strong — finish stronger.",
+
+            // Fun & Joy
+            "Smile — walking is awesome!",
+            "Walking is the best therapy — enjoy it.",
+            "This is your happy place — make it yours.",
+            "Feel the joy of walking — let's go!",
+            "Walking beats sitting — let's do this!",
+
+            // Challenge
+            "Push through — you're stronger than you think.",
+            "Embrace the effort — it makes you.",
+            "Challenge is where growth happens.",
+            "This is what you showed up for.",
+            "Give it everything you've got today.",
+
+            // Simplicity
+            "Just walk — that's all.",
+            "Forward is the only direction.",
+            "Walk your own pace, your own way.",
+            "Simple: put one foot in front of the other.",
+            "Walking doesn't need to be complicated.",
+
+            // Nature & Body
+            "Feel your feet hitting the ground.",
+            "Match your breath to your steps.",
+            "Walk tall — feel alive!",
+            "Your body knows how to do this.",
+            "Listen to your body — it knows the way.",
+
+            // Memory & Pride
+            "Remember why you started — this is it.",
+            "Every walk builds who you are.",
+            "You showed up — now enjoy it.",
+            "Today's walk becomes tomorrow's strength.",
+            "This walk is yours — make it count."
+        ) else listOf(
             // Action & Energy
             "Let's go! You've got this.",
             "Time to fly — let's run!",
             "Here we go — let's do this!",
             "Run hard, run happy!",
             "Let's crush this run!",
-            
+
             // Confidence
             "You've trained for this — own it.",
             "You're ready — let's run.",
             "Trust your training — let's go.",
             "This is your moment — run it.",
             "You've got everything you need.",
-            
+
             // Rhythm & Form
             "Find your rhythm — stay smooth.",
             "Relax and run easy — you've got this.",
             "Breathe deep, run strong.",
             "Focus on form — the speed will come.",
             "One step at a time — that's all.",
-            
+
             // Mindset
             "Stay present — run now.",
             "Clear your mind — just run.",
             "Think less, run more.",
             "This is your time — enjoy it.",
             "Let go and run free.",
-            
+
             // Encouragement
             "Great start — keep it going.",
             "You're moving — stay with it.",
             "Every step counts — let's go.",
             "Progress, not perfection — let's run.",
             "You've started strong — finish stronger.",
-            
+
             // Fun & Joy
             "Smile — running is awesome!",
             "Running is the best therapy — enjoy it.",
             "This is your happy place — run it.",
             "Feel the joy of running — let's go!",
             "Running beats sitting — let's do this!",
-            
+
             // Challenge
             "Push through — you're stronger than you think.",
             "Embrace the effort — it makes you.",
             "Challenge is where growth happens.",
             "This is what you trained for.",
             "Leave it all out there today.",
-            
+
             // Simplicity
             "Just run — that's all.",
             "Forward is the only direction.",
             "Run your own pace, your own race.",
             "Simple: put one foot in front of the other.",
             "Running doesn't need to be complicated.",
-            
+
             // Nature & Body
             "Feel your feet hitting the ground.",
             "Match your breath to your steps.",
             "Run like the wind — feel alive!",
             "Your body knows how to do this.",
             "Listen to your body — it knows the way.",
-            
+
             // Memory & Pride
             "Remember why you started — this is it.",
             "Every run builds who you are.",
@@ -7301,7 +7436,7 @@ class RunTrackingService : Service(), SensorEventListener {
             "Today's run becomes tomorrow's strength.",
             "This run is yours — make it count."
         )
-        
+
         val startMessage = prompts.random()
         
         // Log as a coaching note for the run history

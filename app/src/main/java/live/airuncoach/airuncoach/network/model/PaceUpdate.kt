@@ -53,5 +53,8 @@ data class PaceUpdate(
     // Session target pace from the coaching plan — used to compare km splits against the session's
     // prescribed pace (not the long-term race goal). Provided in seconds/km.
     @SerializedName("sessionTargetPaceMin") val sessionTargetPaceMin: Int? = null,
-    @SerializedName("sessionTargetPaceMax") val sessionTargetPaceMax: Int? = null
+    @SerializedName("sessionTargetPaceMax") val sessionTargetPaceMax: Int? = null,
+    // "run" | "walk" — was previously never sent, so split/500m-check-in coaching always
+    // defaulted to running vocabulary for walk sessions. See RunTrackingService.currentActivityType.
+    @SerializedName("activityType") val activityType: String? = null
 )

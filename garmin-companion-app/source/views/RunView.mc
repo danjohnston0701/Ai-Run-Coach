@@ -1833,8 +1833,10 @@ class RunDelegate extends Ui.BehaviorDelegate {
             // Just flip the screen — never pause or finish from a back gesture during a run
             _view.toggleScreen();
         } else if (_view.isPaused()) {
+            var storedType = App.Storage.getValue("sessionType");
+            var finishPrompt = (storedType != null && storedType.equals("walk")) ? "Finish walk?" : "Finish run?";
             Ui.pushView(
-                new Ui.Confirmation("Finish run?"),
+                new Ui.Confirmation(finishPrompt),
                 new FinishConfirmDelegate(_view),
                 Ui.SLIDE_IMMEDIATE
             );
