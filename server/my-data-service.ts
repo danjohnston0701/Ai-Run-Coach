@@ -13,10 +13,20 @@
 
 import { db } from './db';
 import { runs, userStats, goals } from '@shared/schema';
-import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull, isNull, or, lt } from 'drizzle-orm';
+import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull, isNull, or, lt, inArray } from 'drizzle-orm';
 import { type InferSelectModel } from 'drizzle-orm';
 
 // ─── Personal Bests ──────────────────────────────────────────────────────────
+
+// Distance bands for PB categories that must come from a dedicated run of
+// (approximately) that distance — never inferred from a km split.
+const DISTANCE_PB_BANDS: Record<string, { min: number; max: number; target: number }> = {
+  '5K':            { min: 4.9,  max: 5.3,  target: 5.0  },
+  '10K':           { min: 9.8,  max: 10.3, target: 10.0 },
+  '20K':           { min: 19.8, max: 20.3, target: 20.0 },
+  'Half Marathon': { min: 21.0, max: 21.6, target: 21.1 },
+  'Marathon':      { min: 42.0, max: 42.6, target: 42.2 },
+};
 
 /**
  * Get personal bests from the user_stats cache table.
@@ -29,24 +39,37 @@ export async function getPersonalBests(userId: string) {
 
     if (cached && (cached.totalRuns ?? 0) > 0) {
       const fromCache = buildPersonalBestsFromCache(cached);
-      
-      // Self-heal: verify that at least the first cached PB's run actually exists
-      // This catches stale cache data from before the PB calculation logic changed
+
+      // Self-heal: verify EVERY cached PB's run actually exists, and for
+      // distance-based categories (5K/10K/20K/Half/Marathon) that the run's
+      // logged distance genuinely falls within that category's band.
+      // Checking only the first entry let stale rows through: the old
+      // recomputeForUser() extrapolated 5K–Marathon PBs from a single fast
+      // 1km split, so those entries pointed at a real run (the split's run)
+      // that was never actually run at that distance.
       if (fromCache.length > 0) {
-        const firstPB = fromCache[0];
-        if (firstPB && firstPB.runId) {
-          const pbRunExists = await db.select()
-            .from(runs)
-            .where(and(eq(runs.userId, userId), eq(runs.id, firstPB.runId)))
-            .limit(1);
-          
-          // PB run exists, cache is valid — return from cache
-          if (pbRunExists.length > 0) {
-            return fromCache;
-          }
-        }
-        // If we get here, cache is invalid (PB references non-existent run)
-        // Fall through to live query
+        const runIds = Array.from(new Set(fromCache.filter(pb => pb.runId).map(pb => pb.runId as string)));
+        const cachedRuns = runIds.length > 0
+          ? await db.select({ id: runs.id, distance: runs.distance })
+              .from(runs)
+              .where(and(eq(runs.userId, userId), inArray(runs.id, runIds)))
+          : [];
+        const runById = new Map(cachedRuns.map(r => [r.id, r]));
+
+        const cacheValid = fromCache.every(pb => {
+          if (!pb.runId) return true;
+          const run = runById.get(pb.runId);
+          if (!run) return false;
+
+          const band = DISTANCE_PB_BANDS[pb.category];
+          if (!band) return true; // 1K / Mile are split-based — existence is enough
+
+          const distanceKm = run.distance !== null && run.distance > 200 ? run.distance / 1000 : run.distance;
+          return distanceKm !== null && distanceKm >= band.min && distanceKm <= band.max;
+        });
+
+        if (cacheValid) return fromCache;
+        // Otherwise cache is invalid — fall through to live query
       }
     }
   } catch (err) {
@@ -68,13 +91,9 @@ export async function getPersonalBests(userId: string) {
  * which is a valid proxy for short-distance best efforts.
  */
 async function getPersonalBestsLive(userId: string) {
-  const distancePBs = [
-    { min: 4.9,  max: 5.3,   label: '5K',           target: 5.0  },
-    { min: 9.8,  max: 10.3,  label: '10K',          target: 10.0 },
-    { min: 19.8, max: 20.3,  label: '20K',          target: 20.0 },
-    { min: 21.0, max: 21.6,  label: 'Half Marathon', target: 21.1 },
-    { min: 42.0, max: 42.6,  label: 'Marathon',      target: 42.2 },
-  ];
+  const distancePBs = Object.entries(DISTANCE_PB_BANDS).map(([label, band]) => ({
+    label, min: band.min, max: band.max, target: band.target,
+  }));
 
   const personalBests: any[] = [];
 
