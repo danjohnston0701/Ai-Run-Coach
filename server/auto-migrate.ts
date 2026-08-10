@@ -19,6 +19,14 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.session_type",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS session_type TEXT NOT NULL DEFAULT 'run'",
     },
+    // planned_workouts.session_type — added to shared/schema.ts for walk/run workout
+    // classification but the DB migration was never applied. Without this, any
+    // db.select().from(plannedWorkouts) (e.g. plan reassessment after a run save)
+    // throws "column session_type does not exist".
+    {
+      name: "planned_workouts.session_type",
+      sql: "ALTER TABLE planned_workouts ADD COLUMN IF NOT EXISTS session_type TEXT NOT NULL DEFAULT 'run'",
+    },
     // ── session_instructions ─────────────────────────────────────────────────
     // These columns were added to the schema after the table was first created.
     // Required for AI Coaching Plan generation.

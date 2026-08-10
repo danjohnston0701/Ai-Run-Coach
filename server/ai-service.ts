@@ -898,6 +898,10 @@ Give a very brief (1-2 sentences) ${isWalkSession ? 'walking' : 'pace'} check-in
 
   // Calculate current pace in seconds/km for context directive
   const currentPaceSecPerKm = (() => {
+    if (!currentPace) {
+      console.warn(`[generatePaceUpdate] currentPace missing from request body — check client field casing (expected "currentPace")`);
+      return undefined;
+    }
     const parts = currentPace.split(':').map(Number);
     return parts.length === 2 ? parts[0] * 60 + parts[1] : undefined;
   })();
@@ -1953,6 +1957,12 @@ export async function generateStruggleCoaching(params: {
   const noTerrainRule = (hasRoute || _hasGradeData) ? '' : `
 CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain — you have no information about it. Focus only on pace, effort, form, and motivation.`;
   
+  // currentPace/baselinePace are required by the type signature; formatPaceForTTS is
+  // null-safe so a missing value won't crash, but it silently degrades to "unknown pace" —
+  // log it so a casing mismatch is visible instead of just quietly worse coaching copy.
+  if (!currentPace || !baselinePace) {
+    console.warn(`[generateStruggleCoaching] currentPace or baselinePace missing from request body — check client field casing`);
+  }
   const spokenCurrentPaceStruggle = formatPaceForTTS(currentPace);
   const spokenBaselinePace = formatPaceForTTS(baselinePace);
 
@@ -2129,6 +2139,10 @@ Deliver ONE short coaching cue (1-2 sentences, spoken aloud). Sound encouraging 
   // The values sent from the device (optimalCadenceMin/Max) are also biomechanics-based,
   // but we recalculate here too so the backend's own context is always personalized.
   const paceSecPerKm = (() => {
+    if (!currentPace) {
+      console.warn(`[generateCadenceCoaching] currentPace missing from request body — check client field casing (expected "currentPace")`);
+      return 360; // default to 6:00/km if unknown
+    }
     const parts = currentPace.split(':').map(Number);
     return parts.length === 2 ? parts[0] * 60 + parts[1] : 360;
   })();
@@ -2334,6 +2348,12 @@ export async function getElevationCoaching(params: {
 }): Promise<string> {
   const coachName = params.coachName || 'Coach';
   const coachTone = params.coachTone || 'energetic';
+  // currentGrade is required by the type signature; the ?? 0 fallback below means a missing
+  // value silently reads as "flat terrain" rather than "unknown" — log so a casing mismatch
+  // (or a legacy client still sending "grade") doesn't masquerade as real flat-ground data.
+  if (params.currentGrade == null && params.grade == null) {
+    console.warn(`[getElevationCoaching] currentGrade missing from request body — check client field casing (expected "currentGrade")`);
+  }
   const grade = params.currentGrade ?? params.grade ?? 0;
   const isWalkElevation = params.activityType === 'walk';
   const elevPersonCap = isWalkElevation ? 'Walker' : 'Runner';
@@ -3766,6 +3786,13 @@ export async function generateHeartRateCoaching(params: {
   activityType?: string;
 }): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
+  // currentHR/avgHR/maxHR are required by the type signature but unvalidated — a missing
+  // value doesn't crash here (arithmetic on undefined just yields NaN), but NaN comparisons
+  // silently fall through to "Zone 5 / Maximum", which is confidently wrong rather than
+  // honestly unknown. Log so a casing mismatch is visible instead of masquerading as data.
+  if (currentHR == null || avgHR == null) {
+    console.warn(`[generateHeartRateCoaching] currentHR or avgHR missing from request body — check client field casing (expected "currentHR"/"avgHR")`);
+  }
   const isWalkHR = params.activityType === 'walk';
   const hrPersonLabel = isWalkHR ? 'walker' : 'runner';
   const hrWalkProhibition = isWalkHR
@@ -5740,6 +5767,10 @@ Reference their actual split data.`;
       if (kmSplits && kmSplits.length >= 2) {
         terrainAnalysis = '\nSPLIT-BY-SPLIT TERRAIN ANALYSIS:\n';
         const splitPaces = kmSplits.map(s => {
+          if (!s.pace) {
+            console.warn(`[generateEliteCoaching] kmSplits entry missing pace field — check client field casing`);
+            return 0;
+          }
           const parts = s.pace.split(':');
           return parts.length === 2 ? (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0) : 0;
         });
@@ -6454,6 +6485,17 @@ export async function generateSessionTriggerMessage(params: {
     lastCueHrDelta, lastCuePaceDelta, athleteRespondedToLastCue,
   } = params;
 
+  // sessionType, triggerType, distanceKm are required by the type signature but arrive
+  // as plain req.body fields with no validation — a wrong-cased or missing field crashes
+  // .replace()/.toFixed() below. Guard + log so a mismatch degrades instead of 500s.
+  if (!sessionType || !triggerType || !sessionPhase || typeof distanceKm !== 'number') {
+    console.warn(`[generateSessionTriggerMessage] missing required field(s) — sessionType=${sessionType}, triggerType=${triggerType}, sessionPhase=${sessionPhase}, distanceKm=${distanceKm} — check client field casing`);
+  }
+  const safeSessionType = sessionType || 'training';
+  const safeTriggerType = triggerType || 'check-in';
+  const safeSessionPhase = sessionPhase || 'main';
+  const safeDistanceKm = typeof distanceKm === 'number' ? distanceKm : 0;
+
   const hrTrendDirection   = params.hrTrendDirection;
   const paceTrendDirection = params.paceTrendDirection;
   const isAthleteAlreadyResponding = params.isAthleteAlreadyResponding ?? false;
@@ -6547,20 +6589,20 @@ export async function generateSessionTriggerMessage(params: {
   const prompt = `You are ${coachName}, an elite AI ${triggerCoachLabel}. A coaching trigger just fired during a live training session.${triggerWalkProhibition}
 
 ━━ SESSION CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Session type: ${sessionType.replace(/_/g, ' ')}
+Session type: ${safeSessionType.replace(/_/g, ' ')}
 Session goal: ${sessionGoal}
 ${sessionContextBlock}
 
 ━━ CURRENT STATE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Current phase: ${sessionPhase.replace(/_/g, ' ')}${phaseInstructions ? ` — ${phaseInstructions}` : ''}
+Current phase: ${safeSessionPhase.replace(/_/g, ' ')}${phaseInstructions ? ` — ${phaseInstructions}` : ''}
 
 WHAT JUST TRIGGERED THIS MESSAGE (condition: "${triggerCondition}"):
-${triggerType.replace(/_/g, ' ')}
+${safeTriggerType.replace(/_/g, ' ')}
 
 ━━ ATHLETE'S LIVE NUMBERS AT THIS MOMENT ━━━━━━━━━━━━━━━━
 Heart rate: ${hrStatus}
 Pace: ${paceStatus}${currentCadence && currentCadence > 0 ? `\nCadence: ${currentCadence} spm` : ''}
-Distance: ${distanceKm.toFixed(2)} km${targetDistanceKm ? ` of ${targetDistanceKm} km (${progressPct}%)` : ''}${remainingKm !== null ? ` — ${remainingKm.toFixed(1)} km to go` : ''}
+Distance: ${safeDistanceKm.toFixed(2)} km${targetDistanceKm ? ` of ${targetDistanceKm} km (${progressPct}%)` : ''}${remainingKm !== null ? ` — ${remainingKm.toFixed(1)} km to go` : ''}
 Time elapsed: ${elapsedMinutes} min${gradeStr ? `\nTerrain: ${gradeStr}` : ''}${elevationGainM ? `\nElevation gained: ${Math.round(elevationGainM)}m` : ''}
 ${splitSummary}
 
@@ -6600,7 +6642,7 @@ Deliver ONE message (max 20 words, spoken aloud) that reacts to what is ACTUALLY
 - If the athlete is off target AND NOT already self-correcting: be honest, give a specific corrective cue using the exact numbers
 - If the athlete is already self-correcting (see TREND CONTEXT above): acknowledge and encourage — never repeat a cue they are already executing
 - If the athlete is on target: give a genuine observation tied to their actual data, not generic praise
-- Reference the session context — this is a ${sessionType.replace(/_/g, ' ')} session with specific objectives, not a free run
+- Reference the session context — this is a ${safeSessionType.replace(/_/g, ' ')} session with specific objectives, not a free run
 - Use session memory to pick the most valuable coaching focus for THIS moment — vary topics, don't repeat
 - Write "heart rate" never "HR"
 ${PACE_FORMAT_RULE}`;
