@@ -412,7 +412,10 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
       message: `Imported ${imported} run${imported !== 1 ? 's' : ''} from Strava${skipped > 0 ? ` (${skipped} already existed)` : ''}.`,
     });
   } catch (error: any) {
-    console.error('[Strava Import] Error:', error.message);
+    // Log the actual Strava error body (not just the generic axios status message) —
+    // e.g. a 403 here could be a real app-level issue ({resource:'Application',
+    // field:'Status', code:'Inactive'}) rather than anything user/token-specific.
+    console.error('[Strava Import] Error:', error.response?.data ?? error.message);
     res.status(500).json({ success: false, error: 'Failed to import Strava history' });
   }
 });
