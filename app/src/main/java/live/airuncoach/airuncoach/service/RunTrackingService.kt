@@ -5280,9 +5280,21 @@ class RunTrackingService : Service(), SensorEventListener {
             trigger.type == "hr_recovery_acknowledgement") &&
             hrTrend == "falling" && paceTrend == "slowing"
 
+        // Find interval rep context from the current phase name (encoded as "work_rep_3_of_5").
+        // Computed BEFORE fallbackMessage below so the fallback can actually say "Rep 3 of 5"
+        // instead of silently defaulting to "Rep 1 of 1" via pickTriggerMessage's default params
+        // — this used to be computed after fallbackMessage was already built, so the correct
+        // values were only ever used in the (often-failing) live AI request, never the fallback.
+        val repRegex = Regex("_rep_(\\d+)_of_(\\d+)$")
+        val repMatch = repRegex.find(phaseName)
+        val currentRepNum = repMatch?.groupValues?.get(1)?.toIntOrNull()
+        val totalRepsNum = repMatch?.groupValues?.get(2)?.toIntOrNull()
+            ?: plan.phases.mapNotNull { it.repetitions }.maxOrNull()
+
         // Pre-written fallback — resolved with live data, used if API fails or times out
         val fallbackMessage = pickTriggerMessage(
-            trigger, phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+            trigger, repNum = currentRepNum ?: 1, totalReps = totalRepsNum ?: 1,
+            phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
             phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax
         )
 
@@ -5302,13 +5314,6 @@ class RunTrackingService : Service(), SensorEventListener {
             val hrRange = if (ph.targetHRMin != null && ph.targetHRMax != null) " HR:${ph.targetHRMin}-${ph.targetHRMax}" else ""
             "${reps}${ph.name}(${listOfNotNull(duration.takeIf { it.isNotBlank() }, effort.takeIf { it.isNotBlank() }).joinToString(" ")}${paceRange}${hrRange})"
         }
-
-        // Find interval rep context from the current phase name (encoded as "work_rep_3_of_5")
-        val repRegex = Regex("_rep_(\\d+)_of_(\\d+)$")
-        val repMatch = repRegex.find(phaseName)
-        val currentRepNum = repMatch?.groupValues?.get(1)?.toIntOrNull()
-        val totalRepsNum = repMatch?.groupValues?.get(2)?.toIntOrNull()
-            ?: plan.phases.mapNotNull { it.repetitions }.maxOrNull()
 
         // Phase time progress — how far into the current phase and how much is left.
         // Only meaningful for time-based phases (durationMin > 0), not distance-based.
