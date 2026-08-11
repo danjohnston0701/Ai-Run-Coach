@@ -553,7 +553,7 @@ fun RunSessionScreen(
     if (showPauseConfirm) {
         AlertDialog(
             onDismissRequest = { showPauseConfirm = false },
-            title = { Text("Pause run?") },
+            title = { Text(if (sessionActivityType == "walk") "Pause walk?" else "Pause run?") },
             text = { Text("This will pause tracking until you resume.") },
             confirmButton = {
                 TextButton(
@@ -574,8 +574,8 @@ fun RunSessionScreen(
     if (showStopConfirm) {
         AlertDialog(
             onDismissRequest = { showStopConfirm = false },
-            title = { Text("Stop run?") },
-            text = { Text("This will end the session and save your run.") },
+            title = { Text(if (sessionActivityType == "walk") "Stop walk?" else "Stop run?") },
+            text = { Text("This will end the session and save your ${if (sessionActivityType == "walk") "walk" else "run"}.") },
             confirmButton = {
                 TextButton(
                     onClick = {

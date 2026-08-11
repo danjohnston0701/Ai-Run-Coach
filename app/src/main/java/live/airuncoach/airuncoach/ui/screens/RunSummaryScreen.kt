@@ -244,7 +244,7 @@ fun RunSummaryScreenFlagship(
         contentWindowInsets = WindowInsets(0), // outer Scaffold already handles nav bar insets
         topBar = {
             RunSummaryTopBarFlagship(
-                title = runSession?.name ?: "Run Insights",
+                title = runSession?.name ?: (if (runSession?.sessionType?.lowercase() == "walk") "Walk Insights" else "Run Insights"),
                 subtitle = runSession?.let {
                     "${it.getFormattedDate()} • ${
                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it.startTime))
@@ -1186,7 +1186,7 @@ private fun AiInsightsTabContent(
 
         // Run Completed banner with optional difficulty pill
         item {
-            RunCompletedBannerWithDifficulty(difficultyLabel = difficultyLabel)
+            RunCompletedBannerWithDifficulty(difficultyLabel = difficultyLabel, isWalk = run.sessionType.lowercase() == "walk")
         }
 
         // Personal Best banner — always visible when this run holds any PBs
@@ -1709,7 +1709,7 @@ private fun SuccessBannerFlagship() {
 }
 
 @Composable
-private fun RunCompletedBannerWithDifficulty(difficultyLabel: String?) {
+private fun RunCompletedBannerWithDifficulty(difficultyLabel: String?, isWalk: Boolean = false) {
     val isUnknown = difficultyLabel.isNullOrBlank() || difficultyLabel.equals("UNKNOWN", ignoreCase = true)
     
     Card(
@@ -1737,12 +1737,12 @@ private fun RunCompletedBannerWithDifficulty(difficultyLabel: String?) {
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Run Complete!",
+                    text = if (isWalk) "Walk Complete!" else "Run Complete!",
                     style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
                     color = Colors.success
                 )
             }
-            
+
             // Show difficulty pill only if not unknown
             if (!isUnknown) {
                 DifficultyPillFlagship(label = difficultyLabel!!)

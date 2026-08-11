@@ -123,6 +123,11 @@ class RunTrackingService : Service(), SensorEventListener {
      * Updated whenever currentUser is loaded from the API.
      */
     private var currentActivityType: String = "run"
+    // True once currentActivityType has been set from an explicit session-start intent
+    // (EXTRA_SESSION_TYPE). Guards against the async user-profile load in onCreate()
+    // resolving AFTER onStartCommand() and silently overwriting the real session type
+    // with the user's default preference (see currentActivityType usages below).
+    private var activityTypeSetFromSessionIntent = false
     private var runHistoryStats: live.airuncoach.airuncoach.network.model.RunHistoryStats? = null
     private var activeGoals: List<ActiveGoalInfo> = emptyList()  // Goals for AI coaching context
     private var lastPhase: CoachingPhase? = null
@@ -861,11 +866,18 @@ class RunTrackingService : Service(), SensorEventListener {
                 val userId = sessionManager.getUserId()
                 if (userId != null) {
                     currentUser = apiService.getUser(userId)
-                    // Derive activity type from user's default session preference.
-                    // Normalise to lowercase "run" or "walk" regardless of how it was stored.
-                    currentActivityType = when (currentUser?.defaultSessionType?.lowercase()) {
-                        "walk" -> "walk"
-                        else  -> "run"
+                    // The session's activity type is authoritative from the run-setup screen
+                    // (EXTRA_SESSION_TYPE, applied in onStartCommand) — it drives every
+                    // session feature (UI, Garmin watch, post-run summary, in-session coaching
+                    // prompts/triggers) and must NEVER be overridden by the user's profile
+                    // default once a session has actually been started. Only seed from the
+                    // profile default if this async load resolves BEFORE onStartCommand has
+                    // set the real session type.
+                    if (!activityTypeSetFromSessionIntent) {
+                        currentActivityType = when (currentUser?.defaultSessionType?.lowercase()) {
+                            "walk" -> "walk"
+                            else  -> "run"
+                        }
                     }
                     Log.d("RunTrackingService", "Loaded user profile: ${currentUser?.coachName}, activityType=$currentActivityType")
                     // Load run history stats (will be refreshed at run-start with the target distance)
@@ -1237,6 +1249,7 @@ class RunTrackingService : Service(), SensorEventListener {
             hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
             intent?.getStringExtra(EXTRA_SESSION_TYPE)?.let { requestedType ->
                 currentActivityType = if (requestedType.equals("walk", ignoreCase = true)) "walk" else "run"
+                activityTypeSetFromSessionIntent = true
             }
             aiCoachEnabledForSession = intent?.getBooleanExtra(EXTRA_AI_COACH_ENABLED, true) ?: true
             navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")

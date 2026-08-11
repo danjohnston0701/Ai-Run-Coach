@@ -3467,6 +3467,7 @@ CRITICAL RULES:
 - Include WEATHER in the briefing or weatherAdvice field EVERY TIME (e.g., "Warm day, hydrate well" or "Headwind on the outbound — practice power on climbs").
 - For ${activityLabelShout} marked "${activityLabelShout} (No planned route)" - do NOT mention terrain, elevation, hills, or route characteristics.
 ${!wellnessContext ? '- CRITICAL: No Garmin or wellness data is connected. Do NOT mention body readiness, recovery, fatigue, body battery, sleep, stress, HRV, or any biometric data.' : ''}
+${!targetPace ? `- CRITICAL: This ${activityLabel} has NO target pace or target time set by the ${isWalk ? 'walker' : 'runner'}. Do NOT state, suggest, or imply any specific pace figure (e.g. "aim for 6:30/km") anywhere in your response — not even by reusing their historical/recent average pace from the runner profile as if it were a target for this session. Reference effort or feel instead (e.g. "keep it conversational," "${isWalk ? 'walk' : 'run'} by feel today").` : ''}
 - NEVER start with generic greetings like "Hey there!" — jump straight in.
 - Be conversational as if speaking directly to the ${isWalk ? 'walker' : 'runner'}. Use "you" and "your."${isWalk ? ' WALK SESSION — never say "run", "runner", "running" in your output.' : ''}
 ${coachAccent ? `- Write using natural ${coachAccent} English phrasing. The text will be spoken aloud by a ${coachAccent} voice.` : ''}
