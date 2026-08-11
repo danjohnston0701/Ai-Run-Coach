@@ -137,6 +137,21 @@ class TrainingPlanViewModel @Inject constructor(
         }
     }
 
+    // Guards the screen's auto-open-adaptations effect. Lives here (not as a Composable
+    // `remember`) because this ViewModel is scoped to the training_plan back-stack entry and
+    // survives pushing/popping adaptation_review on top of it, whereas `remember` state is
+    // torn down and reset to its initial value every time the screen is disposed while
+    // adaptation_review is on top — which previously let the effect re-fire on the stale
+    // pre-refresh pendingAdaptationsCount the instant the user popped back, bouncing them
+    // straight back into adaptation_review even though the live count was already 0.
+    private var hasAutoOpenedAdaptations = false
+
+    fun tryConsumeAutoOpenAdaptations(): Boolean {
+        if (hasAutoOpenedAdaptations) return false
+        hasAutoOpenedAdaptations = true
+        return true
+    }
+
     fun loadBlockStatus(planId: String) {
         viewModelScope.launch {
             try {

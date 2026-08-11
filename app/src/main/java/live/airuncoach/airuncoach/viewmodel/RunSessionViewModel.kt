@@ -378,6 +378,14 @@ class RunSessionViewModel @Inject constructor(
     private val _coachingGenerationState = MutableStateFlow(CoachingGenerationState.IDLE)
     val coachingGenerationState: StateFlow<CoachingGenerationState> = _coachingGenerationState.asStateFlow()
 
+    // True while Polly audio for this session's coaching cues is being pre-cached in the
+    // background. coachingGenerationState flips to READY as soon as the plan itself comes
+    // back — well before this finishes — so callers that gate "can the run start" must check
+    // BOTH, or the run can start before any coaching audio is cached (early cues then fall
+    // back to a live Polly call or Android TTS instead of the instant pre-cached audio).
+    private val _isAudioPreloading = MutableStateFlow(false)
+    val isAudioPreloading: StateFlow<Boolean> = _isAudioPreloading.asStateFlow()
+
     /** ID of the workout whose coaching plan is currently cached. */
     private var coachingGeneratedForWorkoutId: String? = null
 
@@ -442,7 +450,14 @@ class RunSessionViewModel @Inject constructor(
                     // This ensures zero-latency, same-voice Polly audio for all in-run coaching
                     // cues (no Android TTS fallback, no network call mid-run).
                     body?.plan?.let { plan ->
-                        launch(Dispatchers.IO) { preGenerateCoachingAudio(workoutId, plan) }
+                        _isAudioPreloading.value = true
+                        launch(Dispatchers.IO) {
+                            try {
+                                preGenerateCoachingAudio(workoutId, plan)
+                            } finally {
+                                _isAudioPreloading.value = false
+                            }
+                        }
                     }
                 } else {
                     Log.w("RunSessionViewModel", "Coaching API returned ${response.code()} — marking FAILED")
@@ -459,6 +474,7 @@ class RunSessionViewModel @Inject constructor(
     fun resetCoachingState() {
         _coachingGenerationState.value = CoachingGenerationState.IDLE
         coachingGeneratedForWorkoutId = null
+        _isAudioPreloading.value = false
     }
 
     /**

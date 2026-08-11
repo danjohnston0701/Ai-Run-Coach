@@ -159,7 +159,18 @@ function estimateMaxHR(
 
 export async function enrichWorkoutBlock(
   userId: string,
-  workoutIds: string[]
+  workoutIds: string[],
+  // Eagerly regenerate each workout's full AI coaching plan (session_instructions) right
+  // after enrichment, instead of leaving it to the on-demand /prepare-coaching path that
+  // fires when the user actually opens the workout. Only meaningful when a workout could
+  // already have a CACHED coaching plan from before this enrichment ran (e.g. the user
+  // opened it days ago, then the daily scheduler re-enriched it with tighter targets as
+  // the date approached) — without this, that stale cache would keep being served forever.
+  // Brand-new workouts (new plan creation, next-block generation, post-orientation first
+  // enrichment) have no prior cache to go stale, so this stays false for those callers —
+  // the on-demand path generates correctly-targeted coaching on first open regardless,
+  // and skipping this avoids an OpenAI call (and cost) for every workout the user never opens.
+  regenerateCoaching = false
 ): Promise<{ enriched: number; failed: number }> {
   if (workoutIds.length === 0) return { enriched: 0, failed: 0 };
 
@@ -475,9 +486,11 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
       }
     }
 
-    // Regenerate session coaching for enriched workouts — fire and forget
-    // This ensures the pre-run briefing and trigger conditions use the new precise targets
-    setImmediate(async () => {
+    // Regenerate session coaching for enriched workouts — fire and forget.
+    // Only runs when the caller opts in (regenerateCoaching=true): refreshes a
+    // possibly-already-cached, now-stale plan so it reflects the new precise targets.
+    // Skipped for brand-new workouts with no prior cache — see param doc above.
+    if (regenerateCoaching) setImmediate(async () => {
       for (const enrichment of enrichedWorkouts) {
         try {
           const workout = workouts.find(w => w.id === enrichment.id);

@@ -297,7 +297,11 @@ export function startScheduler(): void {
           const workoutIds = await getWorkoutIdsForPlanWeeks(planId, nextWeeksToEnrich);
           if (workoutIds.length === 0) continue;
 
-          const { enriched, failed } = await enrichWorkoutBlock(userId, workoutIds);
+          // regenerateCoaching=true: this is the only enrichment call site that can hit an
+          // already-cached, now-stale coaching plan (the user may have opened a workout days
+          // before its rolling-window re-enrichment tightened the targets), so it's worth the
+          // extra OpenAI call here to keep that cache correct.
+          const { enriched, failed } = await enrichWorkoutBlock(userId, workoutIds, true);
           const throughWeek = Math.max(...nextWeeksToEnrich);
           await markPlanEnrichedThroughWeek(planId, throughWeek);
 

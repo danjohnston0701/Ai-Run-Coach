@@ -5998,7 +5998,8 @@ function enforceClosingStagesGate(
 function ensureClosingStageMilestones(
   triggers: SessionCoachingTrigger[],
   targetDistanceKm: number,
-  activityType?: string
+  activityType?: string,
+  targetDurationMinutes?: number
 ): SessionCoachingTrigger[] {
   // Check which final-stage triggers already exist
   const hasType = (type: string) => triggers.some(t => t.type === type);
@@ -6034,17 +6035,32 @@ function ensureClosingStageMilestones(
     });
   }
 
-  // Inject session_complete if missing
-  if (!sessionCompleteExists && targetDistanceKm > 0) {
-    console.log(`[ensureClosingStageMilestones] Injecting missing session_complete trigger`);
-    updated.push({
-      id: "session_complete_mandatory",
-      type: "session_complete",
-      condition: `distance >= ${targetDistanceKm}`,
-      message: `That's your ${targetDistanceKm} kilometre ${activityLabel} done — brilliant effort today. Well done.`,
-      frequency: "once",
-      alertType: "none",
-    });
+  // Inject session_complete if missing. Distance-based sessions get a distance target;
+  // sessions with no usable target distance (duration-only sessions — e.g. an easy run
+  // planned by time rather than km) fall back to a time target instead, so every session
+  // gets an end-of-session summary regardless of how it's structured.
+  if (!sessionCompleteExists) {
+    if (targetDistanceKm > 0) {
+      console.log(`[ensureClosingStageMilestones] Injecting missing session_complete trigger (distance-based)`);
+      updated.push({
+        id: "session_complete_mandatory",
+        type: "session_complete",
+        condition: `distance >= ${targetDistanceKm}`,
+        message: `That's your ${targetDistanceKm} kilometre ${activityLabel} done — brilliant effort today. Well done.`,
+        frequency: "once",
+        alertType: "none",
+      });
+    } else if (targetDurationMinutes && targetDurationMinutes > 0) {
+      console.log(`[ensureClosingStageMilestones] Injecting missing session_complete trigger (time-based)`);
+      updated.push({
+        id: "session_complete_mandatory",
+        type: "session_complete",
+        condition: `elapsed_min >= ${targetDurationMinutes}`,
+        message: `That's your ${targetDurationMinutes} minute ${activityLabel} done — brilliant effort today. Well done.`,
+        frequency: "once",
+        alertType: "none",
+      });
+    }
   }
 
   return updated;
@@ -7172,7 +7188,7 @@ FINAL REMINDER — NON-NEGOTIABLE:
     // ── Post-processing: guarantee final_100m and session_complete triggers ─────
     // If OpenAI forgot to include final_100m or session_complete, inject defaults.
     // These are MANDATORY for distance-based sessions. (Fixes: Wayne & Claire missing prompts)
-    const withMandatoryMilestones = ensureClosingStageMilestones(gatedTriggers, targetDistanceKm, activityType);
+    const withMandatoryMilestones = ensureClosingStageMilestones(gatedTriggers, targetDistanceKm, activityType, targetDurationMinutes);
 
     // ── Post-processing: guarantee rep_start / recovery_start triggers for interval sessions ──
     // If OpenAI didn't include these (which were historically missing from the vocabulary),

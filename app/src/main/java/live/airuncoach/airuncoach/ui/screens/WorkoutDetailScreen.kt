@@ -39,10 +39,13 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import kotlin.math.roundToInt
+import androidx.compose.ui.text.style.TextAlign
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.network.model.WorkoutDetails
+import live.airuncoach.airuncoach.network.model.DynamicCoachingPhase
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WorkoutTypeBadge
 import live.airuncoach.airuncoach.ui.components.workoutTypeColor
@@ -81,6 +84,11 @@ fun WorkoutDetailScreen(
     val isCoachingReady = coachingState == RunSessionViewModel.CoachingGenerationState.READY ||
                           coachingState == RunSessionViewModel.CoachingGenerationState.FAILED
     val isCoachingGenerating = coachingState == RunSessionViewModel.CoachingGenerationState.GENERATING
+    // Coaching plan being READY does not mean the session's Polly audio is cached yet —
+    // that finishes separately, in the background, slightly later. Starting before it's done
+    // means the first coaching cue(s) miss the instant pre-cached audio and fall back to a
+    // live Polly call or Android TTS.
+    val isAudioPreloading by runSessionViewModel.isAudioPreloading.collectAsState()
 
     // Trigger AI coaching generation as soon as the screen opens
     LaunchedEffect(workout.id) {
@@ -166,7 +174,7 @@ fun WorkoutDetailScreen(
     }
 
     // "Start on Phone" is only enabled once GPS is confirmed AND coaching is ready
-    val canStart = hasLocationPermission && gpsReady && !isGettingLocation && isCoachingReady
+    val canStart = hasLocationPermission && gpsReady && !isGettingLocation && isCoachingReady && !isAudioPreloading
 
     Scaffold(
         topBar = {
@@ -197,6 +205,19 @@ fun WorkoutDetailScreen(
         containerColor = Colors.backgroundRoot,
         contentWindowInsets = WindowInsets(0)
     ) { padding ->
+        // Block the whole detail screen behind a loading view until the AI coaching plan is
+        // ready (or has definitively failed) — rather than showing the full screen with a
+        // banner buried down in the Actions section while session_instructions generation
+        // (now on-demand, can take ~20-30s) is still in flight. Rest days never trigger
+        // generation (see the LaunchedEffect above) so they skip straight to the full screen.
+        if (workout.workoutType != "rest" && !isCoachingReady) {
+            GeneratingSessionView(
+                workoutTypeLabel = workoutTypeLabel(workout.workoutType),
+                modifier = Modifier.fillMaxSize().padding(padding)
+            )
+            return@Scaffold
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -559,8 +580,12 @@ fun WorkoutDetailScreen(
             }
 
             // ── Structure breakdown ───────────────────────────────────────────
-            if (workout.workoutType in setOf("intervals", "tempo", "fartlek", "hill_repeats")) {
-                WorkoutStructureSection(workout)
+            // Driven by the real AI-generated phases for this session (activeSessionCoachingPlan,
+            // populated by generateCoachingForWorkout() above) — not a hardcoded per-workoutType
+            // template, so what's shown here always matches what the in-run coaching actually does.
+            val coachingPlanPhases = runSessionViewModel.activeSessionCoachingPlan?.phases.orEmpty()
+            if (isCoachingReady && coachingPlanPhases.isNotEmpty()) {
+                WorkoutStructureSection(coachingPlanPhases)
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
 
@@ -602,7 +627,7 @@ fun WorkoutDetailScreen(
                 // When a watch is connected: "Prepare for Watch" = primary filled teal,
                 //   "Start on Phone" = secondary outlined button below.
                 // When no watch connected: "Start on Phone" = primary filled teal (original).
-                val watchReady = companionInstalled && isCoachingReady
+                val watchReady = companionInstalled && isCoachingReady && !isAudioPreloading
                 val onPrepareWatch = {
                     runSessionViewModel.prepareRunOnWatchWithCoaching(
                         workoutId        = workout.id,
@@ -652,7 +677,7 @@ fun WorkoutDetailScreen(
                         ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        if (isCoachingGenerating) {
+                        if (isCoachingGenerating || isAudioPreloading) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Colors.buttonText)
                             Spacer(modifier = Modifier.width(Spacing.sm))
                             Text("Preparing AI Coaching…", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.buttonText)
@@ -711,6 +736,51 @@ fun WorkoutDetailScreen(
 
             Spacer(modifier = Modifier.height(Spacing.xl))
         }
+    }
+}
+
+// ── Full-screen "generating" loading view ──────────────────────────────────────
+
+/**
+ * Shown in place of the whole workout detail screen while the AI coaching plan
+ * (session_instructions) is being generated or is not yet known to have failed.
+ * Replaced by the full detail screen once coachingGenerationState reaches READY or FAILED.
+ */
+@Composable
+private fun GeneratingSessionView(workoutTypeLabel: String, modifier: Modifier = Modifier) {
+    val pulse by rememberInfiniteTransition(label = "generating-session-pulse").animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+    Column(
+        modifier = modifier.padding(Spacing.xl),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(48.dp),
+            strokeWidth = 3.dp,
+            color = Color(0xFF00E5FF).copy(alpha = pulse)
+        )
+        Spacer(modifier = Modifier.height(Spacing.xl))
+        Text(
+            "Generating your full session",
+            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+            color = Colors.textPrimary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(Spacing.sm))
+        Text(
+            "Your AI coach is building the $workoutTypeLabel session — phases, pacing targets, and live coaching cues.",
+            style = AppTextStyles.body,
+            color = Colors.textSecondary,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -964,54 +1034,73 @@ fun WorkoutStatCard(label: String, value: String, icon: Int, modifier: Modifier 
 }
 
 @Composable
-fun WorkoutStructureSection(workout: WorkoutDetails) {
+fun WorkoutStructureSection(phases: List<DynamicCoachingPhase>) {
     Text("Workout Structure", style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
     Spacer(modifier = Modifier.height(Spacing.sm))
 
-    val structure: List<Triple<String, String, Color>> = when (workout.workoutType) {
-        "intervals" -> listOf(
-            Triple("Warm-up", "10 min easy (Zone 2)", Colors.success),
-            Triple("Work intervals", "High intensity repeats — Zone 4", Colors.error),
-            Triple("Recovery", "Easy jog between intervals (Zone 2)", Colors.success),
-            Triple("Cool-down", "5 min easy (Zone 2)", Colors.success)
-        )
-        "tempo" -> listOf(
-            Triple("Warm-up", "10 min easy (Zone 2)", Colors.success),
-            Triple("Tempo block", "Sustained effort — Zone 3–4", Colors.warning),
-            Triple("Cool-down", "5 min easy (Zone 2)", Colors.success)
-        )
-        "fartlek" -> listOf(
-            Triple("Warm-up", "Easy running to start — Zone 2", Colors.success),
-            Triple("Surges", "Variable pace bursts — Zone 3 to Zone 4", Colors.error),
-            Triple("Float recovery", "Return to easy pace between surges — Zone 2", Colors.primary),
-            Triple("Cool-down", "Easy finish — Zone 2", Colors.success)
-        )
-        "hill_repeats" -> listOf(
-            Triple("Warm-up", "10 min easy on flat (Zone 2)", Colors.success),
-            Triple("Hill repeats", "Hard uphill effort — Zone 4–5", Colors.error),
-            Triple("Recovery", "Easy walk/jog back down (Zone 1–2)", Colors.success),
-            Triple("Cool-down", "5 min easy (Zone 2)", Colors.success)
-        )
-        else -> emptyList()
-    }
-
-    structure.forEach { (phase, detail, color) ->
+    phases.sortedBy { it.order }.forEach { phase ->
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
             shape = RoundedCornerShape(10.dp)
         ) {
             Row(modifier = Modifier.padding(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.width(4.dp).height(40.dp).background(color, RoundedCornerShape(2.dp)))
+                Box(modifier = Modifier.width(4.dp).height(40.dp).background(phaseEffortColor(phase.effort), RoundedCornerShape(2.dp)))
                 Spacer(modifier = Modifier.width(Spacing.md))
                 Column {
-                    Text(phase, style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                    Text(detail, style = AppTextStyles.small, color = Colors.textSecondary)
+                    Text(formatPhaseLabel(phase), style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                    Text(formatPhaseDetail(phase), style = AppTextStyles.small, color = Colors.textSecondary)
                 }
             }
         }
         Spacer(modifier = Modifier.height(Spacing.sm))
     }
+}
+
+private fun phaseEffortColor(effort: String): Color = when (effort.lowercase()) {
+    "easy" -> Colors.success
+    "moderate" -> Colors.primary
+    "threshold" -> Colors.warning
+    "hard", "max" -> Colors.error
+    else -> Colors.textSecondary
+}
+
+private fun formatPhaseLabel(phase: DynamicCoachingPhase): String {
+    val base = when (phase.name.lowercase()) {
+        "warmup", "warm_up" -> "Warm-up"
+        "cooldown", "cool_down" -> "Cool-down"
+        "main_effort" -> "Main effort"
+        "work" -> "Work interval"
+        "recovery_walk" -> "Recovery walk"
+        "recovery" -> "Recovery"
+        else -> phase.name.replace("_", " ").replaceFirstChar { it.uppercase() }
+    }
+    val reps = phase.repetitions ?: 1
+    return if (reps > 1) "$base × $reps" else base
+}
+
+private fun formatPhaseDetail(phase: DynamicCoachingPhase): String {
+    val stats = mutableListOf<String>()
+    phase.durationMinutes?.let { minutes ->
+        val whole = minutes.roundToInt()
+        stats.add(if (minutes == whole.toDouble()) "$whole min" else String.format(java.util.Locale.US, "%.1f min", minutes))
+    }
+    phase.distanceKm?.let { km -> stats.add(String.format(java.util.Locale.US, "%.1f km", km)) }
+    if (phase.targetPaceMin != null && phase.targetPaceMax != null) {
+        stats.add("${formatPhasePace(phase.targetPaceMin)}–${formatPhasePace(phase.targetPaceMax)}/km")
+    }
+    if (phase.targetHRMin != null && phase.targetHRMax != null) {
+        stats.add("${phase.targetHRMin}–${phase.targetHRMax} bpm")
+    }
+    val header = stats.joinToString(" • ").ifBlank { "${phase.effort.replaceFirstChar { it.uppercase() }} effort" }
+    val instructions = phase.phaseInstructions?.trim()?.takeIf { it.isNotBlank() }
+    return if (instructions != null) "$header — $instructions" else header
+}
+
+private fun formatPhasePace(secondsPerKm: Int): String {
+    val minutes = secondsPerKm / 60
+    val seconds = secondsPerKm % 60
+    return String.format(java.util.Locale.US, "%d:%02d", minutes, seconds)
 }
 
 /**

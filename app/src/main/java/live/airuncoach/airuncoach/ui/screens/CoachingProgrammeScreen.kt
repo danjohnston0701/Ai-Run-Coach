@@ -1,3 +1,5 @@
+
+
 package live.airuncoach.airuncoach.ui.screens
 
 import androidx.annotation.DrawableRes
@@ -465,12 +467,13 @@ fun TrainingPlanDashboardScreen(
     }
 
     // Auto-open adaptation review screen when pending adaptations are present.
-    // Fires once per plan opening — once navigated, the flag prevents re-triggering
-    // if the user returns to this screen with adaptations still pending.
-    var hasAutoNavigatedToAdaptations by remember { mutableStateOf(false) }
+    // Fires once per plan opening — the guard lives in the ViewModel (see
+    // tryConsumeAutoOpenAdaptations) rather than a Composable `remember`, because this
+    // screen is disposed and recomposed fresh every time adaptation_review is pushed on
+    // top and then popped, which would otherwise reset a `remember`-based guard and
+    // re-fire this effect on the stale pre-refresh pendingAdaptationsCount value.
     LaunchedEffect(pendingAdaptationsCount) {
-        if (pendingAdaptationsCount > 0 && !hasAutoNavigatedToAdaptations) {
-            hasAutoNavigatedToAdaptations = true
+        if (pendingAdaptationsCount > 0 && viewModel.tryConsumeAutoOpenAdaptations()) {
             onViewAdaptations(planId)
         }
     }
