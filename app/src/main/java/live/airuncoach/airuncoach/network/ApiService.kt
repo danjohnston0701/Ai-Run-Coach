@@ -130,6 +130,13 @@ interface ApiService {
     suspend fun getPaceUpdate(@Body request: PaceUpdate): PaceUpdateResponse
 
     /**
+     * One-time congratulatory message fired the moment a standalone run/walk crosses
+     * its target distance or target time (e.g. "You crushed that 5K!").
+     */
+    @POST("/api/coaching/target-reached")
+    suspend fun getTargetReachedCoaching(@Body request: TargetReachedRequest): TargetReachedResponse
+
+    /**
      * Live AI coaching message when a session plan trigger fires.
      * Replaces the pre-written template substitution with a genuine OpenAI call
      * that analyzes the athlete's actual live data at the moment the trigger fires.

@@ -46,15 +46,15 @@ ${ctx.terrainContext}${ctx.paceTrend}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a brief (1-2 sentences) split update. ${ctx.routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last walk or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${ctx.spokenSplitPace}) and${ctx.splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ctx.sessionSplitContext ? ' how their split compares to the session target pace.' : ctx.isTrainingSession ? ` how this split relates to the ${ctx.workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${ctx.hasRoute === true && ctx.isOnHill ? 'Acknowledge the hill effort. ' : ''}${ctx.paceTrend ? 'Comment on their pace trend.' : ''}`
+Give a brief (1-2 sentences) split update. ${ctx.routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last walk or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${ctx.spokenSplitPace}) and${ctx.splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ctx.sessionSplitContext ? ' how their split compares to the session target pace.' : ctx.isTrainingSession ? ` how this split relates to the ${ctx.workoutType!.replace(/_/g, ' ')} session goal.` : ` ${ctx.topicInstruction}`} ${ctx.hasRoute === true && ctx.isOnHill ? 'Acknowledge the hill effort. ' : ''}`
     : `You are ${ctx.coachName}, an AI walking coach with a ${ctx.coachTone} style.${WALK_PROHIBITION}
 ${ctx.runnerContext ? `\nWalker context: ${ctx.runnerContext}` : ''}
-500m check-in: Walker is at ${formatDistanceForCoaching(ctx.distance)}, pace ${ctx.spokenCurrentPace}, ${ctx.timeFormatted} elapsed.
+500m check-in: Walker is at ${formatDistanceForCoaching(ctx.distance)}, pace ${ctx.spokenCurrentPace}, ${ctx.timeFormatted} elapsed.${ctx.hrContext}
 ${ctx.terrainContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a very brief (1-2 sentences) walking check-in. MUST cite their pace (${ctx.spokenCurrentPace}) and distance (${formatDistanceForCoaching(ctx.distance)}). ${ctx.hasRoute === true && ctx.isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+Give a very brief (1-2 sentences) walking check-in. MUST cite their pace (${ctx.spokenCurrentPace}) and distance (${formatDistanceForCoaching(ctx.distance)}) — but if heart rate context above stands out, briefly reference that too instead of only pace. ${ctx.hasRoute === true && ctx.isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Keep walk updates brief but ALWAYS cite the walker's actual numbers (pace, split time, distance). When walking history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(ctx.hasRoute || (typeof ctx.currentGrade === 'number' && Math.abs(ctx.currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the walker's experience level and the tone directive below.${WALK_PROHIBITION}
 

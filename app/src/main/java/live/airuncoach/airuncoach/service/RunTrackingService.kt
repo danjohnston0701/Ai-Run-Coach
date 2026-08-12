@@ -132,6 +132,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var activeGoals: List<ActiveGoalInfo> = emptyList()  // Goals for AI coaching context
     private var lastPhase: CoachingPhase? = null
     private var last500mMilestone = 0
+    // One-time guard so the target-reached congratulatory cue (fireTargetReachedCoaching)
+    // fires exactly once per run, at the tick the target distance is first crossed.
+    private var hasFiredTargetReachedCoaching = false
     // For walk sessions: tracks the last 500m boundary at which a split coaching cue fired.
     // Walk sessions get a coaching update every 500m (vs every 1km for runs) because walkers
     // move slower and need more frequent check-ins to stay engaged and on pace.
@@ -1451,6 +1454,7 @@ class RunTrackingService : Service(), SensorEventListener {
         pendingKmSplitCoaching = null  // Clear any deferred split from previous run
         last500mMilestone = 0  // Reset for new run
         lastWalk500mSplit = 0  // Reset for new walk session
+        hasFiredTargetReachedCoaching = false  // Reset for new run
         hasGarminData = false       // Will be set true once first watch biometric frame arrives
         garminDeviceName = null     // Re-captured on first frame new run
         lastPhase = null        // Reset for new run - allow first phase change to trigger
@@ -3300,6 +3304,61 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
             } else if (hasReachedTarget) {
                 Log.d("RunTrackingService", "Target distance reached at ${currentKm}km (target was ${(targetDistance!! / 1000.0).toInt()}km) — suppressing km split coaching")
+                fireTargetReachedCoaching()
+            }
+        }
+    }
+
+    /**
+     * One-time congratulatory message fired the moment a standalone run/walk crosses its
+     * target distance (e.g. "You crushed that 5K!"). Previously this moment went completely
+     * silent — checkForKmSplit()'s hasReachedTarget branch only logged and suppressed further
+     * split coaching, with no completion cue ever firing on the current live coaching
+     * endpoints. Mirrors fireFinalCoaching's final_100m precedent: a one-time guard
+     * (hasFiredTargetReachedCoaching) rather than the normal cooldown gate, since this is a
+     * singular guaranteed moment, not a recurring check-in.
+     */
+    private fun fireTargetReachedCoaching() {
+        if (hasFiredTargetReachedCoaching) return
+        hasFiredTargetReachedCoaching = true
+        hasCoachingFiredThisTick = true
+        recordCoachingFired()
+        lastCoachingTime = System.currentTimeMillis()
+        Log.d("RunTrackingService", "Firing target-reached completion coaching")
+        serviceScope.launch {
+            try {
+                val elapsedMs = getActiveRunDuration()
+                val elapsedSec = elapsedMs / 1000.0
+                val distKm = totalDistance / 1000.0
+                val currentAvgPaceStr = if (distKm > 0 && elapsedSec > 0) {
+                    formatPace(elapsedSec / distKm)
+                } else "0:00"
+
+                val request = TargetReachedRequest(
+                    distance = distKm,
+                    targetDistance = targetDistance?.let { it / 1000.0 },
+                    elapsedTime = elapsedSec.toLong(),
+                    targetTime = targetTime?.let { (it / 1000).toInt() },
+                    currentPace = currentAvgPaceStr,
+                    coachName = currentUser?.coachName,
+                    coachTone = currentUser?.coachTone,
+                    coachGender = currentUser?.coachGender,
+                    coachAccent = currentUser?.coachAccent,
+                    runnerName = currentUser?.name,
+                    activityType = currentActivityType,
+                    userId = currentUser?.id
+                )
+                val response = apiService.getTargetReachedCoaching(request)
+                coachingHistory.add(AiCoachingNote(
+                    time = getActiveRunDuration(),
+                    message = "Target reached: ${response.message}"
+                ))
+                Log.d("RunTrackingService", "Target-reached coaching response: ${response.message}")
+                if (!isMuted) {
+                    playCoachingAudio(response.audio, response.format, response.message)
+                }
+            } catch (e: Exception) {
+                Log.e("RunTrackingService", "Failed to get target-reached coaching", e)
             }
         }
     }

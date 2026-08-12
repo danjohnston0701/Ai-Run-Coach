@@ -712,11 +712,34 @@ export async function generatePaceUpdate(params: {
   // resolveActivityType() below accepts either.
   activityType?: string;
   sessionType?: string;
+  // Whole-run average pace, distinct from `currentPace` — some clients (e.g. Android) send
+  // the average pace value itself in `currentPace` for split updates; others send the true
+  // live/instantaneous pace there and the average separately here. Prefer this when present.
+  averagePace?: string;
+  // Explicit terrain classifier ("uphill"|"downhill"|"flat"|"rolling") for clients that don't
+  // send raw GPS grade — used as a fallback when `currentGrade` isn't available.
+  terrainContext?: string;
+  // Heart-rate trend since the last coaching cue — lets the coach reference effort/recovery
+  // instead of only pace.
+  hrTrend?: 'rising' | 'falling' | 'stable';
+  // Cadence in steps per minute — always referenced when present, not just on training sessions.
+  cadence?: number;
+  // Client-computed pace trend across recent splits — overrides the km-split-derived calculation
+  // below when supplied.
+  paceTrendDirection?: 'slowing' | 'speeding_up' | 'consistent';
+  // Topic keys ("terrain" | "hr_trend" | "cadence" | "pace_trend") used in recent coaching
+  // messages this session, most-recent last — used to avoid repeating the same angle twice in a row.
+  recentCoachingTopics?: string[];
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory, heartRate, heartRateZoneTarget } = params;
   const workoutType = (params as any).workoutType as string | undefined;
   const accentRule = accentDirective((params as any).coachAccent);
 
+  // Whole-run average pace — prefer an explicit `averagePace` field; fall back to `currentPace`,
+  // which is the field Android has always populated with the average value for split updates.
+  const averagePaceResolved = params.averagePace || currentPace;
+
+  const hrTrend = params.hrTrend;
   // Build HR context for split coaching — only when athlete has an HR monitor
   let hrContext = '';
   if (heartRate && heartRate > 0) {
@@ -731,45 +754,69 @@ export async function generatePaceUpdate(params: {
       }
     }
   }
-  
+  if (hrTrend === 'rising') {
+    hrContext += hrContext ? ', trending upward' : `\n- Heart rate trending upward`;
+  } else if (hrTrend === 'falling') {
+    hrContext += hrContext ? ', recovering / trending down' : `\n- Heart rate recovering, trending down`;
+  }
+
   const progress = Math.round((distance / targetDistance) * 100);
   const timeMin = Math.floor(elapsedTime / 60);  // kept for backward compat
   const timeFormatted = formatElapsedForTTS(elapsedTime); // full "X min Y sec" string
-  
-  // ONLY include terrain context when the runner has a planned route
+
+  // Terrain context — built from live GPS grade whenever it's meaningfully non-flat, regardless
+  // of whether this session has a planned route (previously gated on hasRoute===true, which
+  // silently dropped terrain commentary for routeless free runs even when grade data existed).
+  // Falls back to a client-supplied classifier string when no grade figure is available.
   let terrainContext = '';
-  if (hasRoute === true) {
-    if (typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 5) {
-      if (currentGrade > 5) {
-        terrainContext = `Currently climbing a steep ${currentGrade.toFixed(1)}% grade hill. `;
-      } else if (currentGrade < -5) {
-        terrainContext = `Currently descending a steep ${Math.abs(currentGrade).toFixed(1)}% grade. `;
-      }
-    }
-    if (totalElevationGain && totalElevationGain > 20) {
-      terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
-    }
+  const hasGradeSignal = typeof currentGrade === 'number' && currentGrade !== null;
+  if (hasGradeSignal && Math.abs(currentGrade!) > 5) {
+    terrainContext = currentGrade! > 5
+      ? `Currently climbing a steep ${currentGrade!.toFixed(1)}% grade hill. `
+      : `Currently descending a steep ${Math.abs(currentGrade!).toFixed(1)}% grade. `;
+  } else if (hasGradeSignal && Math.abs(currentGrade!) > 3) {
+    terrainContext = currentGrade! > 0
+      ? `On a gentle ${currentGrade!.toFixed(1)}% incline. `
+      : `On a gentle ${Math.abs(currentGrade!).toFixed(1)}% decline. `;
+  } else if (params.terrainContext && params.terrainContext !== 'flat') {
+    const terrainLabels: Record<string, string> = {
+      uphill: 'Currently on an uphill stretch. ',
+      downhill: 'Currently on a downhill stretch. ',
+      rolling: 'On rolling, undulating terrain. ',
+    };
+    terrainContext = terrainLabels[params.terrainContext] ?? '';
   }
-  
+  if (hasRoute === true && totalElevationGain && totalElevationGain > 20) {
+    terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
+  }
+
   // Walk/run vocabulary — established early so paceTrend and other context strings use it
   const activityType = resolveActivityType(params as any);
   const isWalkSession = activityType === 'walk';
   const { person: personLabel } = activityVocab(activityType);
 
-  // Build pace trend context for splits
+  // Build pace trend context for splits — prefer a client-computed trend, else derive it
+  // from the last two km splits.
   let paceTrend = '';
-  if (isSplit && kmSplits && kmSplits.length >= 2) {
+  const personWord = isWalkSession ? 'Walker' : 'Runner';
+  if (isSplit && params.paceTrendDirection) {
+    paceTrend = params.paceTrendDirection === 'slowing'
+      ? `${personWord} is gradually slowing down. `
+      : params.paceTrendDirection === 'speeding_up'
+        ? `${personWord} is speeding up. `
+        : `${personWord} is maintaining consistent pace. `;
+  } else if (isSplit && kmSplits && kmSplits.length >= 2) {
     const lastTwo = kmSplits.slice(-2);
     if (lastTwo.length === 2) {
       const prevTime = lastTwo[0].time;
       const currTime = lastTwo[1].time;
       const diff = currTime - prevTime;
       if (diff > 10) {
-        paceTrend = `${isWalkSession ? 'Walker' : 'Runner'} is slowing down compared to previous kilometer. `;
+        paceTrend = `${personWord} is slowing down compared to previous kilometer. `;
       } else if (diff < -10) {
-        paceTrend = `${isWalkSession ? 'Walker' : 'Runner'} is speeding up compared to previous kilometer. `;
+        paceTrend = `${personWord} is speeding up compared to previous kilometer. `;
       } else {
-        paceTrend = `${isWalkSession ? 'Walker' : 'Runner'} is maintaining consistent pace. `;
+        paceTrend = `${personWord} is maintaining consistent pace. `;
       }
     }
   }
@@ -779,7 +826,8 @@ export async function generatePaceUpdate(params: {
   // — it is no longer restricted to only planned navigation routes.
   // Only ban terrain mentions if we genuinely have no elevation data AND no current grade signal.
   const hasGradeData = currentGrade !== undefined && currentGrade !== null && Math.abs(currentGrade) > 0.5;
-  const noTerrainRule = (hasRoute || hasGradeData) ? '' : `
+  const hasExplicitTerrain = !!(params.terrainContext && params.terrainContext !== 'flat');
+  const noTerrainRule = (hasRoute || hasGradeData || hasExplicitTerrain) ? '' : `
 CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'run'}. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain characteristics — you have no information about the terrain. Focus only on pace, effort, form, and motivation.`;
   
   // Build runner/walker profile + history context
@@ -791,7 +839,7 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     runnerContext += buildRunHistoryContext(runHistory, currentPace, isWalkSession);
   }
 
-  const spokenCurrentPace = currentPace ? formatPaceForTTS(currentPace) : null;  // overall average pace - already includes "per kilometer"
+  const spokenCurrentPace = averagePaceResolved ? formatPaceForTTS(averagePaceResolved) : null;  // overall average pace - already includes "per kilometer"
   const spokenSplitPace = formatPaceForTTS(splitPace);       // this km's split pace
   
   // Training session context — builds a plan-aware framing block for the AI
@@ -804,7 +852,7 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
   // sessionTargetPaceMin / sessionTargetPaceMax are in sec/km and come from the coaching plan's targetMetrics.
   const sessionTargetPaceMinSec = (params as any).sessionTargetPaceMin as number | undefined;
   const sessionTargetPaceMaxSec = (params as any).sessionTargetPaceMax as number | undefined;
-  const currentCadence = (params as any).cadence as number | undefined;
+  const currentCadence = params.cadence;
 
   // Build session pace context for training runs — pass raw numbers, let GPT interpret
   let sessionSplitContext = '';
@@ -822,9 +870,10 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     }
   }
 
-  // Cadence context for training sessions (especially relevant for tempo/threshold)
+  // Cadence context — always included when a reading is present (previously gated to training
+  // sessions only, which silently dropped cadence data for free runs even when it was sent).
   // Pass raw cadence data without pre-interpreted verdicts — let GPT decide if cadence needs comment
-  const cadenceContext = (isTrainingSession && currentCadence && currentCadence > 0)
+  const cadenceContext = (currentCadence && currentCadence > 0)
     ? `\n- Current cadence: ${currentCadence} spm${workoutType === 'tempo' || workoutType === 'threshold' ? ` (for ${workoutType.replace(/_/g, ' ')} effort)` : ''}`
     : '';
 
@@ -855,6 +904,43 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     }
   }
 
+  // ── Dynamic topic selection for free-run split updates (no target pace, no training plan) ──
+  // Without this, the closing instruction below defaults to "mention pace and one other data
+  // point" every time, which is exactly what produces flat, pace-only coaching. Pick whichever
+  // signal is most notable right now, and avoid repeating the same angle as the last update.
+  // Only applies when nothing has already forced the topic (target-pace verdict / training
+  // framing, both of which remain mandatory and unchanged below).
+  let topicInstruction = 'at least one other data point (progress, time, or pace trend).';
+  if (!splitTargetVerdict && !sessionSplitContext && !isTrainingSession) {
+    const recentTopics = params.recentCoachingTopics ?? [];
+    const lastTopic = recentTopics.length > 0 ? recentTopics[recentTopics.length - 1] : undefined;
+    const candidates: Array<{ key: string; weight: number; instruction: string }> = [];
+    if (terrainContext) {
+      candidates.push({ key: 'terrain', weight: 4, instruction: 'the terrain they are on right now (e.g. easing off on a climb, or pushing the pace on a flat/descent)' });
+    }
+    if (hrTrend === 'rising' || hrTrend === 'falling') {
+      candidates.push({
+        key: 'hr_trend', weight: 3,
+        instruction: hrTrend === 'rising'
+          ? 'their heart rate trending upward — talk about effort and breathing, not just pace'
+          : 'their heart rate recovering / trending down — acknowledge it',
+      });
+    }
+    if (cadenceContext && !isWalkSession) {
+      // Cadence coaching is run-only — walk sessions never get cadence-target commentary
+      // (see the WALK SESSION POLICY / prohibition elsewhere in the coaching prompts).
+      candidates.push({ key: 'cadence', weight: 2, instruction: 'their cadence, but only if it stands out as notably low or high — otherwise skip it' });
+    }
+    if (paceTrend && !paceTrend.includes('maintaining consistent')) {
+      candidates.push({ key: 'pace_trend', weight: 2, instruction: 'their pace trend over recent splits (speeding up or slowing down)' });
+    }
+    const eligible = lastTopic ? candidates.filter(c => c.key !== lastTopic) : candidates;
+    const pool = (eligible.length > 0 ? eligible : candidates).sort((a, b) => b.weight - a.weight);
+    if (pool.length > 0) {
+      topicInstruction = `${pool[0].instruction} as the main focus of this update — do not just restate the pace.`;
+    }
+  }
+
   // Build Route Intelligence context block (when known route is matched)
   const routeCtxBlock = params.routeIntelligence
     ? buildRouteIntelligenceContext(
@@ -866,13 +952,13 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
       )
     : '';
 
-  // Calculate current pace in seconds/km for context directive
+  // Calculate current (average) pace in seconds/km for context directive
   const currentPaceSecPerKm = (() => {
-    if (!currentPace) {
-      console.warn(`[generatePaceUpdate] currentPace missing from request body — check client field casing (expected "currentPace")`);
+    if (!averagePaceResolved) {
+      console.warn(`[generatePaceUpdate] currentPace/averagePace missing from request body — check client field casing (expected "currentPace" or "averagePace")`);
       return undefined;
     }
-    const parts = currentPace.split(':').map(Number);
+    const parts = averagePaceResolved.split(':').map(Number);
     return parts.length === 2 ? parts[0] * 60 + parts[1] : undefined;
   })();
 
@@ -882,7 +968,7 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     spokenCurrentPace, targetPaceParam, spokenTargetPace, hrContext, cadenceContext,
     splitTargetVerdict, trainingSessionContext, routeCtxBlock, terrainContext, paceTrend,
     noTerrainRule, sessionSplitContext, isTrainingSession, workoutType, hasRoute, isOnHill,
-    runnerContext, currentGrade, fitnessLevel, heartRate, currentPaceSecPerKm,
+    runnerContext, currentGrade, fitnessLevel, heartRate, currentPaceSecPerKm, topicInstruction,
     runnerProfile: params.runnerProfile, accentRule,
   };
   const { system, user } = (isWalkSession ? walkPrompts : runPrompts).paceUpdatePrompt(promptCtx);
@@ -5488,7 +5574,7 @@ Rules:
 5. Keep it natural and conversational — this is spoken aloud while the runner is moving.
 ${cadence ? `\nCurrent cadence: ${cadence} spm` : ''}
 ${heartRate ? `\nCurrent heart rate: ${heartRate} bpm` : ''}
-${isOnHill || (currentGrade && Math.abs(currentGrade) > 3) ? `\nCurrently ${currentGrade && currentGrade > 0 ? 'climbing' : 'descending'} (grade: ${currentGrade?.toFixed(1)}%)` : ''}
+${isUphill || (currentGrade && Math.abs(currentGrade) > 3) ? `\nCurrently ${currentGrade && currentGrade > 0 ? 'climbing' : 'descending'} (grade: ${currentGrade?.toFixed(1)}%)` : ''}
 ${fatigueLevel ? `\nFatigue level: ${fatigueLevel}` : ''}
 ${runPhase ? `\nRun phase: ${runPhase}` : ''}`;
 
@@ -5557,7 +5643,7 @@ The ${isWalkSession ? 'walker' : 'runner'} just reached ${milestonePercent}% of 
 
 Context for your response:
 - Progress: ${milestonePercent}% done
-- Pace: ${spokenCurrentPace}
+- Pace: ${spokenPace}
 ${targetTime ? `- Projected finish: ${projectedFinishTime ? Math.floor(projectedFinishTime / 60) + ' minutes' : 'unknown'} vs target ${Math.floor(targetTime / 60)} minutes` : ''}
 ${isAerobicMilestone ? '- This is an aerobic base-building session' : ''}
 
@@ -5759,6 +5845,13 @@ The ${isWalkSession ? 'walker' : 'runner'} has ${remainingMeters || 500} meters 
     }
 
     case 'final_100m': {
+      let targetContext100 = '';
+      if (targetTime && targetTimeCategory === 'on_track') {
+        targetContext100 = "They're on track to hit their goal time — this final push locks it in.";
+      } else if (targetTime && targetTimeCategory === 'strong_effort') {
+        targetContext100 = "Regardless of the final time, this has been a strong effort — that matters more right now.";
+      }
+
       typePrompt = isWalkSession
         ? `COACHING TYPE: Final 100 meters
 

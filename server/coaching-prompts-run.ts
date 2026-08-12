@@ -51,6 +51,10 @@ export interface PaceUpdatePromptContext {
   currentPaceSecPerKm?: number;
   runnerProfile?: string | null;
   accentRule: string;
+  // Dynamically-chosen closing instruction for what the split update should focus on beyond
+  // the split pace itself (terrain / HR trend / cadence / pace trend), or the generic fallback
+  // phrase when nothing else is notable. See generatePaceUpdate() in ai-service.ts.
+  topicInstruction: string;
 }
 
 export function paceUpdatePrompt(ctx: PaceUpdatePromptContext): { system: string; user: string } {
@@ -69,15 +73,15 @@ ${ctx.terrainContext}${ctx.paceTrend}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a brief (1-2 sentences) split update. ${ctx.routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${ctx.spokenSplitPace}) and${ctx.splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ctx.sessionSplitContext ? ' how their split compares to the session target pace.' : ctx.isTrainingSession ? ` how this split relates to the ${ctx.workoutType!.replace(/_/g, ' ')} session goal.` : ' at least one other data point (progress, time, or pace trend).'} ${ctx.cadenceContext && (ctx.workoutType === 'tempo' || ctx.workoutType === 'threshold') ? 'If cadence is a concern, include a brief cadence cue. ' : ''}${ctx.hasRoute === true && ctx.isOnHill ? 'Acknowledge the hill effort. ' : ''}${ctx.paceTrend ? 'Comment on their pace trend.' : ''}`
+Give a brief (1-2 sentences) split update. ${ctx.routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${ctx.spokenSplitPace}) and${ctx.splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ctx.sessionSplitContext ? ' how their split compares to the session target pace.' : ctx.isTrainingSession ? ` how this split relates to the ${ctx.workoutType!.replace(/_/g, ' ')} session goal.` : ` ${ctx.topicInstruction}`} ${ctx.cadenceContext && (ctx.workoutType === 'tempo' || ctx.workoutType === 'threshold') ? 'If cadence is a concern, include a brief cadence cue. ' : ''}${ctx.hasRoute === true && ctx.isOnHill ? 'Acknowledge the hill effort. ' : ''}`
     : `You are ${ctx.coachName}, an AI running coach with a ${ctx.coachTone} style.
 ${ctx.runnerContext ? `\nRunner context: ${ctx.runnerContext}` : ''}
-500m check-in: Runner is at ${formatDistanceForCoaching(ctx.distance)}, pace ${ctx.spokenCurrentPace}, ${ctx.timeFormatted} elapsed.
+500m check-in: Runner is at ${formatDistanceForCoaching(ctx.distance)}, pace ${ctx.spokenCurrentPace}, ${ctx.timeFormatted} elapsed.${ctx.hrContext}${ctx.cadenceContext}
 ${ctx.terrainContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${ctx.spokenCurrentPace}) and distance (${formatDistanceForCoaching(ctx.distance)}). ${ctx.hasRoute === true && ctx.isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
+Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${ctx.spokenCurrentPace}) and distance (${formatDistanceForCoaching(ctx.distance)}) — but if heart rate or cadence context above stands out, briefly reference that too instead of only pace. ${ctx.hasRoute === true && ctx.isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When running history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(ctx.hasRoute || (typeof ctx.currentGrade === 'number' && Math.abs(ctx.currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the runner's experience level and the tone directive below.
 

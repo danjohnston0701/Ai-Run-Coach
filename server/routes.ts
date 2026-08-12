@@ -11532,6 +11532,26 @@ function transformRunForAndroid(run: any) {
       );
       req.body.coachTone = effectiveTone;
 
+      // Accept snake_case aliases for iOS clients — see iOS_API_CASING_CONTRACT_BRIEF.md.
+      // Fill the camelCase field only when it's actually missing so Android's existing
+      // camelCase payloads are untouched.
+      const snakeCaseAliases: Record<string, string> = {
+        currentPace: 'current_pace',
+        splitPace: 'split_pace',
+        targetPace: 'target_pace',
+        averagePace: 'average_pace_so_far',
+        cadence: 'cadence_spm',
+        terrainContext: 'terrain_context',
+        hrTrend: 'hr_trend_direction',
+        paceTrendDirection: 'pace_trend_direction',
+        recentCoachingTopics: 'recent_coaching_topics',
+      };
+      for (const [camel, snake] of Object.entries(snakeCaseAliases)) {
+        if (req.body[camel] === undefined && req.body[snake] !== undefined) {
+          req.body[camel] = req.body[snake];
+        }
+      }
+
       // Sanitize numeric fields to prevent type errors in AI service
       // Ensure currentGrade is a number or undefined, not null or string
       if (req.body.currentGrade !== undefined && typeof req.body.currentGrade !== 'number') {
@@ -11555,7 +11575,7 @@ function transformRunForAndroid(run: any) {
       }
 
       recordFired(coachingUserId, cooldown.isMilestone);
-      res.json({ 
+      res.json({
         message,
         nextPace: req.body.currentPace, // Fallback
         audio: base64Audio,
@@ -11564,6 +11584,66 @@ function transformRunForAndroid(run: any) {
     } catch (error: any) {
       console.error("Pace update coaching error:", error);
       res.status(500).json({ error: "Failed to get pace update" });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Target Reached — one-time congratulatory message fired the moment a standalone
+  // run/walk crosses its target distance or target time (e.g. "You crushed that 5K!").
+  // generateCompletionSummary()/isRunCompleted() in ai-service.ts already existed for this
+  // purpose but were previously wired only into the legacy /api/ai/* route family, which no
+  // current client calls — this is the first time it's exposed on the live /api/coaching/*
+  // surface that RunTrackingService.kt actually uses. The client fires this exactly once,
+  // at the moment it detects the crossing, so no isRunCompleted() re-check is done here.
+  // ─────────────────────────────────────────────────────────────────────────
+  app.post("/api/coaching/target-reached", async (req: Request, res: Response) => {
+    try {
+      const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
+
+      // Resolve voice settings from DB — overrides stale client values
+      const { coachGender, coachAccent, coachTone, coachName } = await resolveVoiceSettings(req.body);
+      req.body.coachGender = coachGender;
+      req.body.coachAccent = coachAccent;
+      req.body.coachTone = coachTone;
+      req.body.coachName = coachName;
+
+      // Accept snake_case aliases for iOS clients — see iOS_API_CASING_CONTRACT_BRIEF.md.
+      const targetReachedAliases: Record<string, string> = {
+        currentPace: 'current_pace',
+        targetDistance: 'target_distance',
+        targetTime: 'target_time',
+        elapsedTime: 'elapsed_time',
+        activityType: 'activity_type',
+        runnerName: 'runner_name',
+      };
+      for (const [camel, snake] of Object.entries(targetReachedAliases)) {
+        if (req.body[camel] === undefined && req.body[snake] !== undefined) {
+          req.body[camel] = req.body[snake];
+        }
+      }
+
+      const aiService = await import("./ai-service");
+      const message = await aiService.generateCompletionSummary(req.body);
+
+      let base64Audio: string | null = null;
+      try {
+        const voice = mapCoachVoice(coachGender, coachAccent, coachTone);
+        const ttsInstructions = await getCoachTTSInstructions(coachAccent, coachTone, coachGender, coachName);
+        const audioBuffer = await aiService.generateTTS(message, voice, ttsInstructions, coachAccent, coachGender);
+        base64Audio = audioBuffer.toString('base64');
+      } catch (ttsError) {
+        console.warn("Target-reached TTS failed, returning text only:", ttsError);
+      }
+
+      recordFired(coachingUserId, true);
+      res.json({
+        message,
+        audio: base64Audio,
+        format: base64Audio ? 'mp3' : null
+      });
+    } catch (error: any) {
+      console.error("Target reached coaching error:", error);
+      res.status(500).json({ error: "Failed to get target-reached coaching" });
     }
   });
 
@@ -11763,6 +11843,32 @@ function transformRunForAndroid(run: any) {
       req.body.coachAccent = coachAccent;
       req.body.coachTone   = dbCoachTone;   // DB-authoritative tone (base; may be overridden by getPhaseTone below)
       req.body.coachName   = dbCoachName;   // DB-authoritative coach name
+
+      // Accept snake_case aliases for iOS clients — see iOS_API_CASING_CONTRACT_BRIEF.md,
+      // which already flagged this route as "same unguarded pattern, not yet observed to
+      // crash" for currentPace/targetPace. Fill the camelCase field only when missing.
+      const eliteSnakeCaseAliases: Record<string, string> = {
+        coachingType: 'coaching_type',
+        currentPace: 'current_pace',
+        averagePace: 'average_pace_so_far',
+        targetPace: 'target_pace',
+        cadence: 'cadence_spm',
+        activityType: 'activity_type',
+        milestonePercent: 'milestone_percent',
+        paceTrendDirection: 'pace_trend_direction',
+        paceTrendDeltaPerKm: 'pace_trend_delta_per_km',
+        consecutiveConsistentSplits: 'consecutive_consistent_splits',
+        isNegativeSplitting: 'is_negative_splitting',
+        fastestSplitKm: 'fastest_split_km',
+        fastestSplitPace: 'fastest_split_pace',
+        targetTimeCategory: 'target_time_category',
+      };
+      for (const [camel, snake] of Object.entries(eliteSnakeCaseAliases)) {
+        if (req.body[camel] === undefined && req.body[snake] !== undefined) {
+          req.body[camel] = req.body[snake];
+        }
+      }
+
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateEliteCoaching({ ...req.body, runnerProfile });
