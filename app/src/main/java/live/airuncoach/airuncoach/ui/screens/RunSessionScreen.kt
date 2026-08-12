@@ -302,7 +302,7 @@ fun RunSessionScreen(
             enter = fadeIn(animationSpec = tween(300)),
             exit = fadeOut(animationSpec = tween(300))
         ) {
-            RunSavingOverlay()
+            RunSavingOverlay(activityType = sessionActivityType)
         }
 
         LazyColumn(
@@ -3068,7 +3068,8 @@ private fun computeStabilityProxy(cadence: Int?, paceSec: Int?): Int {
 }
 
 @Composable
-private fun RunSavingOverlay() {
+private fun RunSavingOverlay(activityType: String = "run") {
+    val isWalk = activityType.lowercase() == "walk"
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -3121,16 +3122,16 @@ private fun RunSavingOverlay() {
                 )
             }
             
-            // Run Saving text
+            // Saving text
             Text(
-                text = "Run Saving",
+                text = if (isWalk) "Walk Saving" else "Run Saving",
                 style = MaterialTheme.typography.headlineMedium,
                 color = Colors.textPrimary
             )
-            
-            // Processing your run data text
+
+            // Processing your run/walk data text
             Text(
-                text = "We are processing your run data",
+                text = "We are processing your ${if (isWalk) "walk" else "run"} data",
                 style = MaterialTheme.typography.bodyLarge,
                 color = Colors.textSecondary
             )

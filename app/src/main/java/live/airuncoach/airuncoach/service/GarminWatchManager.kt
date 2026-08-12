@@ -6,6 +6,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -371,6 +373,35 @@ class GarminWatchManager(
     // arrives so the user can open phone/watch in any order.
     private var cachedPreparedRunPayload: Map<String, Any>? = null
 
+    // ── Cached session type ("run" | "walk") ──────────────────────────────────
+    // Set by sendSessionType(), called as soon as the phone-side session-setup
+    // screen knows its activity type (setRunConfig()) — NOT gated behind the
+    // user explicitly tapping "Prepare Run on Watch". The watch's own native
+    // Record.createSession() call (its independently-synced Garmin Connect
+    // activity, separate from our backend) reads this from its own storage the
+    // instant its physical START button is pressed, which can happen before any
+    // BLE round-trip completes — so it must already be current by then, not just
+    // eventually. Resent on "watchReady" for the same open-in-any-order reason
+    // as cachedPreparedRunPayload above.
+    private var cachedSessionType: String? = null
+
+    // ── sessionType delivery retry ────────────────────────────────────────────
+    // ConnectIQ.sendMessage() is fire-and-forget — no delivery guarantee, and this
+    // codebase already has multiple confirmed cases of it silently dropping on
+    // constrained BT stacks (FR55 in particular; see the watch-side "start" command
+    // retry in RunView.mc for the mirror-image problem). A dropped sessionType
+    // message is exactly what would let a correctly-prepared walk still upload to
+    // Garmin Connect as a Run — the watch has no way to notice it never arrived. So
+    // this resends up to SESSION_TYPE_RETRY_MAX times until the watch acks receipt
+    // (see "sessionTypeAck" below), same pattern as the watch's own start/stop retry.
+    private val sessionTypeRetryHandler = Handler(Looper.getMainLooper())
+    private var sessionTypeRetryRunnable: Runnable? = null
+    private var sessionTypeAcked = true
+    private var pendingSessionType: String? = null
+    private var sessionTypeRetryCount = 0
+    private val SESSION_TYPE_RETRY_MAX = 3
+    private val SESSION_TYPE_RETRY_DELAY_MS = 1500L
+
     // ── Private SDK handles ───────────────────────────────────────────────────
     private var connectIQ: ConnectIQ? = null
     private var connectedDevice: IQDevice? = null
@@ -540,6 +571,49 @@ class GarminWatchManager(
         Log.d(TAG, "Pending prepared-run cache cleared")
     }
 
+    /**
+     * Push the current activity type ("run" | "walk") to the watch as early as the phone
+     * knows it — i.e. from setRunConfig(), not only from the explicit "Prepare Run on Watch"
+     * flow (sendPreparedRun). Without this, a user who configures a walk on the phone but
+     * presses the watch's own physical START button (never having tapped "send to watch")
+     * gets a watch-recorded Garmin Connect activity that's still classified as a Run: the
+     * watch creates its native ActivityRecording session synchronously on that button press,
+     * before there's any chance for a BLE round-trip, so whatever sessionType is already in
+     * the watch's storage at that instant is what sticks for the whole activity.
+     */
+    fun sendSessionType(sessionType: String) {
+        cachedSessionType = sessionType
+        pendingSessionType = sessionType
+        sessionTypeAcked = false
+        sessionTypeRetryCount = 0
+        sessionTypeRetryRunnable?.let { sessionTypeRetryHandler.removeCallbacks(it) }
+        transmitSessionTypeAttempt()
+    }
+
+    private fun transmitSessionTypeAttempt() {
+        val sessionType = pendingSessionType ?: return
+        sendToWatch(mapOf("type" to "sessionType", "sessionType" to sessionType))
+        Log.d(TAG, "Sent sessionType to watch: $sessionType (attempt ${sessionTypeRetryCount + 1}/$SESSION_TYPE_RETRY_MAX)")
+
+        if (sessionTypeRetryCount >= SESSION_TYPE_RETRY_MAX - 1) { return }
+        sessionTypeRetryCount++
+        val runnable = Runnable {
+            if (!sessionTypeAcked && pendingSessionType == sessionType) {
+                transmitSessionTypeAttempt()
+            }
+        }
+        sessionTypeRetryRunnable = runnable
+        sessionTypeRetryHandler.postDelayed(runnable, SESSION_TYPE_RETRY_DELAY_MS)
+    }
+
+    private fun onSessionTypeAcked() {
+        sessionTypeAcked = true
+        pendingSessionType = null
+        sessionTypeRetryRunnable?.let { sessionTypeRetryHandler.removeCallbacks(it) }
+        sessionTypeRetryRunnable = null
+        Log.d(TAG, "Watch acked sessionType receipt")
+    }
+
     fun sendSessionEnded() {
         sendToWatch(mapOf("type" to "sessionEnded"))
     }
@@ -556,6 +630,22 @@ class GarminWatchManager(
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
+
+    // Persists watch-reported crash breadcrumbs to a small rolling file in app storage
+    // so they're retrievable after the fact (e.g. via `adb shell run-as ... cat files/...`)
+    // rather than only living in logcat's ring buffer until it scrolls away.
+    private fun logWatchCrash(message: String) {
+        try {
+            val file = java.io.File(context.filesDir, "garmin_watch_crashes.log")
+            file.appendText("${java.time.Instant.now()} $message\n")
+            val lines = file.readLines()
+            if (lines.size > 200) {
+                file.writeText(lines.takeLast(200).joinToString("\n") + "\n")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist watch crash log: ${e.message}")
+        }
+    }
 
     private fun sendToWatch(payload: Map<String, Any>) {
         val device = connectedDevice ?: return
@@ -691,6 +781,13 @@ class GarminWatchManager(
                         return
                     }
 
+                    // Watch confirms it stored a "sessionType"/"preparedRun" message — cancels
+                    // the resend loop in sendSessionType(). See that function's retry comment.
+                    if (action == "sessionTypeAck") {
+                        onSessionTypeAcked()
+                        return
+                    }
+
                     // Watch notifies phone immediately after saving an offline run batch,
                     // and also when the background service fails to upload (retry signal).
                     // Shows dashboard banner + heads-up push notification.
@@ -702,6 +799,15 @@ class GarminWatchManager(
                     }
 
                     if (action == "watchReady") {
+                        // The watch has no retrievable crash log of its own for a sideloaded/dev
+                        // build — it persists a one-line breadcrumb across its own relaunch and
+                        // forwards it here on next connect. Log it and persist it phone-side so
+                        // it survives beyond logcat's ring buffer.
+                        val lastCrash = map["lastCrash"] as? String
+                        if (lastCrash != null) {
+                            Log.e(TAG, "Garmin watch reported a crash from its previous run: $lastCrash")
+                            logWatchCrash(lastCrash)
+                        }
                         // Read the hasPendingSync flag the watch now includes
                         val hasPending = map["hasPendingSync"] as? Boolean ?: false
                         if (hasPending) {
@@ -742,6 +848,13 @@ class GarminWatchManager(
                         cachedPreparedRunPayload?.let { payload ->
                             Log.d(TAG, "watchReady received — resending cached preparedRun to watch")
                             sendToWatch(payload)
+                        }
+                        // Resend the current session type too — a watch that reconnects
+                        // (e.g. after a BT drop) must have this before its next physical
+                        // START press, same reasoning as sendSessionType() above.
+                        cachedSessionType?.let { type ->
+                            Log.d(TAG, "watchReady received — resending cached sessionType to watch: $type")
+                            sendToWatch(mapOf("type" to "sessionType", "sessionType" to type))
                         }
                         // Also notify any active ViewModel so it can react
                         onWatchCommand?.invoke(action)

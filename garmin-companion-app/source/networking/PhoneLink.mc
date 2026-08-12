@@ -78,12 +78,17 @@ class PhoneLink {
     // hasPendingSync: true when App.Storage contains a buffered offline run batch.
     // Phone uses this to show a subtle "syncing your offline run" indicator on
     // the dashboard — it's already handled automatically but the user gets feedback.
-    function sendWatchReady(hasPendingSync) {
+    // lastCrash: optional breadcrumb (see RunView._recordCrash) from a caught
+    // exception on the PREVIOUS app run. Forwarded so it lands in the phone's
+    // logcat even without a USB cable to the watch — the watch itself has no
+    // retrievable crash log for a sideloaded/dev build.
+    function sendWatchReady(hasPendingSync, lastCrash) {
         var msg = {
             "type"           => "command",
             "action"         => "watchReady",
             "hasPendingSync" => hasPendingSync
         };
+        if (lastCrash != null) { msg["lastCrash"] = lastCrash; }
         _transmit(msg);
         Sys.println("PhoneLink tx watchReady (hasPendingSync=" + hasPendingSync + ")");
     }

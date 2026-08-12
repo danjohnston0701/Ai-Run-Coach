@@ -3852,15 +3852,25 @@ class RunTrackingService : Service(), SensorEventListener {
                     Log.d("RunTrackingService", "Timer stopped - not tracking")
                     return
                 }
-                
+
                 try {
                     // Update the run session every second regardless of location
                     updateRunSession()
-                    
-                    // Schedule next update in 1 second
-                    timerHandler.postDelayed(this, 1000)
                 } catch (e: Exception) {
                     Log.e("RunTrackingService", "Timer update failed", e)
+                } finally {
+                    // CRITICAL: reschedule unconditionally. The old code only rescheduled
+                    // inside the try block, after updateRunSession() — so a single exception
+                    // in that call (it's a large function: distance/pace math, coaching
+                    // triggers, phase detection, all sensitive to transient bad GPS data)
+                    // permanently killed the recurring tick with no recovery. The visible
+                    // symptom was the session screen freezing outright, since nothing else
+                    // ever restarted the timer. A transient GPS/location glitch (e.g. signal
+                    // loss under cover) is exactly the kind of one-off bad input that could
+                    // trip this — it must not be allowed to end the session's timer forever.
+                    if (isTracking) {
+                        timerHandler.postDelayed(this, 1000)
+                    }
                 }
             }
         }

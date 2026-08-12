@@ -67,6 +67,8 @@ class RunView extends Ui.View {
     private var _coachTargetPaceSec = 0.0;
     private var _statusMessage      = "";
     private var _statusTicks        = 0;
+    // Breadcrumb from _recordCrash() on the PREVIOUS app run, shown once on next open.
+    private var _pendingCrashMsg    = null;
 
     // Infrastructure
     private var _timer        = null;
@@ -215,6 +217,28 @@ class RunView extends Ui.View {
         _isSmallScreen = (ds.screenWidth <= 218);
         if (_isSmallScreen) { _screenPage = 1; }
         _initSimulatorMode();   // no-op in release, seeds preview data in simulator
+
+        // Real Garmin hardware exposes no crash log to sideloaded/dev-mode apps —
+        // Sys.println only reaches a USB/simulator console. Surface any breadcrumb
+        // left by _recordCrash() on the PREVIOUS run as an on-screen status message
+        // so a crash can be diagnosed without a cable. Cleared immediately so it
+        // only ever shows once.
+        var lastCrash = App.Storage.getValue("lastCrashInfo");
+        if (lastCrash != null) {
+            App.Storage.deleteValue("lastCrashInfo");
+            _pendingCrashMsg = lastCrash;
+        }
+    }
+
+    // Persist a compact breadcrumb describing an exception so it survives an app
+    // crash/relaunch. Called from catch blocks around code paths that were
+    // previously unguarded (e.g. onPhoneMessage) — the whole point is to catch
+    // and log rather than let the exception propagate and take the app down.
+    private function _recordCrash(context, e) {
+        var msg = context + ": " + e.toString();
+        if (msg.length() > 120) { msg = msg.substring(0, 120); }
+        Sys.println("CRASH-GUARD " + msg);
+        App.Storage.setValue("lastCrashInfo", msg);
     }
 
     // ── Simulator preview mode ────────────────────────────────────────────────
@@ -581,8 +605,17 @@ class RunView extends Ui.View {
 
     function onShow() {
         _phoneLink.register(method(:onPhoneMessage));
-        // Include hasPendingSync so phone dashboard shows a sync indicator
-        _phoneLink.sendWatchReady(_hasPendingOfflineBatch());
+        // Include hasPendingSync so phone dashboard shows a sync indicator, and forward
+        // any crash breadcrumb from the previous run so it lands in the phone's logcat.
+        _phoneLink.sendWatchReady(_hasPendingOfflineBatch(), _pendingCrashMsg);
+        // Also surface it on screen — real hardware has no accessible crash log for
+        // sideloaded apps, so this is the only way to see what went wrong without
+        // either a USB/simulator console or the phone nearby.
+        if (_pendingCrashMsg != null) {
+            setStatusMessage("Last crash: " + _pendingCrashMsg);
+            _statusTicks = 60; // ~15s — long enough to read/screenshot
+            _pendingCrashMsg = null;
+        }
         if (!_phoneControlled && _isRunning) {
             // Restore after view was hidden (system menu etc).
             // Guard against session re-creation which would split the Garmin activity.
@@ -618,7 +651,20 @@ class RunView extends Ui.View {
     // Single unified handler — PhoneLink routes all messages here via onPhoneMessage.
     // onPhoneAppMessage was the old direct-callback style; it is NOT called by PhoneLink.
 
+    // PhoneLink routes every BLE message from the phone here with no try/catch of
+    // its own — an unhandled exception in _onPhoneMessageInner() used to be a silent
+    // IQ crash with zero trace on real hardware. Wrap it and persist a breadcrumb via
+    // _recordCrash() so the next app open can show what happened (see onShow()).
     function onPhoneMessage(data) {
+        try {
+            _onPhoneMessageInner(data);
+        } catch (e) {
+            var t = (data != null) ? data.get("type") : null;
+            _recordCrash("onPhoneMessage:" + ((t != null) ? t.toString() : "?"), e);
+        }
+    }
+
+    function _onPhoneMessageInner(data) {
         if (data == null) { return; }
         var t = data.get("type");
         if (t == null) { return; }
@@ -646,7 +692,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.3.0");
+                _phoneLink.sendHello("3.3.6");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -739,12 +785,31 @@ class RunView extends Ui.View {
             if (st != null) {
                 App.Storage.setValue("sessionType", st);
                 if (_dataStreamer != null) { _dataStreamer.setActivityType(st); }
+                // Ack so the phone's retry loop (GarminWatchManager.sendSessionType) stops —
+                // Comm.transmit() is fire-and-forget with no delivery guarantee otherwise.
+                _phoneLink.sendCommand("sessionTypeAck");
             }
 
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
             }
             Ui.requestUpdate();
+
+        } else if (t.equals("sessionType")) {
+            // Lightweight companion to "preparedRun" above — sent as soon as the phone's
+            // session-setup screen knows its activity type, NOT gated behind the user
+            // explicitly tapping "Prepare Run on Watch". Needed because _startSession()
+            // (below) reads "sessionType" from storage synchronously the instant the
+            // watch's own physical START button is pressed — if the user never used the
+            // explicit prepare-for-watch flow, this is the only message that would have
+            // set it, and without it the watch's native Garmin Connect activity silently
+            // defaults to Running even when the phone side is correctly showing Walk.
+            var sType = data.get("sessionType");
+            if (sType != null) {
+                App.Storage.setValue("sessionType", sType);
+                if (_dataStreamer != null) { _dataStreamer.setActivityType(sType); }
+                _phoneLink.sendCommand("sessionTypeAck");
+            }
 
         } else if (t.equals("disconnect")) {
             // Mid-run disconnect (Scenario B -> C): start standalone session so data is not lost.

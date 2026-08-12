@@ -3,7 +3,7 @@
 <!-- Device list: all Connect IQ watch-app compatible devices at API level 3.2.0+  -->
 <!-- Last updated: 2026-08-07 from local SDK connectiq-sdk-mac-9.1.0               -->
 <iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
-    <iq:application entry="AiRunCoachApp" id="C7BF12555C184F9FB1F82B49E72E20A2" launcherIcon="@Drawables.LauncherIcon" minApiLevel="3.2.0" name="@Strings.AppName" type="watch-app" version="3.3.4">
+    <iq:application entry="AiRunCoachApp" id="C7BF12555C184F9FB1F82B49E72E20A2" launcherIcon="@Drawables.LauncherIcon" minApiLevel="3.2.0" name="@Strings.AppName" type="watch-app" version="3.3.6">
         <iq:products>
 
             <!-- Fenix 5 Plus series (API 3.3) -->

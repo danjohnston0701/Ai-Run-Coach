@@ -1247,6 +1247,15 @@ class RunSessionViewModel @Inject constructor(
         val isWalk = config.activityType.name.equals("walk", ignoreCase = true)
         val sessionWord = if (isWalk) "walk" else "run"
 
+        // Push the activity type to the watch as soon as it's known — NOT only via the
+        // explicit "Prepare Run on Watch" flow (sendPreparedRun). A user who configures a
+        // walk here but then presses the watch's own physical START button (without ever
+        // tapping "send to watch") would otherwise get a watch-recorded Garmin Connect
+        // activity still misclassified as a Run, since the watch creates its native
+        // ActivityRecording session synchronously on that button press. See
+        // GarminWatchManager.sendSessionType() for the full explanation.
+        garminWatchManager.sendSessionType(sessionWord)
+
         // Only update coachText if we don't already have an AI briefing loaded.
         // "AI briefing" means something was set by prepareRun() — anything other than the
         // default "GPS locked…" placeholder or a simple readiness prompt.
