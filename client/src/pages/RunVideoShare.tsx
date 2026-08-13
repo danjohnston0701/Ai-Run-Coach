@@ -425,32 +425,16 @@ export default function RunVideoShare() {
       const coords3d = coords3dRef.current;
       const start3d  = coords3d[0] ?? [start[0], start[1]];
       const fullLine = { type: "Feature", geometry: { type: "LineString", coordinates: coords3d }, properties: {} };
-      map.addSource("routeFull",     { type: "geojson", data: fullLine as any });
-      map.addSource("routeProgress", { type: "geojson", data: { type: "Feature", geometry: { type: "LineString", coordinates: [start3d, start3d] }, properties: {} } as any });
-      map.addSource("head",          { type: "geojson", data: { type: "Feature", geometry: { type: "Point", coordinates: start }, properties: {} } as any });
+      map.addSource("routeFull", { type: "geojson", data: fullLine as any });
 
+      // Only the static full-route ghost trace lives as a MapLibre layer.
+      // The animated progress line and head marker are drawn on the 2D compositor
+      // canvas (see compositeFrame) via map.project() — this bypasses MapLibre's
+      // GeoJSON Web Worker, which is blocked in iOS WKWebView, causing setData()
+      // to silently do nothing and leaving the line frozen at the start.
       map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
-      // Aurora ribbon: a wide soft glow, a teal body, and a bright white-hot core.
-      map.addLayer({ id: "routeProgressGlow", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": TEAL, "line-width": 34, "line-blur": 26, "line-opacity": 0.5 } });
-      map.addLayer({ id: "routeProgress", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": TEAL, "line-width": 12 } });
-      map.addLayer({ id: "routeCore", type: "line", source: "routeProgress",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#eaffff", "line-width": 4, "line-opacity": 0.9 } });
-      // Signature marker: two expanding energy rings + soft glow + white-hot core.
-      map.addLayer({ id: "headPulse1", type: "circle", source: "head",
-        paint: { "circle-radius": 12, "circle-opacity": 0, "circle-stroke-color": TEAL, "circle-stroke-width": 3, "circle-stroke-opacity": 0.6 } });
-      map.addLayer({ id: "headPulse2", type: "circle", source: "head",
-        paint: { "circle-radius": 12, "circle-opacity": 0, "circle-stroke-color": TEAL, "circle-stroke-width": 3, "circle-stroke-opacity": 0.45 } });
-      map.addLayer({ id: "headGlow", type: "circle", source: "head",
-        paint: { "circle-radius": 24, "circle-color": TEAL, "circle-opacity": 0.4, "circle-blur": 1 } });
-      map.addLayer({ id: "headDot", type: "circle", source: "head",
-        paint: { "circle-radius": 9, "circle-color": WHITE, "circle-stroke-color": TEAL, "circle-stroke-width": 4 } });
 
       // Pre-compute the "whole route" overview camera used for the outro.
       const bounds = coords.reduce(
@@ -674,8 +658,86 @@ export default function RunVideoShare() {
     vig.addColorStop(1, "rgba(3,5,12,0.55)");
     ctx.fillStyle = vig; ctx.fillRect(0, 0, CW, CH);
 
+    // ── 2D canvas route progress line + head marker ──────────────────────────
+    // Drawn via map.project() so they track the camera on every platform.
+    // This replaces MapLibre GeoJSON setData() which is silently blocked in iOS
+    // WKWebView (blob-URL Web Workers are restricted), causing the line to stay
+    // frozen at the start while the camera moves correctly.
+    if (map && routeProgress > 0) {
+      const container = map.getContainer();
+      const cssW = container.offsetWidth  || 1;
+      const cssH = container.offsetHeight || 1;
+      const sx = CW / cssW;
+      const sy = CH / cssH;
+      const proj = (lngLat: [number, number]): [number, number] => {
+        const p = map.project(lngLat as any);
+        return [p.x * sx, p.y * sy];
+      };
+
+      const d = routeProgress * (totalRef.current || 0);
+      const progressCoords = buildProgressLine(d);
+
+      // Subsample to ≤ 300 segments — keeps 2D canvas path fast on mobile
+      const MAX_SEG = 300;
+      const stride = Math.max(1, Math.floor(progressCoords.length / MAX_SEG));
+      const pts: [number, number][] = [];
+      for (let i = 0; i < progressCoords.length; i += stride) {
+        const c = progressCoords[i];
+        try { pts.push(proj([c[0], c[1]])); } catch { /* off-screen */ }
+      }
+      // Always include the exact tip
+      if (progressCoords.length > 0) {
+        const last = progressCoords[progressCoords.length - 1];
+        try { pts.push(proj([last[0], last[1]])); } catch { /* guard */ }
+      }
+
+      if (pts.length >= 2) {
+        const buildPath = () => {
+          ctx.beginPath();
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        };
+        // Glow — shadowBlur works on iOS (ctx.filter blur does not)
+        ctx.save();
+        ctx.shadowColor = TEAL; ctx.shadowBlur = 22; ctx.globalAlpha = 0.7;
+        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+        ctx.restore();
+        // Teal body
+        ctx.save();
+        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+        ctx.restore();
+        // White-hot core
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        buildPath(); ctx.strokeStyle = "#eaffff"; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+        ctx.restore();
+      }
+
+      // Head marker — pulse rings + glow halo + white dot
+      try {
+        const headPos = interpAt(d).pos;
+        const [hx, hy] = proj(headPos);
+        const p1 = (tMs % PULSE_MS) / PULSE_MS;
+        const p2 = ((tMs + PULSE_MS / 2) % PULSE_MS) / PULSE_MS;
+        // Ring 1
+        ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, 10 + p1 * 38, 0, Math.PI * 2);
+        ctx.strokeStyle = TEAL; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.6 * (1 - p1); ctx.stroke(); ctx.restore();
+        // Ring 2
+        ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, 10 + p2 * 38, 0, Math.PI * 2);
+        ctx.strokeStyle = TEAL; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.45 * (1 - p2); ctx.stroke(); ctx.restore();
+        // Glow halo
+        ctx.save(); ctx.shadowColor = TEAL; ctx.shadowBlur = 18;
+        ctx.beginPath(); ctx.arc(hx, hy, 14, 0, Math.PI * 2);
+        ctx.fillStyle = TEAL; ctx.globalAlpha = 0.4; ctx.fill(); ctx.restore();
+        // White dot with teal border
+        ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, 9, 0, Math.PI * 2);
+        ctx.fillStyle = WHITE; ctx.fill();
+        ctx.strokeStyle = TEAL; ctx.lineWidth = 4; ctx.stroke(); ctx.restore();
+      } catch { /* map.project() throws if coordinate is off-screen */ }
+    }
+
     drawOverlay(ctx, routeProgress, tMs, run, units);
-  }, [drawOverlay, run, units]);
+  }, [drawOverlay, run, units, buildProgressLine, interpAt]);
 
   // Trigger a file download. The Android WebView bridge intercepts the anchor click and
   // reads the blob ASYNCHRONOUSLY (fetch → FileReader), so the object URL must stay alive
@@ -924,25 +986,11 @@ export default function RunVideoShare() {
           dispCenterRef.current[1] + (ahead[1] - dispCenterRef.current[1]) * POS_SMOOTH,
         ];
 
-        map.getSource("routeProgress") && (map.getSource("routeProgress") as any).setData({
-          type: "Feature", geometry: { type: "LineString", coordinates: buildProgressLine(d) }, properties: {},
-        });
-        (map.getSource("head") as any)?.setData({
-          type: "Feature", geometry: { type: "Point", coordinates: head }, properties: {},
-        });
         map.jumpTo({ center: dispCenterRef.current as any, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
         lastCamRef.current = { center: [dispCenterRef.current[0], dispCenterRef.current[1]], zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
-        pulseMarker(map, t);
       } else {
         // ── Outro: pull up and out to reveal the whole route ──
         routeProgress = 1;
-        (map.getSource("routeProgress") as any)?.setData({
-          type: "Feature", geometry: { type: "LineString", coordinates: coords3dRef.current.length ? coords3dRef.current : coordsRef.current }, properties: {},
-        });
-        const end = interpAt(total).pos;
-        (map.getSource("head") as any)?.setData({
-          type: "Feature", geometry: { type: "Point", coordinates: end }, properties: {},
-        });
         const from = lastCamRef.current!;
         const ov   = overviewCamRef.current;
         const k = Math.min((t - INTRO_MS - followMs) / OUTRO_MS, 1);
@@ -958,7 +1006,6 @@ export default function RunVideoShare() {
             bearing: lerpAngle(from.bearing, 0, e),
           });
         }
-        pulseMarker(map, t);
       }
 
       compositeFrame(routeProgress, t);
