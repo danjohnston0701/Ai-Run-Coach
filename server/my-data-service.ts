@@ -32,7 +32,13 @@ const DISTANCE_PB_BANDS: Record<string, { min: number; max: number; target: numb
  * Get personal bests from the user_stats cache table.
  * Falls back to live DB query if cache not yet populated.
  */
-export async function getPersonalBests(userId: string) {
+export async function getPersonalBests(userId: string, excludeCoachingPlan: boolean = false) {
+  // The user_stats cache aggregates ALL runs (coaching-plan and free alike) — it has no
+  // excludeCoachingPlan-filtered variant, so that mode always falls through to a live query.
+  if (excludeCoachingPlan) {
+    return getPersonalBestsLive(userId, true);
+  }
+
   try {
     // Attempt cache read first (O(1) PK lookup)
     const [cached] = await db.select().from(userStats).where(eq(userStats.userId, userId));
@@ -90,7 +96,7 @@ export async function getPersonalBests(userId: string) {
  * 1K / Mile PBs: derived from the fastest individual km split across all runs,
  * which is a valid proxy for short-distance best efforts.
  */
-async function getPersonalBestsLive(userId: string) {
+async function getPersonalBestsLive(userId: string, excludeCoachingPlan: boolean = false) {
   const distancePBs = Object.entries(DISTANCE_PB_BANDS).map(([label, band]) => ({
     label, min: band.min, max: band.max, target: band.target,
   }));
@@ -101,7 +107,9 @@ async function getPersonalBestsLive(userId: string) {
   const userRuns = await db
     .select()
     .from(runs)
-    .where(eq(runs.userId, userId))
+    .where(excludeCoachingPlan
+      ? and(eq(runs.userId, userId), isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId))
+      : eq(runs.userId, userId))
     .orderBy(asc(runs.completedAt));
 
   // ── Distance-based PBs: only awarded for actual full-distance runs ──────────
@@ -251,7 +259,7 @@ function buildPersonalBestsFromCache(cached: typeof userStats.$inferSelect) {
  * ⚡ Returns 1 row from the DB regardless of how many runs exist in the period.
  * Previous implementation fetched all matching rows and computed in JavaScript.
  */
-export async function getPeriodStatistics(userId: string, days: number) {
+export async function getPeriodStatistics(userId: string, days: number, excludeCoachingPlan: boolean = false) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
@@ -273,6 +281,7 @@ export async function getPeriodStatistics(userId: string, days: number) {
     }).from(runs).where(and(
       eq(runs.userId, userId),
       gte(runs.completedAt, startDate),
+      ...(excludeCoachingPlan ? [isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId)] : []),
     ));
 
     const totalRuns = Number(stats.totalRuns ?? 0);
@@ -328,13 +337,13 @@ function emptyPeriodStats() {
  * ⚡ Selects only the 5 columns needed — avoids loading gpsTrack, heartRateData,
  *    paceData and other large JSON blobs which can be 10-100KB per run.
  */
-export async function getDetailedTrends(userId: string, days: number) {
+export async function getDetailedTrends(userId: string, days: number, excludeCoachingPlan: boolean = true) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
   try {
     // ⚡ Only fetch the columns needed for charts — not SELECT *
-    // Coaching plan sessions are EXCLUDED (linked_plan_id/linked_workout_id IS NULL)
+    // Coaching plan sessions are excluded by default (linked_plan_id/linked_workout_id IS NULL)
     // so trends only reflect the runner's natural free-run performance.
     const userRuns = await db
       .select({
@@ -349,8 +358,7 @@ export async function getDetailedTrends(userId: string, days: number) {
       .where(and(
         eq(runs.userId, userId),
         gte(runs.completedAt, startDate),
-        isNull(runs.linkedPlanId),
-        isNull(runs.linkedWorkoutId),
+        ...(excludeCoachingPlan ? [isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId)] : []),
       ))
       .orderBy(asc(runs.completedAt));
 
@@ -641,7 +649,13 @@ export async function getCoachingPlanSummary(userId: string, days: number) {
  * ⚡ O(1) PK lookup regardless of run count.
  * Falls back to live SQL aggregation if cache isn't populated yet.
  */
-export async function getAllTimeStats(userId: string) {
+export async function getAllTimeStats(userId: string, excludeCoachingPlan: boolean = false) {
+  // The user_stats cache aggregates ALL runs — no excludeCoachingPlan-filtered variant,
+  // so that mode always falls through to a live query.
+  if (excludeCoachingPlan) {
+    return getAllTimeStatsLive(userId, true);
+  }
+
   try {
     const [cached] = await db.select().from(userStats).where(eq(userStats.userId, userId));
     if (cached) {
@@ -685,7 +699,10 @@ export async function getAllTimeStats(userId: string) {
  * Live SQL aggregation fallback — still 1 DB query, 1 row.
  * Much better than the old approach of fetching all runs then reducing in JS.
  */
-async function getAllTimeStatsLive(userId: string) {
+async function getAllTimeStatsLive(userId: string, excludeCoachingPlan: boolean = false) {
+  const planFilter = excludeCoachingPlan
+    ? and(isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId))
+    : undefined;
   try {
     // Get basic aggregates
     const [stats] = await db.select({
@@ -699,7 +716,7 @@ async function getAllTimeStatsLive(userId: string) {
       maxElevation:         max(runs.maxElevation),
       fastestPaceNumeric: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
       avgPaceNumeric:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
-    }).from(runs).where(eq(runs.userId, userId));
+    }).from(runs).where(planFilter ? and(eq(runs.userId, userId), planFilter) : eq(runs.userId, userId));
 
     const totalRuns = Number(stats.totalRuns ?? 0);
     if (totalRuns === 0) {
@@ -714,7 +731,7 @@ async function getAllTimeStatsLive(userId: string) {
     const longestRun = await db
       .select({ duration: runs.duration })
       .from(runs)
-      .where(eq(runs.userId, userId))
+      .where(planFilter ? and(eq(runs.userId, userId), planFilter) : eq(runs.userId, userId))
       .orderBy(desc(runs.distance))
       .limit(1);
 

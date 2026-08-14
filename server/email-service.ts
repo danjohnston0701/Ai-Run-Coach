@@ -317,7 +317,9 @@ export async function sendAccountDeletionNotification(opts: {
   name: string;
 }): Promise<void> {
   const { client, fromEmail } = await getResendClient();
-  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || fromEmail;
+  // Explicit support@ default — falling back to fromEmail (noreply@) would send this
+  // notification somewhere nobody actually checks if SUPPORT_NOTIFICATION_EMAIL isn't set.
+  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || "support@airuncoach.live";
   const deletionTime = new Date().toISOString();
 
   // Notify the support team about the deletion

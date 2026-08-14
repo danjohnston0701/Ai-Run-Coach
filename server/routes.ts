@@ -812,7 +812,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Fetch the user
-      const user = await storage.getUserById(userId);
+      const user = await storage.getUser(userId);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -1223,15 +1223,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // ── Step 3: Send deletion notification email to support ─────────────
       try {
-        const user = await storage.getUserById(userId);
+        const user = await storage.getUser(userId);
         if (user) {
           const { sendAccountDeletionNotification } = await import("./email-service");
           await sendAccountDeletionNotification({
             userId: user.id,
             email: user.email,
-            name: user.firstname && user.lastname 
-              ? `${user.firstname} ${user.lastname}`
-              : user.firstname || user.email
+            name: user.name || user.email
           });
         }
       } catch (e) {

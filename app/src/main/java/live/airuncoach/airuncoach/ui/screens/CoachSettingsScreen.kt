@@ -81,6 +81,20 @@ fun CoachSettingsScreen(
     val masterAiEnabled by viewModel.masterAiEnabled.collectAsState()
     val showConsentSheet by viewModel.showConsentSheet.collectAsState()
 
+    // Individual coaching trigger toggles — only shown outside onboarding, where this
+    // screen is the single consolidated "AI Coaching Settings" screen in the profile.
+    // During onboarding these live on their own screen (InSessionCoachingSettingsScreen).
+    val paceCoachingEnabled by viewModel.paceCoachingEnabled.collectAsState()
+    val routeNavigationEnabled by viewModel.routeNavigationEnabled.collectAsState()
+    val elevationCoachingEnabled by viewModel.elevationCoachingEnabled.collectAsState()
+    val heartRateCoachingEnabled by viewModel.heartRateCoachingEnabled.collectAsState()
+    val cadenceStrideEnabled by viewModel.cadenceStrideEnabled.collectAsState()
+    val kmSplitsEnabled by viewModel.kmSplitsEnabled.collectAsState()
+    val struggleDetectionEnabled by viewModel.struggleDetectionEnabled.collectAsState()
+    val motivationalCoachingEnabled by viewModel.motivationalCoachingEnabled.collectAsState()
+    val halfKmCheckInEnabled by viewModel.halfKmCheckInEnabled.collectAsState()
+    val kmSplitIntervalKm by viewModel.kmSplitIntervalKm.collectAsState()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -231,6 +245,133 @@ fun CoachSettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(Spacing.xl))
             }
+
+            // Individual coaching prompt/trigger toggles — consolidated here for the
+            // profile's "AI Coaching Settings" screen. Onboarding shows these on their
+            // own separate step instead (InSessionCoachingSettingsScreen), so skip them here.
+            if (!isOnboarding) {
+                item {
+                    SectionTitle(title = "Coaching Prompts")
+                    Text(
+                        text = "Choose which real-time coaching prompts are active during your runs.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        modifier = Modifier.padding(bottom = Spacing.lg)
+                    )
+                }
+
+                if (!masterAiEnabled) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(BorderRadius.md),
+                            colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
+                        ) {
+                            Text(
+                                text = "AI coaching is currently disabled. Enable it above to configure these prompts.",
+                                style = AppTextStyles.body,
+                                color = Colors.textMuted,
+                                modifier = Modifier.padding(Spacing.xl)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(Spacing.xl))
+                    }
+                } else {
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Pace Coaching",
+                            description = "Target pace guidance — warns when you're going too fast or slow",
+                            enabled = paceCoachingEnabled,
+                            onToggle = viewModel::onPaceCoachingToggled
+                        )
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Route Navigation",
+                            description = "Turn-by-turn voice directions on mapped routes",
+                            enabled = routeNavigationEnabled,
+                            onToggle = viewModel::onRouteNavigationToggled
+                        )
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Elevation Coaching",
+                            description = "Hill and gradient advice — pacing tips on climbs and descents",
+                            enabled = elevationCoachingEnabled,
+                            onToggle = viewModel::onElevationCoachingToggled
+                        )
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Heart Rate Coaching",
+                            description = "Heart rate zone guidance during your run",
+                            enabled = heartRateCoachingEnabled,
+                            onToggle = viewModel::onHeartRateCoachingToggled
+                        )
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Cadence & Stride",
+                            description = "Running form analysis — stride length and cadence coaching",
+                            enabled = cadenceStrideEnabled,
+                            onToggle = viewModel::onCadenceStrideToggled
+                        )
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "500m Check-In",
+                            description = "Initial pace assessment at 500 metres into your run",
+                            enabled = halfKmCheckInEnabled,
+                            onToggle = viewModel::onHalfKmCheckInToggled
+                        )
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Km Split Updates",
+                            description = "Pace and progress updates at each split interval",
+                            enabled = kmSplitsEnabled,
+                            onToggle = viewModel::onKmSplitsToggled
+                        )
+                    }
+
+                    if (kmSplitsEnabled) {
+                        item {
+                            KmSplitIntervalSelector(
+                                selectedInterval = kmSplitIntervalKm,
+                                availableIntervals = viewModel.availableKmSplitIntervals,
+                                onIntervalChanged = viewModel::onKmSplitIntervalChanged
+                            )
+                        }
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Struggle Detection",
+                            description = "Supportive coaching when your pace drops significantly",
+                            enabled = struggleDetectionEnabled,
+                            onToggle = viewModel::onStruggleDetectionToggled
+                        )
+                    }
+
+                    item {
+                        CoachingFeatureToggle(
+                            title = "Motivational Coaching",
+                            description = "Milestones, phase changes, technique tips, and encouragement",
+                            enabled = motivationalCoachingEnabled,
+                            onToggle = viewModel::onMotivationalCoachingToggled
+                        )
+                    }
+
+                    item { Spacer(modifier = Modifier.height(Spacing.xl)) }
+                }
+            }
+
             item {
                 Button(
                     onClick = {

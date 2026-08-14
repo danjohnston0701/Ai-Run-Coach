@@ -29,7 +29,8 @@ router.get('/personal-bests', authMiddleware, async (req: AuthenticatedRequest, 
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const personalBests = await myDataService.getPersonalBests(userId);
+    const excludeCoachingPlan = req.query.excludeCoachingPlan === 'true';
+    const personalBests = await myDataService.getPersonalBests(userId, excludeCoachingPlan);
 
     // Wrap array in object so Android Map<String, Any> deserialization works correctly
     res.json({
@@ -59,8 +60,9 @@ router.get('/statistics', authMiddleware, async (req: AuthenticatedRequest, res:
     }
 
     const days = parseInt(req.query.days as string) || 30;
+    const excludeCoachingPlan = req.query.excludeCoachingPlan === 'true';
 
-    const stats = await myDataService.getPeriodStatistics(userId, days);
+    const stats = await myDataService.getPeriodStatistics(userId, days, excludeCoachingPlan);
 
     res.json({
       success: true,
@@ -116,8 +118,11 @@ router.get('/detailed-trends', authMiddleware, async (req: AuthenticatedRequest,
     }
 
     const days = parseInt(req.query.days as string) || 30;
+    const excludeCoachingPlan = req.query.excludeCoachingPlan === 'true' ? true
+      : req.query.excludeCoachingPlan === 'false' ? false
+      : undefined;
 
-    const trends = await myDataService.getDetailedTrends(userId, days);
+    const trends = await myDataService.getDetailedTrends(userId, days, excludeCoachingPlan);
 
     res.json({
       success: true,
@@ -144,7 +149,8 @@ router.get('/all-time-stats', authMiddleware, async (req: AuthenticatedRequest, 
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const stats = await myDataService.getAllTimeStats(userId);
+    const excludeCoachingPlan = req.query.excludeCoachingPlan === 'true';
+    const stats = await myDataService.getAllTimeStats(userId, excludeCoachingPlan);
 
     res.json({
       success: true,

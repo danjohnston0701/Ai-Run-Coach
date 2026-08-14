@@ -43,6 +43,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.delay
 
 import live.airuncoach.airuncoach.AppRoutes
+import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
@@ -1360,6 +1361,29 @@ fun MainScreen(
             }
             composable("subscription") {
                 SubscriptionScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToLogin = onNavigateToLogin,
+                    onNavigateToChangePassword = { navController.navigate("change_password") },
+                    onNavigateToGetSupport = { navController.navigate("get_support") },
+                    onNavigateToDeleteAccount = { navController.navigate("delete_account") }
+                )
+            }
+            composable("change_password") {
+                ChangePasswordScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onSuccess = { navController.popBackStack() }
+                )
+            }
+            composable("get_support") {
+                GetSupportScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable("delete_account") {
+                val context = LocalContext.current
+                val sessionManager = remember { SessionManager(context) }
+                DeleteAccountScreen(
+                    userId = sessionManager.getUserId() ?: "",
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToLogin = onNavigateToLogin
                 )
