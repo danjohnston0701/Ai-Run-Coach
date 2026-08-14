@@ -66,6 +66,12 @@ class BillingManager @Inject constructor(
         const val SUBSCRIPTION_LITE_ANNUAL     = "lite_annual"
         const val SUBSCRIPTION_STANDARD_MONTHLY = "standard_monthly"
         const val SUBSCRIPTION_STANDARD_ANNUAL  = "standard_annual"
+
+        // "No AI Plans" variants — same tier/period, AI training-plan generation excluded.
+        const val SUBSCRIPTION_LITE_NOAI_MONTHLY     = "lite_noaiplan_monthly"
+        const val SUBSCRIPTION_LITE_NOAI_ANNUAL      = "lite_noaiplan_annual"
+        const val SUBSCRIPTION_STANDARD_NOAI_MONTHLY = "standard_noaiplan_monthly"
+        const val SUBSCRIPTION_STANDARD_NOAI_ANNUAL  = "standard_noaiplan_annual"
     }
 
     // ── Initialization ───────────────────────────────────────────────────────
@@ -111,23 +117,20 @@ class BillingManager @Inject constructor(
 
     private suspend fun querySubscriptions() {
         val productList = listOf(
+            SUBSCRIPTION_LITE_MONTHLY,
+            SUBSCRIPTION_LITE_ANNUAL,
+            SUBSCRIPTION_STANDARD_MONTHLY,
+            SUBSCRIPTION_STANDARD_ANNUAL,
+            SUBSCRIPTION_LITE_NOAI_MONTHLY,
+            SUBSCRIPTION_LITE_NOAI_ANNUAL,
+            SUBSCRIPTION_STANDARD_NOAI_MONTHLY,
+            SUBSCRIPTION_STANDARD_NOAI_ANNUAL
+        ).map { productId ->
             QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(SUBSCRIPTION_LITE_MONTHLY)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build(),
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(SUBSCRIPTION_LITE_ANNUAL)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build(),
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(SUBSCRIPTION_STANDARD_MONTHLY)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build(),
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(SUBSCRIPTION_STANDARD_ANNUAL)
+                .setProductId(productId)
                 .setProductType(BillingClient.ProductType.SUBS)
                 .build()
-        )
+        }
 
         val response = billingClient.queryProductDetails(
             QueryProductDetailsParams.newBuilder().setProductList(productList).build()
@@ -277,6 +280,7 @@ class BillingManager @Inject constructor(
                 updateCachedUserTier(
                     tier               = response.tier,
                     subscriptionStatus = response.subscriptionStatus,
+                    aiPlansEnabled     = !productId.contains("noai"),
                     updatedUser        = response.user
                 )
 
@@ -302,6 +306,7 @@ class BillingManager @Inject constructor(
     private fun updateCachedUserTier(
         tier: String,
         subscriptionStatus: String,
+        aiPlansEnabled: Boolean,
         updatedUser: User?
     ) {
         try {
@@ -310,7 +315,7 @@ class BillingManager @Inject constructor(
 
             if (updatedUser != null) {
                 prefs.edit { putString("user", gson.toJson(updatedUser)) }
-                Log.i(TAG, "Cached full updated user profile (tier=${updatedUser.subscriptionTier})")
+                Log.i(TAG, "Cached full updated user profile (tier=${updatedUser.subscriptionTier}, aiPlansEnabled=${updatedUser.aiPlansEnabled})")
                 return
             }
 
@@ -320,10 +325,11 @@ class BillingManager @Inject constructor(
                 val existing = gson.fromJson(existingJson, User::class.java)
                 val patched  = existing.copy(
                     subscriptionTier   = tier,
-                    subscriptionStatus = subscriptionStatus
+                    subscriptionStatus = subscriptionStatus,
+                    aiPlansEnabled     = aiPlansEnabled
                 )
                 prefs.edit { putString("user", gson.toJson(patched)) }
-                Log.i(TAG, "Patched cached user profile: subscriptionTier=$tier")
+                Log.i(TAG, "Patched cached user profile: subscriptionTier=$tier, aiPlansEnabled=$aiPlansEnabled")
             } else {
                 Log.w(TAG, "No cached user found — tier will be read from Google Play fallback")
             }
@@ -344,11 +350,25 @@ class BillingManager @Inject constructor(
             it.purchaseState == Purchase.PurchaseState.PURCHASED
         } ?: return "free"
 
+        // "lite_noaiplan_monthly" still contains "lite" — tier derivation is unaffected
+        // by the AI-plans axis, checked separately via getAiPlansEnabled().
         return when {
             active.products.any { it.contains("lite") }     -> "lite"
             active.products.any { it.contains("standard") } -> "standard"
             else                                             -> "free"
         }
+    }
+
+    /**
+     * Derive AI-plans inclusion from locally-cached Google Play purchases.
+     * Used as a fallback by SubscriptionViewModel.getAiPlansEnabled() when the
+     * database-backed user profile is missing or has no value set.
+     */
+    fun getAiPlansEnabled(): Boolean {
+        val active = _userPurchases.value.firstOrNull {
+            it.purchaseState == Purchase.PurchaseState.PURCHASED
+        } ?: return true
+        return active.products.none { it.contains("noai") }
     }
 
     /**
@@ -367,10 +387,13 @@ class BillingManager @Inject constructor(
         }
     }
 
-    fun getAiCoachingPlansLimit(): Int = when (getSubscriptionTier()) {
-        "lite"     -> 1
-        "standard" -> 3
-        else       -> 0
+    fun getAiCoachingPlansLimit(): Int {
+        if (!getAiPlansEnabled()) return 0
+        return when (getSubscriptionTier()) {
+            "lite"     -> 1
+            "standard" -> 3
+            else       -> 0
+        }
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────

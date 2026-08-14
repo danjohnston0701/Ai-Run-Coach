@@ -127,21 +127,27 @@ function decodeNestedJWS<T extends JwtPayload>(jws: string): T {
 function mapProductIdToTier(productId: string): {
   tier: string;
   billingPeriod: string;
+  aiPlansEnabled: boolean;
 } | null {
-  // Adjust these patterns to match your App Store product IDs
-  if (productId.includes("lite") && productId.includes("monthly")) {
-    return { tier: "lite", billingPeriod: "monthly" };
+  // e.g. "live.airuncoach.subscription.lite" -> lite, monthly, AI on
+  //      "live.airuncoach.subscription.standard.annual" -> standard, annual, AI on
+  //      "live.airuncoach.subscription.lite.noai" -> lite, monthly, AI off
+  //      "live.airuncoach.subscription.standard.noai.annual" -> standard, annual, AI off
+  // NOTE: monthly product IDs have no "monthly" substring at all (it's the implicit
+  // default when "annual" is absent) — a previous version of this function required
+  // productId.includes("monthly") for the monthly branches, which could never match
+  // any real monthly product ID and silently dropped monthly-subscriber sync.
+  let tier: string;
+  if (productId.includes("standard")) {
+    tier = "standard";
+  } else if (productId.includes("lite")) {
+    tier = "lite";
+  } else {
+    return null;
   }
-  if (productId.includes("lite") && productId.includes("annual")) {
-    return { tier: "lite", billingPeriod: "annual" };
-  }
-  if (productId.includes("standard") && productId.includes("monthly")) {
-    return { tier: "standard", billingPeriod: "monthly" };
-  }
-  if (productId.includes("standard") && productId.includes("annual")) {
-    return { tier: "standard", billingPeriod: "annual" };
-  }
-  return null;
+  const billingPeriod = productId.includes("annual") ? "annual" : "monthly";
+  const aiPlansEnabled = !productId.includes("noai");
+  return { tier, billingPeriod, aiPlansEnabled };
 }
 
 /**
@@ -195,7 +201,7 @@ async function handleSubscriptionActive(
     return;
   }
 
-  const { tier, billingPeriod } = tierInfo;
+  const { tier, billingPeriod, aiPlansEnabled } = tierInfo;
   const expiresAt = new Date(renewalInfo.renewalDate);
 
   // Update user subscription
@@ -205,13 +211,15 @@ async function handleSubscriptionActive(
       subscription_status = $2,
       entitlement_type = $3,
       entitlement_expires_at = $4,
+      ai_plans_enabled = $5,
       updated_at = NOW()
-    WHERE id = $5`,
+    WHERE id = $6`,
     [
       tier,
       "active",
       `apple_${billingPeriod}`,
       expiresAt,
+      aiPlansEnabled,
       userId,
     ]
   );

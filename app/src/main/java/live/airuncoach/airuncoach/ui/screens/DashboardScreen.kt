@@ -67,6 +67,7 @@ import live.airuncoach.airuncoach.network.model.TrainingLoadResponse
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.util.AppAnalytics
 import live.airuncoach.airuncoach.util.WorkoutHolder
 import live.airuncoach.airuncoach.util.WorkoutPlanContext
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
@@ -110,6 +111,7 @@ fun DashboardScreen(
     val todayActivePlans by viewModel.todayActivePlans.collectAsState()
     val isKeyboardVisible = WindowInsets.isImeVisible
     val density = LocalDensity.current
+    val context = LocalContext.current
     val bottomContentPadding = if (isKeyboardVisible) {
         with(density) { WindowInsets.ime.getBottom(this).toDp() }
     } else {
@@ -121,6 +123,7 @@ fun DashboardScreen(
         viewModel.fetchRecentRun()
         viewModel.refreshGoals()
         viewModel.checkLocationPermission()
+        AppAnalytics.logEvent(context, AppAnalytics.Event.DASHBOARD_REACHED)
     }
 
     // Refresh runs when returning from other screens (e.g., after completing a run)

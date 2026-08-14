@@ -285,20 +285,10 @@ fun GroupRunCard(
                 }
             }
 
-            // Join button for public runs
-            if (groupRun.isPublic && !groupRun.isJoined && !groupRun.isOrganiser
-                && groupRun.myInvitationStatus == null
-                && groupRun.status != "completed" && groupRun.status != "cancelled") {
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                OutlinedButton(
-                    onClick = onJoin,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
-                ) {
-                    Text("Join Run", style = AppTextStyles.small.copy(fontWeight = FontWeight.Medium))
-                }
-            }
+            // Removed: "Join Run" button for public runs without an invitation. Group runs are
+            // invite-only — the backend now rejects a direct /join call with no existing
+            // invitation record regardless of isPublic, so this button could only ever produce
+            // a 403 for the one case it was designed to handle.
         }
     }
 }

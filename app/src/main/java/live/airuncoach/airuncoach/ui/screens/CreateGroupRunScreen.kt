@@ -213,30 +213,12 @@ fun CreateGroupRunScreen(
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            // ── Public / Private toggle ───────────────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        "Public Run",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium),
-                        color = Colors.textPrimary
-                    )
-                    Text(
-                        "Anyone can discover and join",
-                        style = AppTextStyles.small,
-                        color = Colors.textMuted
-                    )
-                }
-                Switch(
-                    checked = isPublic,
-                    onCheckedChange = viewModel::onIsPublicChanged,
-                    colors = SwitchDefaults.colors(checkedThumbColor = Colors.primary, checkedTrackColor = Colors.primary.copy(alpha = 0.4f))
-                )
-            }
+            // Public/private toggle removed — group runs are invite-only. There was never
+            // a discovery surface for public runs (the list endpoint only ever returned runs
+            // the user hosts or is invited to), and the backend now rejects a direct /join
+            // call from anyone without an existing invitation record regardless of this flag,
+            // so the toggle's "Anyone can discover and join" promise was never accurate and is
+            // actively wrong going forward.
 
             Spacer(modifier = Modifier.height(Spacing.xl))
 

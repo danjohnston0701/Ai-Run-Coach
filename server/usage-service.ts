@@ -104,14 +104,22 @@ export async function getUsageWithLimits(
   userId: string,
   tier: string | null | undefined,
   trialExpiresAt?: Date | null,
-  createdAt?: Date | null
+  createdAt?: Date | null,
+  aiPlansEnabled: boolean = true
 ): Promise<UsageWithLimits> {
   const yearMonth = currentYearMonth();
   const row = await storage.getMonthlyUsage(userId, yearMonth);
 
   // Resolve effective tier — "trial_expired" if free user's window has closed
   const resolvedTier = effectiveTier(tier, trialExpiresAt, createdAt);
-  const limits = getLimitsForTier(resolvedTier);
+  // getLimitsForTier() returns a direct reference into the shared TIER_LIMITS record —
+  // never mutate it in place. Copy before applying the aiPlansEnabled override.
+  const limits: TierLimits = { ...getLimitsForTier(resolvedTier) };
+  // A "no AI Plans" SKU zeroes out the plan-generation limit regardless of tier —
+  // orthogonal to subscriptionTier, so every other limit on this tier is unaffected.
+  if (!aiPlansEnabled) {
+    limits.trainingPlansGenerated = 0;
+  }
 
   const toApiLimit = (v: number) => (v === Infinity ? null : v);
   const toRemaining = (used: number, limit: number) =>
@@ -162,7 +170,8 @@ export async function checkAndEnforceLimit(
   feature: GatedFeature,
   amount: number = 1,
   trialExpiresAt?: Date | null,
-  createdAt?: Date | null
+  createdAt?: Date | null,
+  aiPlansEnabled: boolean = true
 ): Promise<boolean> {
   // ── Trial expiry hard block ────────────────────────────────────────────────
   // This check runs before everything else — an expired trial blocks all features
@@ -172,6 +181,27 @@ export async function checkAndEnforceLimit(
       error: "trial_expired",
       message:
         "Your 14-day free trial has ended. Upgrade to a paid plan to continue using AI Run Coach.",
+      upgradeRequired: true,
+    });
+    return false;
+  }
+
+  // ── AI Plans opted out ──────────────────────────────────────────────────────
+  // Orthogonal to tier — a "no AI Plans" SKU blocks generation regardless of the
+  // tier's normal monthly allowance. A promo-code unlimited grant can still
+  // override this (support may need to unlock it for a specific user).
+  if (feature === "trainingPlansGenerated" && !aiPlansEnabled) {
+    try {
+      const { hasUnlimitedGrant } = await import("./coupon-service");
+      if (await hasUnlimitedGrant(userId, feature)) {
+        return true;
+      }
+    } catch (err) {
+      console.error(`[UsageService] Error checking unlimited grant: ${err}`);
+    }
+    res.status(403).json({
+      error: "ai_plans_not_included",
+      message: "AI Training Plans are not included in your current plan. Upgrade to a plan with AI Training Plans to generate one.",
       upgradeRequired: true,
     });
     return false;

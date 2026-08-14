@@ -1,3 +1,4 @@
+
 # GPS Location Tracking, Power Saving, and Location Permissions - Comprehensive Analysis
 
 ## Executive Summary

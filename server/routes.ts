@@ -189,6 +189,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
           by_currency: {
             "USD": 129.99, "EUR": 134.99, "GBP": 114.99, "JPY": 23200, "CAD": 184.99, "AUD": 204.99, "NZD": 199.99, "CHF": 110.00, "INR": 14700, "MXN": 2649.00, "BRL": 669.99, "SGD": 179.99, "THB": 4650.00, "KRW": 210000, "AED": 499.99, "RUB": 9990.00, "ZAR": 2449.99, "DZD": 17375.00, "BDT": 18000.00, "CZK": 3399.99, "DKK": 1049.00, "EGP": 7449.99, "GHS": 1800.00, "HKD": 1019.00, "HUF": 51999.00, "IDR": 2390000.00, "IQD": 170000.00, "ILS": 399.90, "KES": 19000.00, "KZT": 70990.00, "MAD": 1459.99, "MYR": 569.99, "MMK": 275000.00, "NOK": 1599.00, "NGN": 193000.00, "PKR": 36200.00, "PHP": 9000.00, "PLN": 609.99, "QAR": 475.00, "RON": 699.99, "SAR": 559.99, "RSD": 15999.00, "SEK": 1599.00, "LKR": 43750.00, "TRY": 7339.99, "UAH": 6999.99, "VND": 3400000.00, "BOB": 889.99, "CLP": 144000.00, "COP": 422000.00, "CRC": 59000.00, "GEL": 399.00, "MNT": 465600.00, "MOP": 1080.00, "PEN": 444.99, "PYG": 800000.00, "TWD": 4400.00, "TZS": 342000.00, "XAF": 89300.00, "XOF": 88300.00
           }
+        },
+        // ── "No AI Plans" variants ──────────────────────────────────────────────
+        // PLACEHOLDER pricing per user's initial estimate (2026-08-14), USD only —
+        // unlike the tiers above, these are NOT yet localized to other currencies.
+        // Update default_usd/by_currency here once final pricing is confirmed, and
+        // extend by_currency to match the other tiers' currency coverage before launch.
+        "lite_noaiplan_monthly": {
+          tier: "Lite",
+          period: "monthly",
+          aiPlansEnabled: false,
+          default_usd: 3.99,
+          by_currency: { "USD": 3.99 }
+        },
+        "lite_noaiplan_annual": {
+          tier: "Lite",
+          period: "annual",
+          aiPlansEnabled: false,
+          default_usd: 39.99,
+          by_currency: { "USD": 39.99 }
+        },
+        "standard_noaiplan_monthly": {
+          tier: "Standard",
+          period: "monthly",
+          aiPlansEnabled: false,
+          default_usd: 8.99,
+          by_currency: { "USD": 8.99 }
+        },
+        "standard_noaiplan_annual": {
+          tier: "Standard",
+          period: "annual",
+          aiPlansEnabled: false,
+          default_usd: 89.99,
+          by_currency: { "USD": 89.99 }
         }
       };
       res.json(pricingData);
@@ -1029,13 +1062,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // The platform field is logged for debugging but the actual token is stored as fcmToken
   app.post("/api/notifications/register-device", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { deviceToken, platform, fcmToken } = req.body;
-      const token = deviceToken || fcmToken; // Accept either field name
-      
+      const { deviceToken, platform, fcmToken, device_token, fcm_token } = req.body;
+      // iOS (APIService.registerDeviceToken) sends snake_case (fcm_token) via explicit
+      // CodingKeys — without these aliases every iOS registration call 400s here silently
+      // (fire-and-forget on the client), leaving users.fcmToken permanently unset for iOS
+      // users and breaking all push notifications (group-run invites/start, friend requests,
+      // coaching reminders, etc.) to iOS devices.
+      const token = deviceToken || fcmToken || device_token || fcm_token;
+
       if (!token || typeof token !== "string") {
         return res.status(400).json({ error: "deviceToken or fcmToken is required" });
       }
-      
+
       const platformStr = platform || "unknown";
       console.log(`[RegisterDevice] User ${req.user!.userId} registered ${platformStr} token: ${token.substring(0, 30)}...`);
       
@@ -1045,6 +1083,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Register device error:", error);
       res.status(500).json({ error: "Failed to register device token" });
+    }
+  });
+
+  // Clear the FCM token on logout so a signed-out device stops receiving pushes for the
+  // account. iOS (APIService.unregisterDeviceToken, called from SessionManager on logout)
+  // has called this endpoint since it was added client-side, but it never existed
+  // server-side — every logout call 404'd (swallowed by `try?` client-side, so no crash,
+  // just a silent no-op leaving the stale token in place until the next login overwrites it).
+  app.post("/api/notifications/unregister-device", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { fcmToken, fcm_token, deviceToken, device_token } = req.body;
+      const token = fcmToken || fcm_token || deviceToken || device_token;
+
+      const [user] = await db.select({ fcmToken: users.fcmToken }).from(users).where(eq(users.id, req.user!.userId)).limit(1);
+      // Only clear if it still matches the token being unregistered — avoids a stale/delayed
+      // logout request from a previous session clobbering a newer token another login already set.
+      if (user && (!token || user.fcmToken === token)) {
+        await storage.updateUser(req.user!.userId, { fcmToken: null });
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Unregister device error:", error);
+      res.status(500).json({ error: "Failed to unregister device token" });
     }
   });
 
@@ -3962,6 +4023,7 @@ function transformRunForAndroid(run: any) {
           elevationLoss: route.elevationLoss,
           maxInclineDegrees: route.maxInclineDegrees,
           maxDeclineDegrees: route.maxDeclineDegrees,
+          elevation: route.elevationProfile,
           difficulty: route.difficulty,
           estimatedTime: route.duration,
           popularityScore: route.popularityScore,
@@ -4142,6 +4204,9 @@ function transformRunForAndroid(run: any) {
   app.get("/api/goals/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.params.userId;
+      if (req.user!.userId !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       console.log(`[GET /api/goals/:userId] Fetching goals for userId: ${userId}`);
       
       const rawGoals = await storage.getUserGoals(userId);
@@ -4263,6 +4328,14 @@ function transformRunForAndroid(run: any) {
 
   app.put("/api/goals/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      const existingGoal = await storage.getGoal(req.params.id);
+      if (!existingGoal) {
+        return res.status(404).json({ error: "Goal not found" });
+      }
+      if (existingGoal.userId !== req.user!.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
       // Transform Android app format to backend format
       const updateData: Record<string, any> = {
         type: req.body.type,
@@ -4345,6 +4418,14 @@ function transformRunForAndroid(run: any) {
 
   app.delete("/api/goals/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      const existingGoal = await storage.getGoal(req.params.id);
+      if (!existingGoal) {
+        return res.status(404).json({ error: "Goal not found" });
+      }
+      if (existingGoal.userId !== req.user!.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
       await storage.deleteGoal(req.params.id);
       res.status(204).send(); // No Content - standard for DELETE success
     } catch (error: any) {
@@ -5028,8 +5109,15 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  // NOTE: This route is intentionally left as a pass-through. The full implementation is below (line ~11982).
-  // Due to Express routing, this one is reached first, so we duplicate the logic here.
+  // This is the single POST /api/group-runs handler — two other duplicate registrations of
+  // this and most other group-run routes existed further down the file (from earlier
+  // development passes that never removed the prior implementation) and were shadowed by
+  // this one the whole time, since Express resolves duplicate route registrations by
+  // first-registered match with no warning. Cleaned up: see git history around 2026-08-13
+  // for the removed duplicates and what they diverged on (some legitimate fixes had ended up
+  // stranded in the dead copies — e.g. the group-run-start notification and the completedAt
+  // field on /complete, both restored here/nearby — so if this route ever needs a matching
+  // duplicate check again, grep first).
   app.post("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const {
@@ -5042,6 +5130,9 @@ function transformRunForAndroid(run: any) {
       }
       if (new Date(dateTime) <= new Date()) {
         return res.status(400).json({ error: 'Date/time must be in the future' });
+      }
+      if (distance <= 0 || distance > 100) {
+        return res.status(400).json({ error: 'Distance must be between 0 and 100 km' });
       }
       const inviteToken = `GR${Date.now().toString(36).toUpperCase()}`;
       const groupRun = await storage.createGroupRun({
@@ -5080,11 +5171,30 @@ function transformRunForAndroid(run: any) {
       const userId = req.user!.userId;
       const gr = await storage.getGroupRun(groupRunId);
       if (!gr) return res.status(404).json({ error: 'Group run not found' });
+
       const existing = await db.select().from(groupRunParticipants)
         .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
-      if (existing.length > 0) return res.status(409).json({ error: 'Already joined' });
-      await storage.joinGroupRun(groupRunId, userId);
-      res.json(await buildGroupRunResponse(gr.id, userId));
+
+      if (existing.length > 0) {
+        const participant = existing[0];
+        if (participant.invitationStatus === 'accepted') {
+          return res.status(409).json({ error: 'Already joined' });
+        }
+        if (participant.invitationStatus === 'declined') {
+          return res.status(403).json({ error: 'You must be invited to join this group run' });
+        }
+        // Pending invitation — this call is the accept path.
+        await db.update(groupRunParticipants)
+          .set({ invitationStatus: 'accepted', joinedAt: new Date() })
+          .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
+        return res.json(await buildGroupRunResponse(gr.id, userId));
+      }
+
+      // No invitation record at all — group runs are invite-only, uninvited users cannot join
+      // directly regardless of the run's isPublic flag (public runs are not independently
+      // discoverable/joinable; the list endpoint already only returns runs a user hosts or has
+      // been invited to, so reaching this state means the run ID was obtained out-of-band).
+      return res.status(403).json({ error: 'You must be invited to join this group run' });
     } catch (error: any) {
       console.error("Join group run error:", error);
       res.status(500).json({ error: "Failed to join group run" });
@@ -5597,9 +5707,11 @@ function transformRunForAndroid(run: any) {
         return res.status(400).json({ error: "purchaseToken and productId are required" });
       }
 
-      // ── Derive tier and billing period from productId ───────────────────────
-      // e.g. "lite_monthly" → tier="lite", billingPeriod="monthly"
-      //      "standard_annual" → tier="standard", billingPeriod="annual"
+      // ── Derive tier, billing period, and AI-plans inclusion from productId ──
+      // e.g. "lite_monthly" → tier="lite", billingPeriod="monthly", aiPlansEnabled=true
+      //      "standard_annual" → tier="standard", billingPeriod="annual", aiPlansEnabled=true
+      //      "lite_noaiplan_monthly" → tier="lite", billingPeriod="monthly", aiPlansEnabled=false
+      //      "standard_noaiplan_annual" → tier="standard", billingPeriod="annual", aiPlansEnabled=false
       let tier: string;
       let billingPeriod: string;
 
@@ -5613,6 +5725,7 @@ function transformRunForAndroid(run: any) {
       }
 
       billingPeriod = productId.endsWith("annual") ? "annual" : "monthly";
+      const aiPlansEnabled = !productId.includes("noai");
 
       // ── Calculate approximate next renewal date ─────────────────────────────
       const now = new Date();
@@ -5629,6 +5742,7 @@ function transformRunForAndroid(run: any) {
         subscriptionStatus: "active",
         entitlementType: `google_play_${billingPeriod}`,   // e.g. "google_play_monthly"
         entitlementExpiresAt: expiresAt,
+        aiPlansEnabled,
       });
 
       if (!updatedUser) {
@@ -5637,13 +5751,14 @@ function transformRunForAndroid(run: any) {
 
       console.log(
         `[Subscription] ✅ User ${userId} (${updatedUser.email}) upgraded to ${tier} ` +
-        `(${billingPeriod}) via Google Play. Token: ${purchaseToken.substring(0, 20)}...`
+        `(${billingPeriod}, AI Plans ${aiPlansEnabled ? "enabled" : "disabled"}) via Google Play. Token: ${purchaseToken.substring(0, 20)}...`
       );
 
       res.json({
         success: true,
         tier,
         billingPeriod,
+        aiPlansEnabled,
         subscriptionStatus: "active",
         expiresAt: expiresAt.toISOString(),
         user: updatedUser,
@@ -5672,6 +5787,7 @@ function transformRunForAndroid(run: any) {
         expiresAt: user?.entitlementExpiresAt,
         trialExpiresAt: trialExpiresAt?.toISOString().split("T")[0] ?? null,
         trialExpired,
+        aiPlansEnabled: user?.aiPlansEnabled ?? true,
       });
     } catch (error: any) {
       console.error("Get subscription status error:", error);
@@ -5721,7 +5837,8 @@ function transformRunForAndroid(run: any) {
         req.user!.userId,
         user?.subscriptionTier,
         user?.trialExpiresAt ?? null,
-        user?.createdAt ?? null
+        user?.createdAt ?? null,
+        user?.aiPlansEnabled ?? true
       );
       res.json(usageData);
     } catch (error: any) {
@@ -5767,7 +5884,7 @@ function transformRunForAndroid(run: any) {
       }
       
       // Get current usage (if not already unlimited via promo)
-      const usageData = await getUsageWithLimits(userId, user?.subscriptionTier);
+      const usageData = await getUsageWithLimits(userId, user?.subscriptionTier, user?.trialExpiresAt ?? null, user?.createdAt ?? null, user?.aiPlansEnabled ?? true);
       
       // Extract relevant data for this feature
       const used = usageData.usage[featureName as keyof typeof usageData.usage] || 0;
@@ -11509,9 +11626,41 @@ function transformRunForAndroid(run: any) {
     return { coachGender, coachAccent, coachTone, coachName };
   };
 
+  // Normalizes the field-naming mismatch found across every in-run coaching endpoint (pace-update,
+  // elite-coaching, phase-coaching, struggle-coaching): iOS's request structs consistently use
+  // `distanceKm`/`distance_km` and `elapsedMinutes`/`elapsed_minutes`, while every generate*Coaching()
+  // function in ai-service.ts reads `distance` (km) and `elapsedTime` (seconds). This is NOT a casing
+  // difference the existing per-route snake_case alias blocks catch — the key names themselves differ,
+  // so `distance` and `elapsedTime` were arriving as `undefined` on every iOS coaching call regardless
+  // of casing, silently breaking progress%, pace-verdict, and ETA logic that depends on them.
+  // UPDATE: iOS now sends raw elapsed seconds directly as `elapsed_time` (added across all four
+  // request structs specifically to fix the precision loss noted below) — preferred whenever
+  // present. `elapsedMinutes`/`elapsed_minutes` (computed client-side as elapsedSeconds/60,
+  // losing sub-minute precision) remains as a fallback for any caller still on the old shape.
+  const normalizeCoachingRequestBody = (body: any): void => {
+    if (body.distance === undefined) {
+      body.distance = body.distanceKm ?? body.distance_km;
+    }
+    if (body.elapsedTime === undefined) {
+      if (body.elapsed_time !== undefined) {
+        body.elapsedTime = body.elapsed_time;
+      } else {
+        const mins = body.elapsedMinutes ?? body.elapsed_minutes;
+        if (mins !== undefined) body.elapsedTime = mins * 60;
+      }
+    }
+    if (body.targetDistance === undefined) {
+      body.targetDistance = body.totalDistanceKm ?? body.total_distance_km;
+    }
+    if (body.targetTime === undefined) {
+      body.targetTime = body.targetTimeSeconds ?? body.target_time_seconds;
+    }
+  };
+
   // Pace Update Coaching with TTS
   app.post("/api/coaching/pace-update", async (req: Request, res: Response) => {
     try {
+      normalizeCoachingRequestBody(req.body);
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('pace-update', req.body, coachingUserId);
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
@@ -11701,6 +11850,29 @@ function transformRunForAndroid(run: any) {
   // Struggle Coaching with TTS
   app.post("/api/coaching/struggle-coaching", async (req: Request, res: Response) => {
     try {
+      normalizeCoachingRequestBody(req.body);
+      // Accept snake_case aliases for iOS clients — this route had no alias handling at all
+      // until iOS started calling it directly with a dedicated request struct.
+      const struggleSnakeCaseAliases: Record<string, string> = {
+        currentPace: 'current_pace',
+        baselinePace: 'baseline_pace',
+        paceDropPercent: 'pace_drop_percent',
+        targetPace: 'target_pace',
+        totalElevationGain: 'total_elevation_gain',
+        currentGrade: 'current_grade',
+        cadence: 'cadence_spm',
+        activityType: 'activity_type',
+        runnerName: 'user_name',
+        runnerAge: 'user_age',
+        fitnessLevel: 'user_fitness_level',
+        targetHeartRateZone: 'target_heart_rate_zone',
+      };
+      for (const [camel, snake] of Object.entries(struggleSnakeCaseAliases)) {
+        if (req.body[camel] === undefined && req.body[snake] !== undefined) {
+          req.body[camel] = req.body[snake];
+        }
+      }
+
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('struggle-coaching', req.body, coachingUserId);
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
@@ -11833,6 +12005,7 @@ function transformRunForAndroid(run: any) {
   // Elite Coaching with TTS — technique, milestones, positive reinforcement, target ETA, pace trends, elevation insights
   app.post("/api/coaching/elite-coaching", async (req: Request, res: Response) => {
     try {
+      normalizeCoachingRequestBody(req.body);
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('elite-coaching', req.body, coachingUserId);
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
@@ -11905,6 +12078,35 @@ function transformRunForAndroid(run: any) {
   // Phase Coaching with TTS
   app.post("/api/coaching/phase-coaching", async (req: Request, res: Response) => {
     try {
+      normalizeCoachingRequestBody(req.body);
+      // Accept snake_case aliases for iOS clients — this route had no alias handling at all
+      // until iOS started calling it directly with a dedicated request struct. triggerType is
+      // the critical one: without it every branch in generatePhaseCoaching() keyed off
+      // triggerType (500m_checkin, pace_coaching, pace_abandon, phase_change, navigation_turn)
+      // silently falls through to the generic default path.
+      const phaseSnakeCaseAliases: Record<string, string> = {
+        triggerType: 'trigger_type',
+        currentPace: 'current_pace',
+        targetPace: 'target_pace',
+        totalElevationGain: 'total_elevation_gain',
+        currentGrade: 'current_grade',
+        cadence: 'cadence_spm',
+        activityType: 'activity_type',
+        runnerName: 'user_name',
+        runnerAge: 'user_age',
+        runnerWeight: 'user_weight',
+        runnerHeight: 'user_height',
+        fitnessLevel: 'user_fitness_level',
+        navigationInstruction: 'navigation_instruction',
+        navigationDistance: 'navigation_distance',
+        hasRoute: 'has_route',
+      };
+      for (const [camel, snake] of Object.entries(phaseSnakeCaseAliases)) {
+        if (req.body[camel] === undefined && req.body[snake] !== undefined) {
+          req.body[camel] = req.body[snake];
+        }
+      }
+
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('phase-coaching', req.body, coachingUserId);
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
@@ -12920,12 +13122,28 @@ function transformRunForAndroid(run: any) {
       }
 
       res.json({ success: true, session: updated, summary: stats, runId: newRunId });
+
+      // ── Phase 2 FCM fallback: guaranteed phone-side stop, mirrors session/start above ──
+      // If the watch's "stop" BT command was dropped, RunTrackingService on the phone never
+      // learns the run ended — it (and the run-session screen) is stuck thinking the run is
+      // still active indefinitely, even though the watch's own companion session/end call
+      // (this request) already succeeded and created the run record. Sent after the response
+      // so it never delays the watch.
+      setImmediate(async () => {
+        try {
+          const { sendWatchSessionEndedPush } = await import("./notification-service");
+          await sendWatchSessionEndedPush(userId, sessionId, newRunId);
+        } catch (fcmErr) {
+          // Non-blocking — BT path already covers the common case
+          console.warn(`[Companion] FCM watchSessionEnded push failed (non-critical):`, fcmErr);
+        }
+      });
     } catch (error: any) {
       console.error("Companion session end error:", error);
       res.status(500).json({ error: "Failed to end session" });
     }
   });
-  
+
   // ── Offline batch upload ──────────────────────────────────────────────────
   // Receives the 15-second buffered data points from a watch-only run and
   // patches the existing run record (created by session/end) with full chart
@@ -13875,214 +14093,6 @@ function transformRunForAndroid(run: any) {
 
 
 
-  // NOTE: Duplicate /api/group-runs endpoint removed — it's now handled above (line 3631)
-
-  // Get a single group run with full detail
-  app.get("/api/group-runs/:groupRunId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { groupRunId } = req.params;
-      const userId = req.user!.userId;
-
-      const gr = await storage.getGroupRun(groupRunId);
-      if (!gr) return res.status(404).json({ error: 'Group run not found' });
-
-      res.json(await buildGroupRunResponse(gr.id, userId));
-    } catch (error: any) {
-      console.error("Get group run detail error:", error);
-      res.status(500).json({ error: "Failed to get group run" });
-    }
-  });
-
-  // Create a group run
-  app.post("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const {
-        name, description, meetingPoint, meetingLat, meetingLng,
-        distance, dateTime, maxParticipants = 10, isPublic = true
-      } = req.body;
-      
-      const creatorId = req.user!.userId;
-      
-      // Validation
-      if (!name || !distance || !dateTime) {
-        return res.status(400).json({ error: 'Missing required fields: name, distance, dateTime' });
-      }
-      
-      if (new Date(dateTime) <= new Date()) {
-        return res.status(400).json({ error: 'Date/time must be in the future' });
-      }
-      
-      if (distance <= 0 || distance > 100) {
-        return res.status(400).json({ error: 'Distance must be between 0 and 100 km' });
-      }
-      
-      // Generate invite token
-      const inviteToken = Math.random().toString(36).substring(2, 15);
-      
-      // Create group run
-      const groupRun = await storage.createGroupRun({
-        hostUserId: creatorId,
-        title: name,
-        description: description || null,
-        meetingPoint: meetingPoint || null,
-        meetingLat: meetingLat ? parseFloat(meetingLat) : null,
-        meetingLng: meetingLng ? parseFloat(meetingLng) : null,
-        targetDistance: parseFloat(distance),
-        plannedStartAt: new Date(dateTime),
-        maxParticipants: maxParticipants ? parseInt(maxParticipants) : 10,
-        isPublic: isPublic !== false,
-        inviteToken,
-        status: 'pending',
-        mode: 'route'
-      });
-      
-      // Auto-join creator as organiser
-      await db.insert(groupRunParticipants).values({
-        groupRunId: groupRun.id,
-        userId: creatorId,
-        role: 'organiser',
-        invitationStatus: 'accepted',
-        joinedAt: new Date(),
-        acceptedAt: new Date(),
-      });
-
-      res.status(201).json(await buildGroupRunResponse(groupRun.id, creatorId));
-    } catch (error: any) {
-      console.error("Create group run error:", error);
-      res.status(500).json({ error: "Failed to create group run" });
-    }
-  });
-
-  // Join a group run
-  app.post("/api/group-runs/:groupRunId/join", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { groupRunId } = req.params;
-      const userId = req.user!.userId;
-      
-      // Check if group run exists
-      const groupRun = await storage.getGroupRun(groupRunId);
-      if (!groupRun) {
-        return res.status(404).json({ error: 'Group run not found' });
-      }
-      
-      // Check if already joined
-      const participants = await db.select().from(groupRunParticipants)
-        .where(and(
-          eq(groupRunParticipants.groupRunId, groupRunId),
-          eq(groupRunParticipants.userId, userId)
-        ));
-      
-      if (participants.length > 0) {
-        return res.status(409).json({ error: 'Already joined this group run' });
-      }
-      
-      // Check if group is full (optional - could be added later)
-      
-      // Join group
-      await storage.joinGroupRun(groupRunId, userId);
-      
-      res.json({
-        message: 'Successfully joined group run',
-        groupRunId,
-        userId
-      });
-    } catch (error: any) {
-      console.error("Join group run error:", error);
-      res.status(500).json({ error: "Failed to join group run" });
-    }
-  });
-
-  // Invite friends to a group run
-  app.post("/api/group-runs/:groupRunId/invite", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { groupRunId } = req.params;
-      const { userIds } = req.body as { userIds: string[] };
-      const requesterId = req.user!.userId;
-
-      const gr = await storage.getGroupRun(groupRunId);
-      if (!gr) return res.status(404).json({ error: 'Group run not found' });
-      if (gr.hostUserId !== requesterId) return res.status(403).json({ error: 'Only the organiser can invite friends' });
-
-      if (!Array.isArray(userIds) || userIds.length === 0) {
-        return res.status(400).json({ error: 'userIds must be a non-empty array' });
-      }
-
-      const results: string[] = [];
-      for (const uid of userIds) {
-        // Skip if already a participant
-        const existing = await db.select().from(groupRunParticipants)
-          .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, uid)));
-        if (existing.length > 0) continue;
-
-        await db.insert(groupRunParticipants).values({
-          groupRunId,
-          userId: uid,
-          role: 'participant',
-          invitationStatus: 'pending',
-          joinedAt: new Date(),
-        });
-        results.push(uid);
-
-        // Send push notification to invited user
-        try {
-          const notificationService = await import("./notification-service");
-          const host = await storage.getUser(requesterId);
-          const hostName = host?.name || "Someone";
-          const runName = gr.title || gr.name || "a group run";
-          const plannedDate = gr.plannedStartAt
-            ? new Date(gr.plannedStartAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-            : "soon";
-          await notificationService.sendFirebasePush(
-            uid,
-            `You're invited to a group run! 🏃`,
-            `${hostName} invited you to "${runName}" on ${plannedDate}`,
-            { type: "group_run_invite", groupRunId, runName }
-          );
-        } catch (pushErr: any) {
-          console.warn(`[GroupRunInvite] Push to ${uid} failed:`, pushErr.message);
-        }
-      }
-
-      res.json({ invited: results, groupRunId });
-    } catch (error: any) {
-      console.error("Invite to group run error:", error);
-      res.status(500).json({ error: "Failed to invite users" });
-    }
-  });
-
-  // Respond to a group run invitation (accept or decline)
-  app.post("/api/group-runs/:groupRunId/respond", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { groupRunId } = req.params;
-      const { response } = req.body as { response: 'accepted' | 'declined' };
-      const userId = req.user!.userId;
-
-      if (!['accepted', 'declined'].includes(response)) {
-        return res.status(400).json({ error: "response must be 'accepted' or 'declined'" });
-      }
-
-      const existing = await db.select().from(groupRunParticipants)
-        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
-
-      if (existing.length === 0) {
-        return res.status(404).json({ error: 'No invitation found for this user' });
-      }
-
-      await db.update(groupRunParticipants)
-        .set({
-          invitationStatus: response,
-          ...(response === 'accepted' ? { joinedAt: new Date() } : {}),
-        })
-        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
-
-      const gr = await storage.getGroupRun(groupRunId);
-      res.json(await buildGroupRunResponse(gr!.id, userId));
-    } catch (error: any) {
-      console.error("Respond to group run error:", error);
-      res.status(500).json({ error: "Failed to respond to invitation" });
-    }
-  });
-
   // Mark ready to start
   app.post("/api/group-runs/:groupRunId/ready", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -14114,6 +14124,42 @@ function transformRunForAndroid(run: any) {
       await db.update(groupRuns).set({ status: 'active', startedAt: new Date() })
         .where(eq(groupRuns.id, groupRunId));
 
+      // Notify all participants who haven't declined that the organiser has prepared the run.
+      // This previously lived only in a duplicate /start registration further down the file
+      // (added by 6a4e3b5, "Add push notifications when organiser starts a group run") that a
+      // later, earlier-registered duplicate silently shadowed — Express resolves duplicate
+      // route registrations by first-match, with no warning, so this regressed with no error
+      // anywhere. Restored here in the handler that's actually live, using this file's schema
+      // field names (gr.title, not the dead duplicate's gr.runName).
+      try {
+        const organiser = await storage.getUser(userId);
+        const organiserName = organiser?.name || "The organiser";
+        const runName = gr.title || "a group run";
+
+        const participants = await db
+          .select({ userId: groupRunParticipants.userId, invitationStatus: groupRunParticipants.invitationStatus })
+          .from(groupRunParticipants)
+          .where(and(
+            eq(groupRunParticipants.groupRunId, groupRunId),
+            inArray(groupRunParticipants.invitationStatus, ["accepted", "pending"])
+          ));
+
+        const notificationService = await import("./notification-service");
+        for (const participant of participants) {
+          if (participant.userId === userId) continue; // don't notify the organiser themselves
+          await notificationService.sendFirebasePush(
+            participant.userId,
+            `${organiserName} is ready to run! 🏃`,
+            `The group run "${runName}" is ready to start. Tap to join!`,
+            { type: "group_run_started", groupRunId, runName, organiserName }
+          );
+        }
+        console.log(`[Group Run Start] Sent notifications to ${participants.length} participants for group run ${groupRunId}`);
+      } catch (notifError: any) {
+        console.warn(`[Group Run Start] Failed to send notifications for group run ${groupRunId}:`, notifError.message);
+        // Don't fail the request if notifications fail — the run start is still valid.
+      }
+
       const updated = await storage.getGroupRun(groupRunId);
       res.json(await buildGroupRunResponse(updated!.id, userId));
     } catch (error: any) {
@@ -14129,10 +14175,20 @@ function transformRunForAndroid(run: any) {
       const { runId } = req.body as { runId: string };
       const userId = req.user!.userId;
 
-      // Link run to participant record
+      // Link run to participant record. completedAt is what every client (confirmed:
+      // Android's GroupRunDetailScreenEnhanced.kt checks participant.completedAt != null
+      // to render "✓ Completed") uses to distinguish a finished participant from one still
+      // running — this was previously never set here, so every participant who actually
+      // finished their run still showed as running indefinitely in the group summary.
       await db.update(groupRunParticipants)
-        .set({ runId })
+        .set({ runId, completedAt: new Date() })
         .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
+
+      // Stamp the run itself so GET /api/group-runs/by-run/:runId can look it up — that
+      // endpoint reads runs.groupRunId, which was never being set anywhere until now.
+      if (runId) {
+        await db.update(runs).set({ groupRunId }).where(eq(runs.id, runId));
+      }
 
       // Check if all accepted participants have completed
       const allAccepted = await db.select().from(groupRunParticipants)
@@ -14176,6 +14232,7 @@ function transformRunForAndroid(run: any) {
               runData = await storage.getRun(p.runId);
             } catch {}
           }
+          const rawDistanceKm = runData ? ((runData as any).distance || 0) : 0;
           return {
             userId: p.userId,
             userName: u?.name || 'Unknown',
@@ -14183,21 +14240,36 @@ function transformRunForAndroid(run: any) {
             runId: p.runId || null,
             completedAt: p.completedAt?.toISOString() || null,
             isCurrentUser: p.userId === userId,
+            _sortDistanceKm: rawDistanceKm,
+            // Full run record, shaped via the same transformRunForAndroid() used by
+            // GET /api/runs/:id — Android's GroupRunParticipantResult.runSession (its own doc
+            // comment: "replaces the old [stats] summary object — we use the real run record so
+            // the table can display all the same rich metrics as the individual run history")
+            // deserializes with Gson field-name matching and no @SerializedName annotations, so
+            // it needs the same field names/units (meters, milliseconds) as that endpoint, not
+            // the raw DB row (kilometers, seconds, different field names entirely).
+            runSession: runData ? transformRunForAndroid(runData) : null,
+            // Curated subset — iOS's GroupRunParticipantResult.stats (GroupRunResultsView.swift)
+            // still decodes this shape and was not updated when Android moved to runSession, so
+            // both are populated here to avoid regressing either platform.
             stats: runData ? {
-              distance: (runData as any).distance || 0,
+              distance: rawDistanceKm,
               duration: (runData as any).duration || 0,
-              avgPace: (runData as any).avgPace || null,
-              avgHeartRate: (runData as any).avgHeartRate || null,
+              avg_pace: (runData as any).avgPace || null,
+              avg_heart_rate: (runData as any).avgHeartRate || null,
               calories: (runData as any).calories || null,
+              avg_cadence: (runData as any).cadence || null,
+              total_elevation_gain: (runData as any).elevationGain || null,
             } : null,
           };
         })
       );
 
-      // Sort by distance descending (or pace ascending if available)
-      results.sort((a, b) => (b.stats?.distance || 0) - (a.stats?.distance || 0));
+      // Sort by distance descending
+      results.sort((a, b) => (b._sortDistanceKm || 0) - (a._sortDistanceKm || 0));
+      const responseResults = results.map(({ _sortDistanceKm, ...rest }) => rest);
 
-      res.json({ groupRunId, groupRunName: gr.title, results });
+      res.json({ groupRunId, groupRunName: gr.title, results: responseResults });
     } catch (error: any) {
       console.error("Group run results error:", error);
       res.status(500).json({ error: "Failed to get group run results" });
@@ -15299,7 +15371,7 @@ function transformRunForAndroid(run: any) {
 
       // ── Tier limit check ─────────────────────────────────────────────────
       const planUser = await storage.getUser(userId);
-      const planAllowed = await checkAndEnforceLimit(res, userId, planUser?.subscriptionTier, "trainingPlansGenerated", 1, planUser?.trialExpiresAt ?? null, planUser?.createdAt ?? null);
+      const planAllowed = await checkAndEnforceLimit(res, userId, planUser?.subscriptionTier, "trainingPlansGenerated", 1, planUser?.trialExpiresAt ?? null, planUser?.createdAt ?? null, planUser?.aiPlansEnabled ?? true);
       if (!planAllowed) return;
 
       // ── Deduplication guard ───────────────────────────────────────────────
@@ -17247,62 +17319,6 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     };
   }
 
-  // REMOVED: Another duplicate /api/group-runs endpoint (now handled by line 3605)
-
-  // GET /api/group-runs/:id
-  app.get("/api/group-runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-      const gr = await buildGroupRunResponse(id, userId);
-      if (!gr) return res.status(404).json({ error: "Group run not found" });
-      res.json(gr);
-    } catch (error: any) {
-      console.error("[GET /api/group-runs/:id]", error);
-      res.status(500).json({ error: "Failed to fetch group run" });
-    }
-  });
-
-  // POST /api/group-runs — create
-  app.post("/api/group-runs", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const userId = req.user!.userId;
-      const { name, description, meetingPoint, meetingLat, meetingLng, distance, dateTime, maxParticipants, isPublic } = req.body;
-      if (!name || !dateTime || !distance) {
-        return res.status(400).json({ error: "name, dateTime and distance are required" });
-      }
-
-      const [newRun] = await db.insert(groupRuns).values({
-        name,
-        description: description ?? "",
-        creatorId: userId,
-        meetingPoint: meetingPoint ?? null,
-        meetingLat: meetingLat ?? null,
-        meetingLng: meetingLng ?? null,
-        distance: Number(distance),
-        dateTime: new Date(dateTime),
-        maxParticipants: maxParticipants ?? 10,
-        isPublic: isPublic ?? true,
-        status: "upcoming",
-      }).returning();
-
-      // Add creator as organiser participant
-      await db.insert(groupRunParticipants).values({
-        groupRunId: newRun.id,
-        userId,
-        role: "organiser",
-        invitationStatus: "accepted",
-        readyToStart: false,
-      });
-
-      const gr = await buildGroupRunResponse(newRun.id, userId);
-      res.status(201).json(gr);
-    } catch (error: any) {
-      console.error("[POST /api/group-runs]", error);
-      res.status(500).json({ error: "Failed to create group run" });
-    }
-  });
-
   // PUT /api/group-runs/:id — update group run details (organiser only)
   app.put("/api/group-runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -17338,191 +17354,6 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     }
   });
 
-  // POST /api/group-runs/:id/invite — invite friends by userId list
-  app.post("/api/group-runs/:id/invite", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-      const { userIds } = req.body as { userIds: string[] };
-
-      const [gr] = await db.select({ id: groupRuns.id, hostUserId: groupRuns.hostUserId }).from(groupRuns).where(eq(groupRuns.id, id));
-      if (!gr) return res.status(404).json({ error: "Group run not found" });
-      if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can invite" });
-
-      for (const uid of (userIds ?? [])) {
-        // Upsert — don't re-invite if already a participant
-        const existing = await db.select().from(groupRunParticipants)
-          .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, uid)));
-        if (existing.length === 0) {
-          await db.insert(groupRunParticipants).values({
-            groupRunId: id, userId: uid, role: "participant", invitationStatus: "pending", readyToStart: false,
-          });
-        }
-      }
-
-      res.status(200).json({ invited: userIds?.length ?? 0 });
-    } catch (error: any) {
-      console.error("[POST /api/group-runs/:id/invite]", error);
-      res.status(500).json({ error: "Failed to invite" });
-    }
-  });
-
-  // POST /api/group-runs/:id/respond — accept or decline invite
-  app.post("/api/group-runs/:id/respond", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-      const { response: resp } = req.body as { response: string };
-
-      if (!["accepted", "declined"].includes(resp)) {
-        return res.status(400).json({ error: "response must be 'accepted' or 'declined'" });
-      }
-
-      const existing = await db.select().from(groupRunParticipants)
-        .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
-
-      if (existing.length === 0) {
-        // User is joining a public run they weren't explicitly invited to
-        await db.insert(groupRunParticipants).values({
-          groupRunId: id, userId, role: "participant", invitationStatus: resp, readyToStart: false,
-        });
-      } else {
-        await db.update(groupRunParticipants)
-          .set({ invitationStatus: resp })
-          .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
-      }
-
-      const gr = await buildGroupRunResponse(id, userId);
-      if (!gr) return res.status(404).json({ error: "Group run not found" });
-      res.json(gr);
-    } catch (error: any) {
-      console.error("[POST /api/group-runs/:id/respond]", error);
-      res.status(500).json({ error: "Failed to respond" });
-    }
-  });
-
-  // POST /api/group-runs/:id/ready — mark self as ready to start
-  app.post("/api/group-runs/:id/ready", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-
-      await db.update(groupRunParticipants)
-        .set({ readyToStart: true })
-        .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
-
-      const gr = await buildGroupRunResponse(id, userId);
-      if (!gr) return res.status(404).json({ error: "Group run not found" });
-      res.json(gr);
-    } catch (error: any) {
-      console.error("[POST /api/group-runs/:id/ready]", error);
-      res.status(500).json({ error: "Failed to mark ready" });
-    }
-  });
-
-  // POST /api/group-runs/:id/start — organiser starts the run
-  app.post("/api/group-runs/:id/start", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-
-      const [gr] = await db.select({
-        id: groupRuns.id,
-        hostUserId: groupRuns.hostUserId,
-        runName: groupRuns.runName,
-      }).from(groupRuns).where(eq(groupRuns.id, id));
-      if (!gr) return res.status(404).json({ error: "Group run not found" });
-      if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can start the run" });
-
-      await db.update(groupRuns).set({ status: "active" }).where(eq(groupRuns.id, id));
-
-      // Fetch organiser name for notification
-      const [organiser] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId));
-      const organiserName = organiser?.name || "The organiser";
-
-      // Send push notifications to all participants who are "accepted" or "pending" (NOT "declined")
-      try {
-        const participants = await db
-          .select({
-            userId: groupRunParticipants.userId,
-            invitationStatus: groupRunParticipants.invitationStatus,
-          })
-          .from(groupRunParticipants)
-          .where(
-            and(
-              eq(groupRunParticipants.groupRunId, id),
-              inArray(groupRunParticipants.invitationStatus, ["accepted", "pending"])
-            )
-          );
-
-        const notificationService = await import("./notification-service");
-
-        for (const participant of participants) {
-          // Don't send notification to the organiser themselves
-          if (participant.userId === userId) continue;
-
-          await notificationService.sendFirebasePush(
-            participant.userId,
-            `${organiserName} is ready to run! 🏃`,
-            `The group run "${gr.runName}" is ready to start. Tap to join!`,
-            {
-              type: "group_run_started",
-              groupRunId: id,
-              runName: gr.runName,
-              organiserName,
-            }
-          );
-        }
-
-        console.log(`[Group Run Start] Sent notifications to ${participants.length} participants for group run ${id}`);
-      } catch (notifError: any) {
-        console.warn(`[Group Run Start] Failed to send notifications for group run ${id}:`, notifError.message);
-        // Don't fail the entire request if notifications fail — the run start is still valid
-      }
-
-      const updated = await buildGroupRunResponse(id, userId);
-      res.json(updated);
-    } catch (error: any) {
-      console.error("[POST /api/group-runs/:id/start]", error);
-      res.status(500).json({ error: "Failed to start group run" });
-    }
-  });
-
-  // POST /api/group-runs/:id/complete — link a completed run session
-  app.post("/api/group-runs/:id/complete", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-      const { runId } = req.body as { runId: string };
-
-      if (runId) {
-        // Link the participant row to the run and mark them as completed
-        await db.update(groupRunParticipants)
-          .set({ runId, completedAt: new Date() })
-          .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
-        // Also stamp the run itself so we can look up group runs by runId
-        await db.update(runs).set({ groupRunId: id }).where(eq(runs.id, runId));
-      }
-
-      // Check if all accepted participants have completed
-      const allAccepted = await db.select().from(groupRunParticipants)
-        .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.invitationStatus, 'accepted')));
-      const allDone = allAccepted.every(p => !!p.runId);
-
-      // If all participants have finished, mark the group run as completed
-      if (allDone && allAccepted.length > 0) {
-        await db.update(groupRuns).set({ status: "completed" }).where(eq(groupRuns.id, id));
-      }
-
-      const updated = await buildGroupRunResponse(id, userId);
-      if (!updated) return res.status(404).json({ error: "Group run not found" });
-      res.json(updated);
-    } catch (error: any) {
-      console.error("[POST /api/group-runs/:id/complete]", error);
-      res.status(500).json({ error: "Failed to complete group run" });
-    }
-  });
-
   // GET /api/group-runs/by-run/:runId — look up which group run a specific run belongs to
   app.get("/api/group-runs/by-run/:runId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -17539,70 +17370,6 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     } catch (error: any) {
       console.error("[GET /api/group-runs/by-run/:runId]", error);
       res.status(500).json({ error: "Failed to look up group run" });
-    }
-  });
-
-  // GET /api/group-runs/:id/results
-  app.get("/api/group-runs/:id/results", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-
-      const [gr] = await db.select({ title: groupRuns.title }).from(groupRuns).where(eq(groupRuns.id, id));
-
-      const participants = await db
-        .select({
-          userId: groupRunParticipants.userId,
-          runId: groupRunParticipants.runId,
-          name: users.name,
-          profilePic: users.profilePic,
-        })
-        .from(groupRunParticipants)
-        .innerJoin(users, eq(users.id, groupRunParticipants.userId))
-        .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.invitationStatus, "accepted")));
-
-      const results = await Promise.all(
-        participants.map(async p => {
-          let runSession = null;
-          if (p.runId) {
-            const [run] = await db.select().from(runs).where(eq(runs.id, p.runId));
-            if (run) {
-              // Return the full run record so the client can display any stat it needs
-              runSession = run;
-            }
-          }
-          return {
-            userId: p.userId,
-            userName: p.name,
-            profilePic: p.profilePic,
-            runId: p.runId,
-            completedAt: runSession ? (runSession as any).completedAt ?? null : null,
-            isCurrentUser: p.userId === userId,
-            runSession,
-          };
-        })
-      );
-
-      res.json({ groupRunId: id, groupRunName: gr?.title ?? null, results });
-    } catch (error: any) {
-      console.error("[GET /api/group-runs/:id/results]", error);
-      res.status(500).json({ error: "Failed to get results" });
-    }
-  });
-
-  // DELETE /api/group-runs/:id/leave
-  app.delete("/api/group-runs/:id/leave", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { id } = req.params;
-      const userId = req.user!.userId;
-
-      await db.delete(groupRunParticipants)
-        .where(and(eq(groupRunParticipants.groupRunId, id), eq(groupRunParticipants.userId, userId)));
-
-      res.status(204).send();
-    } catch (error: any) {
-      console.error("[DELETE /api/group-runs/:id/leave]", error);
-      res.status(500).json({ error: "Failed to leave group run" });
     }
   });
 

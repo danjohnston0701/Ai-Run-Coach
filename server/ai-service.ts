@@ -2307,6 +2307,25 @@ export async function getElevationCoaching(params: {
   const elevPersonCap = isWalkElevation ? 'Walker' : 'Runner';
   const elevPersonLower = isWalkElevation ? 'walker' : 'runner';
 
+  // ── Pace-aware cadence hint for run technique cues below ────────────────────
+  // The climb/descent/flat technique cues used to hardcode static spm targets
+  // (e.g. "170-180 spm", "160-170 spm") regardless of the session's actual pace —
+  // fine for a 4:00/km tempo, actively misleading for an 8:00-8:30/km Zone 2 easy
+  // run, where a realistic personal cadence is closer to 150-155 spm. Compute a
+  // real target from calculateOptimalCadenceRange (same function already used
+  // correctly elsewhere in this file for live cadence coaching) instead of citing
+  // a generic number the runner has no way of matching at their actual pace.
+  const elevPaceSecPerKm = (() => {
+    const paceStr = params.currentPace || params.averagePace;
+    if (!paceStr) return null;
+    const parts = paceStr.split(':').map(Number);
+    return parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) ? parts[0] * 60 + parts[1] : null;
+  })();
+  const elevCadenceRange = elevPaceSecPerKm != null ? calculateOptimalCadenceRange(elevPaceSecPerKm, 170) : null;
+  const cadenceHint = elevCadenceRange
+    ? `${elevCadenceRange.low}-${elevCadenceRange.high} spm`
+    : 'a quick, light turnover — do not cite a specific spm number, pace data is unavailable';
+
   // ── Normalise event type across platforms ──────────────────────────────────
   // iOS wraps state in a "terrain_state" envelope: { event_type: "terrain_state", terrain_state: "gradual_climb" }
   // Android sends the state directly as event_type: "gradual_climb"
@@ -2385,7 +2404,7 @@ COACHING FOCUS (current terrain only — do NOT predict what comes after):
 
 COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Acknowledge the climb they are ON: grade, metres climbed, how the effort feels relative to their data
-- Technique on a gradual climb: shorten stride, keep cadence up (target 160-170 spm), stay tall through hips
+- Technique on a gradual climb: shorten stride, keep cadence up (target ${cadenceHint}), stay tall through hips
 - If HR is elevated: coach effort control — "keep it conversational, let the hill come to you"
 - If cadence is low: "quick feet — shorter, lighter steps are more efficient than big powerful strides uphill"
 - Correlate pace drop with grade: a 3-4% grade typically costs 15-25s/km — if they're in that range they're managing it well
@@ -2427,7 +2446,7 @@ COACHING FOCUS (current terrain only — no predictions about what comes next):
 COACHING FOCUS (current terrain only — no predictions about what comes next):
 - Gravity is working FOR them right now — pace naturally picks up, that is correct and expected
 - NEVER say descending "slows you down" or "makes things harder" — it does the opposite
-- Technique on a gradual descent: let the legs turnover quickly, stay light on feet, lean slightly forward, high cadence (170-185 spm)
+- Technique on a gradual descent: let the legs turnover quickly, stay light on feet, lean slightly forward, quick cadence (target ${cadenceHint})
 - If cadence is low: encourage quicker turnover — "let gravity do the work, quick light steps"
 - Use the descent to RECOVER aerobically: HR should drop, breathing should ease — if it's not, they're braking
 - If they're braking (heavy heel striking): "land under your hips, not in front — let the hill flow under you"
@@ -2492,7 +2511,7 @@ COACHING FOCUS:
 - If pace is drifting (spread > 20s): on flat terrain there's no excuse — suggest a form reset or effort check
 ${isWalkElevation
   ? '- Flat walking technique cue: tall posture through hips, relaxed shoulders, arms swinging forward not across, purposeful stride'
-  : '- Flat running technique cue: cadence 170-180, tall posture through hips, relaxed shoulders, arms swinging forward not across'}
+  : `- Flat running technique cue: cadence target ${cadenceHint}, tall posture through hips, relaxed shoulders, arms swinging forward not across`}
 - Reference their actual numbers`;
 
   } else {
@@ -3396,6 +3415,21 @@ export async function generateWellnessAwarePreRunBriefing(params: {
 }> {
   const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, activityType, weather, coachName, coachTone, coachAccent, wellness, hasRoute = true, targetTime, targetPace, weatherImpact, runnerName, fitnessLevel, userTimezoneId, trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks, workoutType, workoutIntensity, workoutDescription } = params;
 
+  // Resolve target pace deterministically in code rather than trusting only the client-sent
+  // literal (or worse, letting the LLM derive it from raw time/distance in the prompt — LLMs
+  // are unreliable at exact division/rounding, e.g. 840s over 3km read back as "4:30/km"
+  // instead of the correct 4:40/km). If the client already sent a target pace string, use it
+  // as-is; otherwise compute it here whenever time + distance are both available, so the
+  // prompt always receives a single already-correct literal via formatPaceForTTS() below.
+  const resolvedTargetPace = targetPace || ((targetTime && targetTime > 0 && distance && distance > 0)
+    ? (() => {
+        const paceSecPerKm = targetTime / distance;
+        const min = Math.floor(paceSecPerKm / 60);
+        const sec = Math.round(paceSecPerKm % 60);
+        return `${min}:${sec.toString().padStart(2, '0')}`;
+      })()
+    : undefined);
+
   // Determine activity-specific language
   const isWalk = activityType && activityType.toLowerCase() === 'walk';
   const activityLabel = isWalk ? 'walk' : 'run';
@@ -3465,9 +3499,9 @@ ${activityLabelShout} (No planned route):
   }
 
   // Add target pace info if user has a target time/pace
-  if (targetTime && targetPace) {
+  if (targetTime && resolvedTargetPace) {
     routeInfo += `
-- Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${formatPaceForTTS(targetPace)})`;
+- Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${formatPaceForTTS(resolvedTargetPace)})`;
   }
 
   // ── POLICY: Garmin Connect data excluded from AI processing ──────────────
@@ -3541,7 +3575,7 @@ ${coachingPlanContext ? `1. "briefing": 2-3 SHORT SENTENCES (max 35 words). This
 3. "weatherAdvice": ONE sentence (≤15 words) on how weather conditions affect the run. Be specific (wind, temp, rain, etc.). Can be empty if weather is neutral.
 4. "warnings": Array of warnings — empty if none. Include readiness warnings if wellness data suggests caution.
 5. "${hasRoute === true ? 'routeInsight' : 'readinessInsight'}": ONE sentence (≤12 words). ${wellnessContext ? 'Key readiness or terrain challenge affecting this specific workout.' : 'One specific motivational detail tied to this workout.'}`
-: `1. "briefing": 2-3 SENTENCES (max 40 words) for a free-form run. Lead with distance${targetPace ? ' and target pace' : ''}, mention weather and how it might affect you. ${wellnessContext ? 'Include your readiness status.' : ''} Be conversational. ${PACE_FORMAT_RULE}
+: `1. "briefing": 2-3 SENTENCES (max 40 words) for a free-form run. Lead with distance${resolvedTargetPace ? ' and target pace' : ''}, mention weather and how it might affect you. ${wellnessContext ? 'Include your readiness status.' : ''} Be conversational. ${PACE_FORMAT_RULE}
 2. "intensityAdvice": ONE sentence (≤15 words). About pace, effort, and listening to your body today.
 3. "weatherAdvice": ONE sentence (≤15 words) on how conditions will impact the ${activityLabel}. Empty if weather is neutral/favorable.
 4. "warnings": Array of warnings ${wellnessContext ? 'if wellness or weather suggest adjusting intensity' : 'based on weather or route conditions'}. Empty if none.
@@ -3553,7 +3587,7 @@ CRITICAL RULES:
 - Include WEATHER in the briefing or weatherAdvice field EVERY TIME (e.g., "Warm day, hydrate well" or "Headwind on the outbound — practice power on climbs").
 - For ${activityLabelShout} marked "${activityLabelShout} (No planned route)" - do NOT mention terrain, elevation, hills, or route characteristics.
 ${!wellnessContext ? '- CRITICAL: No Garmin or wellness data is connected. Do NOT mention body readiness, recovery, fatigue, body battery, sleep, stress, HRV, or any biometric data.' : ''}
-${!targetPace ? `- CRITICAL: This ${activityLabel} has NO target pace or target time set by the ${isWalk ? 'walker' : 'runner'}. Do NOT state, suggest, or imply any specific pace figure (e.g. "aim for 6:30/km") anywhere in your response — not even by reusing their historical/recent average pace from the runner profile as if it were a target for this session. Reference effort or feel instead (e.g. "keep it conversational," "${isWalk ? 'walk' : 'run'} by feel today").` : ''}
+${!resolvedTargetPace ? `- CRITICAL: This ${activityLabel} has NO target pace or target time set by the ${isWalk ? 'walker' : 'runner'}. Do NOT state, suggest, or imply any specific pace figure (e.g. "aim for 6:30/km") anywhere in your response — not even by reusing their historical/recent average pace from the runner profile as if it were a target for this session. Reference effort or feel instead (e.g. "keep it conversational," "${isWalk ? 'walk' : 'run'} by feel today").` : `- The target pace of ${formatPaceForTTS(resolvedTargetPace)} is already correctly calculated — state it exactly as given. Do NOT recompute, round, or re-derive it from the distance and time yourself.`}
 - NEVER start with generic greetings like "Hey there!" — jump straight in.
 - Be conversational as if speaking directly to the ${isWalk ? 'walker' : 'runner'}. Use "you" and "your."${isWalk ? ' WALK SESSION — never say "run", "runner", "running" in your output.' : ''}
 ${coachAccent ? `- Write using natural ${coachAccent} English phrasing. The text will be spoken aloud by a ${coachAccent} voice.` : ''}
@@ -6956,6 +6990,8 @@ ${activityType === "walk" ? "CRITICAL: This is a WALK session. NEVER use running
 
 The plan runs in real time: a live engine evaluates your trigger conditions against the athlete's sensor data every second and fires your messages through text-to-speech the instant conditions are met.
 
+CRITICAL — NO TERRAIN PREDICTION: You are given NO route map, elevation profile, or terrain data anywhere in this prompt — you have no factual basis for what terrain the athlete will encounter. NEVER mention or imply specific upcoming terrain in the preRunBrief or any trigger message — no "hills ahead", "save some energy for the climbs", "there's a downhill coming up", or similar. This applies even if it sounds like generic motivational running-coach language — if you did not receive actual elevation/route data in this prompt, you do not know it, and stating it as if you do is inventing a real-time hazard the athlete will be listening for. Elevation-based coaching during the run is handled by a separate live system that only describes terrain the athlete is on RIGHT NOW, using real GPS data — your job here is the plan structure and target-based coaching only.
+
 ONE REQUIRED OUTPUT: preRunBrief — a spoken summary the athlete hears before they start. It must reflect the PRIMARY SESSION STRUCTURE exactly:
 - Distance-based: lead with the target distance, mention the estimated time as a rough guide, name the target pace and/or HR zone. E.g. "We're off on a 3.5 km easy run — should take around 45 minutes at a light jog. Keep your heart rate between 110 and 130."
 - Time-based: lead with the duration, describe the effort level and any HR targets. E.g. "Today is a 45-minute easy jog — no fixed finish line, just keep it comfortable the whole way."
@@ -6980,8 +7016,17 @@ RHS target keywords: targetHRMax, targetHRMin, targetPaceMax, targetPaceMin (ari
 Syntax: "hr > 155"  |  "remaining_m < 500"  |  "pace < targetPaceMin AND elapsed_min > 3"
 Condition "always" fires unconditionally every frequencySeconds.
 
-MESSAGE VARIABLES — substituted live at trigger time:
-{hr} {pace} {cadence} {repNum} {totalReps} {repsLeft} {targetHRMax} {targetHRMin} {targetPaceMin} {targetPaceMax}
+MESSAGE VARIABLES — substituted live at trigger time. This is the COMPLETE list — the client
+does not recognise anything outside it, so a message using an unlisted token (e.g. inventing
+"{elapsed_time}" instead of the actual "{elapsedMin}") will speak that literal placeholder text
+aloud instead of a real number. If you need a value not in this list, describe it in words
+instead of guessing a token name:
+{hr} {hrZone} {pace} {cadence} {repNum} {totalReps} {repsLeft} {elapsedMin} {distKm}
+{targetHRMax} {targetHRMin} {targetPaceMin} {targetPaceMax} {grade} {elevationGain}
+{remainingKm} {remainingMin}
+- {elapsedMin} = elapsed run time in whole minutes — use this for "you've been running for X minutes" in milestone/session_complete messages, never a guessed name.
+- {distKm} = total distance covered so far in km (1 decimal place).
+- {remainingKm} / {remainingMin} = distance/time remaining to the target — only meaningful when that target type is set for this session.
 
 VOICE: messages are read aloud — write exactly as you would speak it. Write "heart rate" not "HR". Write "beats per minute" or "bpm" not "BPM". Never use symbols.
 PACE FORMAT IN preRunBrief AND messages: NEVER write pace as "6:57/km" — TTS reads colons as clock time. Say "six minutes 57 per kilometre" instead. When referencing {pace} in messages, the engine substitutes the formatted spoken string automatically.

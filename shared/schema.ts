@@ -28,6 +28,10 @@ export const users = pgTable("users", {
   subscriptionStatus: text("subscription_status"),
   entitlementType: text("entitlement_type"),
   entitlementExpiresAt: timestamp("entitlement_expires_at"),
+  // Orthogonal to subscriptionTier — a user on any tier's "no AI Plans" SKU has this false.
+  // Every existing tier-string comparison (subscriptionTier === "lite" etc.) is unaffected;
+  // only AI training-plan generation consults this flag.
+  aiPlansEnabled: boolean("ai_plans_enabled").default(true),
   distanceMinKm: real("distance_min_km").default(0),
   distanceMaxKm: real("distance_max_km").default(50),
   distanceDecimalsEnabled: boolean("distance_decimals_enabled").default(false),

@@ -29,7 +29,12 @@ data class GooglePlayPricingResponse(
     @SerializedName("lite_monthly")    val liteMonthly:    PricingTierData,
     @SerializedName("lite_annual")     val liteAnnual:     PricingTierData,
     @SerializedName("standard_monthly") val standardMonthly: PricingTierData,
-    @SerializedName("standard_annual") val standardAnnual:  PricingTierData
+    @SerializedName("standard_annual") val standardAnnual:  PricingTierData,
+    // "No AI Plans" variants — same tier/period, AI training-plan generation excluded.
+    @SerializedName("lite_noaiplan_monthly")    val liteNoAiMonthly:    PricingTierData? = null,
+    @SerializedName("lite_noaiplan_annual")     val liteNoAiAnnual:     PricingTierData? = null,
+    @SerializedName("standard_noaiplan_monthly") val standardNoAiMonthly: PricingTierData? = null,
+    @SerializedName("standard_noaiplan_annual") val standardNoAiAnnual:  PricingTierData? = null
 )
 
 data class PricingTierData(

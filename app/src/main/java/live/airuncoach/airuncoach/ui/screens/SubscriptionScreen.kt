@@ -67,6 +67,7 @@ fun SubscriptionScreen(
     // without needing navigation away and back.
     val currentTier by viewModel.subscriptionTierState.collectAsState()
     val isPremium = currentTier == "lite" || currentTier == "standard"
+    val currentAiPlansEnabled = viewModel.getAiPlansEnabled()
     val isTrialExpired = viewModel.isTrialExpired()
     val trialDaysRemaining = viewModel.trialDaysRemaining()
     val trialExpiresAt = viewModel.getTrialExpiresAt()
@@ -178,6 +179,7 @@ fun SubscriptionScreen(
                 trialDaysRemaining = trialDaysRemaining,
                 trialExpiresAt = trialExpiresAt,
                 currentTier = currentTier,
+                currentAiPlansEnabled = currentAiPlansEnabled,
                 selectedCurrency = userCurrency,
                 pricingData = pricingData,
                 onNavigateToChangePassword = onNavigateToChangePassword,
@@ -258,6 +260,7 @@ private fun PlansTabContent(
     trialDaysRemaining: Int = 0,
     trialExpiresAt: LocalDate? = null,
     currentTier: String = "free",
+    currentAiPlansEnabled: Boolean = true,
     selectedCurrency: String = "USD",
     pricingData: GooglePlayPricingResponse? = null,
     onNavigateToChangePassword: () -> Unit = {},
@@ -267,6 +270,10 @@ private fun PlansTabContent(
     val context = LocalContext.current
     // Hoisted OUTSIDE LazyColumn so scrolling can never reset it
     var isAnnual by remember { mutableStateOf(false) }
+    // Browsing toggle — independent of the user's actual current plan, lets anyone
+    // preview no-AI-Plans pricing before purchasing. Defaults to the user's real
+    // current setting so premium users see their own plan reflected correctly.
+    var aiPlansToggle by remember { mutableStateOf(currentAiPlansEnabled) }
 
     LazyColumn(
         modifier = Modifier
@@ -318,19 +325,27 @@ private fun PlansTabContent(
             BillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
         }
 
+        // AI Plans toggle — shown above both plan tiles, applies to both Monthly and
+        // Annual tabs. Off swaps both cards to the cheaper "no AI Plans" variant.
+        item {
+            AiPlansToggleRow(aiPlansEnabled = aiPlansToggle, onToggle = { aiPlansToggle = it })
+        }
+
         // Plan Cards — localized using the user's inferred currency + server pricing data
         val freeTier = PlanData.FREE_TRIAL
-        val liteTier = PlanData.LITE.localizedFor(
+        val liteBase = if (aiPlansToggle) PlanData.LITE else PlanData.LITE_NOAI
+        val liteTier = liteBase.localizedFor(
             currency    = selectedCurrency,
             pricing     = pricingData,
-            monthlyTier = pricingData?.liteMonthly,
-            annualTier  = pricingData?.liteAnnual
+            monthlyTier = if (aiPlansToggle) pricingData?.liteMonthly else pricingData?.liteNoAiMonthly,
+            annualTier  = if (aiPlansToggle) pricingData?.liteAnnual else pricingData?.liteNoAiAnnual
         )
-        val standardTier = PlanData.STANDARD.localizedFor(
+        val standardBase = if (aiPlansToggle) PlanData.STANDARD else PlanData.STANDARD_NOAI
+        val standardTier = standardBase.localizedFor(
             currency    = selectedCurrency,
             pricing     = pricingData,
-            monthlyTier = pricingData?.standardMonthly,
-            annualTier  = pricingData?.standardAnnual
+            monthlyTier = if (aiPlansToggle) pricingData?.standardMonthly else pricingData?.standardNoAiMonthly,
+            annualTier  = if (aiPlansToggle) pricingData?.standardAnnual else pricingData?.standardNoAiAnnual
         )
 
         // Free trial card — only shown when the user is NOT already paid
@@ -350,12 +365,12 @@ private fun PlansTabContent(
         item {
             PlanCard(
                 plan = liteTier,
-                isCurrent = isPremium && currentTier.lowercase() == "lite",
+                isCurrent = isPremium && currentTier.lowercase() == "lite" && aiPlansToggle == currentAiPlansEnabled,
                 isAnnual = isAnnual,
                 onUpgradeClick = {
                     val packageName = context.packageName
-                    val productId = if (isAnnual) "lite_annual" else "lite_monthly"
-                    
+                    val productId = resolveProductId("lite", isAnnual, aiPlansToggle)
+
                     if (!isPremium) {
                         // Non-premium user: try to purchase through billing client
                         activity?.let {
@@ -387,13 +402,13 @@ private fun PlansTabContent(
         item {
             PlanCard(
                 plan = standardTier,
-                isCurrent = isPremium && currentTier.lowercase() == "standard",
+                isCurrent = isPremium && currentTier.lowercase() == "standard" && aiPlansToggle == currentAiPlansEnabled,
                 isPopular = true,
                 isAnnual = isAnnual,
                 onUpgradeClick = {
                     val packageName = context.packageName
-                    val productId = if (isAnnual) "standard_annual" else "standard_monthly"
-                    
+                    val productId = resolveProductId("standard", isAnnual, aiPlansToggle)
+
                     if (!isPremium) {
                         // Non-premium user: try to purchase through billing client
                         activity?.let {
@@ -422,10 +437,16 @@ private fun PlansTabContent(
             Spacer(modifier = Modifier.height(Spacing.xxxl))
         }
 
-        // Manage Subscription Link (Paid users)
+        // Manage Subscription Link (Paid users) — deep-links to the user's actual
+        // current product, not a hardcoded one, so Google Play shows the right plan.
         if (isPremium) {
             item {
-                ManageSubscriptionCard(context = context)
+                val currentProductId = resolveProductId(
+                    tier = currentTier,
+                    isAnnual = viewModel.getBillingPeriod() == "annual",
+                    aiPlansEnabled = currentAiPlansEnabled
+                )
+                ManageSubscriptionCard(context = context, productId = currentProductId)
             }
         }
 
@@ -1475,18 +1496,19 @@ private fun CurrentPlanBadge(currentTier: String) {
  * Card with link to manage subscription in Google Play Store
  */
 @Composable
-private fun ManageSubscriptionCard(context: android.content.Context) {
+private fun ManageSubscriptionCard(context: android.content.Context, productId: String) {
     val packageName = context.packageName
-    
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = Spacing.lg)
             .padding(bottom = Spacing.lg)
             .clickable {
-                // Open Google Play subscription management
+                // Open Google Play subscription management, deep-linked to the user's
+                // actual current product — not hardcoded to a fixed SKU.
                 val intent = Intent(Intent.ACTION_VIEW).apply {
-                    data = "https://play.google.com/store/account/subscriptions?package=$packageName&sku=lite_monthly".toUri()
+                    data = "https://play.google.com/store/account/subscriptions?package=$packageName&sku=$productId".toUri()
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 context.startActivity(intent)
@@ -1592,6 +1614,34 @@ data class PlanData(
                 PlanFeature("3 AI Training Plan generations per month", true)
             )
         )
+
+        // "No AI Plans" variants — same tier limits otherwise, AI Training Plans excluded.
+        // Pricing is a placeholder pending final confirmation (see /api/googlePlayPricing).
+        val LITE_NOAI = LITE.copy(
+            monthlyPriceDisplay = "USD 3.99",
+            annualPriceDisplay = "USD 39.99",
+            annualMonthlyEquivalent = "USD 3.33/month — save USD 7.89",
+            features = listOf(
+                PlanFeature("Unlimited AI Sessions", true),
+                PlanFeature("50km of AI Coaching per month", true),
+                PlanFeature("15 AI Session Summaries per month", true),
+                PlanFeature("10 AI Route Generations per month", true),
+                PlanFeature("AI Training Plans", false)
+            )
+        )
+
+        val STANDARD_NOAI = STANDARD.copy(
+            monthlyPriceDisplay = "USD 8.99",
+            annualPriceDisplay = "USD 89.99",
+            annualMonthlyEquivalent = "USD 7.50/month — save USD 17.89",
+            features = listOf(
+                PlanFeature("Unlimited AI Sessions", true),
+                PlanFeature("200km of AI Coaching per month", true),
+                PlanFeature("50 AI Session Summaries per month", true),
+                PlanFeature("30 AI Route Generations per month", true),
+                PlanFeature("AI Training Plans", false)
+            )
+        )
     }
 }
 
@@ -1642,4 +1692,46 @@ fun PlanData.localizedFor(
     )
 }
 
+/**
+ * Single source of truth mapping (tier, billing period, AI-plans inclusion) to the
+ * corresponding Google Play product ID. Previously each screen/card hardcoded these
+ * strings independently, which is exactly how the Manage Subscription deep-link ended
+ * up pinned to "lite_monthly" regardless of the user's actual plan.
+ */
+fun resolveProductId(tier: String, isAnnual: Boolean, aiPlansEnabled: Boolean): String {
+    val base = if (tier.lowercase() == "standard") "standard" else "lite"
+    val aiSuffix = if (aiPlansEnabled) "" else "_noaiplan"
+    val periodSuffix = if (isAnnual) "annual" else "monthly"
+    return "${base}${aiSuffix}_$periodSuffix"
+}
+
+@Composable
+fun AiPlansToggleRow(aiPlansEnabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(bottom = Spacing.lg)
+            .background(Colors.backgroundSecondary, RoundedCornerShape(12.dp))
+            .padding(Spacing.lg),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = Spacing.md)) {
+            Text(
+                text = "Include AI Training Plans",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Colors.textPrimary
+            )
+            Text(
+                text = "Turn off to lower your price if you don't need AI-generated training plans",
+                fontSize = 12.sp,
+                color = Colors.textSecondary,
+                modifier = Modifier.padding(top = Spacing.xs)
+            )
+        }
+        Switch(checked = aiPlansEnabled, onCheckedChange = onToggle)
+    }
+}
 

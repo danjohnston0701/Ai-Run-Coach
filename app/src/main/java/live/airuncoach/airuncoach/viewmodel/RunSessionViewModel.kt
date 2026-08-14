@@ -1023,7 +1023,10 @@ class RunSessionViewModel @Inject constructor(
                     val distance = route?.distance ?: runConfig?.targetDistance?.toDouble()
                     val elevationGain = route?.elevationGain?.toInt() ?: 0
                     val elevationLoss = route?.elevationLoss?.toInt() ?: 0
-                    val maxGradientDegrees = route?.maxGradientDegrees ?: 0.0
+                    // Use steepest climb as the general "max gradient" figure for the pre-run brief —
+                    // a reasonable proxy since PreRunBriefingRequest.maxGradientDegrees is a single
+                    // overall value, not a separate incline/decline pair.
+                    val maxGradientDegrees = route?.maxInclineDegrees ?: 0.0
                     val difficulty = if (hasRoute) {
                         route?.difficulty?.name?.lowercase() ?: "moderate"
                     } else {

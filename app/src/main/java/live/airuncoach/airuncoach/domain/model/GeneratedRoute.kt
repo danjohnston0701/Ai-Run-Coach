@@ -1,5 +1,7 @@
 package live.airuncoach.airuncoach.domain.model
 
+import live.airuncoach.airuncoach.network.model.ElevationProfilePoint
+
 /**
  * Complete representation of a generated running route
  */
@@ -13,8 +15,9 @@ data class GeneratedRoute(
     val difficulty: RouteDifficulty,        // EASY, MODERATE, HARD
     val elevationGain: Double,                // Total elevation gain in meters (can be decimal)
     val elevationLoss: Double,              // Total elevation loss in meters (can be decimal)
-    val maxGradientPercent: Double,         // Steepest gradient percentage (e.g., 8.5)
-    val maxGradientDegrees: Double,         // Steepest gradient in degrees (e.g., 4.9)
+    val maxInclineDegrees: Double,          // Steepest uphill segment in degrees (e.g., 4.9)
+    val maxDeclineDegrees: Double,          // Steepest downhill segment in degrees (e.g., 8.5)
+    val elevationProfile: List<ElevationProfilePoint>? = null, // Downsampled distance-vs-elevation points for charting
     val instructions: List<String>,         // Turn-by-turn text instructions
     val turnInstructions: List<TurnInstruction>, // Detailed turn instructions with coordinates
     val backtrackRatio: Double,             // How much the route backtracks (0.0 - 1.0)

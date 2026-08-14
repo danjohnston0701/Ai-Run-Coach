@@ -166,6 +166,18 @@ export async function sendFirebasePush(
               clickAction: "OPEN_RUN_SUMMARY",
             },
           },
+          // Without an explicit apns.payload.aps.sound, FCM still auto-converts the top-level
+          // "notification" into a displayable iOS banner, but silently — no sound plays, unlike
+          // Android which gets one via android.notification.sound above. Mirrors that here so
+          // both platforms behave the same for every push sent through this non-dataOnly path
+          // (friend requests, activity/PB notifications, etc.).
+          apns: {
+            payload: {
+              aps: {
+                sound: "default",
+              },
+            },
+          },
         };
 
     const messaging = adminSDK.messaging ? adminSDK.messaging(app) : adminSDK.default?.messaging(app);
@@ -254,6 +266,57 @@ export async function sendWatchSessionStartedPush(
       : adminSDK.default?.messaging(app);
     await messaging.send(message);
     console.log(`[WatchSessionFCM] ✅ Sent watchSessionStarted to user ${userId} (session ${sessionId})`);
+    return true;
+  } catch (err: any) {
+    if (err?.code === "messaging/registration-token-not-registered") {
+      await db.update(users).set({ fcmToken: null }).where(eq(users.id, userId));
+      console.warn(`[WatchSessionFCM] Stale FCM token cleared for user ${userId}`);
+    } else {
+      console.warn(`[WatchSessionFCM] Push failed for user ${userId}: ${err?.message}`);
+    }
+    return false;
+  }
+}
+
+// Mirror of sendWatchSessionStartedPush above, for session END. The phone-side "stop" BT
+// command from the watch is fire-and-forget (ConnectIQ Comm.transmit()) with the same drop
+// risk documented on the start push — but until this was added, there was no fallback for
+// it: a dropped "stop" left RunTrackingService (and the phone's run-session screen) stuck
+// thinking the run was still active forever, even though the watch's own companion
+// session/end call succeeded and created the run record. Sent from the same relay-backed
+// endpoint (/api/garmin-companion/session/end) as the start push, so it survives Doze/
+// backgrounding the same way.
+export async function sendWatchSessionEndedPush(
+  userId: string,
+  sessionId: string,
+  runId: string | null
+): Promise<boolean> {
+  const app = await getFirebaseApp();
+  if (!app) return false;
+
+  try {
+    const [user] = await db
+      .select({ fcmToken: users.fcmToken })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user?.fcmToken) {
+      console.log(`[WatchSessionFCM] No FCM token for user ${userId} — BT path only`);
+      return false;
+    }
+
+    const message: any = {
+      token: user.fcmToken,
+      data: { type: "watchSessionEnded", sessionId, ...(runId ? { runId } : {}) },
+      android: { priority: "high", ttl: 20000 },
+    };
+
+    const messaging = adminSDK.messaging
+      ? adminSDK.messaging(app)
+      : adminSDK.default?.messaging(app);
+    await messaging.send(message);
+    console.log(`[WatchSessionFCM] ✅ Sent watchSessionEnded to user ${userId} (session ${sessionId})`);
     return true;
   } catch (err: any) {
     if (err?.code === "messaging/registration-token-not-registered") {

@@ -15,7 +15,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -23,6 +25,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import live.airuncoach.airuncoach.domain.model.RunSession
+import live.airuncoach.airuncoach.network.model.ElevationProfilePoint
 import live.airuncoach.airuncoach.ui.extensions.getHeartRateZoneDistribution
 import live.airuncoach.airuncoach.ui.theme.*
 import java.util.Locale
@@ -469,4 +472,61 @@ private fun formatPaceMinutes(paceMinPerKm: Float): String {
     val minutes = paceMinPerKm.toInt()
     val seconds = ((paceMinPerKm - minutes) * 60).toInt()
     return String.format(Locale.US, "%d:%02d", minutes, seconds)
+}
+
+/**
+ * Elevation profile preview for a generated route card (route-selection screen).
+ * Mirrors iOS's RouteElevationChart exactly: min/max-normalised filled line, no axes/labels —
+ * this is a compact preview, not the full interactive elevation chart used on the run summary
+ * screen (RunLineChartCanvas in RunSummaryScreen.kt), which has axes/tooltips/fullscreen mode
+ * and is scoped to that screen. Data comes from the same source both platforms now share:
+ * server/intelligent-route-generation.ts's buildElevationProfile() (~40 points spaced evenly
+ * by cumulative distance).
+ */
+@Composable
+fun RouteElevationChart(
+    elevationPoints: List<ElevationProfilePoint>,
+    modifier: Modifier = Modifier
+) {
+    if (elevationPoints.size < 2) return
+
+    val elevations = elevationPoints.map { it.elevation.toFloat() }
+    val minE = elevations.min()
+    val maxE = elevations.max()
+    val range = (maxE - minE).coerceAtLeast(1f)
+
+    Canvas(modifier = modifier.fillMaxWidth().height(48.dp)) {
+        val w = size.width
+        val h = size.height
+        val step = w / (elevations.size - 1)
+
+        val linePath = Path()
+        val fillPath = Path()
+        elevations.forEachIndexed { i, e ->
+            val x = i * step
+            val y = h - ((e - minE) / range) * h
+            if (i == 0) {
+                linePath.moveTo(x, y)
+                fillPath.moveTo(x, h)
+                fillPath.lineTo(x, y)
+            } else {
+                linePath.lineTo(x, y)
+                fillPath.lineTo(x, y)
+            }
+        }
+        fillPath.lineTo(w, h)
+        fillPath.close()
+
+        drawPath(
+            path = fillPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(Colors.success.copy(alpha = 0.5f), Colors.success.copy(alpha = 0.05f))
+            )
+        )
+        drawPath(
+            path = linePath,
+            color = Colors.success,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
+        )
+    }
 }

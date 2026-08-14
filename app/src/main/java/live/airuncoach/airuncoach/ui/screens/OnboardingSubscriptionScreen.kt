@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,17 +23,31 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.delay
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.util.AppAnalytics
 import live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel
 
 /**
  * Onboarding-specific subscription screen shown after AI Coach Settings.
- * Explains the free trial clearly and offers the same localized Google Play plans
- * as the subscription screen.
- * Users can dismiss to continue to the app with trial access.
+ *
+ * Redesigned 2026-08-14 after a suspected activation-drop-off issue: users were completing
+ * onboarding but not doing a first run. Root causes addressed here:
+ *  1. The whole screen used to be gated behind Play Billing connecting — any device that
+ *     couldn't reach Play Billing (no Play Store signed in, MDM-managed device, region
+ *     restriction, a network blip) got stuck on an infinite spinner with no way to reach the
+ *     dashboard. The primary "Continue to Dashboard" CTA below no longer depends on billing
+ *     at all — only the opt-in "See plans & pricing" section does, and that now has a timeout
+ *     + graceful fallback instead of spinning forever.
+ *  2. Pricing/plan cards were the default, forced view — reads as a paywall before the user
+ *     has done anything in the app. Plans are now behind an explicit opt-in toggle, so pricing
+ *     is still fully visible for anyone who wants it (transparency was a deliberate goal),
+ *     without it being the thing standing between signup and the dashboard.
+ *  3. The free-trial reassurance ("no credit card required") is now directly attached to the
+ *     primary CTA instead of buried in a footnote below two cards of trial-limitation copy.
  */
 @Composable
 fun OnboardingSubscriptionScreen(
@@ -46,8 +61,26 @@ fun OnboardingSubscriptionScreen(
     val sessionManager = remember { SessionManager(context) }
     val userCurrency by viewModel.userCurrency.collectAsState()
     val pricingData by viewModel.pricingData.collectAsState()
-    
+
     var isAnnual by remember { mutableStateOf(false) }
+    var showPlans by remember { mutableStateOf(false) }
+    var billingTimedOut by remember { mutableStateOf(false) }
+    var aiPlansToggle by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_SUBSCRIPTION_VIEWED)
+    }
+
+    // Give billing a few seconds to connect before treating it as unavailable. This only
+    // gates the opt-in "See plans" section now — never the primary continue path.
+    LaunchedEffect(billingConnectionState) {
+        if (!billingConnectionState) {
+            delay(4000)
+            if (!billingConnectionState) billingTimedOut = true
+        } else {
+            billingTimedOut = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -84,70 +117,80 @@ fun OnboardingSubscriptionScreen(
             }
         }
 
-        // Main content
-        if (billingConnectionState) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Colors.backgroundRoot),
-                contentPadding = PaddingValues(vertical = Spacing.lg)
-            ) {
-                // Trial limitations banner
-                item {
-                    TrialWelcomeCard()
-                }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Colors.backgroundRoot),
+            contentPadding = PaddingValues(vertical = Spacing.lg)
+        ) {
+            // Condensed trial summary — one card instead of two, so the primary CTA is
+            // reachable without scrolling past a wall of feature bullets first.
+            item {
+                TrialSummaryCard()
+            }
 
-                // Features during trial
-                item {
-                    FeaturesAvailableDuringTrial()
-                }
-
-                // ━━ PROMINENT FREE TRIAL CTA — Above subscription options ━━━━━━━━━━
-                // Make it obvious that users can continue without paying
-                item {
-                    Button(
-                        onClick = {
-                            sessionManager.clearOnboardingFlags()
-                            onNavigateToPermissions()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(horizontal = Spacing.lg)
-                            .padding(vertical = Spacing.md),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Colors.primary,  // Teal — prominent
-                            contentColor = Colors.buttonText
-                        ),
-                        shape = RoundedCornerShape(BorderRadius.lg)
-                    ) {
-                        Text(
-                            "Start Free Trial",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    }
-                }
-
-                // Subtitle — explain the option below
-                item {
+            // ━━ PRIMARY CTA — always visible, never depends on billing connecting ━━━━━━━━━━
+            item {
+                Button(
+                    onClick = {
+                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_CONTINUE_TO_DASHBOARD_TAPPED)
+                        sessionManager.clearOnboardingFlags()
+                        onNavigateToPermissions()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .padding(horizontal = Spacing.lg)
+                        .padding(top = Spacing.md),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Colors.primary,
+                        contentColor = Colors.buttonText
+                    ),
+                    shape = RoundedCornerShape(BorderRadius.lg)
+                ) {
                     Text(
-                        text = "Or upgrade for premium features",
-                        fontSize = 13.sp,
-                        color = Colors.textSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                        "Continue to Dashboard",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
                     )
                 }
+                Text(
+                    text = "Free 14-day trial — no credit card required",
+                    fontSize = 12.sp,
+                    color = Colors.textMuted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                )
+            }
 
-                // What's available in paid plans
-                item {
-                    WhatsIncludedInPaidPlans()
+            // Secondary, opt-in pricing — kept fully available (transparency matters) but no
+            // longer forced in front of the user before they've reached the app at all.
+            item {
+                TextButton(
+                    onClick = {
+                        if (!showPlans) {
+                            AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_SEE_PLANS_TAPPED)
+                        }
+                        showPlans = !showPlans
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.sm)
+                ) {
+                    Text(
+                        text = if (showPlans) "Hide plans & pricing" else "See plans & pricing",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Colors.primary
+                    )
                 }
+            }
 
-                // Plan selection - show both Lite and Standard
+            if (showPlans) {
+                item { WhatsIncludedInPaidPlans() }
+
                 item {
                     Text(
                         text = "Choose Your Plan",
@@ -160,105 +203,127 @@ fun OnboardingSubscriptionScreen(
                     )
                 }
 
-                // Billing period toggle
-                item {
-                    OnboardingBillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
-                    Spacer(modifier = Modifier.height(Spacing.lg))
-                }
+                if (billingConnectionState) {
+                    item {
+                        OnboardingBillingPeriodToggle(isAnnual = isAnnual, onToggle = { isAnnual = it })
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
 
-                // Lite Plan
-                item {
-                    OnboardingPlanCard(
-                        plan = PlanData.LITE.localizedFor(
-                            currency = userCurrency,
-                            pricing = pricingData,
-                            monthlyTier = pricingData?.liteMonthly,
-                            annualTier = pricingData?.liteAnnual
-                        ),
-                        isAnnual = isAnnual,
-                        onUpgradeClick = {
-                            activity?.let {
-                                val productId = if (isAnnual) "lite_annual" else "lite_monthly"
-                                val liteProduct = subscriptions.find { sub -> sub.productId == productId }
-                                if (liteProduct != null) {
-                                    viewModel.purchaseSubscription(it, liteProduct)
+                    // AI Plans toggle — applies to both the Monthly and Annual tabs above.
+                    item {
+                        AiPlansToggleRow(aiPlansEnabled = aiPlansToggle, onToggle = { aiPlansToggle = it })
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
+
+                    item {
+                        val liteBase = if (aiPlansToggle) PlanData.LITE else PlanData.LITE_NOAI
+                        OnboardingPlanCard(
+                            plan = liteBase.localizedFor(
+                                currency = userCurrency,
+                                pricing = pricingData,
+                                monthlyTier = if (aiPlansToggle) pricingData?.liteMonthly else pricingData?.liteNoAiMonthly,
+                                annualTier = if (aiPlansToggle) pricingData?.liteAnnual else pricingData?.liteNoAiAnnual
+                            ),
+                            isAnnual = isAnnual,
+                            onUpgradeClick = {
+                                AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_PLAN_PURCHASE_TAPPED)
+                                activity?.let {
+                                    val productId = resolveProductId("lite", isAnnual, aiPlansToggle)
+                                    val liteProduct = subscriptions.find { sub -> sub.productId == productId }
+                                    if (liteProduct != null) {
+                                        viewModel.purchaseSubscription(it, liteProduct)
+                                    }
                                 }
                             }
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.lg))
-                }
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
 
-                // Standard Plan - Recommended
-                item {
-                    OnboardingPlanCard(
-                        plan = PlanData.STANDARD.localizedFor(
-                            currency = userCurrency,
-                            pricing = pricingData,
-                            monthlyTier = pricingData?.standardMonthly,
-                            annualTier = pricingData?.standardAnnual
-                        ),
-                        isPopular = true,
-                        isAnnual = isAnnual,
-                        onUpgradeClick = {
-                            activity?.let {
-                                val productId = if (isAnnual) "standard_annual" else "standard_monthly"
-                                val standardProduct = subscriptions.find { sub -> sub.productId == productId }
-                                if (standardProduct != null) {
-                                    viewModel.purchaseSubscription(it, standardProduct)
+                    item {
+                        val standardBase = if (aiPlansToggle) PlanData.STANDARD else PlanData.STANDARD_NOAI
+                        OnboardingPlanCard(
+                            plan = standardBase.localizedFor(
+                                currency = userCurrency,
+                                pricing = pricingData,
+                                monthlyTier = if (aiPlansToggle) pricingData?.standardMonthly else pricingData?.standardNoAiMonthly,
+                                annualTier = if (aiPlansToggle) pricingData?.standardAnnual else pricingData?.standardNoAiAnnual
+                            ),
+                            isPopular = true,
+                            isAnnual = isAnnual,
+                            onUpgradeClick = {
+                                AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_PLAN_PURCHASE_TAPPED)
+                                activity?.let {
+                                    val productId = resolveProductId("standard", isAnnual, aiPlansToggle)
+                                    val standardProduct = subscriptions.find { sub -> sub.productId == productId }
+                                    if (standardProduct != null) {
+                                        viewModel.purchaseSubscription(it, standardProduct)
+                                    }
                                 }
                             }
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.xxl))
+                    }
+
+                    item {
+                        Text(
+                            text = "You can upgrade anytime. No credit card commitment needed.",
+                            fontSize = 12.sp,
+                            color = Colors.textMuted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.lg)
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.lg))
+                    }
+
+                    item {
+                        Text(
+                            text = "Prices shown in $userCurrency. Subscriptions renew automatically and can be cancelled in Google Play.",
+                            fontSize = 12.sp,
+                            color = Colors.textMuted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.lg, vertical = Spacing.lg)
+                        )
+                        Spacer(modifier = Modifier.height(Spacing.xxxl))
+                    }
+                } else if (billingTimedOut) {
+                    item {
+                        Text(
+                            text = "Plans are temporarily unavailable. You can view and subscribe anytime from Settings → Subscription.",
+                            fontSize = 13.sp,
+                            color = Colors.textSecondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.lg, vertical = Spacing.xxl)
+                        )
+                    }
+                } else {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = Spacing.xxl),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Colors.primary)
                         }
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.xxl))
+                    }
                 }
-
-                // Footnotes
-                item {
-                    Text(
-                        text = "You can upgrade anytime. No credit card commitment needed.",
-                        fontSize = 12.sp,
-                        color = Colors.textMuted,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg)
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.lg))
-                }
-
-                item {
-                    Text(
-                        text = "Prices shown in $userCurrency. Subscriptions renew automatically and can be cancelled in Google Play.",
-                        fontSize = 12.sp,
-                        color = Colors.textMuted,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg, vertical = Spacing.lg)
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.xxxl))
-                }
-            }
-        } else {
-            // Loading state
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Colors.backgroundDefault),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = Colors.primary)
             }
         }
     }
 }
 
 /**
- * Prominent banner showing trial limitations
+ * Condensed trial summary — merges the old two-card layout (limitations + "what you can do")
+ * into one, so the primary CTA is reachable within roughly one screen's worth of scrolling.
  */
 @Composable
-private fun TrialWelcomeCard() {
+private fun TrialSummaryCard() {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -280,16 +345,10 @@ private fun TrialWelcomeCard() {
                 Text("✨", fontSize = 24.sp)
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Explore the full power of your AI coach",
+                        text = "Your free trial includes",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Colors.textPrimary
-                    )
-                    Spacer(modifier = Modifier.height(Spacing.xs))
-                    Text(
-                        text = "Your trial includes:",
-                        fontSize = 13.sp,
-                        color = Colors.textSecondary
                     )
                 }
             }
@@ -299,40 +358,6 @@ private fun TrialWelcomeCard() {
             FeatureItem("15 km of realtime AI coaching and run insights")
             FeatureItem("3 post-run AI summaries")
             FeatureItem("Garmin watch compatibility for enhanced insights and reporting")
-        }
-    }
-}
-
-/**
- * Shows what features are available during the trial
- */
-@Composable
-private fun FeaturesAvailableDuringTrial() {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg)
-            .padding(bottom = Spacing.lg),
-        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(Spacing.lg)
-        ) {
-            Text(
-                text = "✅ What You Can Do During Trial",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = Colors.textPrimary
-            )
-            Spacer(modifier = Modifier.height(Spacing.md))
-
-            FeatureItem("Record and track your runs")
-            FeatureItem("Get detailed AI insights from eligible runs")
-            FeatureItem("Receive post-run summaries within your trial allowance")
-            FeatureItem("Use Ai Run Coach Garmin watch app - download from Garmin IQ")
         }
     }
 }

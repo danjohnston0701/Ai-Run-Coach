@@ -26,8 +26,8 @@ android {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
         targetSdk = 36          // Google Play requires 36+ as of Aug 2026
-        versionCode = 53          // ← Increment by 1 for every Play Store upload
-        versionName = "2.0.11"   // ← Human-readable version shown in Play Store
+        versionCode = 54          // ← Increment by 1 for every Play Store upload
+        versionName = "2.0.12"   // ← Human-readable version shown in Play Store
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -180,9 +180,10 @@ dependencies {
     // Requires: PICOVOICE_ACCESS_KEY in local.properties + hey_coach_android.ppn in assets/
     implementation("ai.picovoice:porcupine-android:3.0.2")
 
-    // --- Firebase: Cloud Messaging for push notifications ---
+    // --- Firebase: Cloud Messaging for push notifications, Analytics for funnel tracking ---
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
+    implementation("com.google.firebase:firebase-analytics-ktx")
 
     // --- Google Play Billing: In-app subscriptions and purchases ---
     implementation("com.android.billingclient:billing-ktx:8.0.0")

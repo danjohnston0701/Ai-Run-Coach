@@ -80,8 +80,24 @@ data class IntelligentRoute(
     @SerializedName("maxDeclineDegrees")
     val maxDeclineDegrees: Double? = null,  // Steepest downhill segment in degrees
 
+    @SerializedName("elevation")
+    val elevation: List<ElevationProfilePoint>? = null,  // Downsampled distance-vs-elevation profile for charting
+
     @SerializedName("turnInstructions")
     val turnInstructions: List<GraphHopperTurnInstruction>? = null  // Turn-by-turn from GraphHopper
+)
+
+/**
+ * One point in the route's downsampled elevation profile (server/intelligent-route-generation.ts
+ * buildElevationProfile() — ~40 points spaced evenly by cumulative distance, not raw-point index).
+ * Matches iOS's ElevationDto exactly (same field names, same "elevation" wire key).
+ */
+data class ElevationProfilePoint(
+    @SerializedName("distance")
+    val distance: Double,  // cumulative distance from route start, km
+
+    @SerializedName("elevation")
+    val elevation: Double  // metres
 )
 
 /**

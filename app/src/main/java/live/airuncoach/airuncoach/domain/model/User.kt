@@ -24,6 +24,10 @@ data class User(
     val distanceDecimalsEnabled: Boolean = false,
     val subscriptionTier: String? = null,
     val subscriptionStatus: String? = null,
+    // Orthogonal to subscriptionTier — false only for "no AI Plans" SKU subscribers.
+    // Nullable so Gson null (legacy cached JSON / pre-migration accounts) → treated as
+    // enabled by default wherever this is read, matching the coach*Enabled fields below.
+    val aiPlansEnabled: Boolean? = null,
     val distanceScale: String? = null,
     // In-Run AI Coaching feature preferences (synced with server)
     // Nullable so Gson null → we treat as "default enabled" in loadFromUser()

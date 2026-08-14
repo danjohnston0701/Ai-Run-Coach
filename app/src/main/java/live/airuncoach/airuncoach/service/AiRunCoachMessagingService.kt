@@ -96,6 +96,20 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
             return  // Silent — no notification shown to user
         }
 
+        // ── Phase 2 FCM fallback: guaranteed watch session end ─────────────────
+        // Mirrors watchSessionStarted above. Sent by the backend when the watch's
+        // DataStreamer POSTs /api/garmin-companion/session/end via the Garmin Connect
+        // HTTP relay — the same Doze/backgrounding-proof channel used for session start.
+        // Without this, a dropped BT "stop" command left RunTrackingService (and the
+        // run-session screen) stuck thinking the run was still active forever, even
+        // though the watch's own companion session had already ended and created the
+        // run record server-side.
+        if (type == "watchSessionEnded") {
+            Log.d(TAG, "FCM watchSessionEnded — stopping RunTrackingService via FCM fallback")
+            stopWatchSessionFromFcm()
+            return  // Silent — no notification shown to user
+        }
+
         showNotification(title, body, type, runId, sessionId, storeUrl, message.data)
     }
 
@@ -125,6 +139,33 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
             // Should not happen — FCM high-priority grants foreground-service exemption,
             // but log so we can diagnose if it ever occurs on an unusual OEM build.
             Log.e(TAG, "FCM watchSessionStarted: failed to start RunTrackingService: ${e.message}")
+        }
+    }
+
+    /**
+     * FCM fallback: stop RunTrackingService when the watch ends a session.
+     *
+     * Called from onMessageReceived() when type == "watchSessionEnded".
+     * Guarded by RunTrackingService.isServiceRunning so it's a safe no-op if the
+     * phone's own BT "stop" handling already finished the run — this push can
+     * arrive after the fact (e.g. once the watch's session/end HTTP call and the
+     * BT command both eventually land), and stopTracking() has no idempotency
+     * guard of its own, so re-invoking it on an already-stopped service would
+     * needlessly re-run the finalize/upload flow.
+     */
+    private fun stopWatchSessionFromFcm() {
+        if (!RunTrackingService.isServiceRunning.value) {
+            Log.d(TAG, "FCM watchSessionEnded: RunTrackingService not running — already stopped, ignoring")
+            return
+        }
+        try {
+            val intent = Intent(this, RunTrackingService::class.java).apply {
+                action = RunTrackingService.ACTION_STOP_TRACKING
+            }
+            startService(intent)
+            Log.d(TAG, "FCM watchSessionEnded: RunTrackingService stop triggered ✅")
+        } catch (e: Exception) {
+            Log.e(TAG, "FCM watchSessionEnded: failed to stop RunTrackingService: ${e.message}")
         }
     }
 

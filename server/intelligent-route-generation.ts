@@ -64,6 +64,7 @@ interface GeneratedRoute {
   elevationLoss: number; // meters
   maxInclineDegrees?: number; // Maximum steepness of climb in degrees
   maxDeclineDegrees?: number; // Maximum steepness of descent in degrees
+  elevationProfile?: Array<{ distance: number; elevation: number }>; // distance in km, elevation in m — downsampled for charting
   duration: number; // seconds (estimated)
   difficulty: string; // "easy", "moderate", "hard"
   popularityScore: number; // 0-1
@@ -566,6 +567,53 @@ function calculateMaxSegmentGradients(
     maxClimbDegrees: Math.round(maxClimb * 10) / 10,
     maxDescentDegrees: Math.round(maxDescent * 10) / 10,
   };
+}
+
+/**
+ * Build a downsampled distance-vs-elevation profile for the route-selection elevation chart.
+ * GraphHopper returns hundreds of raw points — too many to send over the wire or render
+ * usefully — so this resamples to `targetPoints` points spaced evenly by cumulative distance
+ * (not by raw-point index, since GPS points are unevenly spaced along the route; sampling by
+ * index would cluster points wherever GraphHopper happened to place them densely and produce
+ * a visually distorted profile). Elevation at each sample point is linearly interpolated
+ * between the two bracketing raw points.
+ */
+function buildElevationProfile(
+  coordinates: Array<[number, number, ...number[]]>,
+  targetPoints: number = 40
+): Array<{ distance: number; elevation: number }> {
+  if (coordinates.length < 2) return [];
+
+  const cumulativeKm: number[] = [0];
+  for (let i = 1; i < coordinates.length; i++) {
+    const prev = coordinates[i - 1];
+    const curr = coordinates[i];
+    const segKm = getDistanceKm({ lat: prev[1], lng: prev[0] }, { lat: curr[1], lng: curr[0] });
+    cumulativeKm.push(cumulativeKm[i - 1] + segKm);
+  }
+  const totalKm = cumulativeKm[cumulativeKm.length - 1];
+  if (totalKm <= 0) return [];
+
+  const profile: Array<{ distance: number; elevation: number }> = [];
+  let searchIdx = 0;
+  for (let step = 0; step <= targetPoints; step++) {
+    const targetKm = (totalKm * step) / targetPoints;
+    while (searchIdx < cumulativeKm.length - 2 && cumulativeKm[searchIdx + 1] < targetKm) {
+      searchIdx++;
+    }
+    const kmStart = cumulativeKm[searchIdx];
+    const kmEnd = cumulativeKm[searchIdx + 1] ?? kmStart;
+    const elevStart = coordinates[searchIdx][2] ?? 0;
+    const elevEnd = coordinates[searchIdx + 1]?.[2] ?? elevStart;
+    const segRange = kmEnd - kmStart;
+    const t = segRange > 0 ? (targetKm - kmStart) / segRange : 0;
+    const elevation = elevStart + (elevEnd - elevStart) * t;
+    profile.push({
+      distance: Math.round(targetKm * 1000) / 1000,
+      elevation: Math.round(elevation * 10) / 10,
+    });
+  }
+  return profile;
 }
 
 // ==================== SHAPE & QUALITY ANALYSIS ====================
@@ -1193,10 +1241,17 @@ export async function generateIntelligentRoute(request: RouteRequest & { userId?
     const elevGain = r.ascend || 0;
     const elevLoss = r.descend || 0;
 
-    // Calculate steepest climb/descent from segment-by-segment elevation analysis
-    const { maxClimbDegrees, maxDescentDegrees } = calculateMaxSegmentGradients(
-      finalCoords as Array<[number, number, number?]>
-    );
+    // Calculate steepest climb/descent from segment-by-segment elevation analysis.
+    // finalCoords is already Array<[number, number, ...number[]]> (removeDeadEnds' own return
+    // type) — no cast needed. A prior `as Array<[number, number, number?]>` cast here actually
+    // narrowed it to an incompatible type (optional single element vs. rest-tuple), which was
+    // the actual source of a pre-existing type error, not a fix for one.
+    const { maxClimbDegrees, maxDescentDegrees } = calculateMaxSegmentGradients(finalCoords);
+
+    // Downsampled distance-vs-elevation profile for the route-selection elevation chart —
+    // reuses the same GraphHopper coordinate data (with real per-point elevation) that
+    // maxClimbDegrees/maxDescentDegrees above are computed from.
+    const elevationProfile = buildElevationProfile(finalCoords);
 
     console.log(
       `  Route ${i + 1}: ${(finalDistance / 1000).toFixed(2)}km ` +
@@ -1207,6 +1262,7 @@ export async function generateIntelligentRoute(request: RouteRequest & { userId?
       id: generateRouteId(), polyline: encodePolyline(finalCoords), coordinates: finalCoords,
       distance: finalDistance, elevationGain: elevGain, elevationLoss: elevLoss,
       maxInclineDegrees: maxClimbDegrees, maxDeclineDegrees: maxDescentDegrees,
+      elevationProfile,
       duration: r.time / 1000, difficulty: diff, popularityScore: c.popularityScore,
       qualityScore: c.validation.qualityScore, loopQuality: c.loopQuality, backtrackRatio: c.backtrackRatio,
       turnInstructions: finalInstructions,

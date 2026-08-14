@@ -169,6 +169,25 @@ class SubscriptionViewModel @Inject constructor(
      */
     fun getBillingPeriod(): String? = billingManager.getBillingPeriod()
 
+    /**
+     * Whether the user's current plan includes AI Training Plans — orthogonal to tier.
+     * Same source-of-truth priority as [getSubscriptionTier]: database-synced cached
+     * user profile first, then Google Play local purchase state as a fallback.
+     */
+    fun getAiPlansEnabled(): Boolean {
+        try {
+            val sharedPrefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+            val userJson    = sharedPrefs.getString("user", null)
+            if (userJson != null) {
+                val user = Gson().fromJson(userJson, User::class.java)
+                user?.aiPlansEnabled?.let { return it }
+            }
+        } catch (_: Exception) {
+            // Fall through to Google Play check
+        }
+        return billingManager.getAiPlansEnabled()
+    }
+
     /** AI Coaching Plans limit for the user's tier. */
     fun getAiCoachingPlansLimit(): Int = billingManager.getAiCoachingPlansLimit()
 

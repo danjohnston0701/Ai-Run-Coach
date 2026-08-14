@@ -273,6 +273,14 @@ export function registerSessionCoachingRoutes(app: Express) {
           // If table doesn't exist, log a warning but continue
           if (insertError.message?.includes('does not exist')) {
             console.warn("coaching_session_events table not found - event not logged but continuing");
+          } else if (insertError.code === "23503") {
+            // Foreign-key violation on run_id: expected during live coaching. The client logs
+            // events using a client-generated placeholder run ID (RunTrackingService assigns
+            // UUID.randomUUID() at run start) that only becomes a real `runs` row once the run
+            // finishes and uploads — every event fired mid-run is sent before that row exists.
+            // Non-fatal by design (this is best-effort analytics, not the run record itself) —
+            // just skip instead of a noisy 500 on every single coaching cue of every run.
+            console.warn(`coaching_session_events: run ${runId} not yet persisted (mid-run event) - event not logged`);
           } else {
             throw insertError;
           }

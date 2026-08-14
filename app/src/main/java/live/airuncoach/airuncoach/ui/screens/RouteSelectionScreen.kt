@@ -242,11 +242,9 @@ fun RouteCard(
     }
     
     // Use per-segment max gradient values calculated server-side (steepest individual hill segment).
-    // maxGradientDegrees = steepest climb in degrees (from server maxInclineDegrees)
-    // maxGradientPercent = steepest descent in degrees (repurposed field, from server maxDeclineDegrees)
-    val maxClimb = route.maxGradientDegrees.format(1)
-    val maxDescent = route.maxGradientPercent.format(1)
-    Log.d("RouteCard", "Route ${route.id}: maxClimb=${route.maxGradientDegrees}°, maxDescent=${route.maxGradientPercent}°")
+    val maxClimb = route.maxInclineDegrees.format(1)
+    val maxDescent = route.maxDeclineDegrees.format(1)
+    Log.d("RouteCard", "Route ${route.id}: maxClimb=${route.maxInclineDegrees}°, maxDescent=${route.maxDeclineDegrees}°")
     
     // Store GoogleMap reference for zoom controls
     var googleMapRef by remember { mutableStateOf<GoogleMap?>(null) }
@@ -438,7 +436,21 @@ fun RouteCard(
                     }
                 }
             }
-            
+
+            // Elevation profile preview — only when the server provided one (older cached
+            // responses or generate-options-sourced routes may not have it).
+            route.elevationProfile?.let { profile ->
+                if (profile.size > 2) {
+                    live.airuncoach.airuncoach.ui.components.RouteElevationChart(
+                        elevationPoints = profile,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0F1A2A))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
             // Route Details Section (with SELECT ROUTE visual indicator)
             Column(
                 modifier = Modifier
