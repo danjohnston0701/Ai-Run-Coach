@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Advertises this Wear OS app to the phone side (SamsungWatchManager.CAPABILITY_WEAR_APP
+         on the phone discovers this via CapabilityClient). -->
+    <string-array name="android_wear_capabilities">
+        <item>airuncoach_wear_app</item>
+    </string-array>
+</resources>

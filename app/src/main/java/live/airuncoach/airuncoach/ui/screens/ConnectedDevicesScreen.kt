@@ -54,6 +54,7 @@ fun ConnectedDevicesScreen(
     onNavigateToGarminWatchApp: () -> Unit = {},
     onNavigateToGarminPermissions: () -> Unit = {},
     onNavigateToStrava: () -> Unit = {},
+    onNavigateToSamsungWatchApp: () -> Unit = {},
     viewModel: ConnectedDevicesViewModel = hiltViewModel()
 ) {
     val garminConnectionStatus by viewModel.garminConnectionStatus.collectAsState()
@@ -86,7 +87,7 @@ fun ConnectedDevicesScreen(
     }
 
     val comingSoonDevices = remember {
-        listOf(
+        listOf<DeviceInfo>(
             // Apple Watch and COROS removed per requirements
             // DeviceInfo(
             //     name = "Apple Watch",
@@ -98,16 +99,8 @@ fun ConnectedDevicesScreen(
             //     requiresAppInstall = true,
             //     onConnect = {}
             // ),
-            DeviceInfo(
-                name = "Samsung Galaxy Watch",
-                description = "Connect via Samsung Health for real-time heart rate tracking",
-                icon = Icons.Default.Star,
-                supportsRealtimeHR = true,
-                supportsPostRunSync = true,
-                isAvailableOnAndroid = false,
-                requiresAppInstall = true,
-                onConnect = {}
-            )
+            // Samsung Galaxy Watch moved out of "Coming Soon" — see the dedicated
+            // "Samsung / Wear OS Watch App" section below, mirroring the Garmin section.
             // COROS removed per requirements
             // DeviceInfo(
             //     name = "COROS",
@@ -174,6 +167,18 @@ fun ConnectedDevicesScreen(
 
             item {
                 GarminWatchAppCard(onSetUp = onNavigateToGarminWatchApp)
+            }
+
+            // ── Section: Samsung / Wear OS Watch App ──────────────────────────
+            item {
+                SectionHeader(
+                    title = "Samsung / Wear OS Watch App",
+                    accentColor = Colors.primary
+                )
+            }
+
+            item {
+                SamsungWatchAppCard(onSetUp = onNavigateToSamsungWatchApp)
             }
 
             // ── Section: Strava Integration ───────────────────────────────────
@@ -344,6 +349,148 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
             Spacer(modifier = Modifier.height(14.dp))
 
             // Feature chips
+            WatchFeatureChips()
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Phone-connected mode highlight
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Colors.primary.copy(alpha = 0.08f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        tint = Colors.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "With phone: live coaching, full charts & unlimited run length.",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                        color = Colors.primary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Phone-free mode callout
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFFF8C00).copy(alpha = 0.10f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = Color(0xFFFF8C00),
+                        modifier = Modifier
+                            .size(15.dp)
+                            .padding(top = 1.dp)
+                    )
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "Without phone: GPS route, heart rate & pace charts buffered for up to 90 minutes. Data uploads automatically when you open the app after your run.",
+                        style = AppTextStyles.caption.copy(fontSize = 11.sp),
+                        color = Color(0xFFFF8C00),
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // CTA button
+            Button(
+                onClick = onSetUp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "Get Watch App",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SamsungWatchAppCard(onSetUp: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.backgroundSecondary
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header: "Samsung / Wear OS Watch App" title + "Free" badge
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Download from Play Store",
+                        style = AppTextStyles.h3,
+                        color = Colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Colors.primary.copy(alpha = 0.18f)
+                    ) {
+                        Text(
+                            "★ FREE",
+                            style = AppTextStyles.caption.copy(
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = Colors.primary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Description
+            Text(
+                "Install the Ai Run Coach companion app on your Galaxy Watch4 or later (Wear OS). Run with your phone for live coaching and full charts, or leave it at home — the watch buffers your run and uploads everything when you're back in range.",
+                style = AppTextStyles.caption,
+                color = Colors.textSecondary,
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Feature chips — same set the watch supports, reused from the Garmin section
             WatchFeatureChips()
 
             Spacer(modifier = Modifier.height(10.dp))

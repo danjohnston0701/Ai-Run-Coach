@@ -14,6 +14,7 @@ import live.airuncoach.airuncoach.data.repository.RunRepository
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.service.GarminWatchManager
+import live.airuncoach.airuncoach.service.SamsungWatchManager
 import javax.inject.Singleton
 
 @Module
@@ -64,6 +65,20 @@ object AppModule {
         runRepository: RunRepository
     ): GarminWatchManager {
         return GarminWatchManager(context, runRepository)
+    }
+
+    /**
+     * Single SamsungWatchManager instance shared across the whole app — the Wear OS Data
+     * Layer equivalent of [provideGarminWatchManager] above. Coexists with the Garmin manager
+     * since a user has one watch brand at a time but the app doesn't hard-code which.
+     */
+    @Singleton
+    @Provides
+    fun provideSamsungWatchManager(
+        @ApplicationContext context: Context,
+        runRepository: RunRepository
+    ): SamsungWatchManager {
+        return SamsungWatchManager(context, runRepository)
     }
 
     @Singleton

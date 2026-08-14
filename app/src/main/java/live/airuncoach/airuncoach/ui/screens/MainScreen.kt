@@ -1330,16 +1330,24 @@ fun MainScreen(
                     onNavigateToGarminConnect = { navController.navigate("garmin_connect") },
                     onNavigateToGarminWatchApp = { navController.navigate("garmin_watch_app") },
                     onNavigateToGarminPermissions = { navController.navigate("garmin_permissions") },
-                    onNavigateToStrava = { navController.navigate("strava_oauth") }
+                    onNavigateToStrava = { navController.navigate("strava_oauth") },
+                    onNavigateToSamsungWatchApp = { navController.navigate("samsung_watch_app") }
                 )
             }
-            composable("garmin_connect") { 
+            composable("garmin_connect") {
                 GarminConnectScreen(onNavigateBack = { navController.popBackStack() })
             }
             composable("garmin_watch_app") {
                 GarminCompanionPromptScreen(
                     onDismiss = { navController.popBackStack() },
                     onInstall = { /* URL opened inside GarminCompanionPromptScreen */ },
+                    onMaybeLater = { navController.popBackStack() }
+                )
+            }
+            composable("samsung_watch_app") {
+                SamsungCompanionPromptScreen(
+                    onDismiss = { navController.popBackStack() },
+                    onInstall = { /* URL opened inside SamsungCompanionPromptScreen */ },
                     onMaybeLater = { navController.popBackStack() }
                 )
             }

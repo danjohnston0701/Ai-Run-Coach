@@ -29,6 +29,7 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.service.AiRunCoachMessagingService
 import live.airuncoach.airuncoach.service.GarminWatchManager
+import live.airuncoach.airuncoach.service.SamsungWatchManager
 import live.airuncoach.airuncoach.service.RunTrackingService
 import javax.inject.Inject
 import live.airuncoach.airuncoach.ui.navigation.RootNavigationGraph
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
 
     // Injected singleton — shared with RunTrackingService and ViewModels via Hilt
     @Inject lateinit var garminWatchManager: GarminWatchManager
+    @Inject lateinit var samsungWatchManager: SamsungWatchManager
 
     // Garmin watch update pending state (navigates to root-level garmin_watch_update screen)
     private val _pendingGarminUpdate = mutableStateOf<Pair<String, String>?>(null)
@@ -74,7 +76,8 @@ class MainActivity : ComponentActivity() {
         // This allows the watch companion app to receive an auth token as soon as
         // the phone app opens — without requiring a run to be in progress.
         initGarminWatchBridge()
-        
+        initSamsungWatchBridge()
+
         // Handle OAuth callback if present
         handleGarminOAuthCallback(intent)
         
@@ -481,6 +484,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Wear OS/Samsung equivalent of [initGarminWatchBridge] — same flow, over the Data
+     * Layer API instead of ConnectIQ.
+     */
+    private fun initSamsungWatchBridge() {
+        try {
+            val sessionManager = SessionManager(this)
+
+            samsungWatchManager.onWatchAppReady = {
+                val name = sessionManager.getUserName() ?: ""
+                lifecycleScope.launch {
+                    pushFreshWatchToken(name)
+                }
+            }
+            samsungWatchManager.initialize()
+            Log.d("MainActivity", "✅ SamsungWatchManager initialized at app startup")
+        } catch (e: Exception) {
+            // Non-fatal: no Wear OS watch paired on this device
+            Log.w("MainActivity", "SamsungWatchManager init skipped (non-fatal): ${e.message}")
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         // Every time the app comes to the foreground, silently request a fresh 365-day
@@ -506,6 +531,7 @@ class MainActivity : ComponentActivity() {
                 RefreshWatchTokenRequest(deviceModel = deviceModel)
             )
             garminWatchManager.sendAuth(response.token, runnerName)
+            samsungWatchManager.sendAuth(response.token, runnerName)
             Log.d("MainActivity", "✅ Fresh 365d watch token pushed (device: $deviceModel)")
         } catch (e: Exception) {
             // Network unavailable or user not logged in — fall back to the stored JWT
@@ -515,6 +541,7 @@ class MainActivity : ComponentActivity() {
                 val fallbackToken = sessionManager.getAuthToken()
                 if (fallbackToken != null) {
                     garminWatchManager.sendAuth(fallbackToken, runnerName)
+                    samsungWatchManager.sendAuth(fallbackToken, runnerName)
                     Log.d("MainActivity", "Fallback token pushed to watch")
                 }
             } catch (fe: Exception) {
@@ -529,6 +556,11 @@ class MainActivity : ComponentActivity() {
             garminWatchManager.shutdown()
         } catch (e: Exception) {
             Log.w("MainActivity", "GarminWatchManager shutdown: ${e.message}")
+        }
+        try {
+            samsungWatchManager.shutdown()
+        } catch (e: Exception) {
+            Log.w("MainActivity", "SamsungWatchManager shutdown: ${e.message}")
         }
     }
 

@@ -223,6 +223,188 @@ fun GarminCompanionPromptScreen(
     }
 }
 
+/**
+ * Wear OS / Samsung Galaxy Watch equivalent of [GarminCompanionPromptScreen] — same layout
+ * and benefit list, wording and install link swapped for the Wear OS app (Play Store instead
+ * of Connect IQ Store).
+ */
+@Composable
+fun SamsungCompanionPromptScreen(
+    onDismiss: () -> Unit,
+    onInstall: () -> Unit,
+    onMaybeLater: () -> Unit
+) {
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Colors.backgroundRoot)
+            .padding(Spacing.lg)
+            .verticalScroll(scrollState),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = Colors.textSecondary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.md))
+
+        Icon(
+            painter = painterResource(id = R.drawable.icon_timer_vector),
+            contentDescription = "Samsung Galaxy Watch",
+            tint = Colors.primary,
+            modifier = Modifier.size(80.dp)
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.lg))
+
+        Text(
+            text = "Get AI Coaching on Your Galaxy Watch!",
+            style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
+            color = Colors.textPrimary,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        Text(
+            text = "Install our companion app on your Wear OS watch for the ultimate running experience",
+            style = AppTextStyles.body,
+            color = Colors.textSecondary,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
+        Text(
+            text = "What You'll Get:",
+            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+            color = Colors.textPrimary
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.md))
+
+        BenefitCard(
+            icon = "💓",
+            title = "Real-Time Heart Rate",
+            description = "Live HR monitoring with zone alerts directly on your watch"
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        BenefitCard(
+            icon = "🗣️",
+            title = "AI Coaching on Watch",
+            description = "Get personalized audio and text coaching without looking at your phone"
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        BenefitCard(
+            icon = "📊",
+            title = "Advanced Running Metrics",
+            description = "Cadence, stride length, ground contact time, vertical oscillation & more"
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.sm))
+
+        BenefitCard(
+            icon = "🎯",
+            title = "Single Activity",
+            description = "No need to run both apps - watch and phone sync automatically"
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = Colors.backgroundSecondary
+            ),
+            shape = RoundedCornerShape(BorderRadius.md)
+        ) {
+            Column(
+                modifier = Modifier.padding(Spacing.md)
+            ) {
+                Text(
+                    text = "Data You'll Stream:",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+
+                Spacer(modifier = Modifier.height(Spacing.sm))
+
+                DataComparisonRow("Without Companion", "With Companion")
+                Spacer(modifier = Modifier.height(Spacing.xs))
+                HorizontalDivider(color = Colors.backgroundTertiary)
+                Spacer(modifier = Modifier.height(Spacing.xs))
+
+                DataItemRow("Heart Rate", hasBasic = false, hasAdvanced = true)
+                DataItemRow("GPS Route", hasBasic = false, hasAdvanced = true)
+                DataItemRow("Pace & Cadence", hasBasic = false, hasAdvanced = true)
+                DataItemRow("Offline Buffering", hasBasic = false, hasAdvanced = true)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
+        // Install button — Play Store, not Connect IQ Store
+        Button(
+            onClick = {
+                onInstall()
+                val playStoreUrl = "https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach.wear"
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(playStoreUrl))
+                context.startActivity(intent)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(BorderRadius.lg),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Colors.primary,
+                contentColor = Colors.buttonText
+            )
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.icon_timer_vector),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Text(
+                "Install on Galaxy Watch",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.md))
+
+        TextButton(
+            onClick = onMaybeLater,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                "Maybe Later",
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.lg))
+    }
+}
+
 @Composable
 private fun BenefitCard(
     icon: String,

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Advertises the phone app to the Wear OS companion app (WearDataLayerClient's
+         CAPABILITY_PHONE_APP on the watch discovers this via CapabilityClient), symmetric to
+         wear/src/main/res/values/wear.xml's "airuncoach_wear_app" capability. -->
+    <string-array name="android_wear_capabilities">
+        <item>airuncoach_phone_app</item>
+    </string-array>
+</resources>

@@ -90,7 +90,6 @@ import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
-import { registerSamsungCompanionRoutes } from "./routes-samsung-companion";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
 import {
   snapTrackToOSMSegments,
@@ -140,7 +139,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/coaching", realtimeCoachingRouter); // Real-time biomechanical coaching
   app.use("/api", achievementsRouter);
   registerSessionCoachingRoutes(app);
-  await registerSamsungCompanionRoutes(app);
 
   // Version probe — tells us immediately which build is running
   app.get("/api/version", (_req: Request, res: Response) => {
@@ -2886,18 +2884,18 @@ function transformRunForAndroid(run: any) {
           return res.status(200).json(transformRunForAndroid(rapidDup));
         }
 
-        // Case 2 — Garmin companion run created in the last 3 hours with similar distance.
-        // The watch uploads a standalone session; the phone then uploads its richer copy
-        // (with watchHrSeries, full GPS track, coaching notes, etc).  Rather than
-        // discarding the phone's data, merge it into the watch's record — same logic as
-        // Case 0 — then return the now-enriched record.
+        // Case 2 — watch companion run (Garmin or Samsung/Wear OS) created in the last 3 hours
+        // with similar distance. The watch uploads a standalone session; the phone then
+        // uploads its richer copy (with watchHrSeries, full GPS track, coaching notes, etc).
+        // Rather than discarding the phone's data, merge it into the watch's record — same
+        // logic as Case 0 — then return the now-enriched record.
         const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
         const garminCandidates = await db.select()
           .from(runs)
           .where(and(
             eq(runs.userId, userId),
             gte(runs.createdAt, threeHoursAgo),
-            eq(runs.externalSource, 'garmin_companion'),
+            inArray(runs.externalSource, ['garmin_companion', 'wearos_companion']),
           ))
           .limit(10);
         // 15% tolerance: phone GPS and watch GPS commonly disagree by 5–12% due to
@@ -12392,7 +12390,27 @@ function transformRunForAndroid(run: any) {
   // ============================================
   // These endpoints are for the Android companion app to publish
   // real-time data from Garmin SDK to this backend.
-  
+  //
+  // NOTE: despite the "garmin" naming (kept for backward compatibility — renaming would be
+  // a large, purely-cosmetic migration), these endpoints are brand-agnostic and are shared
+  // by both the Garmin Connect IQ watch app and the Wear OS (Samsung Galaxy Watch) companion
+  // app. The only brand-specific behavior is the derived run name / externalSource value
+  // below, both keyed off the freeform `deviceModel` string sent at session/start.
+
+  // Classifies a companion session's freeform deviceModel string into a display label and
+  // externalSource discriminator. Defaults to Garmin naming when deviceModel is absent —
+  // preserves exact existing behavior for pre-existing Garmin sessions/clients.
+  function watchDeviceLabel(deviceModel: string | null | undefined): string {
+    const m = (deviceModel || '').toLowerCase();
+    if (m.includes('galaxy') || m.includes('wear os') || m.includes('samsung')) return 'Samsung Galaxy Watch';
+    return 'Garmin Watch';
+  }
+  function watchExternalSource(deviceModel: string | null | undefined): string {
+    const m = (deviceModel || '').toLowerCase();
+    if (m.includes('galaxy') || m.includes('wear os') || m.includes('samsung')) return 'wearos_companion';
+    return 'garmin_companion';
+  }
+
   // Companion app authentication - validates user and returns session token
   app.post("/api/garmin-companion/auth", async (req: Request, res: Response) => {
     try {
@@ -13080,13 +13098,13 @@ function transformRunForAndroid(run: any) {
             elevationGain: stats.totalAscent ?? null,
             elevationLoss: stats.totalDescent ?? null,
             elevation: stats.totalAscent ?? null,
-            name: sessionType === "walk" ? `Garmin Watch Walk` : `Garmin Watch Run`,
+            name: `${watchDeviceLabel(updated?.deviceModel)} ${sessionType === "walk" ? "Walk" : "Run"}`,
             sessionType,
             runDate: now.toISOString().split('T')[0],
             runTime: now.toTimeString().split(' ')[0].slice(0, 5),
             completedAt: now,
             externalId: sessionId,
-            externalSource: 'garmin_companion',
+            externalSource: watchExternalSource(updated?.deviceModel),
             hasGarminData: true,
             difficulty: 'moderate',
             isPublic: false,
@@ -13236,14 +13254,19 @@ function transformRunForAndroid(run: any) {
       if (!existingRun) {
         console.log(`[Offline Batch] No run found for session ${sessionId} — creating run from batch (phone-less or service-failed run)`);
 
+        // Fetch the companion session once for both sessionType fallback and device labeling.
+        const [batchSession] = await db.select({
+          activityType: garminCompanionSessions.activityType,
+          deviceModel:  garminCompanionSessions.deviceModel,
+        })
+          .from(garminCompanionSessions)
+          .where(and(eq(garminCompanionSessions.sessionId, sessionId), eq(garminCompanionSessions.userId, userId)))
+          .limit(1);
+
         // Resolve sessionType for this batch — prefer explicit body field, fall back to the
         // companion session's activityType stored at session/start ("walking"|"running").
         let resolvedBatchSessionType = batchSessionType;
         if (!resolvedBatchSessionType) {
-          const [batchSession] = await db.select({ activityType: garminCompanionSessions.activityType })
-            .from(garminCompanionSessions)
-            .where(and(eq(garminCompanionSessions.sessionId, sessionId), eq(garminCompanionSessions.userId, userId)))
-            .limit(1);
           if (batchSession) {
             const at = String(batchSession.activityType ?? "").toLowerCase().trim();
             resolvedBatchSessionType = (at === "walk" || at === "walking") ? "walk" : "run";
@@ -13288,13 +13311,13 @@ function transformRunForAndroid(run: any) {
           cadence:        avgCad,
           elevationGain:  totalAscent ?? null,
           elevation:      totalAscent ?? null,
-          name:           resolvedBatchSessionType === "walk" ? 'Garmin Watch Walk' : 'Garmin Watch Run',
+          name:           `${watchDeviceLabel(batchSession?.deviceModel)} ${resolvedBatchSessionType === "walk" ? "Walk" : "Run"}`,
           sessionType:    resolvedBatchSessionType,
           runDate:        now.toISOString().split('T')[0],
           runTime:        now.toTimeString().split(' ')[0].slice(0, 5),
           completedAt:    now,
           externalId:     sessionId,
-          externalSource: 'garmin_companion',
+          externalSource: watchExternalSource(batchSession?.deviceModel),
           hasGarminData:  true,
           difficulty:     'moderate',
           isPublic:       false,

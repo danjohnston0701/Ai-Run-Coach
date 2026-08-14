@@ -51,6 +51,7 @@ import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
 import live.airuncoach.airuncoach.util.NavigationRouteHolder
 import live.airuncoach.airuncoach.di.GarminWatchManagerEntryPoint
+import live.airuncoach.airuncoach.di.SamsungWatchManagerEntryPoint
 import com.google.maps.android.PolyUtil
 import com.google.maps.android.SphericalUtil
 import dagger.hilt.android.EntryPointAccessors
@@ -94,6 +95,11 @@ class RunTrackingService : Service(), SensorEventListener {
     // Sends live run state to the watch and receives start/pause/resume/stop commands.
     // Gracefully no-ops if the ConnectIQ SDK is not present or no watch is paired.
     private var garminWatchManager: GarminWatchManager? = null
+
+    // ── Samsung/Wear OS watch bridge — same role as garminWatchManager above, via the
+    // Wear OS Data Layer API instead of ConnectIQ. Both can be attached simultaneously;
+    // each independently no-ops if its brand of watch isn't paired.
+    private var samsungWatchManager: SamsungWatchManager? = null
 
     // Timestamp of the last watch GPS injection (ms).  While watch GPS is flowing
     // (within 15 s) phone GPS updates are skipped to prevent double-counting distance.
@@ -990,6 +996,78 @@ class RunTrackingService : Service(), SensorEventListener {
         } catch (e: Exception) {
             Log.w("RunTrackingService", "GarminWatchManager attach failed (non-fatal): ${e.message}")
             garminWatchManager = null
+        }
+
+        // Attach to the application-scoped SamsungWatchManager singleton (Wear OS Data Layer
+        // bridge) — same pattern as the Garmin block above, so a phone-controlled run can be
+        // mirrored to either watch brand without the service needing to know which is paired.
+        // injectWatchLocation()/updateWatchSensorData() are already brand-neutral; both managers
+        // can safely call them.
+        try {
+            val samsungHiltEntry = EntryPointAccessors.fromApplication(
+                applicationContext,
+                SamsungWatchManagerEntryPoint::class.java
+            )
+            samsungWatchManager = samsungHiltEntry.samsungWatchManager()
+            samsungWatchManager?.let { manager ->
+                manager.onWatchCommand = { action ->
+                    Log.d("RunTrackingService", "⌚ Wear watch command received: $action")
+                    when (action) {
+                        "start"      -> {
+                            wasRunStartedByWatch = true
+                            lastWatchGpsMs = System.currentTimeMillis()
+                            Log.d("RunTrackingService", "⌚ Wear watch START → wasRunStartedByWatch=true, phone GPS blocked")
+                            startTracking()
+                        }
+                        "pause"      -> pauseTracking()
+                        "resume"     -> resumeTracking()
+                        "stop"       -> stopTracking()
+                        "watchReady" -> {
+                            serviceScope.launch {
+                                val token = sessionManager.getAuthToken()
+                                val name  = currentUser?.name ?: ""
+                                val age   = currentUser?.age
+                                if (token != null) samsungWatchManager?.sendAuth(token, name, age)
+                            }
+                        }
+                        "sessionReady" -> {
+                            Log.d("RunTrackingService", "⌚ Wear watch session ready — posting notification")
+                            postWatchSessionReadyNotification()
+                        }
+                        "talkToCoach" -> {
+                            Log.d("RunTrackingService", "⌚ Wear watch tap → talk to coach request")
+                            triggerWatchTalkToCoach()
+                        }
+                    }
+                }
+
+                manager.onWatchGpsUpdate = { lat, lng, altM, speedMs ->
+                    injectWatchLocation(lat, lng, altM, speedMs)
+                }
+
+                manager.onWatchSensorData = { frame ->
+                    updateWatchSensorData(frame)
+                }
+
+                manager.onWatchAppReady = {
+                    Log.d("RunTrackingService", "Wear watch app ready — pushing auth token proactively")
+                    serviceScope.launch {
+                        val token = sessionManager.getAuthToken()
+                        val name  = currentUser?.name ?: ""
+                        val age   = currentUser?.age
+                        if (token != null) {
+                            samsungWatchManager?.sendAuth(token, name, age)
+                        } else {
+                            Log.w("RunTrackingService", "Wear watch ready but no auth token available — user may not be logged in")
+                        }
+                    }
+                }
+
+                Log.d("RunTrackingService", "✅ Attached to shared SamsungWatchManager singleton (no re-init)")
+            }
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "SamsungWatchManager attach failed (non-fatal): ${e.message}")
+            samsungWatchManager = null
         }
     }
 
@@ -2638,9 +2716,12 @@ class RunTrackingService : Service(), SensorEventListener {
         // Mark that Garmin sensor data was received (drives hasGarminData flag on upload)
         if (!hasGarminData) {
             hasGarminData = true
-            // Capture device name once — requires manager to be available
+            // Capture device name once — requires manager to be available. This callback is
+            // shared by both watch managers (onWatchSensorData), so try whichever is actually
+            // connected rather than assuming Garmin.
             if (garminDeviceName == null) {
                 garminDeviceName = garminWatchManager?.getConnectedDeviceName()
+                    ?: samsungWatchManager?.getConnectedDeviceName()
             }
         }
         // NOTE: We still accumulate HR/cadence/dynamics data even if _currentRunSession
@@ -3618,17 +3699,32 @@ class RunTrackingService : Service(), SensorEventListener {
         // No-ops gracefully if no watch is connected.
         try {
             val session = _currentRunSession.value
-            if (session != null && garminWatchManager?.isWatchConnected?.value == true && !wasRunStartedByWatch) {
+            val garminReady  = garminWatchManager?.isWatchConnected?.value == true
+            val samsungReady = samsungWatchManager?.isWatchConnected?.value == true
+            if (session != null && (garminReady || samsungReady) && !wasRunStartedByWatch) {
                 val paceSeconds = parsePaceToSeconds(session.currentPace ?: "0:00")
-                garminWatchManager?.sendRunUpdate(
-                    paceSecPerKm   = paceSeconds,
-                    distanceMetres = session.distance, // already in metres
-                    heartRate      = session.heartRate ?: 0,
-                    elapsedSeconds = (session.duration / 1000L),
-                    cadence        = session.cadence ?: 0,
-                    isRunning      = isTracking,
-                    isPaused       = !isTracking && pauseStartTime > 0
-                )
+                if (garminReady) {
+                    garminWatchManager?.sendRunUpdate(
+                        paceSecPerKm   = paceSeconds,
+                        distanceMetres = session.distance, // already in metres
+                        heartRate      = session.heartRate ?: 0,
+                        elapsedSeconds = (session.duration / 1000L),
+                        cadence        = session.cadence ?: 0,
+                        isRunning      = isTracking,
+                        isPaused       = !isTracking && pauseStartTime > 0
+                    )
+                }
+                if (samsungReady) {
+                    samsungWatchManager?.sendRunUpdate(
+                        paceSecPerKm   = paceSeconds,
+                        distanceMetres = session.distance, // already in metres
+                        heartRate      = session.heartRate ?: 0,
+                        elapsedSeconds = (session.duration / 1000L),
+                        cadence        = session.cadence ?: 0,
+                        isRunning      = isTracking,
+                        isPaused       = !isTracking && pauseStartTime > 0
+                    )
+                }
             }
         } catch (e: Exception) {
             // Non-fatal — watch broadcast should never break the run session
@@ -3957,6 +4053,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 Log.d("RunTrackingService", "⌚ Sending sessionEnded to watch immediately on stop")
                 garminWatchManager?.sendSessionEnded()
             }
+            if (samsungWatchManager?.isWatchConnected?.value == true) {
+                Log.d("RunTrackingService", "⌚ Sending sessionEnded to Wear watch immediately on stop")
+                samsungWatchManager?.sendSessionEnded()
+            }
         } catch (e: Exception) {
             Log.w("RunTrackingService", "sessionEnded early notify failed (non-fatal): ${e.message}")
         }
@@ -4063,12 +4163,15 @@ class RunTrackingService : Service(), SensorEventListener {
         else if (runSession.heartRate > 0) runSession.heartRate  // Fallback to last reading
         else null
 
-        // Detect if run was completed on the Garmin watch (watch was connected)
+        // Detect if run was completed on a companion watch (Garmin or Samsung/Wear OS)
         // NOTE: Snapshot the state atomically to avoid TOCTOU race condition where watch disconnects between checks
-        val isWatchRun = garminWatchManager?.isWatchConnected?.value == true
+        val isGarminWatchRun  = garminWatchManager?.isWatchConnected?.value == true
+        val isSamsungWatchRun = samsungWatchManager?.isWatchConnected?.value == true
+        val isWatchRun = isGarminWatchRun || isSamsungWatchRun
         val deviceName = if (isWatchRun) {
             try {
-                garminWatchManager?.getConnectedDeviceName()
+                if (isGarminWatchRun) garminWatchManager?.getConnectedDeviceName()
+                else samsungWatchManager?.getConnectedDeviceName()
             } catch (e: Exception) {
                 Log.w("RunTrackingService", "Failed to get connected device name (watch may have disconnected): ${e.message}")
                 null
@@ -4586,6 +4689,16 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "GarminWatchManager shutdown complete")
         } catch (e: Exception) {
             Log.w("RunTrackingService", "GarminWatchManager shutdown error (non-fatal): ${e.message}")
+        }
+        try {
+            if (samsungWatchManager?.isWatchConnected?.value == true) {
+                Log.d("RunTrackingService", "Notifying Wear watch of session end...")
+                samsungWatchManager?.sendSessionEnded()
+            }
+            samsungWatchManager?.shutdown()
+            Log.d("RunTrackingService", "SamsungWatchManager shutdown complete")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "SamsungWatchManager shutdown error (non-fatal): ${e.message}")
         }
         serviceScope.cancel()
         Log.d("RunTrackingService", "Service destroyed")

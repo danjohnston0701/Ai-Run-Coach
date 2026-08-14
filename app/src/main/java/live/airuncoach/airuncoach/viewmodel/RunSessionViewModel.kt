@@ -44,6 +44,7 @@ import live.airuncoach.airuncoach.network.model.PreRunBriefingResponse
 import live.airuncoach.airuncoach.network.model.PrepareCoachingRequest
 // SessionInstructionsResponse import removed — legacy path retired
 import live.airuncoach.airuncoach.service.GarminWatchManager
+import live.airuncoach.airuncoach.service.SamsungWatchManager
 // SessionCoachingHelper import retained for future logCoachingEvent usage
 import live.airuncoach.airuncoach.service.RunTrackingService
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
@@ -107,6 +108,7 @@ class RunSessionViewModel @Inject constructor(
     private val healthConnectRepository: HealthConnectRepository,
     private val syncQueue: SyncQueue,
     private val garminWatchManager: GarminWatchManager,
+    private val samsungWatchManager: SamsungWatchManager,
 ) : ViewModel() {
 
     private val _runState = MutableStateFlow(RunState())
@@ -356,10 +358,11 @@ class RunSessionViewModel @Inject constructor(
         )
     }
 
-    // ── Garmin watch companion ────────────────────────────────────────────────
-    /** True when the AI Run Coach app is confirmed installed on the paired watch. */
+    // ── Watch companion (Garmin or Samsung/Wear OS) ───────────────────────────
+    /** True when the AI Run Coach app is confirmed installed on either paired watch brand. */
     val isWatchCompanionInstalled: StateFlow<Boolean> =
-        garminWatchManager.isCompanionAppInstalled
+        combine(garminWatchManager.isCompanionAppInstalled, samsungWatchManager.isCompanionAppInstalled) { g, s -> g || s }
+            .stateIn(viewModelScope, SharingStarted.Lazily, false)
 
     // ── Watch send state (for PrepareRunOnWatchButton UI) ────────────────────
     private val _watchSendState = MutableStateFlow(live.airuncoach.airuncoach.ui.components.WatchSendState.IDLE)
@@ -431,7 +434,8 @@ class RunSessionViewModel @Inject constructor(
             try {
                 // Pass watch connectivity so OpenAI knows for certain whether HR data will be
                 // available during the run, overriding the history-based inference.
-                val isWatchConnected = garminWatchManager.isWatchConnected.value == true
+                val isWatchConnected = garminWatchManager.isWatchConnected.value == true ||
+                    samsungWatchManager.isWatchConnected.value == true
                 val response = apiService.prepareSessionCoaching(
                     workoutId       = workoutId,
                     forceRegenerate = force,
@@ -668,6 +672,19 @@ class RunSessionViewModel @Inject constructor(
             intervalDurSecs   = intervalDurSecs,
             sessionType       = sessionType
         )
+        samsungWatchManager.sendPreparedRun(
+            distanceKm        = distanceKm,
+            runType           = runType,
+            workoutType       = workoutType,
+            workoutIntensity  = workoutIntensity,
+            workoutDesc       = workoutDesc,
+            routePolyline     = routePolyline,
+            targetPace        = targetPace,
+            intervalCount     = intervalCount,
+            intervalDistKm    = intervalDistKm,
+            intervalDurSecs   = intervalDurSecs,
+            sessionType       = sessionType
+        )
         Log.d("RunSessionViewModel", "prepareRunOnWatch sent: type=$runType sessionType=$sessionType dist=${distanceKm}km")
         prepareServiceForWatch()
     }
@@ -696,6 +713,19 @@ class RunSessionViewModel @Inject constructor(
         val sessionType = runConfig?.activityType?.name?.lowercase() ?: "run"
 
         garminWatchManager.sendPreparedRun(
+            distanceKm       = distanceKm,
+            runType          = "training",
+            workoutType      = workoutType,
+            workoutIntensity = workoutIntensity,
+            workoutDesc      = preRunBrief ?: "Coached ${workoutType.replace("_", " ")} session",
+            targetPace       = targetPace,
+            intervalCount    = intervalCount,
+            intervalDistKm   = intervalDistKm,
+            intervalDurSecs  = intervalDurSecs,
+            plannedWorkoutId = workoutId,
+            sessionType      = sessionType
+        )
+        samsungWatchManager.sendPreparedRun(
             distanceKm       = distanceKm,
             runType          = "training",
             workoutType      = workoutType,
@@ -775,11 +805,12 @@ class RunSessionViewModel @Inject constructor(
         }
 
         // ── Watch command handler ─────────────────────────────────────────────
-        // The DI singleton GarminWatchManager is alive as soon as the ViewModel
-        // is created (i.e. the user has opened the Run screen).  If the user
-        // presses START on the watch *before* tapping Start on the phone, the
-        // RunTrackingService doesn't exist yet — so this handler bridges the gap.
-        garminWatchManager.onWatchCommand = { action ->
+        // The DI singleton watch managers are alive as soon as the ViewModel is created
+        // (i.e. the user has opened the Run screen). If the user presses START on the watch
+        // *before* tapping Start on the phone, the RunTrackingService doesn't exist yet — so
+        // this handler bridges the gap. Shared body assigned to both managers (Garmin and
+        // Samsung/Wear OS) since the handling is identical regardless of watch brand.
+        val watchCommandHandler: (String) -> Unit = { action ->
             Log.d("RunSessionViewModel", "⌚ Watch command received in ViewModel: $action")
             when (action) {
                 "start" -> {
@@ -818,7 +849,10 @@ class RunSessionViewModel @Inject constructor(
                     viewModelScope.launch {
                         val token = sessionManager.getAuthToken()
                         val name = user?.name ?: ""
-                        if (token != null) garminWatchManager.sendAuth(token, name)
+                        if (token != null) {
+                            garminWatchManager.sendAuth(token, name)
+                            samsungWatchManager.sendAuth(token, name)
+                        }
                     }
                 }
                 "sessionReady" -> {
@@ -829,11 +863,13 @@ class RunSessionViewModel @Inject constructor(
                     // talkToCoach through triggerWatchTalkToCoach() → watchTalkToCoachRequest
                     // StateFlow → the collector below. Handling it here too would cause a
                     // double "hello" because both this handler and the service's handler can
-                    // fire for the same ConnectIQ message.
+                    // fire for the same message.
                     Log.d("RunSessionViewModel", "⌚ talkToCoach in ViewModel handler — ignored (service path handles it)")
                 }
             }
         }
+        garminWatchManager.onWatchCommand = watchCommandHandler
+        samsungWatchManager.onWatchCommand = watchCommandHandler
     }
     private val weatherRepository = WeatherRepository(context)
     // SessionCoachingHelper retained for future logCoachingEvent usage (currently unused after legacy path retirement)
@@ -1258,6 +1294,7 @@ class RunSessionViewModel @Inject constructor(
         // ActivityRecording session synchronously on that button press. See
         // GarminWatchManager.sendSessionType() for the full explanation.
         garminWatchManager.sendSessionType(sessionWord)
+        samsungWatchManager.sendSessionType(sessionWord)
 
         // Only update coachText if we don't already have an AI briefing loaded.
         // "AI briefing" means something was set by prepareRun() — anything other than the
@@ -1558,6 +1595,7 @@ class RunSessionViewModel @Inject constructor(
         // Clear the standby flag and the cached prepared-run — run is now live
         isServicePreparedForWatch = false
         garminWatchManager.clearPendingPreparedRun()
+        samsungWatchManager.clearPendingPreparedRun()
         // Reset route recognition state for this new run
         _knownRouteMatch.value = null
         routeIntelligenceContext = null
@@ -2131,6 +2169,7 @@ class RunSessionViewModel @Inject constructor(
             isServicePreparedForWatch = false
         }
         garminWatchManager.clearPendingPreparedRun()
+        samsungWatchManager.clearPendingPreparedRun()
     }
 
     /**

@@ -133,6 +133,9 @@ dependencies {
     // --- Location Services: Google Play Services for GPS tracking ---
     implementation("com.google.android.gms:play-services-location:21.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
+    // --- Wear OS Data Layer: phone<->watch messaging for the Samsung/Wear OS companion app ---
+    implementation("com.google.android.gms:play-services-wearable:18.2.0")
     
     // --- Google Maps: For route display and navigation ---
     implementation("com.google.android.gms:play-services-maps:18.2.0")
