@@ -669,25 +669,46 @@ export default function RunVideoShare() {
         return [p.x * sx, p.y * sy];
       };
 
-      // Full ghost trace (white, faint) — entire route drawn first so progress
-      // and head marker render on top.
+      // Margin beyond which a projected point is considered off-screen.
+      // Points outside this box cause the pen to lift so no line is drawn
+      // across the canvas to an out-of-bounds coordinate (pitched cameras
+      // project "behind-horizon" points to extreme pixel values).
+      const PAD = 200;
+      const inBounds = ([x, y]: [number, number]) =>
+        x > -PAD && x < CW + PAD && y > -PAD && y < CH + PAD;
+
+      // Build a canvas path with pen-lift at out-of-bounds points so that
+      // off-screen projections never draw a diagonal slash across the frame.
+      const buildClippedPath = (screenPts: [number, number][]) => {
+        ctx.beginPath();
+        let penDown = false;
+        for (const pt of screenPts) {
+          if (!inBounds(pt)) { penDown = false; continue; }
+          if (!penDown) { ctx.moveTo(pt[0], pt[1]); penDown = true; }
+          else          { ctx.lineTo(pt[0], pt[1]); }
+        }
+      };
+
+      // Helper: project a list of raw coords (subsampled to maxSeg) to screen pts.
+      const projectCoords = (raw: [number, number][], maxSeg: number): [number, number][] => {
+        const stride = Math.max(1, Math.floor(raw.length / maxSeg));
+        const out: [number, number][] = [];
+        for (let i = 0; i < raw.length; i += stride) {
+          try { out.push(proj([raw[i][0], raw[i][1]])); } catch { /* guard */ }
+        }
+        // Always include the exact last point
+        if (raw.length > 0) {
+          try { out.push(proj([raw[raw.length - 1][0], raw[raw.length - 1][1]])); } catch { /* guard */ }
+        }
+        return out;
+      };
+
+      // Full ghost trace (white, faint) — drawn first so progress line sits on top.
       const allCoords = (coords3dRef.current.length ? coords3dRef.current : coordsRef.current) as [number, number][];
-      const GHOST_SEG = 400;
-      const gStride = Math.max(1, Math.floor(allCoords.length / GHOST_SEG));
-      const ghostPts: [number, number][] = [];
-      for (let i = 0; i < allCoords.length; i += gStride) {
-        const c = allCoords[i];
-        try { ghostPts.push(proj([c[0], c[1]])); } catch { /* off-screen */ }
-      }
-      if (allCoords.length > 0) {
-        const lc = allCoords[allCoords.length - 1];
-        try { ghostPts.push(proj([lc[0], lc[1]])); } catch { /* guard */ }
-      }
+      const ghostPts = projectCoords(allCoords, 400);
       if (ghostPts.length >= 2) {
         ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(ghostPts[0][0], ghostPts[0][1]);
-        for (let i = 1; i < ghostPts.length; i++) ctx.lineTo(ghostPts[i][0], ghostPts[i][1]);
+        buildClippedPath(ghostPts);
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 5;
         ctx.lineCap = "round";
@@ -701,27 +722,10 @@ export default function RunVideoShare() {
       if (routeProgress > 0) {
       const d = routeProgress * (totalRef.current || 0);
       const progressCoords = buildProgressLine(d);
-
-      // Subsample to ≤ 300 segments — keeps 2D canvas path fast on mobile
-      const MAX_SEG = 300;
-      const stride = Math.max(1, Math.floor(progressCoords.length / MAX_SEG));
-      const pts: [number, number][] = [];
-      for (let i = 0; i < progressCoords.length; i += stride) {
-        const c = progressCoords[i];
-        try { pts.push(proj([c[0], c[1]])); } catch { /* off-screen */ }
-      }
-      // Always include the exact tip
-      if (progressCoords.length > 0) {
-        const last = progressCoords[progressCoords.length - 1];
-        try { pts.push(proj([last[0], last[1]])); } catch { /* guard */ }
-      }
+      const pts = projectCoords(progressCoords as [number, number][], 300);
 
       if (pts.length >= 2) {
-        const buildPath = () => {
-          ctx.beginPath();
-          ctx.moveTo(pts[0][0], pts[0][1]);
-          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-        };
+        const buildPath = () => buildClippedPath(pts);
         // Glow — shadowBlur works on iOS (ctx.filter blur does not)
         ctx.save();
         ctx.shadowColor = TEAL; ctx.shadowBlur = 22; ctx.globalAlpha = 0.7;
