@@ -200,28 +200,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           period: "monthly",
           aiPlansEnabled: false,
           default_usd: 3.99,
-          by_currency: { "USD": 3.99 }
+          by_currency: {
+            "USD": 3.99, "EUR": 4.19, "GBP": 3.59, "JPY": 700, "CAD": 5.49, "AUD": 5.99, "NZD": 6.99, "CHF": 3.20, "INR": 450.00, "MXN": 79.00, "BRL": 20.99, "SGD": 5.49, "THB": 150.00, "KRW": 6000, "AED": 14.99, "RUB": 329.00, "ZAR": 73.99, "DZD": 525.00, "BDT": 550.00, "CZK": 99.99, "DKK": 32.00, "EGP": 229.99, "GHS": 50.00, "HKD": 29.90, "HUF": 1599, "IDR": 71000.00, "IQD": 5250.00, "ILS": 11.90, "KES": 600.00, "KZT": 2190.00, "MAD": 44.99, "MYR": 17.99, "MMK": 8000.00, "NOK": 47.00, "NGN": 5830.00, "PKR": 1100.00, "PHP": 275.00, "PLN": 17.99, "QAR": 15.00, "RON": 21.99, "SAR": 16.99, "RSD": 499, "SEK": 48.00, "LKR": 1325.00, "TRY": 229.99, "UAH": 214.99, "VND": 104000.00, "BOB": 46.99, "CLP": 4300.00, "COP": 12500.00, "CRC": 1800.00, "GEL": 14.00, "MNT": 14300.00, "MOP": 31.99, "PEN": 12.99, "PYG": 20000.00, "TWD": 130.00, "TZS": 11000.00, "XAF": 2700, "XOF": 2700, "JOD": 2.85
+          }
         },
         "lite_noaiplan_annual": {
           tier: "Lite",
           period: "annual",
           aiPlansEnabled: false,
           default_usd: 39.99,
-          by_currency: { "USD": 39.99 }
+          by_currency: {
+            "USD": 39.99, "EUR": 41.99, "GBP": 35.49, "JPY": 7000, "CAD": 55.99, "AUD": 61.99, "NZD": 69.99, "CHF": 33.00, "INR": 4500.00, "MXN": 789.00, "BRL": 204.99, "SGD": 55.98, "THB": 1425.00, "KRW": 60000, "AED": 154.99, "RUB": 3299.00, "ZAR": 739.99, "DZD": 5325.00, "BDT": 5700.00, "CZK": 999.99, "DKK": 325.00, "EGP": 2299.99, "GHS": 530.00, "HKD": 318.00, "HUF": 15999, "IDR": 690000.00, "IQD": 52400.00, "ILS": 125.00, "KES": 6000.00, "KZT": 21990.00, "MAD": 444.99, "MYR": 174.99, "MMK": 84000.00, "NOK": 475.00, "NGN": 58500.00, "PKR": 11100.00, "PHP": 2750.00, "PLN": 184.99, "QAR": 145.00, "RON": 219.99, "SAR": 174.99, "RSD": 4899, "SEK": 479.00, "LKR": 13375.00, "TRY": 2299.99, "UAH": 2149.99, "VND": 1050000.00, "BOB": 464.99, "CLP": 43500.00, "COP": 125000.00, "CRC": 18000.00, "GEL": 124.00, "MNT": 143800.00, "MOP": 319.00, "PEN": 134.99, "PYG": 250000.00, "TWD": 1350.00, "TZS": 105000.00, "XAF": 27100, "XOF": 26800, "JOD": 28.35
+          }
         },
         "standard_noaiplan_monthly": {
           tier: "Standard",
           period: "monthly",
           aiPlansEnabled: false,
           default_usd: 8.99,
-          by_currency: { "USD": 8.99 }
+          by_currency: {
+            "USD": 8.99, "EUR": 9.49, "GBP": 7.99, "JPY": 1580, "CAD": 12.99, "AUD": 13.99, "NZD": 14.99, "CHF": 7.30, "INR": 1000.00, "MXN": 179.00, "BRL": 46.99, "SGD": 12.98, "THB": 325.00, "KRW": 14000, "AED": 34.99, "RUB": 790.00, "ZAR": 164.99, "DZD": 1200.00, "BDT": 1300.00, "CZK": 229.99, "DKK": 75.00, "EGP": 519.99, "GHS": 120.00, "HKD": 70.90, "HUF": 3599, "IDR": 159000.00, "IQD": 11800.00, "ILS": 26.90, "KES": 1300.00, "KZT": 4890.00, "MAD": 99.99, "MYR": 39.99, "MMK": 19000.00, "NOK": 105.00, "NGN": 13000.00, "PKR": 2500.00, "PHP": 619.00, "PLN": 40.99, "QAR": 33.00, "RON": 48.99, "SAR": 38.99, "RSD": 1099, "SEK": 109.00, "LKR": 3000.00, "TRY": 519.99, "UAH": 479.99, "VND": 234000.00, "BOB": 104.99, "CLP": 9800.00, "COP": 28000.00, "CRC": 4000.00, "GEL": 29.00, "MNT": 32300.00, "MOP": 72.88, "PEN": 29.99, "PYG": 50000.00, "TWD": 300.00, "TZS": 24000.00, "XAF": 6100, "XOF": 6000, "JOD": 6.35
+          }
         },
         "standard_noaiplan_annual": {
           tier: "Standard",
           period: "annual",
           aiPlansEnabled: false,
           default_usd: 89.99,
-          by_currency: { "USD": 89.99 }
+          by_currency: {
+            "USD": 89.99, "EUR": 94.99, "GBP": 79.99, "JPY": 15800, "CAD": 124.99, "AUD": 139.99, "NZD": 149.99, "CHF": 75.00, "INR": 10100.00, "MXN": 1799.00, "BRL": 464.99, "SGD": 129.98, "THB": 3200.00, "KRW": 140000, "AED": 344.99, "RUB": 7499.00, "ZAR": 1699.99, "DZD": 12000.00, "BDT": 13000.00, "CZK": 2299.99, "DKK": 729.00, "EGP": 5149.99, "GHS": 1200.00, "HKD": 708.00, "HUF": 35999, "IDR": 1590000.00, "IQD": 118000.00, "ILS": 275.00, "KES": 13000.00, "KZT": 48990.00, "MAD": 999.99, "MYR": 394.99, "MMK": 190000.00, "NOK": 1049.00, "NGN": 131500.00, "PKR": 25000.00, "PHP": 6200.00, "PLN": 414.99, "QAR": 330.00, "RON": 494.99, "SAR": 389.99, "RSD": 10999, "SEK": 1099.00, "LKR": 30000.00, "TRY": 5169.99, "UAH": 4849.99, "VND": 2350000.00, "BOB": 1049.99, "CLP": 98000.00, "COP": 281000.00, "CRC": 40400.00, "GEL": 274.00, "MNT": 323600.00, "MOP": 728.00, "PEN": 304.99, "PYG": 550000.00, "TWD": 3040.00, "TZS": 237000.00, "XAF": 61000, "XOF": 60400, "JOD": 64.00
+          }
         }
       };
       res.json(pricingData);
