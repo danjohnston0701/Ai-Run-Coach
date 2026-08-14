@@ -728,17 +728,17 @@ export default function RunVideoShare() {
         const buildPath = () => buildClippedPath(pts);
         // Glow — shadowBlur works on iOS (ctx.filter blur does not)
         ctx.save();
-        ctx.shadowColor = TEAL; ctx.shadowBlur = 22; ctx.globalAlpha = 0.7;
-        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+        ctx.shadowColor = TEAL; ctx.shadowBlur = 44; ctx.globalAlpha = 0.7;
+        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 24; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
         ctx.restore();
         // Teal body
         ctx.save();
-        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 12; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 24; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
         ctx.restore();
         // White-hot core
         ctx.save();
         ctx.globalAlpha = 0.9;
-        buildPath(); ctx.strokeStyle = "#eaffff"; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+        buildPath(); ctx.strokeStyle = "#eaffff"; ctx.lineWidth = 8; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
         ctx.restore();
       }
 
