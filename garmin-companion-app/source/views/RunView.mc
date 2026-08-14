@@ -235,7 +235,15 @@ class RunView extends Ui.View {
     // previously unguarded (e.g. onPhoneMessage) — the whole point is to catch
     // and log rather than let the exception propagate and take the app down.
     private function _recordCrash(context, e) {
-        var msg = context + ": " + e.toString();
+        _recordBreadcrumb(context + ": " + e.toString());
+    }
+
+    // Persist a compact diagnostic breadcrumb — crash OR notable lifecycle event — so it
+    // survives an app crash/relaunch. Shares the same storage key/display path as
+    // _recordCrash() (see onShow()'s _pendingCrashMsg handling): real hardware exposes no
+    // crash log to sideloaded apps, so this is the only way to see what happened without a
+    // USB/simulator console.
+    private function _recordBreadcrumb(msg) {
         if (msg.length() > 120) { msg = msg.substring(0, 120); }
         Sys.println("CRASH-GUARD " + msg);
         App.Storage.setValue("lastCrashInfo", msg);
@@ -604,6 +612,8 @@ class RunView extends Ui.View {
     }
 
     function onShow() {
+        Sys.println(">>> onShow() — isRunning=" + _isRunning + " phoneControlled=" + _phoneControlled
+            + " session=" + (_session != null) + " timerAlreadyAlive=" + (_timer != null));
         _phoneLink.register(method(:onPhoneMessage));
         // Include hasPendingSync so phone dashboard shows a sync indicator, and forward
         // any crash breadcrumb from the previous run so it lands in the phone's logcat.
@@ -630,15 +640,27 @@ class RunView extends Ui.View {
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
             _gpsListening = true;
         }
-        _timer = new Timer.Timer();
-        _timer.start(method(:onTick), _tickMs, true);
+        // Guard against a duplicate/overlapping Timer: onHide() no longer stops the
+        // timer while a run is active (see below), so if we're re-shown mid-run the
+        // existing timer is still alive and must not be replaced.
+        if (_timer == null) {
+            _timer = new Timer.Timer();
+            _timer.start(method(:onTick), _tickMs, true);
+        }
     }
 
     function onHide() {
-        if (_timer != null) { _timer.stop(); _timer = null; }
-        // Do NOT disable GPS or sensors when a run is active — view may be
-        // temporarily hidden by system menu/glance.  Only clean up when idle.
+        Sys.println(">>> onHide() — isRunning=" + _isRunning + " session=" + (_session != null)
+            + " gpsListening=" + _gpsListening);
+        // Do NOT tear down the timer, GPS, or sensors when a run is active — view may be
+        // temporarily hidden by system menu/glance/a Garmin "Move!" alert.  Previously the
+        // timer was stopped here UNCONDITIONALLY, contradicting the very next lines' intent:
+        // it silently halted onTick() — and therefore all elapsed/distance tracking, phone
+        // streaming, and offline-buffer sampling — for the whole duration of any such
+        // interruption. Suspected root cause of watch-initiated runs appearing to "freeze".
+        // Only clean up when genuinely idle.
         if (!_isRunning) {
+            if (_timer != null) { _timer.stop(); _timer = null; }
             if (_gpsListening) {
                 Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
                 _gpsListening = false;
@@ -692,7 +714,7 @@ class RunView extends Ui.View {
                 Sys.println("Auth received — overlayState=" + _overlayState);
                 // Tell the phone which watch app version is installed so the
                 // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.3.6");
+                _phoneLink.sendHello("3.3.7");
                 // If GPS was already locked before auth arrived, notify phone now
                 if (_gpsReady && !_isRunning && !_sessionReadySent) {
                     _phoneLink.sendCommand("sessionReady");
@@ -1723,9 +1745,19 @@ class RunView extends Ui.View {
     }
 
     private function _startSession() {
+        Sys.println(">>> _startSession() — isRunning=" + _isRunning + " existingSession=" + (_session != null)
+            + " storedType=" + App.Storage.getValue("sessionType"));
         // Defensive: ensure no stale session is left open before creating a new one.
         // A double-open can cause an IQ error on some devices.
         if (_session != null) {
+            // Being called with a session already open while a run is genuinely still in
+            // progress means something re-triggered _startSession() mid-run — this is
+            // exactly what splits one continuous Garmin Connect activity into several
+            // short ones. Persist a breadcrumb so a real on-device repro can confirm this
+            // path is (or isn't) what's happening — see the open Garmin walk-freeze report.
+            if (_isRunning) {
+                _recordBreadcrumb("startSession:recreateWhileRunning storedType=" + App.Storage.getValue("sessionType"));
+            }
             try {
                 if (_session.isRecording()) { _session.stop(); }
                 _session.save();
