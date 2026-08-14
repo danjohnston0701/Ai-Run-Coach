@@ -422,19 +422,13 @@ export default function RunVideoShare() {
         });
       } catch { /* sky unsupported on this build — ignore */ }
 
-      const coords3d = coords3dRef.current;
-      const start3d  = coords3d[0] ?? [start[0], start[1]];
-      const fullLine = { type: "Feature", geometry: { type: "LineString", coordinates: coords3d }, properties: {} };
-      map.addSource("routeFull", { type: "geojson", data: fullLine as any });
-
-      // Only the static full-route ghost trace lives as a MapLibre layer.
-      // The animated progress line and head marker are drawn on the 2D compositor
-      // canvas (see compositeFrame) via map.project() — this bypasses MapLibre's
-      // GeoJSON Web Worker, which is blocked in iOS WKWebView, causing setData()
-      // to silently do nothing and leaving the line frozen at the start.
-      map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
+      // No MapLibre route layers at all — the ghost trace, progress line, and head
+      // marker are all drawn on the 2D compositor canvas (compositeFrame) via
+      // map.project().  This avoids the blob-URL Web Worker restriction in iOS
+      // WKWebView, which silently blocks GeoJSON setData() calls and would keep
+      // any MapLibre layer frozen.  It also prevents the "parallel line" artifact
+      // that occurs when a WebGL layer and a canvas-projected line both render at
+      // slightly different 3D positions on a pitched camera.
 
       // Pre-compute the "whole route" overview camera used for the outro.
       const bounds = coords.reduce(
@@ -658,12 +652,13 @@ export default function RunVideoShare() {
     vig.addColorStop(1, "rgba(3,5,12,0.55)");
     ctx.fillStyle = vig; ctx.fillRect(0, 0, CW, CH);
 
-    // ── 2D canvas route progress line + head marker ──────────────────────────
-    // Drawn via map.project() so they track the camera on every platform.
-    // This replaces MapLibre GeoJSON setData() which is silently blocked in iOS
-    // WKWebView (blob-URL Web Workers are restricted), causing the line to stay
-    // frozen at the start while the camera moves correctly.
-    if (map && routeProgress > 0) {
+    // ── 2D canvas route lines + head marker ──────────────────────────────────
+    // All route drawing is done here via map.project() so that:
+    //  (a) iOS WKWebView blob-URL Worker restriction is bypassed (no setData())
+    //  (b) ghost trace and progress line share the same coordinate space,
+    //      eliminating the "parallel line" artefact seen when a WebGL layer and
+    //      a canvas-projected line both render on a pitched camera.
+    if (map) {
       const container = map.getContainer();
       const cssW = container.offsetWidth  || 1;
       const cssH = container.offsetHeight || 1;
@@ -674,6 +669,36 @@ export default function RunVideoShare() {
         return [p.x * sx, p.y * sy];
       };
 
+      // Full ghost trace (white, faint) — entire route drawn first so progress
+      // and head marker render on top.
+      const allCoords = (coords3dRef.current.length ? coords3dRef.current : coordsRef.current) as [number, number][];
+      const GHOST_SEG = 400;
+      const gStride = Math.max(1, Math.floor(allCoords.length / GHOST_SEG));
+      const ghostPts: [number, number][] = [];
+      for (let i = 0; i < allCoords.length; i += gStride) {
+        const c = allCoords[i];
+        try { ghostPts.push(proj([c[0], c[1]])); } catch { /* off-screen */ }
+      }
+      if (allCoords.length > 0) {
+        const lc = allCoords[allCoords.length - 1];
+        try { ghostPts.push(proj([lc[0], lc[1]])); } catch { /* guard */ }
+      }
+      if (ghostPts.length >= 2) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(ghostPts[0][0], ghostPts[0][1]);
+        for (let i = 1; i < ghostPts.length; i++) ctx.lineTo(ghostPts[i][0], ghostPts[i][1]);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 5;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.globalAlpha = 0.22;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Progress line + head marker (only once route has started)
+      if (routeProgress > 0) {
       const d = routeProgress * (totalRef.current || 0);
       const progressCoords = buildProgressLine(d);
 
@@ -734,7 +759,8 @@ export default function RunVideoShare() {
         ctx.fillStyle = WHITE; ctx.fill();
         ctx.strokeStyle = TEAL; ctx.lineWidth = 4; ctx.stroke(); ctx.restore();
       } catch { /* map.project() throws if coordinate is off-screen */ }
-    }
+      } // end routeProgress > 0
+    } // end if (map)
 
     drawOverlay(ctx, routeProgress, tMs, run, units);
   }, [drawOverlay, run, units, buildProgressLine, interpAt]);
