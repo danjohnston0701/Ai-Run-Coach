@@ -5279,6 +5279,7 @@ export type EliteCoachingType =
   | 'elevation_insight'     // How elevation is affecting their pace right now
   | 'heart_rate_check'      // HR-focused coaching for zone 2 sessions (with HR device)
   | 'final_500m'            // Last 500m motivational push
+  | 'final_250m'            // Last 250m — building sprint intensity toward the finish
   | 'final_100m';           // Last 100m — maximum intensity finish line push
 
 export interface EliteCoachingParams {
@@ -5875,6 +5876,32 @@ The ${isWalkSession ? 'walker' : 'runner'} has ${remainingMeters || 500} meters 
       systemExtra = isWalkSession
         ? 'This is the home stretch. Coach with warmth and conviction — a strong, purposeful finish, not a race. Reference real data.'
         : 'This is the home stretch. Coach with intensity and conviction. Reference real data.';
+      break;
+    }
+
+    case 'final_250m': {
+      const etaProjMin = projectedFinishTime ? Math.floor(projectedFinishTime / 60) : 0;
+      const etaProjSec = projectedFinishTime ? Math.round(projectedFinishTime % 60) : 0;
+      const tgtMin = targetTime ? Math.floor(targetTime / 60) : 0;
+      const tgtSec = targetTime ? Math.round(targetTime % 60) : 0;
+
+      let targetContext = '';
+      if (targetTime && targetTimeCategory === 'on_track') {
+        targetContext = `Target finish: ${etaProjMin}:${etaProjSec.toString().padStart(2, '0')} (goal: ${tgtMin}:${tgtSec.toString().padStart(2, '0')})`;
+      } else if (targetTime && targetTimeCategory === 'strong_effort') {
+        targetContext = `Strong effort — ${etaOverTargetPercent?.toFixed(1)}% over target, but they've given it their all.`;
+      }
+
+      typePrompt = `COACHING TYPE: Final 250 meters
+
+${status}
+${noTerrainRule}
+${targetContext ? `Context: ${targetContext}` : ''}
+
+The ${isWalkSession ? 'walker' : 'runner'} has ${remainingMeters || 250} meters to the finish — closer than the 500m call, building toward the finish line. Give a short, high-energy 1-2 sentence message that escalates the intensity from a 500m cue toward the 100m sprint call.`;
+      systemExtra = isWalkSession
+        ? 'This is deep in the home stretch, almost there — closer than the 500m mark, not yet the final-100m burst. Coach with rising warmth and urgency. Reference real data.'
+        : 'This is deep in the home stretch, almost there — closer than the 500m mark, not yet the final-100m burst. Coach with rising intensity. Reference real data.';
       break;
     }
 

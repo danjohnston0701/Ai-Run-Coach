@@ -419,6 +419,8 @@ data class SessionTriggerLiveResponse(
     @com.google.gson.annotations.SerializedName("message") val message: String,
     @com.google.gson.annotations.SerializedName("audio") val audio: String? = null,
     @com.google.gson.annotations.SerializedName("format") val format: String? = null,
+    // See HeartRateCoachingResponse.skipped — same shared-cooldown skip contract.
+    @com.google.gson.annotations.SerializedName("skipped") val skipped: Boolean = false,
 )
 
 /**

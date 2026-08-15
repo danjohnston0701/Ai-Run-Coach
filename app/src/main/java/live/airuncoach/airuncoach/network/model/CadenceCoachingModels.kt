@@ -50,5 +50,7 @@ data class CadenceCoachingResponse(
     @SerializedName("audio") val audio: String? = null,
     @SerializedName("format") val format: String? = "mp3",
     @SerializedName("cadenceProximityTier") val cadenceProximityTier: String? = null,
-    @SerializedName("recommendation") val recommendation: String? = null
+    @SerializedName("recommendation") val recommendation: String? = null,
+    // See HeartRateCoachingResponse.skipped — same shared-cooldown skip contract.
+    @SerializedName("skipped") val skipped: Boolean = false
 )

@@ -433,7 +433,6 @@ class RunTrackingService : Service(), SensorEventListener {
         // HILL-SPECIFIC TECHNIQUE
         "hill_uphill_technique",     // Shorten stride, lean into hill, pump arms
         "hill_downhill_technique",   // Controlled descent, slight lean forward, quick feet
-        "hill_crest_transition",     // Don't ease off at the top, maintain through the crest
 
         // BREATHING
         "breathing_rhythm",          // Match breathing to stride (2:2 or 3:2 pattern)
@@ -2415,10 +2414,14 @@ class RunTrackingService : Service(), SensorEventListener {
                         "abandoning=$isAbandoning")
                 
                 val response = apiService.getPhaseCoaching(update)
-                Log.d("PaceCoaching", "LLM response: ${response.message.take(80)}...")
-                
-                // Play via the standard coaching audio pipeline (handles all text normalizations)
-                playCoachingAudio(response.audio, response.format, response.message)
+                // Server returns skipped=true with no message when the shared cooldown rejects
+                // this call — skip logging/playback in that case rather than relying on an NPE.
+                if (!response.skipped && response.message.isNotBlank()) {
+                    Log.d("PaceCoaching", "LLM response: ${response.message.take(80)}...")
+
+                    // Play via the standard coaching audio pipeline (handles all text normalizations)
+                    playCoachingAudio(response.audio, response.format, response.message)
+                }
             } catch (e: Exception) {
                 Log.e("PaceCoaching", "Failed to get pace coaching from LLM", e)
             }
@@ -2558,9 +2561,17 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun getCurrentStrideAnalysis(): StrideSnapshot? {
         if (currentCadence <= 0) return null
 
-        // Prefer GPS-reported speed (more accurate, uses doppler shift) over distance/time calculation
-        val currentSpeed = if (routePoints.isNotEmpty() && routePoints.last().speed != null && routePoints.last().speed!! > 0.5f) {
-            routePoints.last().speed!!.toDouble()
+        // Use the same smoothed distance/time speed that drives the displayed pace
+        // (recentPaceDistances/recentPaceTimes, ~8 points / 8-16s window) rather than a
+        // single point's raw reported speed (phone Doppler or watch-streamed speedMs).
+        // A single bad reading from either source (BLE glitch, GPS multipath, etc.) can
+        // spike that raw value toward the formula's clamp ceiling and produce a wildly
+        // wrong personalised cadence target that disagrees with the pace quoted in the
+        // same coaching message — smoothing over several points absorbs a one-off spike.
+        val currentSpeed = if (recentPaceDistances.size >= 3) {
+            val totalDist = recentPaceDistances.sum()
+            val totalTime = recentPaceTimes.sum()
+            if (totalTime > 0) totalDist / totalTime else 0.0
         } else if (routePoints.size >= 2) {
             val last = routePoints.last()
             val prev = routePoints[routePoints.size - 2]
@@ -4884,16 +4895,20 @@ class RunTrackingService : Service(), SensorEventListener {
                         userId = currentUser?.id
                     )
                     val response = apiService.getPhaseCoaching(update)
-                    coachingHistory.add(AiCoachingNote(
-                        time = getActiveRunDuration(),
-                        message = "500m: ${response.message}"
-                    ))
-                    Log.d("RunTrackingService", "500m coaching response: ${response.message}")
+                    // Server returns skipped=true with no message when the shared cooldown rejects
+                    // this call — don't log/play "500m: null" in that case.
+                    if (!response.skipped && response.message.isNotBlank()) {
+                        coachingHistory.add(AiCoachingNote(
+                            time = getActiveRunDuration(),
+                            message = "500m: ${response.message}"
+                        ))
+                        Log.d("RunTrackingService", "500m coaching response: ${response.message}")
 
-                    // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
-                    // (playCoachingAudio handles all text normalizations internally)
-                    if (!isMuted) {
-                        playCoachingAudio(response.audio, response.format, response.message)
+                        // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
+                        // (playCoachingAudio handles all text normalizations internally)
+                        if (!isMuted) {
+                            playCoachingAudio(response.audio, response.format, response.message)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("RunTrackingService", "Failed to get 500m coaching", e)
@@ -5593,7 +5608,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     apiService.getSessionTriggerLive(request)
                 }
 
-                if (response != null) {
+                // Server returns skipped=true with no message when the shared cooldown rejects
+                // this call — treat that the same as a timeout and use the local fallback message
+                // rather than firing a null/blank cue for a trigger the runner is expecting.
+                if (response != null && !response.skipped && response.message.isNotBlank()) {
                     Log.d("RunTrackingService", "🤖 Live trigger AI message [${trigger.type}]: ${response.message}")
                     // Play with AI-generated TTS audio if available, otherwise Android TTS
                     fireDynamicTrigger(
@@ -5604,7 +5622,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         overrideAudioFormat = response.format,
                     )
                 } else {
-                    Log.w("RunTrackingService", "⚠️ Live trigger timed out — using fallback for [${trigger.type}]")
+                    Log.w("RunTrackingService", "⚠️ Live trigger timed out or skipped — using fallback for [${trigger.type}]")
                     fireDynamicTrigger(fallbackMessage, trigger.type, phaseName)
                 }
             } catch (e: Exception) {
@@ -6482,15 +6500,19 @@ class RunTrackingService : Service(), SensorEventListener {
                         userId = currentUser?.id
                     )
                     val response = apiService.getPhaseCoaching(update)
-                    coachingHistory.add(AiCoachingNote(
-                        time = getActiveRunDuration(),
-                        message = response.message
-                    ))
-                    Log.d("RunTrackingService", "Phase coaching response: ${response.message}")
+                    // Server returns skipped=true with no message when the shared cooldown rejects
+                    // this call — don't log/play a null message in that case.
+                    if (!response.skipped && response.message.isNotBlank()) {
+                        coachingHistory.add(AiCoachingNote(
+                            time = getActiveRunDuration(),
+                            message = response.message
+                        ))
+                        Log.d("RunTrackingService", "Phase coaching response: ${response.message}")
 
-                    // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
-                    if (!isMuted) {
-                        playCoachingAudio(response.audio, response.format, response.message)
+                        // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
+                        if (!isMuted) {
+                            playCoachingAudio(response.audio, response.format, response.message)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e("RunTrackingService", "Failed to get phase coaching", e)
@@ -6559,21 +6581,25 @@ class RunTrackingService : Service(), SensorEventListener {
                 )
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
-                coachingHistory.add(AiCoachingNote(
-                    time = getActiveRunDuration(),
-                    message = "Struggle: ${response.message}"
-                ))
-                
-                // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
-                if (!isMuted) {
-                    playCoachingAudio(response.audio, response.format, response.message)
+                // Server returns skipped=true with no message when the shared cooldown rejects
+                // this call — don't log/play "Struggle: null" in that case.
+                if (!response.skipped && response.message.isNotBlank()) {
+                    coachingHistory.add(AiCoachingNote(
+                        time = getActiveRunDuration(),
+                        message = "Struggle: ${response.message}"
+                    ))
+
+                    // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
+                    if (!isMuted) {
+                        playCoachingAudio(response.audio, response.format, response.message)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
     }
-    
+
     private fun triggerKmSplitCoaching(split: KmSplit) {
         if (!coachingFeaturePrefs.kmSplitsEnabled) return
         serviceScope.launch {
@@ -6646,16 +6672,21 @@ class RunTrackingService : Service(), SensorEventListener {
                     activityType = currentActivityType
                 )
                 val response = apiService.getPaceUpdate(update)
-                coachingHistory.add(AiCoachingNote(
-                    time = getActiveRunDuration(),
-                    message = "Km ${split.km}: ${response.message}"
-                ))
-                Log.d("RunTrackingService", "Km ${split.km} split coaching: ${response.message}")
+                // Server returns skipped=true with no message when the shared cooldown (or the
+                // user's configured km-interval setting) rejects this split — don't log/play
+                // "Km X: null" in that case.
+                if (!response.skipped && response.message.isNotBlank()) {
+                    coachingHistory.add(AiCoachingNote(
+                        time = getActiveRunDuration(),
+                        message = "Km ${split.km}: ${response.message}"
+                    ))
+                    Log.d("RunTrackingService", "Km ${split.km} split coaching: ${response.message}")
 
-                // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
-                // (playCoachingAudio handles all text normalizations internally)
-                if (!isMuted) {
-                    playCoachingAudio(response.audio, response.format, response.message)
+                    // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
+                    // (playCoachingAudio handles all text normalizations internally)
+                    if (!isMuted) {
+                        playCoachingAudio(response.audio, response.format, response.message)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("RunTrackingService", "Failed to get km split coaching", e)
@@ -6944,13 +6975,17 @@ class RunTrackingService : Service(), SensorEventListener {
                     activityType = currentActivityType
                 )
                 val response = apiService.getHeartRateCoaching(request)
-                coachingHistory.add(AiCoachingNote(
-                    time = getActiveRunDuration(),
-                    message = "HR: ${response.message}"
-                ))
+                // Server returns skipped=true with no message when the shared per-user coaching
+                // cooldown rejects this call — don't log/play "HR: null" in that case.
+                if (!response.skipped && response.message.isNotBlank()) {
+                    coachingHistory.add(AiCoachingNote(
+                        time = getActiveRunDuration(),
+                        message = "HR: ${response.message}"
+                    ))
 
-                if (!isMuted) {
-                    playCoachingAudio(response.audio, response.format, response.message)
+                    if (!isMuted) {
+                        playCoachingAudio(response.audio, response.format, response.message)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -7105,12 +7140,16 @@ class RunTrackingService : Service(), SensorEventListener {
                     cadenceRole = if (currentActivityType == "walk") "context_only" else "primary_metric"
                 )
                 val response = apiService.getCadenceCoaching(request)
-                coachingHistory.add(AiCoachingNote(
-                    time = getActiveRunDuration(),
-                    message = "Cadence: ${response.message}"
-                ))
-                if (!isMuted) {
-                    playCoachingAudio(response.audio, response.format, response.message)
+                // Server returns skipped=true with no message when the shared cooldown rejects
+                // this call — don't log/play "Cadence: null" in that case.
+                if (!response.skipped && response.message.isNotBlank()) {
+                    coachingHistory.add(AiCoachingNote(
+                        time = getActiveRunDuration(),
+                        message = "Cadence: ${response.message}"
+                    ))
+                    if (!isMuted) {
+                        playCoachingAudio(response.audio, response.format, response.message)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("RunTrackingService", "Failed to get cadence coaching", e)
@@ -7772,7 +7811,11 @@ class RunTrackingService : Service(), SensorEventListener {
         serviceScope.launch {
             try {
                 val response = apiService.getEliteCoaching(request)
-                if (response.message.isNotBlank()) {
+                // Server returns skipped=true with no message when the shared cooldown rejects
+                // this call. (message.isNotBlank() alone happened to catch this too, since a
+                // Gson-nulled non-null String throws on isNotBlank() and gets swallowed by the
+                // catch block below — but that's an accident of implementation, not a real check.)
+                if (!response.skipped && response.message.isNotBlank()) {
                     coachingHistory.add(AiCoachingNote(
                         time = getActiveRunDuration(),
                         message = "$label: ${response.message}"
@@ -8087,7 +8130,6 @@ class RunTrackingService : Service(), SensorEventListener {
         // Hills
         "hill_uphill_technique" to "Shorten your stride, increase cadence, lean into the hill from your ankles. Pump your arms harder. Attack the hill with quick feet, not big strides.",
         "hill_downhill_technique" to "Let gravity help! Lean slightly forward (don't lean back). Quick light steps, slightly wider foot placement. Control your speed with cadence, not braking.",
-        "hill_crest_transition" to "Don't ease off at the top of the hill! Many runners lose 5-10 seconds by relaxing at the crest. Push through and over the top, then settle into rhythm.",
 
         // Breathing
         "breathing_rhythm" to "Match your breathing to your stride. Try a 2:2 pattern — breathe in for 2 steps, out for 2 steps. At easy pace, try 3:3.",
@@ -8314,13 +8356,17 @@ class RunTrackingService : Service(), SensorEventListener {
                     hasRouteElevationAhead = false  // Route elevation lookahead not yet implemented
                 )
                 val response = apiService.getElevationCoaching(request)
-                coachingHistory.add(AiCoachingNote(
-                    time = getActiveRunDuration(),
-                    message = "Elevation: ${response.message}"
-                ))
+                // Server returns skipped=true with no message when the shared cooldown rejects
+                // this call — don't log/play "Elevation: null" in that case.
+                if (!response.skipped && response.message.isNotBlank()) {
+                    coachingHistory.add(AiCoachingNote(
+                        time = getActiveRunDuration(),
+                        message = "Elevation: ${response.message}"
+                    ))
 
-                if (!isMuted) {
-                    playCoachingAudio(response.audio, response.format, response.message)
+                    if (!isMuted) {
+                        playCoachingAudio(response.audio, response.format, response.message)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -12039,6 +12039,14 @@ function transformRunForAndroid(run: any) {
         fastestSplitKm: 'fastest_split_km',
         fastestSplitPace: 'fastest_split_pace',
         targetTimeCategory: 'target_time_category',
+        // technique_form category-selection context (iOS technique-category port)
+        techniqueCategory: 'technique_category',
+        techniqueHint: 'technique_hint',
+        runPhase: 'run_phase',
+        isOnHill: 'is_on_hill',
+        isUphill: 'is_uphill',
+        fatigueLevel: 'fatigue_level',
+        recentTechniqueCategories: 'used_technique_categories',
       };
       for (const [camel, snake] of Object.entries(eliteSnakeCaseAliases)) {
         if (req.body[camel] === undefined && req.body[snake] !== undefined) {
@@ -12104,6 +12112,14 @@ function transformRunForAndroid(run: any) {
         navigationInstruction: 'navigation_instruction',
         navigationDistance: 'navigation_distance',
         hasRoute: 'has_route',
+        // pace_coaching/pace_abandon zone-engine context (iOS pace-zone engine port)
+        consecutiveBehindCues: 'consecutive_behind_cues',
+        paceDeviationPercent: 'pace_deviation_percent',
+        rollingPaceDeviationPercent: 'rolling_pace_deviation_percent',
+        projectedFinishSeconds: 'projected_finish_seconds',
+        currentAvgPaceSecondsPerKm: 'current_avg_pace_seconds_per_km',
+        rollingPaceSecondsPerKm: 'rolling_pace_seconds_per_km',
+        progressPercent: 'progress_percent',
       };
       for (const [camel, snake] of Object.entries(phaseSnakeCaseAliases)) {
         if (req.body[camel] === undefined && req.body[snake] !== undefined) {
