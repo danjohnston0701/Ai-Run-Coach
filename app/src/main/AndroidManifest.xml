@@ -6,6 +6,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- The app doesn't show ads or do ad attribution — no AdMob/Facebook Ads/AppsFlyer/Adjust
+         anywhere in the codebase — but firebase-analytics-ktx's own manifest requests both the
+         legacy Google Play services advertising ID permission AND the newer Android 13+
+         AdServices/Privacy Sandbox one by default (for ad-personalization analytics features
+         this app doesn't use), which is what triggers Play Console's "Incomplete advertising ID
+         declaration" block on submission (that policy applies specifically to apps targeting
+         Android 13+, i.e. the ACCESS_ADSERVICES_AD_ID permission below). Explicitly remove both
+         so the merged manifest — and the Play Console App Content declaration — accurately
+         reflect that this app does not use advertising ID. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" tools:node="remove" />
+
     <!-- Location permissions for GPS tracking -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
