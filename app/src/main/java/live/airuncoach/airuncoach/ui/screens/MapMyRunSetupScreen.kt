@@ -87,6 +87,11 @@ fun MapMyRunSetupScreen(
     ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
+    // Remembers the last-picked target distance/time so it survives a full app close/reopen
+    // (mirrors DashboardViewModel's identically-keyed persistence, which seeds initialDistance
+    // for this screen's two real entry points — route generation and free-run setup). Written
+    // here too so the value is captured the moment the user adjusts it, not only via Dashboard.
+    val targetPrefs = remember { context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE) }
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
     val runState by runSessionViewModel.runState.collectAsState()
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
@@ -270,7 +275,11 @@ fun MapMyRunSetupScreen(
                 item {
                     TargetDistanceCard(
                         distance = targetDistance,
-                        onDistanceChanged = { targetDistance = it.roundToInt().toFloat() }
+                        onDistanceChanged = {
+                            val snapped = it.roundToInt().toFloat()
+                            targetDistance = snapped
+                            targetPrefs.edit().putFloat("target_distance_km", snapped).apply()
+                        }
                     )
                 }
 
@@ -281,13 +290,16 @@ fun MapMyRunSetupScreen(
             item {
                 CompactTargetTimeSection(
                     isEnabled = isTargetTimeEnabled,
-                    onEnabledChange = { isTargetTimeEnabled = it },
+                    onEnabledChange = {
+                        isTargetTimeEnabled = it
+                        targetPrefs.edit().putBoolean("target_time_enabled", it).apply()
+                    },
                     hours = targetHours,
                     minutes = targetMinutes,
                     seconds = targetSeconds,
-                    onHoursChange = { if (it.length <= 2) targetHours = it },
-                    onMinutesChange = { if (it.length <= 2) targetMinutes = it },
-                    onSecondsChange = { if (it.length <= 2) targetSeconds = it }
+                    onHoursChange = { if (it.length <= 2) { targetHours = it; targetPrefs.edit().putString("target_hours", it).apply() } },
+                    onMinutesChange = { if (it.length <= 2) { targetMinutes = it; targetPrefs.edit().putString("target_minutes", it).apply() } },
+                    onSecondsChange = { if (it.length <= 2) { targetSeconds = it; targetPrefs.edit().putString("target_seconds", it).apply() } }
                 )
             }
 
@@ -389,11 +401,12 @@ fun MapMyRunSetupScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
-                            // Left: Prepare for Watch button
+                            // Left: Prepare for Watch button — primary filled action
                             Box(modifier = Modifier.weight(1f)) {
                                 PrepareRunOnWatchButton(
                                     companionInstalled = companionInstalled,
                                     sendState = watchSendState,
+                                    isPrimary = true,
                                     onPrepare = {
                                         watchSendState = WatchSendState.SENDING
 
@@ -453,9 +466,9 @@ fun MapMyRunSetupScreen(
                                 )
                             }
 
-                            // Right: Prepare for Phone button
+                            // Right: Prepare for Phone button — secondary outlined action
                             Box(modifier = Modifier.weight(1f)) {
-                                PrimaryCtaButton(
+                                OutlinedCtaButton(
                                     text = when {
                                         !hasLocationPermission -> "GRANT"
                                         isGettingLocation -> "GPS…"
@@ -1634,6 +1647,41 @@ private fun PrimaryCtaButton(
             containerColor = Colors.primary,
             contentColor = Colors.buttonText,
             disabledContainerColor = Colors.backgroundTertiary,
+            disabledContentColor = Colors.textMuted
+        )
+    ) {
+        if (leadingIconRes != null) {
+            Icon(
+                painter = painterResource(id = leadingIconRes),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+        }
+        Text(
+            text = text,
+            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+        )
+    }
+}
+
+@Composable
+private fun OutlinedCtaButton(
+    text: String,
+    leadingIconRes: Int?,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        shape = RoundedCornerShape(BorderRadius.lg),
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, Colors.primary),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = Colors.primary,
             disabledContentColor = Colors.textMuted
         )
     ) {

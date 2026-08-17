@@ -18,8 +18,12 @@ import com.garmin.android.connectiq.exception.InvalidStateException
 import com.garmin.android.connectiq.exception.ServiceUnavailableException
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.repository.RunRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 /**
  * GarminWatchManager
@@ -54,8 +58,38 @@ class GarminWatchManager(
      * newly uploaded run would not show in run history until the cache expired.
      * Nullable so the manager still constructs if no repository is wired (tests).
      */
-    private val runRepository: RunRepository? = null
+    private val runRepository: RunRepository? = null,
+    private val apiService: live.airuncoach.airuncoach.network.ApiService? = null
 ) {
+    /**
+     * Companion session ID fetched when the watch starts a run. Sent with the phone's own
+     * run upload so the backend can deterministically link/enrich from the companion batch
+     * instead of relying on a fuzzy distance-tolerance match. Mirrors iOS's
+     * `activeCompanionSessionId` in GarminWatchManager.swift.
+     */
+    var activeCompanionSessionId: String? = null
+        private set
+
+    /** Re-sent on retry since the session row may not exist server-side the instant "start" fires. */
+    private fun fetchAndCacheCompanionSession(retries: Int = 5) {
+        val api = apiService ?: return
+        CoroutineScope(Dispatchers.IO).launch {
+            for (attempt in 1..retries) {
+                try {
+                    val response = api.getGarminCompanionSession()
+                    val sessionId = response.session?.sessionId
+                    if (sessionId != null) {
+                        activeCompanionSessionId = sessionId
+                        android.util.Log.d("GarminWatchManager", "cached companion session $sessionId")
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("GarminWatchManager", "could not fetch companion session (attempt $attempt) — ${e.message}")
+                }
+                if (attempt < retries) delay(1000)
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "GarminWatchManager"
@@ -829,6 +863,8 @@ class GarminWatchManager(
                         // Immediately ack the start so the watch cancels its retry timer.
                         // This prevents duplicate start commands from FR55 (BT-drop recovery).
                         sendStartAck()
+                        // Fetch the active companion session ID so it can be linked at upload time
+                        fetchAndCacheCompanionSession()
                     }
 
                     // Immediately ack the "stop" command so the watch cancels its stop-retry
@@ -840,6 +876,8 @@ class GarminWatchManager(
                     if (action == "stop") {
                         sendStopAck()
                         Log.d(TAG, "Watch STOP received — sent stopAck immediately")
+                        // Session is ending — clear cached ID so it isn't reused for the next run
+                        activeCompanionSessionId = null
                     }
 
                     // For all other commands: if no ViewModel or service is listening,

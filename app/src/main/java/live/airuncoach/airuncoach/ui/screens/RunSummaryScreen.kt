@@ -8483,13 +8483,16 @@ private fun DataTabFlagship(
                 metrics = buildList {
                     if (totalSteps > 0) {
                         add("Total Steps" to "${"%,d".format(totalSteps)} steps")
-                        val estimatedCalories = (totalSteps * 0.04).toInt()
-                        add("Est. Calories" to "$estimatedCalories kcal")
                         if (run.avgStrideLength != null && run.avgStrideLength > 0) {
                             add("Avg Stride" to "${String.format(java.util.Locale.US, "%.2f", run.avgStrideLength)} m")
                         }
                     } else {
                         add("Total Steps" to "-- steps")
+                    }
+                    // Real calorie data (from Garmin/watch), not a fabricated per-step estimate —
+                    // only shown when the device actually reported it.
+                    if (run.calories > 0) {
+                        add("Calories Burned" to "${run.calories} kcal")
                     }
                 }
             )

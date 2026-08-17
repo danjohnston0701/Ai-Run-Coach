@@ -69,6 +69,10 @@ data class UploadRunRequest(
     // Garmin device info — set to true if run was completed on Garmin companion watch
     val hasGarminData: Boolean = false,
     val garminDeviceName: String? = null,
+    // Links this phone-tracked run to the watch's own companion session (set via
+    // /api/garmin-companion/session/start) so the server can deterministically merge/
+    // enrich them instead of relying on a fuzzy distance-tolerance match.
+    val garminCompanionSessionId: String? = null,
     // ── Running Dynamics (averaged over the run) ──────────────────────────────
     val avgGroundContactTime: Float? = null,
     val minGroundContactTime: Float? = null,

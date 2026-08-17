@@ -564,6 +564,7 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val NOTIFICATION_ID = 1001
         private const val NOTIF_ID_WATCH_SESSION_READY = 1002
         private const val NOTIF_ID_WATCH_RUN_STARTED = 1003
+        private const val NOTIF_ID_SESSION_INTERRUPTED = 1004
         private const val LOCATION_UPDATE_INTERVAL = 1000L  // Request GPS every 1 second (matches Garmin frequency)
         private const val LOCATION_FASTEST_INTERVAL = 500L   // Accept updates as fast as 500ms
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
@@ -1304,6 +1305,46 @@ class RunTrackingService : Service(), SensorEventListener {
     private val gson = com.google.gson.Gson()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A null Intent is never delivered by anything in this app — every real call site
+        // (ViewModel, watch command handler, etc.) always passes an explicit action. Android only
+        // ever redelivers a null Intent when it killed this service and START_STICKY is
+        // restarting it (e.g. aggressive OEM battery management while the screen was locked).
+        //
+        // On the fresh Service instance, every per-run instance accumulator (startTime, HR sums,
+        // cadence baselines, routePoints, isTracking itself, etc.) has reset to its default —
+        // only the companion-object `_currentRunSession` (process-wide, not instance-scoped)
+        // survives, and only because onDestroy() deliberately left it intact when it saw
+        // isTracking==true at the moment of the kill (see onDestroy below).
+        //
+        // Previously nothing handled this: the service came back as a silent zombie — still
+        // foregrounded, still showing "running" in the UI (isRunning lives in the ViewModel and
+        // is never re-synced), but with no timer, no GPS updates, and no watch-frame processing
+        // ever restarting. The user would see the display frozen (sometimes at 00:00 if the kill
+        // happened almost immediately) for the rest of the session, with no indication anything
+        // was wrong. (Reported 2026-08 — Nino, walk session, Garmin Forerunner 55: phone froze
+        // while the watch kept tracking correctly the whole time.)
+        //
+        // stopTracking() already has its own fallback for exactly this "instance vars reset but
+        // companion-object session preserved" case (see its startTime==0 guard) since it primarily
+        // finalizes from _currentRunSession rather than live instance state — so the safe recovery
+        // here is to reuse that same, already-hardened path: finalize and upload whatever data
+        // survived, and tell the user, rather than resume tracking with all internal accumulators
+        // silently reset to zero (which would produce a run with a real first half and a bogus,
+        // zeroed-out second half baked into its averages).
+        if (intent == null) {
+            val orphanedSession = _currentRunSession.value
+            if (orphanedSession?.isActive == true && !isTracking) {
+                Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent with an active orphaned session — " +
+                    "service was killed and restarted by the OS mid-run. Finalizing via stopTracking() instead of continuing as a zombie.")
+                postSessionInterruptedNotification()
+                stopTracking()
+            } else {
+                Log.d("RunTrackingService", "onStartCommand: null Intent, no active session to recover — stopping self")
+                stopSelf()
+            }
+            return START_NOT_STICKY
+        }
+
         // Run-config extras (targetDistance, planWorkoutId, etc.) are ONLY parsed for start-type
         // actions.  Stop / pause / resume / finish intents carry no extras, so parsing them
         // unconditionally would silently wipe planWorkoutId (and other plan context) right before
@@ -3663,6 +3704,9 @@ class RunTrackingService : Service(), SensorEventListener {
             // ── Garmin watch device info ───────────────────────────────────────
             hasGarminData = hasGarminData,
             garminDeviceName = garminDeviceName,
+            // Links this upload to the watch's own companion session for deterministic
+            // server-side merge/enrichment (avoids the fuzzy distance-tolerance match).
+            garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId,
             // ── Running Dynamics scalars (averaged / min / max over the run) ───
             avgGroundContactTime       = if (watchGctCount > 0) watchGctSum / watchGctCount else null,
             minGroundContactTime       = null,  // not separately tracked; use series min if needed
@@ -4475,6 +4519,59 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "⌚ Session ready notification posted")
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Failed to post session ready notification: ${e.message}")
+        }
+    }
+
+    /**
+     * Posts a notification telling the user their session was interrupted by the OS killing
+     * this service mid-run (e.g. aggressive battery management while the screen was locked) and
+     * has been saved with whatever data survived up to that point. See onStartCommand's
+     * null-Intent handling for why this fires.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun postSessionInterruptedNotification() {
+        try {
+            val channelId = "session_interrupted"
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+            if (nm.getNotificationChannel(channelId) == null) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel(
+                        channelId,
+                        "Session Interrupted",
+                        android.app.NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Alerts when a run/walk session was interrupted by the system"
+                        enableVibration(true)
+                    }
+                )
+            }
+
+            val intent = android.content.Intent(this, live.airuncoach.airuncoach.MainActivity::class.java).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("deeplink_destination", "dashboard")
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                "session_interrupted".hashCode(),
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val activityWord = if (currentActivityType == "walk") "walk" else "run"
+            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                .setContentTitle("Session interrupted")
+                .setContentText("Your phone stopped updating during this $activityWord — we've saved what was recorded. Your watch kept tracking normally.")
+                .setSmallIcon(R.drawable.notification_icon)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            nm.notify(NOTIF_ID_SESSION_INTERRUPTED, notification)
+            Log.d("RunTrackingService", "⚠️ Session interrupted notification posted")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to post session interrupted notification: ${e.message}")
         }
     }
 

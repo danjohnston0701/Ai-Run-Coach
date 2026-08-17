@@ -62,9 +62,10 @@ object AppModule {
     @Provides
     fun provideGarminWatchManager(
         @ApplicationContext context: Context,
-        runRepository: RunRepository
+        runRepository: RunRepository,
+        apiService: ApiService
     ): GarminWatchManager {
-        return GarminWatchManager(context, runRepository)
+        return GarminWatchManager(context, runRepository, apiService)
     }
 
     /**

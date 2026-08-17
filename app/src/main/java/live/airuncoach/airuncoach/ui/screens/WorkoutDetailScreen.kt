@@ -645,26 +645,38 @@ fun WorkoutDetailScreen(
                     onStartWorkout(workout)
                 }
 
-                // "Prepare for Watch" button — full-width with icon+text in a row
-                PrepareRunOnWatchButton(
-                    companionInstalled = watchReady,
-                    sendState = watchSendState,
-                    isPrimary = watchReady,   // filled teal when watch connected
-                    onPrepare = onPrepareWatch,
-                    modifier = Modifier.padding(bottom = Spacing.sm)
-                )
-
-                // "Start on Phone" — primary when no watch, outlined when watch connected
+                // Watch connected: "Prepare for Watch" (primary filled, left) and
+                // "Start on Phone" (secondary outlined, right) side by side.
                 if (watchReady) {
-                    OutlinedButton(
-                        onClick = { onStartWorkout(workout) },
-                        enabled = canStart,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(16.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                        Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(Spacing.sm))
-                        Text("Start on Phone", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                        Box(modifier = Modifier.weight(1f)) {
+                            PrepareRunOnWatchButton(
+                                companionInstalled = watchReady,
+                                sendState = watchSendState,
+                                isPrimary = true,
+                                onPrepare = onPrepareWatch
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(
+                                onClick = { onStartWorkout(workout) },
+                                enabled = canStart,
+                                modifier = Modifier.fillMaxWidth().height(56.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.5.dp, Colors.primary),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Colors.primary,
+                                    disabledContentColor = Colors.textMuted
+                                )
+                            ) {
+                                Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text("Start on Phone", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                            }
+                        }
                     }
                 } else {
                     Button(

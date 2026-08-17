@@ -2397,6 +2397,12 @@ function transformRunForAndroid(run: any) {
     try {
       const userId = req.user!.userId;
       const runData = req.body;
+      // Garmin/Wear companion session ID, when this run was started via "Prepare for
+      // Watch" — lets Case 2 below (and the later /session/end handler) deterministically
+      // link the phone's upload to the watch's companion session instead of guessing from
+      // distance. iOS sends both key casings; accept either.
+      const companionSessionId: string | null =
+        runData.garmin_companion_session_id ?? runData.garminCompanionSessionId ?? null;
       // Persist only the two supported coaching activities. Older clients and
       // Garmin imports default to run; Garmin's separate activityType remains
       // available for device classification.
@@ -2889,23 +2895,45 @@ function transformRunForAndroid(run: any) {
         // uploads its richer copy (with watchHrSeries, full GPS track, coaching notes, etc).
         // Rather than discarding the phone's data, merge it into the watch's record — same
         // logic as Case 0 — then return the now-enriched record.
-        const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
-        const garminCandidates = await db.select()
-          .from(runs)
-          .where(and(
-            eq(runs.userId, userId),
-            gte(runs.createdAt, threeHoursAgo),
-            inArray(runs.externalSource, ['garmin_companion', 'wearos_companion']),
-          ))
-          .limit(10);
-        // 15% tolerance: phone GPS and watch GPS commonly disagree by 5–12% due to
-        // different satellite acquisition, algorithms, and BLE dropout gaps during
-        // live runs.  Using 15% prevents creating a duplicate phone run when the
-        // companion record already exists with a slightly different measured distance.
-        const garminDup = garminCandidates.find(r => {
-          const rDist = (r as any).distance ?? 0;
-          return rDist > 0 && Math.abs(rDist - distanceRounded) / Math.max(rDist, 0.1) < 0.15;
-        });
+        //
+        // Deterministic link takes priority over fuzzy matching: if this upload carries the
+        // companion session ID (cached by the phone at "Prepare for Watch" time), and that
+        // session is already linked to a run (e.g. the watch's session/end fired first), use
+        // that exact run instead of guessing from distance — which fails whenever one side's
+        // track is corrupted/incomplete.
+        let garminDup: any = undefined;
+        if (companionSessionId) {
+          const [linkedSession] = await db.select({ runId: garminCompanionSessions.runId })
+            .from(garminCompanionSessions)
+            .where(eq(garminCompanionSessions.sessionId, companionSessionId))
+            .limit(1);
+          if (linkedSession?.runId) {
+            const [linkedRun] = await db.select().from(runs).where(eq(runs.id, linkedSession.runId)).limit(1);
+            garminDup = linkedRun;
+            if (garminDup) {
+              console.log(`[POST /api/runs] Case 2 — deterministic session link found run ${garminDup.id}, skipping fuzzy match`);
+            }
+          }
+        }
+        if (!garminDup) {
+          const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+          const garminCandidates = await db.select()
+            .from(runs)
+            .where(and(
+              eq(runs.userId, userId),
+              gte(runs.createdAt, threeHoursAgo),
+              inArray(runs.externalSource, ['garmin_companion', 'wearos_companion']),
+            ))
+            .limit(10);
+          // 15% tolerance fallback — used when no deterministic session↔run link exists yet
+          // (e.g. an older client build that doesn't send the companion session ID, or the
+          // watch session hasn't ended/linked yet). Phone GPS and watch GPS commonly disagree
+          // by 5–12% due to different satellite acquisition, algorithms, and BLE dropout gaps.
+          garminDup = garminCandidates.find(r => {
+            const rDist = (r as any).distance ?? 0;
+            return rDist > 0 && Math.abs(rDist - distanceRounded) / Math.max(rDist, 0.1) < 0.15;
+          });
+        }
         if (garminDup) {
           console.log(`[POST /api/runs] Case 2 — phone upload matches watch run ${garminDup.id} — merging phone data in`);
 
@@ -3044,6 +3072,18 @@ function transformRunForAndroid(run: any) {
             console.error('[POST /api/runs] Case 2: workout auto-complete failed (non-fatal):', err)
           );
 
+          // If this match came from the fuzzy-distance fallback (not already ID-linked),
+          // record the link now so any future lookup for this session is deterministic.
+          if (companionSessionId) {
+            db.update(garminCompanionSessions)
+              .set({ runId: garminDup.id })
+              .where(and(
+                eq(garminCompanionSessions.sessionId, companionSessionId),
+                eq(garminCompanionSessions.userId, userId),
+              ))
+              .catch(err => console.error('[POST /api/runs] Case 2: Failed to link companion session:', err));
+          }
+
           const [updated2] = await db.select().from(runs).where(eq(runs.id, garminDup.id)).limit(1);
           return res.status(200).json(transformRunForAndroid(updated2 ?? garminDup));
         }
@@ -3150,6 +3190,20 @@ function transformRunForAndroid(run: any) {
         stepsData:                stepsDataArr,
       });
       console.log(`[POST /api/runs] Run created successfully with ID: ${run.id}`);
+
+      // Link this newly-created run back to its companion session (if any), so a later
+      // watch session/end call finds the link deterministically instead of falling back
+      // to fuzzy distance matching. Fire-and-forget; never blocks the response.
+      if (companionSessionId) {
+        db.update(garminCompanionSessions)
+          .set({ runId: run.id })
+          .where(and(
+            eq(garminCompanionSessions.sessionId, companionSessionId),
+            eq(garminCompanionSessions.userId, userId),
+          ))
+          .then(() => console.log(`[POST /api/runs] Linked companion session ${companionSessionId} → run ${run.id}`))
+          .catch(err => console.error('[POST /api/runs] Failed to link companion session:', err));
+      }
 
       // ⚡ Update user stats cache asynchronously (don't block response)
       onRunSaved(userId, run).catch(err =>
@@ -12967,23 +13021,47 @@ function transformRunForAndroid(run: any) {
           // POST /api/runs.  Check for a phone-uploaded run within the last
           // 2 hours with a similar distance (±10%) — if found, link the session
           // to it and skip creating a second record.
-          const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-          const existingPhoneRuns = await db
-            .select({ id: runs.id, distance: runs.distance })
-            .from(runs)
-            .where(and(
-              eq(runs.userId, userId),
-              gte(runs.createdAt, twoHoursAgo),
-              isNull(runs.externalId),          // phone uploads have no externalId
-            ))
-            .limit(10);
-          // 15% tolerance: phone GPS and watch GPS often disagree by 5–12%
-          // (different satellite lock, algorithm differences, BLE dropout gaps).
-          // Using 15% instead of 10% prevents creating a duplicate companion run
-          // when the distances are close but not identical.
-          const phoneMatchedRun = existingPhoneRuns.find(r =>
-            Math.abs((r.distance ?? 0) - distanceKm) / Math.max(distanceKm, 0.1) < 0.15
-          );
+          // Deterministic link takes priority over fuzzy matching: if the phone
+          // already linked this session to a run (either it sent
+          // garminCompanionSessionId on its POST /api/runs upload, or called
+          // /session/link explicitly), `updated.runId` is already set from the
+          // db.update(garminCompanionSessions) above — use that exact run rather
+          // than guessing from distance, which fails whenever one side's track
+          // is corrupted/incomplete (e.g. a paused/frozen phone track).
+          let phoneMatchedRun: { id: string; distance: number | null } | undefined;
+          if (updated?.runId) {
+            const [linkedRun] = await db
+              .select({ id: runs.id, distance: runs.distance })
+              .from(runs)
+              .where(eq(runs.id, updated.runId))
+              .limit(1);
+            phoneMatchedRun = linkedRun;
+            if (phoneMatchedRun) {
+              console.log(`[Companion] session/end — session ${sessionId} already deterministically linked to run ${phoneMatchedRun.id}, skipping fuzzy match`);
+            }
+          }
+          if (!phoneMatchedRun) {
+            // Fallback only — used when no deterministic session↔run link exists
+            // yet (e.g. an older client build that doesn't send the companion
+            // session ID on its run upload).
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+            const existingPhoneRuns = await db
+              .select({ id: runs.id, distance: runs.distance })
+              .from(runs)
+              .where(and(
+                eq(runs.userId, userId),
+                gte(runs.createdAt, twoHoursAgo),
+                isNull(runs.externalId),          // phone uploads have no externalId
+              ))
+              .limit(10);
+            // 15% tolerance: phone GPS and watch GPS often disagree by 5–12%
+            // (different satellite lock, algorithm differences, BLE dropout gaps).
+            // Using 15% instead of 10% prevents creating a duplicate companion run
+            // when the distances are close but not identical.
+            phoneMatchedRun = existingPhoneRuns.find(r =>
+              Math.abs((r.distance ?? 0) - distanceKm) / Math.max(distanceKm, 0.1) < 0.15
+            );
+          }
           if (phoneMatchedRun) {
             console.log(`[Companion] session/end — phone run ${phoneMatchedRun.id} already exists for this session, linking instead of duplicating`);
             await db.update(garminCompanionSessions)
@@ -17181,7 +17259,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
           latestVersion: process.env.IOS_LATEST_VERSION || "1.9.0",
           minVersion:    process.env.IOS_MIN_VERSION    || "1.0.0",
           appStoreUrl:   process.env.IOS_APP_STORE_URL  ||
-                         "https://apps.apple.com/app/ai-run-coach/id6568919065",
+                         "https://apps.apple.com/nz/app/ai-run-coach/id6762181649",
           releaseNote:   process.env.IOS_RELEASE_NOTE   || "",
         },
       });

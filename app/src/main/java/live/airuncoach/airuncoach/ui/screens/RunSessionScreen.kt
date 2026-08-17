@@ -281,6 +281,7 @@ fun RunSessionScreen(
                 isRunning = runState.isRunning,
                 isPaused = runState.isPaused,
                 isStopping = runState.isStopping,
+                isWatchRun = isWatchMode,
                 onStart = { viewModel.startRun() },
                 onPause = { showPauseConfirm = true },
                 onResume = { viewModel.resumeRun() },
@@ -2404,6 +2405,7 @@ fun ControlButtons(
     isRunning: Boolean,
     isPaused: Boolean,
     isStopping: Boolean = false,
+    isWatchRun: Boolean = false,
     onStart: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -2417,6 +2419,23 @@ fun ControlButtons(
     ) {
         if (isRunning || isPaused || isStopping) {
             // Running/Paused/Stopping - show Stop and Play/Pause buttons
+            if (isWatchRun) {
+                // Watch-owned session: the watch is authoritative and the phone can't tell it
+                // it paused, so pausing here freezes the phone display while the watch keeps
+                // recording independently. Hide Pause entirely; only Stop remains, as a
+                // last-resort escape hatch if the watch app crashes/dies mid-session.
+                Text(
+                    text = "Pause and stop this session on your watch. Only use Stop here if " +
+                        "your watch app is unable to end the session.",
+                    style = AppTextStyles.caption,
+                    color = Colors.textSecondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg)
+                        .padding(bottom = Spacing.sm)
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
@@ -2439,19 +2458,21 @@ fun ControlButtons(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(Spacing.xl))
+                if (!isWatchRun) {
+                    Spacer(modifier = Modifier.width(Spacing.xl))
 
-                FloatingActionButton(
-                    onClick = { if (isRunning) onPause() else onResume() },
-                    containerColor = Colors.primary,
-                    modifier = Modifier.size(72.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(id = if (isRunning) R.drawable.icon_pause_vector else R.drawable.icon_play_vector),
-                        contentDescription = if (isRunning) "Pause" else "Resume",
-                        tint = Colors.backgroundRoot,
-                        modifier = Modifier.size(32.dp)
-                    )
+                    FloatingActionButton(
+                        onClick = { if (isRunning) onPause() else onResume() },
+                        containerColor = Colors.primary,
+                        modifier = Modifier.size(72.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = if (isRunning) R.drawable.icon_pause_vector else R.drawable.icon_play_vector),
+                            contentDescription = if (isRunning) "Pause" else "Resume",
+                            tint = Colors.backgroundRoot,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
             }
         } else {

@@ -167,41 +167,71 @@ fun RouteSelectionScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // "Prepare Run on Watch" — shown only when companion app is installed
+                // "Prepare for Watch" (primary filled, left) and "Start on Phone"
+                // (secondary outlined, right) side by side — shown only when the
+                // companion app is installed; otherwise a single full-width phone button.
                 val selectedRoute = routes.find { it.id == selectedRouteId }
-                PrepareRunOnWatchButton(
-                    companionInstalled = companionInstalled && selectedRouteId != null,
-                    sendState = watchSendState,
-                    onPrepare = {
-                        watchSendState = WatchSendState.SENDING
-                        viewModel.prepareRunOnWatch(
-                            distanceKm = distanceKm.toFloat(),
-                            runType = "route",
-                            routePolyline = selectedRoute?.polyline
-                        )
-                        watchSendState = WatchSendState.SENT
+                if (companionInstalled) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            PrepareRunOnWatchButton(
+                                companionInstalled = selectedRouteId != null,
+                                sendState = watchSendState,
+                                isPrimary = true,
+                                onPrepare = {
+                                    watchSendState = WatchSendState.SENDING
+                                    viewModel.prepareRunOnWatch(
+                                        distanceKm = distanceKm.toFloat(),
+                                        runType = "route",
+                                        routePolyline = selectedRoute?.polyline
+                                    )
+                                    watchSendState = WatchSendState.SENT
+                                }
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(
+                                onClick = onStartRun,
+                                enabled = selectedRouteId != null,
+                                modifier = Modifier.fillMaxWidth().height(56.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF00E5FF)),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFF00E5FF),
+                                    disabledContentColor = Color.Gray
+                                )
+                            ) {
+                                Text(
+                                    "START $activityTypeLabel",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
-                )
-
-                // Primary "Start Run/Walk on Phone" button
-                Button(
-                    onClick = onStartRun,
-                    enabled = selectedRouteId != null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00E5FF),
-                        disabledContainerColor = Color(0xFF1A2634)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        "START $activityTypeLabel",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (selectedRouteId != null) Color.Black else Color.Gray
-                    )
+                } else {
+                    Button(
+                        onClick = onStartRun,
+                        enabled = selectedRouteId != null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF00E5FF),
+                            disabledContainerColor = Color(0xFF1A2634)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            "START $activityTypeLabel",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selectedRouteId != null) Color.Black else Color.Gray
+                        )
+                    }
                 }
             }
         }

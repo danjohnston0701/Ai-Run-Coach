@@ -167,6 +167,14 @@ class DashboardViewModel @Inject constructor(
                 Log.e("DashboardViewModel", "Error loading AI coach preference: ${e.message}", e)
             }
         }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                loadTargetPreferences()
+            } catch (e: Exception) {
+                Log.e("DashboardViewModel", "Error loading target distance/time preference: ${e.message}", e)
+            }
+        }
         
         viewModelScope.launch {
             try {
@@ -208,6 +216,18 @@ class DashboardViewModel @Inject constructor(
     
     private fun loadAiCoachPreference() {
         _isAiCoachEnabled.value = sharedPrefs.getBoolean("ai_coach_enabled", true)
+    }
+
+    // Remembers the free-run/free-walk target distance & time the user last picked on
+    // MapMyRunSetupScreen, so it survives a full app close/reopen instead of resetting to
+    // the 5km/no-time default. Only used to seed the free-run setup flow — planned/coached
+    // workouts always carry their own fixed distance and never read these values.
+    private fun loadTargetPreferences() {
+        _targetDistance.value = sharedPrefs.getFloat("target_distance_km", 5f)
+        _isTargetTimeEnabled.value = sharedPrefs.getBoolean("target_time_enabled", false)
+        _targetHours.value = sharedPrefs.getString("target_hours", "00") ?: "00"
+        _targetMinutes.value = sharedPrefs.getString("target_minutes", "00") ?: "00"
+        _targetSeconds.value = sharedPrefs.getString("target_seconds", "00") ?: "00"
     }
     
     private fun loadTrainingLoad() {
@@ -424,23 +444,29 @@ class DashboardViewModel @Inject constructor(
 
     fun onDistanceChanged(distance: Float) {
         // Snap to whole kilometres to avoid floating point drift (e.g. 9.9999 → 9)
-        _targetDistance.value = Math.round(distance).toFloat()
+        val snapped = Math.round(distance).toFloat()
+        _targetDistance.value = snapped
+        sharedPrefs.edit().putFloat("target_distance_km", snapped).apply()
     }
 
     fun onTargetTimeToggled(enabled: Boolean) {
         _isTargetTimeEnabled.value = enabled
+        sharedPrefs.edit().putBoolean("target_time_enabled", enabled).apply()
     }
 
     fun onTargetHoursChanged(hours: String) {
         _targetHours.value = hours
+        sharedPrefs.edit().putString("target_hours", hours).apply()
     }
 
     fun onTargetMinutesChanged(minutes: String) {
         _targetMinutes.value = minutes
+        sharedPrefs.edit().putString("target_minutes", minutes).apply()
     }
 
     fun onTargetSecondsChanged(seconds: String) {
         _targetSeconds.value = seconds
+        sharedPrefs.edit().putString("target_seconds", seconds).apply()
     }
 
     fun fetchRecentRun(forceRefresh: Boolean = false) {

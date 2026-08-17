@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.network
 
+import com.google.gson.annotations.SerializedName
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.model.GroupRunsResponse
 import live.airuncoach.airuncoach.network.model.CreateGroupRunRequest
@@ -752,6 +753,10 @@ interface ApiService {
     @POST("/api/garmin-companion/refresh-watch-token")
     suspend fun refreshWatchToken(@Body body: RefreshWatchTokenRequest): RefreshWatchTokenResponse
 
+    /** Check whether the authenticated user has an active Garmin companion watch session. */
+    @GET("/api/garmin-companion/session/active")
+    suspend fun getGarminCompanionSession(): GarminCompanionSessionResponse
+
     // ========== LIVE RUN SESSIONS ==========
     
     /**
@@ -854,6 +859,24 @@ data class RefreshWatchTokenRequest(
 data class RefreshWatchTokenResponse(
     val token: String,
     val expiresIn: Long
+)
+
+data class GarminCompanionSession(
+    @SerializedName("session_id") val sessionId: String,
+    @SerializedName("user_id") val userId: String? = null,
+    @SerializedName("started_at") val startedAt: String? = null,
+    @SerializedName("is_active") val isActive: Boolean? = null,
+    // Backend returns the sport as camelCase `activityType` via Drizzle, with `activity_type`
+    // kept as a fallback for older rows — mirrors iOS's GarminCompanionSession model.
+    val activityType: String? = null,
+    @SerializedName("activity_type") val activityTypeSnake: String? = null
+) {
+    val resolvedActivityType: String? get() = activityType ?: activityTypeSnake
+}
+
+data class GarminCompanionSessionResponse(
+    val session: GarminCompanionSession? = null,
+    @SerializedName("has_active_session") val hasActiveSession: Boolean = false
 )
 
 // Observer session response - returned by GET /api/observe/{token}
