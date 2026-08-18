@@ -18,6 +18,7 @@ import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.LoginRequest
 import live.airuncoach.airuncoach.network.model.RegisterRequest
 import live.airuncoach.airuncoach.service.GarminWatchManager
+import live.airuncoach.airuncoach.service.SamsungWatchManager
 import javax.inject.Inject
 
 @HiltViewModel
@@ -25,7 +26,8 @@ class LoginViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val apiService: ApiService,
     private val sessionManager: SessionManager,
-    private val garminWatchManager: GarminWatchManager
+    private val garminWatchManager: GarminWatchManager,
+    private val samsungWatchManager: SamsungWatchManager
 ) : ViewModel() {
 
     // Expose sessionManager for navigation logic in UI
@@ -167,7 +169,13 @@ class LoginViewModel @Inject constructor(
                     garminWatchManager.sendAuth(token, user.name)
                     android.util.Log.d("LoginViewModel", "⌚ Auth token pushed to Garmin watch after login")
                 } catch (e: Exception) {
-                    android.util.Log.w("LoginViewModel", "⌚ Could not push auth to watch (watch may not be connected): ${e.message}")
+                    android.util.Log.w("LoginViewModel", "⌚ Could not push auth to Garmin watch (watch may not be connected): ${e.message}")
+                }
+                try {
+                    samsungWatchManager.sendAuth(token, user.name)
+                    android.util.Log.d("LoginViewModel", "⌚ Auth token pushed to Samsung/Wear OS watch after login")
+                } catch (e: Exception) {
+                    android.util.Log.w("LoginViewModel", "⌚ Could not push auth to Samsung/Wear OS watch (watch may not be connected): ${e.message}")
                 }
 
                 // Upload FCM token now that we're authenticated

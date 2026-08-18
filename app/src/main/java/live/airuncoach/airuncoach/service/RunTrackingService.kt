@@ -1342,7 +1342,7 @@ class RunTrackingService : Service(), SensorEventListener {
             if (orphanedSession?.isActive == true && !isTracking) {
                 Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent with an active orphaned session — " +
                     "service was killed and restarted by the OS mid-run. Finalizing via stopTracking() instead of continuing as a zombie.")
-                postSessionInterruptedNotification()
+                postSessionInterruptedNotification(orphanedSession.sessionType)
                 stopTracking()
             } else {
                 Log.d("RunTrackingService", "onStartCommand: null Intent, no active session to recover — stopping self")
@@ -3465,10 +3465,13 @@ class RunTrackingService : Service(), SensorEventListener {
         recordCoachingFired()
         lastCoachingTime = System.currentTimeMillis()
         Log.d("RunTrackingService", "Firing target-reached completion coaching")
+        // Captured synchronously — not inside the coroutine below — so a Stop tapped in the
+        // same tick the target is crossed can't race calculateWasTargetAchieved() into reading
+        // this as still-null and falling back to the stale final stop-time duration.
+        val elapsedMs = getActiveRunDuration()
+        targetReachedAtDurationMs = elapsedMs
         serviceScope.launch {
             try {
-                val elapsedMs = getActiveRunDuration()
-                targetReachedAtDurationMs = elapsedMs
                 val elapsedSec = elapsedMs / 1000.0
                 val distKm = totalDistance / 1000.0
                 val currentAvgPaceStr = if (distKm > 0 && elapsedSec > 0) {
@@ -4542,7 +4545,7 @@ class RunTrackingService : Service(), SensorEventListener {
      * null-Intent handling for why this fires.
      */
     @android.annotation.SuppressLint("MissingPermission")
-    private fun postSessionInterruptedNotification() {
+    private fun postSessionInterruptedNotification(sessionType: String = currentActivityType) {
         try {
             val channelId = "session_interrupted"
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
@@ -4571,7 +4574,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
             )
 
-            val activityWord = if (currentActivityType == "walk") "walk" else "run"
+            val activityWord = if (sessionType == "walk") "walk" else "run"
             val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
                 .setContentTitle("Session interrupted")
                 .setContentText("Your phone stopped updating during this $activityWord — we've saved what was recorded. Your watch kept tracking normally.")

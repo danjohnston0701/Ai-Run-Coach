@@ -862,16 +862,17 @@ data class RefreshWatchTokenResponse(
 )
 
 data class GarminCompanionSession(
-    @SerializedName("session_id") val sessionId: String,
-    @SerializedName("user_id") val userId: String? = null,
-    @SerializedName("started_at") val startedAt: String? = null,
-    @SerializedName("is_active") val isActive: Boolean? = null,
-    // Backend returns the sport as camelCase `activityType` via Drizzle, with `activity_type`
-    // kept as a fallback for older rows — mirrors iOS's GarminCompanionSession model.
-    val activityType: String? = null,
-    @SerializedName("activity_type") val activityTypeSnake: String? = null
+    // Raw Drizzle row (garminCompanionSessions table) — camelCase, same as every other
+    // response in the /api/garmin-companion/* family (session/start, session/link, etc.).
+    // There is no `is_active` field server-side; liveness is the `status` string.
+    val sessionId: String,
+    val userId: String? = null,
+    val startedAt: String? = null,
+    val status: String? = null,
+    val activityType: String? = null
 ) {
-    val resolvedActivityType: String? get() = activityType ?: activityTypeSnake
+    val isActive: Boolean get() = status == "active"
+    val resolvedActivityType: String? get() = activityType
 }
 
 data class GarminCompanionSessionResponse(

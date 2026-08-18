@@ -2914,12 +2914,21 @@ function transformRunForAndroid(run: any) {
         // track is corrupted/incomplete.
         let garminDup: any = undefined;
         if (companionSessionId) {
+          // Scoped by userId on both lookups — sessionId is client-supplied with no
+          // server-enforced uniqueness/ownership at /session/start, so an unscoped lookup here
+          // could merge a different user's run (GPS track, HR series, coaching notes) into this
+          // upload's response.
           const [linkedSession] = await db.select({ runId: garminCompanionSessions.runId })
             .from(garminCompanionSessions)
-            .where(eq(garminCompanionSessions.sessionId, companionSessionId))
+            .where(and(
+              eq(garminCompanionSessions.sessionId, companionSessionId),
+              eq(garminCompanionSessions.userId, userId),
+            ))
             .limit(1);
           if (linkedSession?.runId) {
-            const [linkedRun] = await db.select().from(runs).where(eq(runs.id, linkedSession.runId)).limit(1);
+            const [linkedRun] = await db.select().from(runs)
+              .where(and(eq(runs.id, linkedSession.runId), eq(runs.userId, userId)))
+              .limit(1);
             garminDup = linkedRun;
             if (garminDup) {
               console.log(`[POST /api/runs] Case 2 — deterministic session link found run ${garminDup.id}, skipping fuzzy match`);
@@ -3085,14 +3094,20 @@ function transformRunForAndroid(run: any) {
 
           // If this match came from the fuzzy-distance fallback (not already ID-linked),
           // record the link now so any future lookup for this session is deterministic.
+          // Awaited — a fast-following /session/end request reads this same row to decide
+          // whether a run is already linked; if this write weren't committed yet, that read
+          // would see stale pre-link state and could create a duplicate run.
           if (companionSessionId) {
-            db.update(garminCompanionSessions)
-              .set({ runId: garminDup.id })
-              .where(and(
-                eq(garminCompanionSessions.sessionId, companionSessionId),
-                eq(garminCompanionSessions.userId, userId),
-              ))
-              .catch(err => console.error('[POST /api/runs] Case 2: Failed to link companion session:', err));
+            try {
+              await db.update(garminCompanionSessions)
+                .set({ runId: garminDup.id })
+                .where(and(
+                  eq(garminCompanionSessions.sessionId, companionSessionId),
+                  eq(garminCompanionSessions.userId, userId),
+                ));
+            } catch (err) {
+              console.error('[POST /api/runs] Case 2: Failed to link companion session:', err);
+            }
           }
 
           const [updated2] = await db.select().from(runs).where(eq(runs.id, garminDup.id)).limit(1);
@@ -3204,16 +3219,21 @@ function transformRunForAndroid(run: any) {
 
       // Link this newly-created run back to its companion session (if any), so a later
       // watch session/end call finds the link deterministically instead of falling back
-      // to fuzzy distance matching. Fire-and-forget; never blocks the response.
+      // to fuzzy distance matching. Awaited — a fast-following /session/end request reads
+      // this same row, and an un-awaited write here could lose that race and cause a
+      // duplicate run to be created for the same session.
       if (companionSessionId) {
-        db.update(garminCompanionSessions)
-          .set({ runId: run.id })
-          .where(and(
-            eq(garminCompanionSessions.sessionId, companionSessionId),
-            eq(garminCompanionSessions.userId, userId),
-          ))
-          .then(() => console.log(`[POST /api/runs] Linked companion session ${companionSessionId} → run ${run.id}`))
-          .catch(err => console.error('[POST /api/runs] Failed to link companion session:', err));
+        try {
+          await db.update(garminCompanionSessions)
+            .set({ runId: run.id })
+            .where(and(
+              eq(garminCompanionSessions.sessionId, companionSessionId),
+              eq(garminCompanionSessions.userId, userId),
+            ));
+          console.log(`[POST /api/runs] Linked companion session ${companionSessionId} → run ${run.id}`);
+        } catch (err) {
+          console.error('[POST /api/runs] Failed to link companion session:', err);
+        }
       }
 
       // ⚡ Update user stats cache asynchronously (don't block response)
@@ -12628,6 +12648,11 @@ function transformRunForAndroid(run: any) {
       // Check if session already exists
       const existing = await db.select().from(garminCompanionSessions).where(eq(garminCompanionSessions.sessionId, sessionId)).limit(1);
       if (existing.length > 0) {
+        // sessionId is client-generated with no server-enforced uniqueness — a guessed/reused/
+        // colliding ID from a different user must never hand back that user's session data here.
+        if (existing[0].userId !== userId) {
+          return res.status(409).json({ error: "Session ID already in use" });
+        }
         return res.json({ success: true, session: existing[0], message: "Session already exists" });
       }
       
@@ -13629,6 +13654,29 @@ function transformRunForAndroid(run: any) {
     }
   });
   
+  // Get the user's single most-recent active companion session (used by the phone apps to
+  // deterministically link an in-progress watch session to the run being tracked/uploaded —
+  // Android's ApiService.getGarminCompanionSession() and iOS's APIService.getGarminCompanionSession()
+  // both call this exact path/shape).
+  app.get("/api/garmin-companion/session/active", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+
+      const [session] = await db.select().from(garminCompanionSessions)
+        .where(and(
+          eq(garminCompanionSessions.userId, userId),
+          eq(garminCompanionSessions.status, "active")
+        ))
+        .orderBy(sql`started_at DESC`)
+        .limit(1);
+
+      res.json({ session: session ?? null, has_active_session: !!session });
+    } catch (error: any) {
+      console.error("Get active companion session error:", error);
+      res.status(500).json({ error: "Failed to get active session" });
+    }
+  });
+
   // Get user's active companion sessions
   app.get("/api/garmin-companion/sessions/active", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

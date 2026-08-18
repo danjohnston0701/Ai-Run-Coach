@@ -31,6 +31,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.domain.model.GeneratedRoute
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RouteDifficulty
+import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
@@ -168,17 +169,20 @@ fun RouteSelectionScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // "Prepare for Watch" (primary filled, left) and "Start on Phone"
-                // (secondary outlined, right) side by side — shown only when the
-                // companion app is installed; otherwise a single full-width phone button.
+                // (secondary outlined, right) side by side — shown only once a route is
+                // selected AND the companion app is installed; otherwise a single full-width
+                // phone button (also covers "companion installed but no route picked yet",
+                // which previously rendered the half-width row with dead space instead of the
+                // full-width disabled button).
                 val selectedRoute = routes.find { it.id == selectedRouteId }
-                if (companionInstalled) {
+                if (companionInstalled && selectedRouteId != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(modifier = Modifier.weight(1f)) {
                             PrepareRunOnWatchButton(
-                                companionInstalled = selectedRouteId != null,
+                                companionInstalled = true,
                                 sendState = watchSendState,
                                 isPrimary = true,
                                 onPrepare = {
@@ -193,23 +197,12 @@ fun RouteSelectionScreen(
                             )
                         }
                         Box(modifier = Modifier.weight(1f)) {
-                            OutlinedButton(
-                                onClick = onStartRun,
-                                enabled = selectedRouteId != null,
-                                modifier = Modifier.fillMaxWidth().height(56.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF00E5FF)),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color(0xFF00E5FF),
-                                    disabledContentColor = Color.Gray
-                                )
-                            ) {
-                                Text(
-                                    "START $activityTypeLabel",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            OutlinedCtaButton(
+                                text = "START $activityTypeLabel",
+                                leadingIconRes = null,
+                                enabled = true,
+                                onClick = onStartRun
+                            )
                         }
                     }
                 } else {

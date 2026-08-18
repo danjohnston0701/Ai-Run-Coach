@@ -57,7 +57,7 @@ fun WaitingOverlay(modifier: Modifier = Modifier) {
         )
         Text(
             text = "You only need to do this once.",
-            color = WearColors.GreenRing,
+            color = WearColors.TealKm,
             style = TextStyle(fontSize = 10.sp, textAlign = TextAlign.Center),
             modifier = Modifier.padding(top = 12.dp, start = 16.dp, end = 16.dp)
         )

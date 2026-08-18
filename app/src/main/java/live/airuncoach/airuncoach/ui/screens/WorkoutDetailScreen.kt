@@ -46,6 +46,7 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.HeartRateZones
 import live.airuncoach.airuncoach.network.model.WorkoutDetails
 import live.airuncoach.airuncoach.network.model.DynamicCoachingPhase
+import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WorkoutTypeBadge
 import live.airuncoach.airuncoach.ui.components.workoutTypeColor
@@ -661,21 +662,12 @@ fun WorkoutDetailScreen(
                             )
                         }
                         Box(modifier = Modifier.weight(1f)) {
-                            OutlinedButton(
-                                onClick = { onStartWorkout(workout) },
+                            OutlinedCtaButton(
+                                text = "Start on Phone",
+                                leadingIconRes = R.drawable.icon_play_vector,
                                 enabled = canStart,
-                                modifier = Modifier.fillMaxWidth().height(56.dp),
-                                shape = RoundedCornerShape(16.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.5.dp, Colors.primary),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Colors.primary,
-                                    disabledContentColor = Colors.textMuted
-                                )
-                            ) {
-                                Icon(painterResource(R.drawable.icon_play_vector), null, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(Spacing.sm))
-                                Text("Start on Phone", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
-                            }
+                                onClick = { onStartWorkout(workout) }
+                            )
                         }
                     }
                 } else {

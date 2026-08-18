@@ -52,6 +52,9 @@ data class RunSession(
     
     // Garmin device information (if run was from or enriched with Garmin data)
     val garminDeviceName: String? = null,
+    // Links this run to its Garmin companion (watch) session for deterministic server-side
+    // merge/enrichment — avoids the fuzzy distance-tolerance match on duplicate uploads.
+    val garminCompanionSessionId: String? = null,
     
     // TRUE if run was enriched with Garmin data (HR, cadence, elevation, etc.)
     val hasGarminData: Boolean = false,

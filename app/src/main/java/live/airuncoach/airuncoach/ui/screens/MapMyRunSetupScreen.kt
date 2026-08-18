@@ -34,6 +34,7 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
+import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
@@ -1665,37 +1666,5 @@ private fun PrimaryCtaButton(
     }
 }
 
-@Composable
-private fun OutlinedCtaButton(
-    text: String,
-    leadingIconRes: Int?,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp),
-        shape = RoundedCornerShape(BorderRadius.lg),
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, Colors.primary),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = Colors.primary,
-            disabledContentColor = Colors.textMuted
-        )
-    ) {
-        if (leadingIconRes != null) {
-            Icon(
-                painter = painterResource(id = leadingIconRes),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(Spacing.sm))
-        }
-        Text(
-            text = text,
-            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
-        )
-    }
-}
+// OutlinedCtaButton moved to ui.components.OutlinedCtaButton — shared with
+// RouteSelectionScreen and WorkoutDetailScreen (see that file for rationale).

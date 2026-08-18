@@ -80,6 +80,30 @@ class RunSessionController(
     private val _state = MutableStateFlow(RunScreenState())
     val state: StateFlow<RunScreenState> = _state
 
+    /** Set whenever [onBackPressed] resolves to a confirmation prompt — single source of truth
+     * so both the system back-gesture (BackHandler) and the physical bottom/BACK button
+     * (WearMainActivity.onKeyDown) drive the exact same dialog. */
+    private val _pendingConfirm = MutableStateFlow<live.airuncoach.airuncoach.wear.ui.BackAction?>(null)
+    val pendingConfirm: StateFlow<live.airuncoach.airuncoach.wear.ui.BackAction?> = _pendingConfirm
+
+    fun clearPendingConfirm() {
+        _pendingConfirm.value = null
+    }
+
+    /**
+     * Debug-only: injects an auth token exactly as the "auth" phone message would (see
+     * [handleMessage]'s "auth" branch), for testing when the real phone<->watch Data Layer
+     * capability sync isn't available (e.g. flaky emulator-to-emulator pairing). Never invoked
+     * from any production code path — only from WearMainActivity behind BuildConfig.DEBUG.
+     */
+    fun debugInjectAuth(token: String, runnerName: String) {
+        if (!BuildConfig.DEBUG) return
+        scope.launch { prefs.setAuth(token, runnerName, 185) }
+        _state.update {
+            it.copy(isAuthenticated = true, overlay = if (it.gpsQuality > 0) Overlay.GPS_WAIT else it.overlay)
+        }
+    }
+
     private val startRetry = RetryLoop(scope, START_RETRY_MAX, START_RETRY_INTERVAL_MS) {
         dataLayer.sendCommand("start")
     }
@@ -297,7 +321,7 @@ class RunSessionController(
 
     fun onBackPressed(): live.airuncoach.airuncoach.wear.ui.BackAction {
         val s = _state.value
-        return when {
+        val action = when {
             s.isRunning && !s.isPaused -> {
                 toggleScreen()
                 live.airuncoach.airuncoach.wear.ui.BackAction.ToggleScreen
@@ -305,6 +329,12 @@ class RunSessionController(
             s.isPaused -> live.airuncoach.airuncoach.wear.ui.BackAction.ConfirmFinish
             else -> live.airuncoach.airuncoach.wear.ui.BackAction.ConfirmExit
         }
+        if (action == live.airuncoach.airuncoach.wear.ui.BackAction.ConfirmFinish ||
+            action == live.airuncoach.airuncoach.wear.ui.BackAction.ConfirmExit
+        ) {
+            _pendingConfirm.value = action
+        }
+        return action
     }
 
     // ── Phone message dispatch (mirrors RunView.mc's _onPhoneMessageInner) ─────
@@ -467,7 +497,19 @@ class RunSessionController(
             maybeSendWatchData(now, m)
             maybeSendHttpData(now, m)
         } else {
-            _state.update { it.copy(gpsQuality = quality, gpsLost = false, offlineGraceElapsed = offlineGraceElapsed) }
+            // Mirrors RunView.mc: once GPS becomes ready while idle+authenticated, the watch
+            // moves off the GPS_WAIT overlay into the normal idle dashboard (StartHintArc +
+            // "PRESS START") on its own — it does not wait for the user to press start first.
+            val minQuality = if (s.isPhoneConnected) 2 else 3
+            val readyToTransition = s.overlay == Overlay.GPS_WAIT && s.isAuthenticated && quality >= minQuality
+            _state.update {
+                it.copy(
+                    gpsQuality = quality,
+                    gpsLost = false,
+                    offlineGraceElapsed = offlineGraceElapsed,
+                    overlay = if (readyToTransition) Overlay.NONE else it.overlay
+                )
+            }
         }
     }
 

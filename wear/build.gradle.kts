@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -8,6 +10,14 @@ plugins {
 // Deliberately no Hilt here — this module uses manual DI via WearApplication (see
 // WearApplication.kt) to keep the watch build lightweight, mirroring the Garmin
 // Connect IQ companion app's lack of any DI framework at all.
+
+// ── Load local.properties for signing credentials (same keystore/keys as app/) ─────
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) localProps.load(localPropsFile.inputStream())
+
+fun localProp(key: String): String =
+    localProps.getProperty(key) ?: System.getenv(key) ?: ""
 
 android {
     namespace = "live.airuncoach.airuncoach.wear"
@@ -25,9 +35,24 @@ android {
         versionName = "1.0.0"
     }
 
+    // ── Release signing ─────────────────────────────────────────────────────
+    // Reuses the same keystore/credentials as app/build.gradle.kts (local.properties
+    // keys: KEYSTORE_PATH, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD) — a Wear OS
+    // standalone app doesn't need to share signing with its paired phone app, but
+    // keeping one keystore is simpler to manage.
+    signingConfigs {
+        create("release") {
+            storeFile     = file(localProp("KEYSTORE_PATH"))
+            storePassword = localProp("KEYSTORE_PASSWORD")
+            keyAlias      = localProp("KEY_ALIAS")
+            keyPassword   = localProp("KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -63,6 +88,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
+    // Transitively pulled in at 1.2.4 by another dependency, below the 1.3.0 floor
+    // registerForActivityResult() requires — pin explicitly to satisfy lint-vital.
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
 
     // --- Jetpack Compose for Wear OS (NOT standard Compose Material3 — Wear uses its own) ---
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))

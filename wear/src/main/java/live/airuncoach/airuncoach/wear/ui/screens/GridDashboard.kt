@@ -14,6 +14,7 @@ import androidx.wear.compose.material.Text
 import live.airuncoach.airuncoach.wear.ui.RunScreenState
 import live.airuncoach.airuncoach.wear.ui.StatusBarInput
 import live.airuncoach.airuncoach.wear.ui.components.PageDots
+import live.airuncoach.airuncoach.wear.ui.components.StartHintArc
 import live.airuncoach.airuncoach.wear.ui.components.StatusBar
 import live.airuncoach.airuncoach.wear.ui.formatDistanceKm
 import live.airuncoach.airuncoach.wear.ui.formatElapsed
@@ -35,6 +36,10 @@ fun GridDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
         val w = maxWidth
         val h = maxHeight
 
+        if (!state.isRunning && !state.isPaused) {
+            StartHintArc(modifier = Modifier.fillMaxSize())
+        }
+
         val timerText = if (state.isRunning || state.isPaused || state.isFinished) {
             formatElapsed(state.elapsedMs)
         } else {
@@ -47,16 +52,16 @@ fun GridDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
         }
 
         // Row 1: Duration | Pace
-        GridCell("DURATION", timerText, timerColor, Modifier.align(Alignment.TopStart).offset(x = w * 0.05f, y = h * 0.16f))
-        GridCell("PACE", formatPace(state.paceSecPerKm), WearColors.YellowPace, Modifier.align(Alignment.TopEnd).offset(x = -w * 0.05f, y = h * 0.16f))
+        GridCell("DURATION", timerText, timerColor, alignStart = true, modifier = Modifier.align(Alignment.TopStart).offset(x = w * 0.16f, y = h * 0.22f))
+        GridCell("PACE", formatPace(state.paceSecPerKm), WearColors.YellowPace, alignStart = false, modifier = Modifier.align(Alignment.TopEnd).offset(x = -w * 0.16f, y = h * 0.22f))
 
         // Row 2: Distance | Cadence
-        GridCell("KM", formatDistanceKm(state.distanceM), WearColors.TealKm, Modifier.align(Alignment.CenterStart).offset(x = w * 0.05f, y = -h * 0.08f))
-        GridCell("SPM", formatIntOrDash(state.cadence), WearColors.OrangeCadence, Modifier.align(Alignment.CenterEnd).offset(x = -w * 0.05f, y = -h * 0.08f))
+        GridCell("KM", formatDistanceKm(state.distanceM), WearColors.TealKm, alignStart = true, modifier = Modifier.align(Alignment.CenterStart).offset(x = w * 0.16f, y = -h * 0.04f))
+        GridCell("SPM", formatIntOrDash(state.cadence), WearColors.OrangeCadence, alignStart = false, modifier = Modifier.align(Alignment.CenterEnd).offset(x = -w * 0.16f, y = -h * 0.04f))
 
         // Row 3: HR | Avg Pace
-        GridCell("HR", formatIntOrDash(state.heartRate), WearColors.RedHr, Modifier.align(Alignment.BottomStart).offset(x = w * 0.05f, y = -h * 0.24f))
-        GridCell("AVG PACE", formatPace(state.avgPaceSecPerKm), WearColors.YellowPace, Modifier.align(Alignment.BottomEnd).offset(x = -w * 0.05f, y = -h * 0.24f))
+        GridCell("HR", formatIntOrDash(state.heartRate), WearColors.RedHr, alignStart = true, modifier = Modifier.align(Alignment.BottomStart).offset(x = w * 0.16f, y = -h * 0.24f))
+        GridCell("AVG PACE", formatPace(state.avgPaceSecPerKm), WearColors.YellowPace, alignStart = false, modifier = Modifier.align(Alignment.BottomEnd).offset(x = -w * 0.16f, y = -h * 0.24f))
 
         // Divider lines
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -93,9 +98,11 @@ fun GridDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun GridCell(label: String, value: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
-    androidx.compose.foundation.layout.Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = label, color = color, style = TextStyle(fontSize = 8.sp, textAlign = TextAlign.Center))
-        Text(text = value, color = WearColors.White, style = TextStyle(fontSize = 14.sp, textAlign = TextAlign.Center))
+private fun GridCell(label: String, value: String, color: androidx.compose.ui.graphics.Color, alignStart: Boolean, modifier: Modifier) {
+    val columnAlignment = if (alignStart) Alignment.Start else Alignment.End
+    val textAlign = if (alignStart) TextAlign.Start else TextAlign.End
+    androidx.compose.foundation.layout.Column(modifier = modifier, horizontalAlignment = columnAlignment) {
+        Text(text = label, color = color, style = TextStyle(fontSize = 8.sp, textAlign = textAlign))
+        Text(text = value, color = WearColors.White, style = TextStyle(fontSize = 14.sp, textAlign = textAlign))
     }
 }

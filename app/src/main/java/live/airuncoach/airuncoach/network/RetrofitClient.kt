@@ -237,7 +237,9 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                 // Detect if running on emulator or physical device
                 val isEmulator = android.os.Build.FINGERPRINT.contains("generic") ||
                                 android.os.Build.MODEL.contains("Emulator") ||
-                                android.os.Build.MODEL.contains("Android SDK")
+                                android.os.Build.MODEL.contains("Android SDK") ||
+                                android.os.Build.HARDWARE.contains("ranchu") ||
+                                android.os.Build.HARDWARE.contains("goldfish")
                 
                 if (isEmulator) {
                     // Use 10.0.2.2 for Android Emulator (maps to host's localhost)

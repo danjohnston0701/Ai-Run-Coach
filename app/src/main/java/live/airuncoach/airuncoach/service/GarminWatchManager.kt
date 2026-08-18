@@ -70,10 +70,26 @@ class GarminWatchManager(
     var activeCompanionSessionId: String? = null
         private set
 
-    /** Re-sent on retry since the session row may not exist server-side the instant "start" fires. */
+    /** The in-flight companion-session fetch, if any — cancelled before starting a new one so a
+     * quick stop/start/stop cycle can't leave two overlapping retry loops racing to set
+     * [activeCompanionSessionId], where a slow, stale response from the FIRST (superseded) fetch
+     * could overwrite the correct ID set by the second, current one. */
+    private var companionSessionFetchJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Re-sent on retry since the session row may not exist server-side the instant "start" fires.
+     *
+     * Clears [activeCompanionSessionId] synchronously up front (rather than nulling it when
+     * "stop" is received) so the stop/finalize path — which reads this field asynchronously to
+     * build the run upload payload — always sees the just-finished run's real session ID instead
+     * of racing a premature null-out. The ID is only ever stale (pointing at the previous run)
+     * for the brief window between a new "start" and this fetch resolving, never permanently gone.
+     */
     private fun fetchAndCacheCompanionSession(retries: Int = 5) {
         val api = apiService ?: return
-        CoroutineScope(Dispatchers.IO).launch {
+        companionSessionFetchJob?.cancel()
+        activeCompanionSessionId = null
+        companionSessionFetchJob = CoroutineScope(Dispatchers.IO).launch {
             for (attempt in 1..retries) {
                 try {
                     val response = api.getGarminCompanionSession()
@@ -876,8 +892,11 @@ class GarminWatchManager(
                     if (action == "stop") {
                         sendStopAck()
                         Log.d(TAG, "Watch STOP received — sent stopAck immediately")
-                        // Session is ending — clear cached ID so it isn't reused for the next run
-                        activeCompanionSessionId = null
+                        // Deliberately NOT clearing activeCompanionSessionId here — the stop/finalize
+                        // path (RunTrackingService) reads it asynchronously afterward to build the
+                        // run upload payload. It's cleared instead at the START of the *next*
+                        // fetchAndCacheCompanionSession() call, so this run's ID survives until the
+                        // next run actually begins fetching its own.
                     }
 
                     // For all other commands: if no ViewModel or service is listening,

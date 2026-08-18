@@ -6,21 +6,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 
 /**
- * Primary tap → start/pause/resume (the one unavoidable platform deviation from Garmin: Wear
- * OS/Galaxy Watch side buttons are OS-reserved, so there's no hardware START button analog —
- * the outcome is preserved via a context-sensitive tap instead of the trigger).
- *
  * Double-tap → talk-to-coach, gated by the caller to only fire while running+unpaused,
- * mirroring RunView.mc's `onTap()` exactly (that one behavior DOES map 1:1 to Wear OS).
+ * mirroring RunView.mc's `onTap()` exactly. Single tap is intentionally NOT wired to any
+ * run-state action — Garmin's `onTap()` consumes single taps and does nothing with them
+ * ("screen touches must NEVER start/pause a run"); all run control is button-only, via
+ * WearMainActivity.onKeyDown (KEYCODE_STEM_1 = start/pause/resume, KEYCODE_STEM_2 = back).
  */
-fun Modifier.runScreenTapGestures(
-    onSingleTap: () -> Unit,
-    onDoubleTap: () -> Unit
-): Modifier = this.pointerInput(Unit) {
-    detectTapGestures(
-        onTap = { onSingleTap() },
-        onDoubleTap = { onDoubleTap() }
-    )
+fun Modifier.runScreenDoubleTapGesture(onDoubleTap: () -> Unit): Modifier = this.pointerInput(Unit) {
+    detectTapGestures(onDoubleTap = { onDoubleTap() })
 }
 
 /** Horizontal drag → toggle Diamond/Grid screen. Deliberately NOT the OS edge-swipe-back

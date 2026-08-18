@@ -118,7 +118,7 @@ fun DiamondDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
         )
 
         // ── Battery ──
-        BatteryIndicator(modifier = Modifier.align(Alignment.CenterEnd).offset(x = -w * 0.02f, y = h * 0.20f))
+        BatteryIndicator(modifier = Modifier.align(Alignment.CenterEnd).offset(x = -w * 0.22f, y = h * 0.30f))
 
         // ── Status bar ──
         StatusBar(
