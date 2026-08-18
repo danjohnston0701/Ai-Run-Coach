@@ -186,8 +186,27 @@ export function sanitizeForTTS(text: string): string {
 }
 
 /**
+ * Escape text for safe inclusion inside SSML markup.
+ */
+function escapeSsml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+// Raw Polly neural output is noticeably quieter than typical loudness-normalized
+// music (e.g. Spotify), which made in-run coaching hard to hear at a music-friendly
+// volume without blasting spoken audio. Boost via SSML <prosody volume> rather than
+// simple post-gain, since Polly renders the boost as part of synthesis instead of
+// digitally amplifying (and clipping) the finished waveform.
+const TTS_VOLUME_BOOST_DB = "+6dB";
+
+/**
  * Generate speech audio using AWS Polly Neural TTS
- * 
+ *
  * @param text - Text to synthesize
  * @param accent - Coach accent (british, american, australian, irish, south_african, new_zealand)
  * @param gender - Voice gender (male or female)
@@ -213,9 +232,12 @@ export async function synthesizeSpeech(
   const region = getRegionForAccent(accent);
   const pollyClient = getPollyClient(region);
 
+  const ssmlText = `<speak><prosody volume="${TTS_VOLUME_BOOST_DB}">${escapeSsml(enhancedText)}</prosody></speak>`;
+
   try {
     const command = new SynthesizeSpeechCommand({
-      Text: enhancedText,
+      Text: ssmlText,
+      TextType: "ssml",
       OutputFormat: "mp3",
       VoiceId: voiceId,
       Engine: "neural", // Use Neural engine for high quality

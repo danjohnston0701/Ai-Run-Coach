@@ -141,6 +141,12 @@ class RunTrackingService : Service(), SensorEventListener {
     // One-time guard so the target-reached congratulatory cue (fireTargetReachedCoaching)
     // fires exactly once per run, at the tick the target distance is first crossed.
     private var hasFiredTargetReachedCoaching = false
+    // Active run duration captured at the moment the target distance was first crossed (i.e. when
+    // fireTargetReachedCoaching fires). Used by calculateWasTargetAchieved() instead of the final
+    // stop-time duration — otherwise a runner who kept going a little past their target distance
+    // before tapping stop would show as having missed their target time, even though they hit it
+    // exactly when the coach congratulated them for it.
+    private var targetReachedAtDurationMs: Long? = null
     // For walk sessions: tracks the last 500m boundary at which a split coaching cue fired.
     // Walk sessions get a coaching update every 500m (vs every 1km for runs) because walkers
     // move slower and need more frequent check-ins to stay engaged and on pace.
@@ -1573,6 +1579,7 @@ class RunTrackingService : Service(), SensorEventListener {
         last500mMilestone = 0  // Reset for new run
         lastWalk500mSplit = 0  // Reset for new walk session
         hasFiredTargetReachedCoaching = false  // Reset for new run
+        targetReachedAtDurationMs = null  // Reset for new run
         hasGarminData = false       // Will be set true once first watch biometric frame arrives
         garminDeviceName = null     // Re-captured on first frame new run
         lastPhase = null        // Reset for new run - allow first phase change to trigger
@@ -3461,6 +3468,7 @@ class RunTrackingService : Service(), SensorEventListener {
         serviceScope.launch {
             try {
                 val elapsedMs = getActiveRunDuration()
+                targetReachedAtDurationMs = elapsedMs
                 val elapsedSec = elapsedMs / 1000.0
                 val distKm = totalDistance / 1000.0
                 val currentAvgPaceStr = if (distKm > 0 && elapsedSec > 0) {
@@ -3979,9 +3987,13 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun calculateWasTargetAchieved(): Boolean? {
         if (targetDistance == null && targetTime == null) return null
-        
+
         val achievedDistance = (targetDistance != null && totalDistance >= targetDistance!! - 100.0) // Allow 100m margin
-        val achievedTime = (targetTime != null && (getActiveRunDuration()) <= targetTime!!)
+        // Use the duration captured when the target distance was first crossed, not the final
+        // stop-time duration — a runner who kept going a bit past their target before stopping
+        // shouldn't have that extra time count against whether they hit their target time.
+        val durationForTargetCheck = targetReachedAtDurationMs ?: getActiveRunDuration()
+        val achievedTime = (targetTime != null && durationForTargetCheck <= targetTime!!)
         
         return if (targetDistance != null && targetTime != null) {
             achievedDistance && achievedTime
@@ -4235,6 +4247,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
+            garminCompanionSessionId = runSession.garminCompanionSessionId,
             startTime = runSession.startTime,
             sessionType = currentActivityType,
             distance = runSession.distance / 1000.0, // Convert meters to km

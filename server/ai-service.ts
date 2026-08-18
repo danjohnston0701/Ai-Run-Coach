@@ -6031,6 +6031,7 @@ function buildSessionCoachingPolicy(
       primaryMetric: "pace",
       cadenceTriggersAllowed: true,
       elevationTriggersAllowed: true,
+      heartRateTriggersAllowed: true,
       hrValidationRequired: false,
     };
   }
@@ -6041,6 +6042,7 @@ function buildSessionCoachingPolicy(
     primaryMetric: isHRLed ? "hr" : "effort",
     cadenceTriggersAllowed: true,   // Cadence is universal form coaching — always valuable
     elevationTriggersAllowed: false, // Terrain coaching conflicts with effort-controlled sessions
+    heartRateTriggersAllowed: true,
     hrValidationRequired: true,
   };
 }
@@ -6312,6 +6314,16 @@ export interface SessionCoachingPolicy {
    * TRUE for all other session types where terrain affects pace targets.
    */
   elevationTriggersAllowed: boolean;
+  /**
+   * Whether the client's standalone/native heart-rate coaching fallback may fire
+   * when the AI-authored plan itself contains no hr-based triggers (e.g. because
+   * no heart-rate monitor was detected at plan-generation time). Always true —
+   * HR coaching is universally valuable whenever HR data happens to be available,
+   * same rationale as cadenceTriggersAllowed. This does NOT control whether the
+   * AI is allowed to author hr-based triggers itself (see hasHeartRateMonitor in
+   * the generation prompt) — it only governs the client-side fallback safety net.
+   */
+  heartRateTriggersAllowed: boolean;
   /**
    * When true, the live engine must validate HR readings before firing any
    * HR-based trigger.  A sudden drop of >30 bpm in under 10 seconds is almost

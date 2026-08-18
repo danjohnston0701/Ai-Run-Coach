@@ -7,12 +7,14 @@ import android.media.AudioManager
 import android.util.Log
 
 /**
- * Manages audio focus so that background music (Spotify, etc.) is paused
- * while the AI coaching audio plays, then resumes when coaching finishes.
+ * Manages audio focus so that background music (Spotify, etc.) is ducked
+ * (lowered in volume, not paused) while the AI coaching audio plays, then
+ * returns to full volume when coaching finishes. Mirrors iOS's
+ * `AVAudioSession` `.duckOthers` behavior so runners can still hear the
+ * beat of their music underneath the coach's voice.
  *
- * Uses AUDIOFOCUS_GAIN_TRANSIENT which tells other audio apps to pause
- * (rather than just "duck" / lower volume slightly), giving the coaching
- * voice full clarity.
+ * Uses AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK, which tells other audio apps
+ * it's fine to just lower their volume instead of stopping playback.
  */
 class AudioFocusManager(context: Context) {
 
@@ -38,8 +40,9 @@ class AudioFocusManager(context: Context) {
     }
 
     /**
-     * Request transient audio focus, causing background music to pause.
-     * Safe to call multiple times — will only request if we don't already hold focus.
+     * Request transient audio focus, causing background music to duck (lower
+     * volume) rather than pause. Safe to call multiple times — will only
+     * request if we don't already hold focus.
      */
     fun requestFocus(): Boolean {
         if (hasFocus) {
@@ -47,7 +50,7 @@ class AudioFocusManager(context: Context) {
             return true
         }
 
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -55,7 +58,6 @@ class AudioFocusManager(context: Context) {
                     .build()
             )
             .setOnAudioFocusChangeListener(focusChangeListener)
-            .setWillPauseWhenDucked(true) // We want other apps to pause, not just duck
             .build()
         focusRequest = request
         val result = audioManager.requestAudioFocus(request)
