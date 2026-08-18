@@ -72,6 +72,7 @@ fun ProfileScreen(
     onNavigateToSubscription: () -> Unit,
     onNavigateToCoachingProgramme: () -> Unit = {},
     onNavigateToInjuries: () -> Unit = {},
+    onNavigateToUsefulTips: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val viewModel: ProfileViewModel = hiltViewModel()
@@ -281,6 +282,7 @@ fun ProfileScreen(
                 SettingsItem(icon = R.drawable.icon_watch_vector, text = "Connected Devices", onClick = onNavigateToConnectedDevices)
                 SettingsItem(icon = R.drawable.icon_info_vector, text = "Push Notifications", onClick = onNavigateToNotifications)
                 SettingsItem(icon = R.drawable.icon_crown_vector, text = "My Account", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
+                SettingsItem(icon = R.drawable.icon_info_vector, text = "Helpful Tips and Info", onClick = onNavigateToUsefulTips)
             }
         }
 

@@ -356,7 +356,13 @@ fun MainScreen(
                     onNavigateToConnectedDevices = { navController.navigate("connected_devices") },
                     onNavigateToSubscription = { navController.navigate("subscription") },
                     onNavigateToCoachingProgramme = { navController.navigate("coaching_programme") },
-                    onNavigateToInjuries = { navController.navigate("injuries") }
+                    onNavigateToInjuries = { navController.navigate("injuries") },
+                    onNavigateToUsefulTips = { navController.navigate("useful_tips") }
+                )
+            }
+            composable("useful_tips") {
+                UsefulTipsScreen(
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable("my_data") {
