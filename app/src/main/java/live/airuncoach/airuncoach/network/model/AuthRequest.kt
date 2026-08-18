@@ -4,7 +4,8 @@ data class LoginRequest(
     val email: String,
     val password: String,
     val timezone: String? = null,
-    val country: String? = null
+    val country: String? = null,
+    val platform: String = "android"
 )
 
 data class RegisterRequest(
@@ -12,7 +13,8 @@ data class RegisterRequest(
     val email: String,
     val password: String,
     val timezone: String? = null,
-    val country: String? = null
+    val country: String? = null,
+    val platform: String = "android"
 )
 
 data class ForgotPasswordRequest(

@@ -18,6 +18,10 @@ export const users = pgTable("users", {
   coachName: text("coach_name").default("AI Coach"),
   profilePic: text("profile_pic"),
   createdAt: timestamp("created_at").defaultNow(),
+  // Platform of the app the user most recently registered or logged in from — "ios" | "android".
+  // Set on both POST /api/auth/register and POST /api/auth/login; null for accounts that predate
+  // this column or haven't logged in again since it was added.
+  deviceSource: text("device_source"),
   isAdmin: boolean("is_admin").default(false),
   coachGender: text("coach_gender").default("male"),
   coachAccent: text("coach_accent").default("british"),

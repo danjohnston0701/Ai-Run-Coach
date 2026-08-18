@@ -164,9 +164,16 @@ async function handleSubscriptionActive(
   let userId: string | null = null;
 
   if (appAccountToken) {
-    // Best case: user's app set the appAccountToken to their userId
+    // Best case: StoreKitManager.purchase() sets appAccountToken to the user's own
+    // `id` (see StoreKitManager.swift), NOT to the (never-populated) users.apple_
+    // account_token column — this previously queried that dead column and could
+    // never match any user, silently dropping every first-time subscriber's sync
+    // (renewals "worked" only via the apple_transactions fallback below, and only
+    // after a first successful match had ever inserted a row there). Case-insensitive
+    // because Swift's UUID.uuidString is uppercase while Postgres's gen_random_uuid()
+    // default renders lowercase.
     const result = await pool.query(
-      "SELECT id FROM users WHERE apple_account_token = $1 LIMIT 1",
+      "SELECT id FROM users WHERE LOWER(id) = LOWER($1) LIMIT 1",
       [appAccountToken]
     );
     if (result.rows.length > 0) {
@@ -204,15 +211,17 @@ async function handleSubscriptionActive(
   const { tier, billingPeriod, aiPlansEnabled } = tierInfo;
   const expiresAt = new Date(renewalInfo.renewalDate);
 
-  // Update user subscription
+  // Update user subscription. No updated_at here — users has no such column
+  // (only createdAt); this previously threw SQLSTATE 42703 on every single call,
+  // meaning this UPDATE has never once succeeded regardless of the userId-lookup
+  // fix above.
   await pool.query(
     `UPDATE users SET
       subscription_tier = $1,
       subscription_status = $2,
       entitlement_type = $3,
       entitlement_expires_at = $4,
-      ai_plans_enabled = $5,
-      updated_at = NOW()
+      ai_plans_enabled = $5
     WHERE id = $6`,
     [
       tier,
@@ -269,14 +278,13 @@ async function handleSubscriptionExpired(
 
   const userId = result.rows[0].user_id;
 
-  // Mark subscription as expired
+  // Mark subscription as expired. No updated_at — see handleSubscriptionActive.
   await pool.query(
     `UPDATE users SET
       subscription_tier = NULL,
       subscription_status = $1,
       entitlement_type = NULL,
-      entitlement_expires_at = NULL,
-      updated_at = NOW()
+      entitlement_expires_at = NULL
     WHERE id = $2`,
     ["expired", userId]
   );
@@ -308,14 +316,13 @@ async function handleRefund(
 
   const userId = result.rows[0].user_id;
 
-  // Mark subscription as refunded
+  // Mark subscription as refunded. No updated_at — see handleSubscriptionActive.
   await pool.query(
     `UPDATE users SET
       subscription_tier = NULL,
       subscription_status = $1,
       entitlement_type = NULL,
-      entitlement_expires_at = NULL,
-      updated_at = NOW()
+      entitlement_expires_at = NULL
     WHERE id = $2`,
     ["refunded", userId]
   );

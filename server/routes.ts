@@ -304,8 +304,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
-      const { email, password, name, timezone, country } = req.body;
-      
+      const { email, password, name, timezone, country, platform } = req.body;
+      // Which app the account was created from — "ios" | "android". Anything else
+      // (missing, web, typo) is left null rather than stored as garbage.
+      const normalizedPlatform: "ios" | "android" | undefined =
+        platform === "ios" || platform === "android" ? platform : undefined;
+
       if (!email || !password || !name) {
         return res.status(400).json({ error: "Email, password, and name are required" });
       }
@@ -372,6 +376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         emailVerified: false,
         emailVerificationToken: otpHash,
         emailVerificationExpiry: otpExpiry,
+        deviceSource: normalizedPlatform,
       });
 
       // Send verification email (non-blocking — don't fail registration if email fails)
@@ -533,7 +538,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { email, password, timezone, country } = req.body;
+      const { email, password, timezone, country, platform } = req.body;
+      // Which app this login came from — "ios" | "android". Kept up to date on every
+      // login so it reflects the device the account is currently active on.
+      const normalizedPlatform: "ios" | "android" | undefined =
+        platform === "ios" || platform === "android" ? platform : undefined;
 
       if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required" });
@@ -631,13 +640,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .set({
             timezone: resolved.timezone,
             country: resolvedCountry,
-            currency: inferredCurrency
+            currency: inferredCurrency,
+            ...(normalizedPlatform ? { deviceSource: normalizedPlatform } : {}),
           })
           .where(eq(users.id, user.id));
 
         user.timezone = resolved.timezone;
         user.country = resolvedCountry;
         user.currency = inferredCurrency;
+        if (normalizedPlatform) user.deviceSource = normalizedPlatform;
         console.log(`[Login] Updated user ${user.id}: timezone=${resolved.timezone}, country=${resolvedCountry}, currency=${inferredCurrency}`);
       } catch (error: any) {
         console.warn(`[Login] Failed to update timezone/country/currency for user ${user.id}: ${error.message}`);
