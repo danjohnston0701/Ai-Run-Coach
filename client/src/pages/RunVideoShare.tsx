@@ -48,6 +48,14 @@ const BRG_SMOOTH      = 0.04; // camera-bearing easing per frame (lower = gentle
 const SUPERSAMPLE     = 1.25; // render the map above output res, then downscale = crisper
 const PULSE_MS        = 1600; // marker energy-ring pulse period
 
+// ─── Platform detection ───────────────────────────────────────────────────────
+// iOS WKWebView blocks blob-URL Web Workers, which MapLibre uses for GeoJSON
+// setData() processing — so on iOS we skip all MapLibre route layers and draw
+// everything on the 2D compositor canvas instead.  On Android (which supports
+// the full Web Worker API) we use the original MapLibre WebGL layers for the
+// buttery-smooth, perspective-correct "drone follow" experience.
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 // ─── Geo helpers ──────────────────────────────────────────────────────────────
 type LngLat = [number, number]; // [lng, lat]
 
@@ -422,13 +430,49 @@ export default function RunVideoShare() {
         });
       } catch { /* sky unsupported on this build — ignore */ }
 
-      // No MapLibre route layers at all — the ghost trace, progress line, and head
-      // marker are all drawn on the 2D compositor canvas (compositeFrame) via
-      // map.project().  This avoids the blob-URL Web Worker restriction in iOS
-      // WKWebView, which silently blocks GeoJSON setData() calls and would keep
-      // any MapLibre layer frozen.  It also prevents the "parallel line" artifact
-      // that occurs when a WebGL layer and a canvas-projected line both render at
-      // slightly different 3D positions on a pitched camera.
+      const coords3d = coords3dRef.current;
+      const start3d  = coords3d[0] ?? [start[0], start[1]];
+
+      // On Android (isIOS === false) we use full MapLibre WebGL layers for the
+      // original high-quality perspective-correct drone-follow experience.
+      // On iOS, blob-URL Web Workers are blocked so setData() silently fails;
+      // those platforms fall back to 2D canvas drawing inside compositeFrame.
+      if (!isIOS) {
+        // ── Ghost trace (full route, faint white) ──
+        const fullLine = { type: "Feature", geometry: { type: "LineString", coordinates: coords3d }, properties: {} };
+        map.addSource("routeFull", { type: "geojson", data: fullLine as any });
+        map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
+
+        // ── Animated progress line ──
+        const emptyLine = { type: "Feature", geometry: { type: "LineString", coordinates: [start3d, start3d] }, properties: {} };
+        map.addSource("routeProgress", { type: "geojson", data: emptyLine as any });
+        map.addLayer({ id: "routeProgressGlow", type: "line", source: "routeProgress",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": TEAL, "line-opacity": 0.35, "line-width": 44, "line-blur": 8 } });
+        map.addLayer({ id: "routeProgress", type: "line", source: "routeProgress",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": TEAL, "line-opacity": 0.9, "line-width": 24 } });
+        map.addLayer({ id: "routeCore", type: "line", source: "routeProgress",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#eaffff", "line-opacity": 0.9, "line-width": 8 } });
+
+        // ── Animated head marker ──
+        const headPt = { type: "Feature", geometry: { type: "Point", coordinates: start3d }, properties: {} };
+        map.addSource("head", { type: "geojson", data: headPt as any });
+        map.addLayer({ id: "headPulse1", type: "circle", source: "head",
+          paint: { "circle-radius": 12, "circle-color": "transparent",
+                   "circle-stroke-width": 2.5, "circle-stroke-color": TEAL, "circle-stroke-opacity": 0.6, "circle-opacity": 0 } });
+        map.addLayer({ id: "headPulse2", type: "circle", source: "head",
+          paint: { "circle-radius": 12, "circle-color": "transparent",
+                   "circle-stroke-width": 2.5, "circle-stroke-color": TEAL, "circle-stroke-opacity": 0.45, "circle-opacity": 0 } });
+        map.addLayer({ id: "headGlow", type: "circle", source: "head",
+          paint: { "circle-radius": 14, "circle-color": TEAL, "circle-opacity": 0.4, "circle-blur": 0.6 } });
+        map.addLayer({ id: "headDot", type: "circle", source: "head",
+          paint: { "circle-radius": 9, "circle-color": WHITE,
+                   "circle-stroke-width": 4, "circle-stroke-color": TEAL, "circle-opacity": 1 } });
+      }
 
       // Pre-compute the "whole route" overview camera used for the outro.
       const bounds = coords.reduce(
@@ -652,13 +696,13 @@ export default function RunVideoShare() {
     vig.addColorStop(1, "rgba(3,5,12,0.55)");
     ctx.fillStyle = vig; ctx.fillRect(0, 0, CW, CH);
 
-    // ── 2D canvas route lines + head marker ──────────────────────────────────
-    // All route drawing is done here via map.project() so that:
-    //  (a) iOS WKWebView blob-URL Worker restriction is bypassed (no setData())
-    //  (b) ghost trace and progress line share the same coordinate space,
-    //      eliminating the "parallel line" artefact seen when a WebGL layer and
-    //      a canvas-projected line both render on a pitched camera.
-    if (map) {
+    // ── 2D canvas route lines + head marker (iOS only) ───────────────────────
+    // On iOS WKWebView, blob-URL Web Workers are blocked so MapLibre GeoJSON
+    // setData() silently does nothing.  We draw the route entirely on this 2D
+    // canvas via map.project() instead.  On Android the MapLibre WebGL layers
+    // (added in map init above) handle this with full perspective-correct 3D
+    // rendering — no 2D canvas drawing needed there.
+    if (isIOS && map) {
       const container = map.getContainer();
       const cssW = container.offsetWidth  || 1;
       const cssH = container.offsetHeight || 1;
@@ -1018,9 +1062,29 @@ export default function RunVideoShare() {
 
         map.jumpTo({ center: dispCenterRef.current as any, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
         lastCamRef.current = { center: [dispCenterRef.current[0], dispCenterRef.current[1]], zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
+        if (!isIOS) {
+          map.getSource("routeProgress") && (map.getSource("routeProgress") as any).setData({
+            type: "Feature", geometry: { type: "LineString", coordinates: buildProgressLine(d) }, properties: {},
+          });
+          (map.getSource("head") as any)?.setData({
+            type: "Feature", geometry: { type: "Point", coordinates: head }, properties: {},
+          });
+          pulseMarker(map, t);
+        }
       } else {
         // ── Outro: pull up and out to reveal the whole route ──
         routeProgress = 1;
+        if (!isIOS) {
+          const endCoords = coords3dRef.current.length ? coords3dRef.current : coordsRef.current;
+          (map.getSource("routeProgress") as any)?.setData({
+            type: "Feature", geometry: { type: "LineString", coordinates: endCoords }, properties: {},
+          });
+          const end = interpAt(total).pos;
+          (map.getSource("head") as any)?.setData({
+            type: "Feature", geometry: { type: "Point", coordinates: end }, properties: {},
+          });
+          pulseMarker(map, t);
+        }
         const from = lastCamRef.current!;
         const ov   = overviewCamRef.current;
         const k = Math.min((t - INTRO_MS - followMs) / OUTRO_MS, 1);
