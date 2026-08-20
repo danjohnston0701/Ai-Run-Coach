@@ -4,6 +4,7 @@ using Toybox.Communications as Comm;
 using Toybox.System as Sys;
 using Toybox.Application as App;
 using Toybox.Lang as Lang;
+using Toybox.Timer as Timer;
 
 (:gui)
 class DataStreamer {
@@ -16,9 +17,34 @@ class DataStreamer {
     private var _altitude = null;
     private var _pendingRequests = 0;
     private var _pendingBatchSessionId = null;  // set when uploadOfflineBatch() starts
+    // True while a batch upload HTTP request is actually in flight (unlike
+    // _pendingBatchSessionId, which stays set across a failed attempt so the next
+    // "auth" message can retry). Guards against RunView's "auth" handler firing a
+    // duplicate uploadOfflineBatch() before the previous request's response has
+    // arrived — auth can arrive multiple times in quick succession (watch reconnect,
+    // phone re-sending cached auth) and the pending batch is deliberately NOT cleared
+    // until a confirmed 200, so without this guard every extra "auth" re-triggers a
+    // fully duplicate upload. Confirmed happening for real (three /upload-batch calls
+    // within 3s for one session) via server logs from an actual field session.
+    private var _batchUploadInFlight = false;
     // "run" | "walk" — set by RunView before prepareSession() so both the
     // session/start call and the session/end summary carry the correct type.
     private var _activityType = "run";
+
+    // ── session/start retry ──────────────────────────────────────────────────
+    // startSession() previously gave up permanently — with no retry at all — if
+    // _authToken wasn't set yet at the exact instant it fired (a real race: it's
+    // called immediately from prepareSession() at run start, before the phone's
+    // "auth" BLE message is guaranteed to have arrived) or if the HTTP call itself
+    // failed. That's more than cosmetic: this exact call is what makes the server
+    // send the high-priority FCM push that lets the phone start RunTrackingService
+    // from the background when the direct BLE "start" message hits Android's
+    // foreground-service-from-background restriction — so a silently-skipped
+    // session/start also silently disarms that safety net for the whole run.
+    private const START_SESSION_MAX_RETRIES = 5;
+    private const START_SESSION_RETRY_MS = 2000;
+    private var _startSessionRetriesLeft = 0;
+    private var _startSessionRetryTimer = null;
 
     // Called by RunView when it knows the session type (from phone BLE message).
     function setActivityType(type) {
@@ -53,6 +79,7 @@ class DataStreamer {
         } catch (ex) {
             Sys.println("DataStreamer: storage error writing sessionId: " + ex.getErrorMessage());
         }
+        _startSessionRetriesLeft = START_SESSION_MAX_RETRIES;
         startSession();
         Sys.println("DataStreamer: session prepared — " + _sessionId);
     }
@@ -61,8 +88,18 @@ class DataStreamer {
     // Handles the case where the token expired mid-session and the phone re-authenticated.
     function setAuthToken(token) {
         if (token != null && token.length() > 0) {
+            var hadToken = (_authToken != null);
             _authToken = token;
             Sys.println("DataStreamer: auth token refreshed");
+            // If startSession() is currently waiting on a retry specifically because it had
+            // no token yet, don't sit through the rest of the scheduled delay — fire now
+            // that one just arrived. Keeps the worst case close to instant instead of up to
+            // START_SESSION_MAX_RETRIES * START_SESSION_RETRY_MS.
+            if (!hadToken && _sessionId != null && _startSessionRetriesLeft > 0) {
+                if (_startSessionRetryTimer != null) { _startSessionRetryTimer.stop(); }
+                Sys.println("DataStreamer: auth token arrived mid-retry — firing startSession() immediately");
+                startSession();
+            }
         }
     }
 
@@ -187,9 +224,11 @@ class DataStreamer {
     // Start session on backend
     private function startSession() {
         if (_authToken == null) {
+            Sys.println("DataStreamer.startSession: no auth token yet");
+            _retryStartSessionIfBudgetRemains();
             return;
         }
-        
+
         var deviceInfo = Sys.getDeviceSettings();
         var payload = {
             "sessionId"    => _sessionId,
@@ -220,17 +259,40 @@ class DataStreamer {
             Comm.makeWebRequest(url, payload, options, method(:onSessionStarted));
         } catch (e) {
             Sys.println("DataStreamer.startSession: makeWebRequest threw — " + e.toString());
+            _retryStartSessionIfBudgetRemains();
         }
     }
-    
+
     function onSessionStarted(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
         if (responseCode == 200) {
             Sys.println("Session started on backend");
+            _startSessionRetriesLeft = 0;  // done — cancel any pending retry
         } else {
             Sys.println("Session start failed: " + responseCode);
+            _retryStartSessionIfBudgetRemains();
         }
     }
-    
+
+    // Retries startSession() after a short delay if attempts remain. Used both when
+    // _authToken isn't set yet and when the HTTP call itself fails/throws/returns non-200 —
+    // this call is what arms the server's FCM background-start fallback (see the comment
+    // on START_SESSION_MAX_RETRIES above), so silently giving up after one attempt was
+    // effectively also silently disarming that safety net for the whole run.
+    private function _retryStartSessionIfBudgetRemains() {
+        if (_startSessionRetriesLeft <= 0) {
+            Sys.println("DataStreamer.startSession: out of retries — session/start never reached the backend for " + _sessionId);
+            return;
+        }
+        _startSessionRetriesLeft -= 1;
+        Sys.println("DataStreamer.startSession: retrying in " + (START_SESSION_RETRY_MS / 1000) + "s (" + _startSessionRetriesLeft + " attempts left)");
+        if (_startSessionRetryTimer == null) {
+            _startSessionRetryTimer = new Timer.Timer();
+        } else {
+            _startSessionRetryTimer.stop();
+        }
+        _startSessionRetryTimer.start(method(:startSession), START_SESSION_RETRY_MS, false);
+    }
+
     // End session on backend — creates a permanent run record in AI Run Coach
     function endSession(summary) {
         if (_authToken == null || _sessionId == null) {
@@ -311,6 +373,10 @@ class DataStreamer {
     // durationSec  : total elapsed time in seconds
     // totalAscent  : total ascent in metres
     function uploadOfflineBatch(sessionId, points, distanceM, durationSec, totalAscent) {
+        if (_batchUploadInFlight) {
+            Sys.println("DataStreamer.uploadOfflineBatch: request already in flight for " + _pendingBatchSessionId + " — skipping duplicate call for " + sessionId);
+            return;
+        }
         _pendingBatchSessionId = sessionId;
         if (_authToken == null) {
             Sys.println("DataStreamer.uploadOfflineBatch: no auth token");
@@ -344,15 +410,18 @@ class DataStreamer {
             },
             :responseType => Comm.HTTP_RESPONSE_CONTENT_TYPE_JSON
         };
+        _batchUploadInFlight = true;
         try {
             Comm.makeWebRequest(url, payload, options, method(:onBatchUploaded));
         } catch (e) {
+            _batchUploadInFlight = false;
             Sys.println("DataStreamer.uploadOfflineBatch: makeWebRequest threw — " + e.toString());
         }
         Sys.println("DataStreamer: uploading offline batch (" + points.size() + " pts, session=" + sessionId + ")");
     }
 
     function onBatchUploaded(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
+        _batchUploadInFlight = false;
         if (responseCode == 200) {
             Sys.println("DataStreamer: offline batch upload success");
             // Notify the app so it can tell the phone to show a sync notification.

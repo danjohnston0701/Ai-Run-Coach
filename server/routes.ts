@@ -13431,29 +13431,48 @@ function transformRunForAndroid(run: any) {
         }
 
         const now = new Date();
-        const [created] = await db.insert(runs).values({
-          userId,
-          distance:       distKm,
-          duration:       durSec,
-          avgPace:        avgPaceStr,
-          avgHeartRate:   avgHR,
-          maxHeartRate:   maxHR,
-          cadence:        avgCad,
-          elevationGain:  totalAscent ?? null,
-          elevation:      totalAscent ?? null,
-          name:           `${watchDeviceLabel(batchSession?.deviceModel)} ${resolvedBatchSessionType === "walk" ? "Walk" : "Run"}`,
-          sessionType:    resolvedBatchSessionType,
-          runDate:        now.toISOString().split('T')[0],
-          runTime:        now.toTimeString().split(' ')[0].slice(0, 5),
-          completedAt:    now,
-          externalId:     sessionId,
-          externalSource: watchExternalSource(batchSession?.deviceModel),
-          hasGarminData:  true,
-          difficulty:     'moderate',
-          isPublic:       false,
-        }).returning();
-        existingRun = created;
-        console.log(`[Offline Batch] Created new run record ${existingRun.id} for phone-less session ${sessionId} (${distKm.toFixed(2)}km)`);
+        try {
+          const [created] = await db.insert(runs).values({
+            userId,
+            distance:       distKm,
+            duration:       durSec,
+            avgPace:        avgPaceStr,
+            avgHeartRate:   avgHR,
+            maxHeartRate:   maxHR,
+            cadence:        avgCad,
+            elevationGain:  totalAscent ?? null,
+            elevation:      totalAscent ?? null,
+            name:           `${watchDeviceLabel(batchSession?.deviceModel)} ${resolvedBatchSessionType === "walk" ? "Walk" : "Run"}`,
+            sessionType:    resolvedBatchSessionType,
+            runDate:        now.toISOString().split('T')[0],
+            runTime:        now.toTimeString().split(' ')[0].slice(0, 5),
+            completedAt:    now,
+            externalId:     sessionId,
+            externalSource: watchExternalSource(batchSession?.deviceModel),
+            hasGarminData:  true,
+            difficulty:     'moderate',
+            isPublic:       false,
+          }).returning();
+          existingRun = created;
+          console.log(`[Offline Batch] Created new run record ${existingRun.id} for phone-less session ${sessionId} (${distKm.toFixed(2)}km)`);
+        } catch (insertError: any) {
+          // A concurrent request for the same session (watch retry, or a near-simultaneous
+          // second upload-batch call) can lose this exact race: both see "no existing run"
+          // above, both attempt to insert, and idx_runs_user_external_id_unique (user_id,
+          // external_id) rejects the loser. Rather than 500 and drop this request's batch
+          // data entirely, fall back to the row the winner just created and continue on to
+          // the enrichment path below — same outcome as if this request's SELECT had simply
+          // run a few ms later.
+          if (insertError?.code === "23505" && insertError?.constraint === "idx_runs_user_external_id_unique") {
+            const [winner] = await db.select().from(runs)
+              .where(and(eq(runs.userId, userId), eq(runs.externalId, sessionId)));
+            if (!winner) throw insertError;
+            existingRun = winner;
+            console.log(`[Offline Batch] Insert raced with a concurrent request for session ${sessionId} — using run ${existingRun.id} created by the other request`);
+          } else {
+            throw insertError;
+          }
+        }
       }
 
       // ── Decode compact points into chart series ──────────────────────────

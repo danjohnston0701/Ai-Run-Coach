@@ -360,6 +360,14 @@ class RunTrackingService : Service(), SensorEventListener {
     // Altitude smoothing - rolling window to filter GPS noise
     private val recentAltitudes = ArrayList<Double>() // Rolling window of recent altitudes
     private var smoothedAltitude: Double? = null // Smoothed altitude from rolling average
+    // Min/max of the windowed elevation means (garminElevBuffer/phoneElevBuffer below) — used
+    // by determineTerrainType() instead of raw per-point altitude. Raw phone GPS altitude noise
+    // (±5-10m even standing still) can make a genuinely flat route show 20-50m of fake "range",
+    // enough to misclassify it as Rolling/Hilly. These track the same noise-filtered window
+    // means that already drive totalElevationGain/totalElevationLoss, so a flat route correctly
+    // stays near-zero range regardless of GPS noise.
+    private var smoothedMinElevation: Double? = null
+    private var smoothedMaxElevation: Double? = null
     // Phone GPS elevation tracking — 60-second windowed means (see PHONE_ELEV_WINDOW constant)
     private val phoneElevBuffer = ArrayList<Double>() // Accumulates raw altitudes for 60-second window
     private var prevPhoneElevWindowMean: Double? = null // Mean from the previous completed 60-second window
@@ -571,6 +579,7 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val NOTIF_ID_WATCH_SESSION_READY = 1002
         private const val NOTIF_ID_WATCH_RUN_STARTED = 1003
         private const val NOTIF_ID_SESSION_INTERRUPTED = 1004
+        private const val NOTIF_ID_START_FAILED = 1005
         private const val LOCATION_UPDATE_INTERVAL = 1000L  // Request GPS every 1 second (matches Garmin frequency)
         private const val LOCATION_FASTEST_INTERVAL = 500L   // Accept updates as fast as 500ms
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
@@ -1552,11 +1561,21 @@ class RunTrackingService : Service(), SensorEventListener {
             startForeground(NOTIFICATION_ID, createNotification(startingLabel, "Initializing GPS"))
             Log.d("RunTrackingService", "Foreground service started successfully")
         } catch (e: Exception) {
+            // Most common cause: Android 14+ blocks starting a location-type foreground
+            // service from the background (no visible activity / no active exemption at
+            // this exact moment) — SecurityException "the app must be in the eligible
+            // state/exemptions". Hit when the watch starts a run with no phone-side prep
+            // (GarminWatchManager's no-listener bootstrap, or its FCM-fallback twin) while
+            // the phone app isn't foregrounded. Previously this failed completely silently
+            // from the user's perspective — the watch had no way to know the phone never
+            // actually started tracking. A plain notification is not itself a foreground-
+            // service start, so it's unaffected by this restriction.
             Log.e("RunTrackingService", "Failed to start foreground service", e)
+            postTrackingStartFailedNotification()
             stopSelf()
             return
         }
-        
+
         // Now safely initialize everything else
         isTracking = true
         _currentRunSession.value = null  // Clear stale data from previous run
@@ -1714,6 +1733,8 @@ class RunTrackingService : Service(), SensorEventListener {
         rollingTerrainDetected = false
         recentAltitudes.clear()
         smoothedAltitude = null
+        smoothedMinElevation = null
+        smoothedMaxElevation = null
         phoneElevBuffer.clear()
         prevPhoneElevWindowMean = null
         hrSum = 0
@@ -3194,6 +3215,8 @@ class RunTrackingService : Service(), SensorEventListener {
                             }
                             prevGarminElevWindowMean = windowMean
                             garminElevBuffer.clear() // Start next window fresh
+                            smoothedMinElevation = smoothedMinElevation?.let { minOf(it, windowMean) } ?: windowMean
+                            smoothedMaxElevation = smoothedMaxElevation?.let { maxOf(it, windowMean) } ?: windowMean
                         }
                     } else {
                         // Phone GPS: altitude accuracy ±5–10 m at 1 Hz.  Per-sample threshold
@@ -3218,6 +3241,8 @@ class RunTrackingService : Service(), SensorEventListener {
                             }
                             prevPhoneElevWindowMean = windowMean
                             phoneElevBuffer.clear() // Start next 60-second window fresh
+                            smoothedMinElevation = smoothedMinElevation?.let { minOf(it, windowMean) } ?: windowMean
+                            smoothedMaxElevation = smoothedMaxElevation?.let { maxOf(it, windowMean) } ?: windowMean
                         }
                     }
                     
@@ -3871,10 +3896,20 @@ class RunTrackingService : Service(), SensorEventListener {
     }
     
     /**
-     * Classify terrain using elevation RANGE per km (max - min across all GPS points).
+     * Classify terrain using elevation RANGE per km (max - min of the smoothed, noise-filtered
+     * elevation window means — smoothedMinElevation/smoothedMaxElevation — NOT raw per-point
+     * altitude).
      *
      * Why NOT avgGradient: on any loop/parkrun course the runner starts and finishes at nearly the
      * same altitude, so the net gradient is ~0% → always "FLAT" even on a 40m rolling course.
+     *
+     * Why NOT raw calculateMinElevation()/calculateMaxElevation(): phone GPS altitude noise alone
+     * (±5-10m, even standing still — see the phoneElevBuffer comment above) can push a genuinely
+     * flat route's raw min/max range past the Rolling/Hilly thresholds below with zero real
+     * elevation change. Confirmed misclassifying a flat real-world route as "Hilly" (2026-08).
+     * smoothedMinElevation/smoothedMaxElevation instead track the min/max of the same 60-sample
+     * (phone) / 10-sample (Garmin) windowed means that already drive totalElevationGain/Loss,
+     * so noise below the commit threshold can't move them.
      *
      * Elevation range per km reflects undulation regardless of whether the course is a loop or out-and-back:
      *   < 5 m/km  → Flat
@@ -3884,8 +3919,8 @@ class RunTrackingService : Service(), SensorEventListener {
      */
     private fun determineTerrainType(): TerrainType {
         val distanceKm = (totalDistance / 1000.0).coerceAtLeast(0.1)
-        val minElev = calculateMinElevation()
-        val maxElev = calculateMaxElevation()
+        val minElev = smoothedMinElevation
+        val maxElev = smoothedMaxElevation
         if (minElev == null || maxElev == null || maxElev <= minElev) return TerrainType.FLAT
         val elevRangePerKm = (maxElev - minElev) / distanceKm
         return when {
@@ -4588,6 +4623,70 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "⚠️ Session interrupted notification posted")
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Failed to post session interrupted notification: ${e.message}")
+        }
+    }
+
+    /**
+     * Posts a notification telling the user tracking never started on the phone at all —
+     * startTracking()'s startForeground() call threw (see that catch block for the usual
+     * cause: Android 14+ blocking a background-started location foreground service).
+     *
+     * When this fires for a watch-initiated run (wasRunStartedByWatch), the watch is still
+     * recording the session standalone on its own GPS/HR — it doesn't need to be told to stop,
+     * it already has its own offline-buffer/upload-batch fallback for exactly this "phone
+     * never joined" case. This notification exists purely so the failure isn't silent to the
+     * user, who otherwise has no way to know live coaching/audio won't be available this run.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun postTrackingStartFailedNotification() {
+        try {
+            val channelId = "tracking_start_failed"
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+            if (nm.getNotificationChannel(channelId) == null) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel(
+                        channelId,
+                        "Tracking Failed to Start",
+                        android.app.NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Alerts when the phone could not start tracking a run/walk session"
+                        enableVibration(true)
+                    }
+                )
+            }
+
+            val intent = android.content.Intent(this, live.airuncoach.airuncoach.MainActivity::class.java).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("deeplink_destination", "dashboard")
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                "tracking_start_failed".hashCode(),
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val activityWord = if (currentActivityType == "walk") "walk" else "run"
+            val contentText = if (wasRunStartedByWatch) {
+                "Your phone couldn't join this $activityWord — your watch is still recording it and will sync when you finish. No live coaching this session."
+            } else {
+                "Your phone couldn't start tracking this $activityWord. Open the app and try starting again."
+            }
+            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                .setContentTitle("Tracking didn't start")
+                .setContentText(contentText)
+                .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(contentText))
+                .setSmallIcon(R.drawable.notification_icon)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            nm.notify(NOTIF_ID_START_FAILED, notification)
+            Log.d("RunTrackingService", "⚠️ Tracking-start-failed notification posted")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to post tracking-start-failed notification: ${e.message}")
         }
     }
 
