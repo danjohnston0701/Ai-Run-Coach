@@ -222,7 +222,13 @@ class DataStreamer {
     }
     
     // Start session on backend
-    private function startSession() {
+    // NOT private: it's referenced indirectly via method(:startSession) as the retry Timer's
+    // callback, and Monkey C's indirect symbol lookup (":startSession") cannot resolve a
+    // private member — confirmed by a real compiler warning when this was private ("The
+    // private symbol 'startSession' will not be found when using the indirect lookup syntax").
+    // Matches onSessionStarted below, which is non-private for the same reason (it's the
+    // Comm.makeWebRequest callback).
+    function startSession() {
         if (_authToken == null) {
             Sys.println("DataStreamer.startSession: no auth token yet");
             _retryStartSessionIfBudgetRemains();
