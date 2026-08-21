@@ -7,7 +7,7 @@ import { onRunSaved, onRunDeleted } from "./user-stats-cache";
 import { getRunnerProfile, runnerProfileBlock, persistCoachingObservation, refreshRunnerProfile } from "./runner-profile-service";
 import { 
   garminWellnessMetrics, connectedDevices, garminActivities, garminBodyComposition, 
-  runs, garminRealtimeData, garminCompanionSessions,
+  runs, garminRealtimeData, garminCompanionSessions, garminPairingDiagnostics, garminPairingCodes,
   dailyFitness, segmentEfforts, segmentStars, segments,
   trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations,
   feedActivities, reactions, activityComments, commentLikes,
@@ -12602,6 +12602,252 @@ function transformRunForAndroid(run: any) {
     } catch (error: any) {
       console.error("Watch token refresh error:", error);
       res.status(500).json({ error: "Token refresh failed" });
+    }
+  });
+
+  // ── Garmin ConnectIQ pairing diagnostics — called by the iOS app to report what
+  // happened during "Pair Garmin Device" (which SDK callback fired, canOpenURL results,
+  // deep-link open results). The ConnectIQ SDK's own device-selection hand-off to Garmin
+  // Connect Mobile fails silently on-device with no error surfaced to us, so this is the
+  // only visibility we have into where pairing broke down for a given user. Persisted to
+  // garmin_pairing_diagnostics (in addition to console.log) so it can be queried/aggregated
+  // once this ships to many users instead of relying on grepping ephemeral console logs.
+  //
+  // Also used internally by the pairing-code flow below (logPairingDiagnostic helper) to
+  // log every step of that flow too — including pre-auth watch requests, which carry
+  // pairingCode instead of userId since the watch has no user session yet at that point.
+  async function logPairingDiagnostic(opts: {
+    userId?: string | null;
+    pairingCode?: string | null;
+    event: string;
+    details?: Record<string, any>;
+    appVersion?: string | null;
+    iosVersion?: string | null;
+    deviceModel?: string | null;
+    watchModel?: string | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  }) {
+    console.log(`[Garmin Pairing] user=${opts.userId ?? "-"} code=${opts.pairingCode ?? "-"} event=${opts.event} details=${JSON.stringify(opts.details ?? {})}`);
+    try {
+      await db.insert(garminPairingDiagnostics).values({
+        userId: opts.userId ?? null,
+        pairingCode: opts.pairingCode ?? null,
+        event: opts.event,
+        details: opts.details ?? {},
+        appVersion: opts.appVersion ?? null,
+        iosVersion: opts.iosVersion ?? null,
+        deviceModel: opts.deviceModel ?? null,
+        watchModel: opts.watchModel ?? null,
+        ipAddress: opts.ipAddress ?? null,
+        userAgent: opts.userAgent ?? null,
+      });
+    } catch (error: any) {
+      // Never let diagnostic logging itself break the pairing flow it's observing.
+      console.error("Garmin pairing diagnostic persist error:", error);
+    }
+  }
+
+  app.post("/api/garmin-companion/pairing-diagnostic", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { event, details, appVersion, iosVersion, deviceModel, watchModel } = req.body;
+      await logPairingDiagnostic({
+        userId, event, details, appVersion, iosVersion, deviceModel, watchModel,
+        ipAddress: req.ip || req.socket.remoteAddress,
+        userAgent: req.headers["user-agent"] as string | undefined,
+      });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Garmin pairing diagnostic log error:", error);
+      res.status(500).json({ error: "Failed to log diagnostic" });
+    }
+  });
+
+  // ── Garmin pairing-code fallback ──────────────────────────────────────────────
+  // Self-configured pairing that does not depend on Garmin's ConnectIQ device-selection
+  // UI at all (confirmed unreliable — see pairing-diagnostic above). The watch requests a
+  // short-lived numeric code and displays it; the user types it into the already-logged-in
+  // iOS app; the backend links the code to that user; the watch picks up its companion
+  // token on its next status poll. Every step is logged via logPairingDiagnostic so a
+  // stuck pairing attempt is fully traceable server-side without needing device console access.
+  const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  const PAIRING_CODE_MAX_ATTEMPTS = 8; // failed /confirm attempts before a code is invalidated
+
+  function normalizeWatchModel(raw: any): string | null {
+    return raw ? String(raw) : null;
+  }
+
+  async function generateUniquePairingCode(): Promise<string> {
+    const crypto = await import("crypto");
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = String(crypto.randomInt(100000, 1000000)); // 6 digits, 100000-999999
+      const [existingActive] = await db
+        .select({ id: garminPairingCodes.id })
+        .from(garminPairingCodes)
+        .where(and(
+          eq(garminPairingCodes.code, code),
+          eq(garminPairingCodes.status, "pending"),
+          gt(garminPairingCodes.expiresAt, new Date())
+        ))
+        .limit(1);
+      if (!existingActive) { return code; }
+    }
+    // Astronomically unlikely with a 900k code space and single-digit concurrent pairings,
+    // but never let this hang — caller treats a thrown error as a 500 with full logging.
+    throw new Error("Could not generate a unique pairing code after 5 attempts");
+  }
+
+  // Watch requests a code — unauthenticated, the watch has no user session at this point.
+  app.post("/api/garmin-companion/pairing/start", async (req: Request, res: Response) => {
+    const { deviceId, deviceModel, watchAppVersion } = req.body;
+    try {
+      if (!deviceId) {
+        await logPairingDiagnostic({ event: "pairingCode.start.missingDeviceId", details: { body: req.body } });
+        return res.status(400).json({ error: "deviceId is required" });
+      }
+
+      // At most one active code per watch — supersede any still-pending code for this device
+      // so a watch that requests again (e.g. after backgrounding) doesn't leave stale codes active.
+      await db.update(garminPairingCodes)
+        .set({ status: "invalidated" })
+        .where(and(eq(garminPairingCodes.watchDeviceId, String(deviceId)), eq(garminPairingCodes.status, "pending")));
+
+      const code = await generateUniquePairingCode();
+      const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS);
+      await db.insert(garminPairingCodes).values({
+        code,
+        watchDeviceId: String(deviceId),
+        watchModel: normalizeWatchModel(deviceModel),
+        watchAppVersion: watchAppVersion || null,
+        status: "pending",
+        expiresAt,
+      });
+
+      await logPairingDiagnostic({
+        pairingCode: code, event: "pairingCode.start", watchModel: normalizeWatchModel(deviceModel),
+        details: { deviceId, watchAppVersion },
+        ipAddress: req.ip || req.socket.remoteAddress, userAgent: req.headers["user-agent"] as string | undefined,
+      });
+      res.json({ code, expiresInSeconds: PAIRING_CODE_TTL_MS / 1000 });
+    } catch (error: any) {
+      console.error("pairing/start error:", error);
+      await logPairingDiagnostic({ event: "pairingCode.start.error", details: { error: error.message, deviceId } });
+      res.status(500).json({ error: "Failed to generate pairing code" });
+    }
+  });
+
+  // Watch polls this until the user has entered the code on the phone.
+  app.get("/api/garmin-companion/pairing/status", async (req: Request, res: Response) => {
+    const code = String(req.query.code || "");
+    try {
+      if (!code) {
+        return res.status(400).json({ error: "code query param is required" });
+      }
+      const [row] = await db.select().from(garminPairingCodes).where(eq(garminPairingCodes.code, code)).orderBy(desc(garminPairingCodes.createdAt)).limit(1);
+
+      if (!row) {
+        await logPairingDiagnostic({ pairingCode: code, event: "pairingCode.status.notFound" });
+        return res.status(404).json({ status: "not_found" });
+      }
+      if (row.status === "pending" && row.expiresAt.getTime() < Date.now()) {
+        await db.update(garminPairingCodes).set({ status: "expired" }).where(eq(garminPairingCodes.id, row.id));
+        await logPairingDiagnostic({ pairingCode: code, event: "pairingCode.status.expired" });
+        return res.json({ status: "expired" });
+      }
+      if (row.status === "confirmed") {
+        await logPairingDiagnostic({ pairingCode: code, userId: row.userId, event: "pairingCode.status.confirmedDelivered" });
+        return res.json({ status: "confirmed", token: row.companionToken });
+      }
+      if (row.status === "invalidated" || row.status === "expired") {
+        return res.json({ status: row.status });
+      }
+      // status === "pending" and not yet expired — normal poll, logged at debug volume
+      // (up to ~150 rows per attempt over the 10-minute TTL) for full step-by-step visibility.
+      await logPairingDiagnostic({ pairingCode: code, event: "pairingCode.status.pending" });
+      res.json({ status: "pending" });
+    } catch (error: any) {
+      console.error("pairing/status error:", error);
+      await logPairingDiagnostic({ pairingCode: code, event: "pairingCode.status.error", details: { error: error.message } });
+      res.status(500).json({ error: "Failed to check pairing status" });
+    }
+  });
+
+  // Phone confirms the code the user typed in — authenticated as the logged-in AI Run Coach user.
+  app.post("/api/garmin-companion/pairing/confirm", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    const userId = req.user!.userId;
+    const code = String(req.body.code || "");
+    try {
+      if (!/^\d{6}$/.test(code)) {
+        await logPairingDiagnostic({ userId, pairingCode: code, event: "pairingCode.confirm.malformedCode" });
+        return res.status(400).json({ error: "Invalid code format" });
+      }
+
+      // Per-IP guess-rate limit (independent of the per-code attemptCount below) — a 6-digit
+      // code space is only brute-forceable if an attacker can try many different codes fast,
+      // which this blocks regardless of which code they're guessing. Reuses the existing
+      // invite-code rate limiter with a constant key so it becomes a plain per-IP limit.
+      const { checkRateLimit } = await import("./rate-limit");
+      const clientIp = req.ip || req.socket.remoteAddress || "unknown";
+      if (checkRateLimit(clientIp, "garmin-pairing-confirm")) {
+        await logPairingDiagnostic({ userId, pairingCode: code, event: "pairingCode.confirm.rateLimited", ipAddress: clientIp });
+        return res.status(429).json({ error: "Too many attempts — please wait a minute and try again" });
+      }
+
+      const [row] = await db.select().from(garminPairingCodes)
+        .where(and(eq(garminPairingCodes.code, code), eq(garminPairingCodes.status, "pending")))
+        .orderBy(desc(garminPairingCodes.createdAt)).limit(1);
+
+      if (!row) {
+        await logPairingDiagnostic({ userId, pairingCode: code, event: "pairingCode.confirm.notFound" });
+        return res.status(404).json({ error: "Invalid code" });
+      }
+      if (row.expiresAt.getTime() < Date.now()) {
+        await db.update(garminPairingCodes).set({ status: "expired" }).where(eq(garminPairingCodes.id, row.id));
+        await logPairingDiagnostic({ userId, pairingCode: code, event: "pairingCode.confirm.expired" });
+        return res.status(410).json({ error: "Code expired — generate a new one on your watch" });
+      }
+      if ((row.attemptCount ?? 0) >= PAIRING_CODE_MAX_ATTEMPTS) {
+        await db.update(garminPairingCodes).set({ status: "invalidated" }).where(eq(garminPairingCodes.id, row.id));
+        await logPairingDiagnostic({ userId, pairingCode: code, event: "pairingCode.confirm.tooManyAttempts" });
+        return res.status(429).json({ error: "Too many attempts — generate a new code on your watch" });
+      }
+
+      const jwt = await import("jsonwebtoken");
+      const companionToken = jwt.default.sign(
+        { userId, type: "companion", deviceId: row.watchDeviceId },
+        process.env.SESSION_SECRET || "fallback-secret",
+        { expiresIn: "365d" }
+      );
+
+      await db.update(garminPairingCodes)
+        .set({ status: "confirmed", userId, companionToken, confirmedAt: new Date() })
+        .where(eq(garminPairingCodes.id, row.id));
+
+      // Mirror the legacy /api/garmin-companion/auth bookkeeping so hasGarminWatchApp-based
+      // targeting (notification-service.ts) and firstSeenAt stay accurate for this new flow too.
+      const [user] = await db.select({ hasGarminWatchApp: users.hasGarminWatchApp }).from(users).where(eq(users.id, userId)).limit(1);
+      const watchAppUpdate: Record<string, any> = { hasGarminWatchApp: true, garminWatchAppLastSeenAt: new Date() };
+      if (user && !user.hasGarminWatchApp) { watchAppUpdate.garminWatchAppFirstSeenAt = new Date(); }
+      await db.update(users).set(watchAppUpdate).where(eq(users.id, userId));
+
+      await logPairingDiagnostic({
+        userId, pairingCode: code, event: "pairingCode.confirm.success",
+        watchModel: row.watchModel, details: { watchDeviceId: row.watchDeviceId },
+        ipAddress: req.ip || req.socket.remoteAddress, userAgent: req.headers["user-agent"] as string | undefined,
+      });
+      res.json({ success: true, watchModel: row.watchModel, watchDeviceId: row.watchDeviceId });
+    } catch (error: any) {
+      console.error("pairing/confirm error:", error);
+      // Best-effort attempt-count bump so a confirm error doesn't give unlimited free retries
+      // against the same code; failure to bump is non-fatal (caught separately, swallowed).
+      try {
+        await db.update(garminPairingCodes)
+          .set({ attemptCount: sql`${garminPairingCodes.attemptCount} + 1` })
+          .where(and(eq(garminPairingCodes.code, code), eq(garminPairingCodes.status, "pending")));
+      } catch {}
+      await logPairingDiagnostic({ userId, pairingCode: code, event: "pairingCode.confirm.error", details: { error: error.message } });
+      res.status(500).json({ error: "Failed to confirm pairing code" });
     }
   });
 

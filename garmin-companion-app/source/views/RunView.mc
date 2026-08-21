@@ -75,6 +75,10 @@ class RunView extends Ui.View {
     private var _dataStreamer = null;
     private var _phoneLink    = null;
     private var _session      = null;
+    // Pairing-code fallback (does not depend on ConnectIQ device pairing) — see
+    // PairingCodeManager.mc. Null until a code has been requested from the backend.
+    private var _pairingCodeManager = null;
+    private var _pairingCode        = null;
 
     // Tracks whether we've already sent sessionReady to the phone this session
     private var _sessionReadySent = false;
@@ -211,6 +215,11 @@ class RunView extends Ui.View {
         var tok = App.Storage.getValue("authToken");
         _isAuthenticated = (tok != null && tok.length() > 0);
         _overlayState = _isAuthenticated ? OVERLAY_GPS_WAIT : OVERLAY_WAITING;
+        // Constructed here (no Comm calls yet — see DataStreamer.initialize()'s comment on
+        // why Comm.makeWebRequest during View construction crashes the app); actually
+        // started from onShow() once the Comm subsystem is guaranteed ready.
+        _pairingCodeManager = new PairingCodeManager();
+        _pairingCodeManager.setCallbacks(method(:_onPairingCodeReceived), method(:_onPairingCodeConfirmed));
         _paceHistory = [];
         // Detect small/MIP screens (FR55=208px) and default to grid
         var ds = Sys.getDeviceSettings();
@@ -626,6 +635,12 @@ class RunView extends Ui.View {
             _statusTicks = 60; // ~15s — long enough to read/screenshot
             _pendingCrashMsg = null;
         }
+        // Kick off the pairing-code fallback in parallel with the BLE "auth" path —
+        // whichever completes first wins (see _applyAuthToken). No-ops if already
+        // authenticated or already started. Comm subsystem is guaranteed ready here.
+        if (!_isAuthenticated && _pairingCodeManager != null) {
+            _pairingCodeManager.start();
+        }
         if (!_phoneControlled && _isRunning) {
             // Restore after view was hidden (system menu etc).
             // Guard against session re-creation which would split the Garmin activity.
@@ -694,75 +709,8 @@ class RunView extends Ui.View {
         if (t.equals("auth")) {
             var tok   = data.get("authToken");
             var rname = data.get("runnerName");
-            if (tok != null && tok.length() > 0) {
-                App.Storage.setValue("authToken", tok);
-                _isAuthenticated  = true;
-                _isConnected      = true;
-                _connectWaitTicks = CONNECT_WAIT_MAX; // Mark grace period done
-                // Update personalised max HR for on-watch zone display
-                var mhr = data.get("maxHr");
-                if (mhr != null && mhr > 0) { _maxHr = mhr.toNumber(); }
-                // Refresh DataStreamer token in case the old one expired mid-session
-                if (_dataStreamer != null) { _dataStreamer.setAuthToken(tok); }
-                if (!_isRunning) {
-                    if (!_gpsListening) {
-                        Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
-                        _gpsListening = true;
-                    }
-                    _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
-                }
-                Sys.println("Auth received — overlayState=" + _overlayState);
-                // Tell the phone which watch app version is installed so the
-                // "Watch App Update" notification screen can show the diff.
-                _phoneLink.sendHello("3.3.7");
-                // If GPS was already locked before auth arrived, notify phone now
-                if (_gpsReady && !_isRunning && !_sessionReadySent) {
-                    _phoneLink.sendCommand("sessionReady");
-                    _sessionReadySent = true;
-                }
-            }
-            if (rname != null) { App.Storage.setValue("runnerName", rname); }
-
-                // ── Upload any pending offline batch from a previous phone-less run ──
-                // DEFENSIVE: pendingPts MUST be a Lang.Array — stale data from an old
-                // store version may have been serialised as another type.  Calling
-                // .size() on a non-Array raises "Failed invoking <symbol>" (IQ crash).
-                // CRITICAL: do NOT clear the batch before the upload confirms success.
-                // The upload is async and often fails on the first reconnect (relay
-                // settling, token just refreshed). Clearing up-front would lose the run
-                // with no chance for the 20-min BackgroundService retry. Storage is now
-                // cleared only after a confirmed 200 (see onBatchUploaded()).
-                var pendingSid = App.Storage.getValue("offlineBatchSessionId");
-                var pendingPts = App.Storage.getValue("offlineBatchPoints");
-                if (pendingSid != null && (pendingPts instanceof Lang.Array) && pendingPts.size() > 0) {
-                    Sys.println("Pending offline batch: " + pendingPts.size() + " pts for " + pendingSid);
-                    var pendingDist = App.Storage.getValue("offlineBatchDistance");
-                    var pendingDur  = App.Storage.getValue("offlineBatchDuration");
-                    var pendingAsc  = App.Storage.getValue("offlineBatchAscent");
-                    _dataStreamer.uploadOfflineBatch(pendingSid, pendingPts, pendingDist, pendingDur, pendingAsc);
-                } else if (pendingSid != null) {
-                    Sys.println("Discarded corrupt offline batch (wrong type) — keys cleared");
-                    _clearOfflineBatchStorage();
-                }
-
-                // ── In-memory fallback: storage-full runs ────────────────────
-                // If the batch save in finishRun() hit the storage quota, the GPS
-                // points were kept in _offlineBuffer (in memory) rather than being
-                // written to App.Storage.  The phone is now connected, so we upload
-                // the buffer via BT immediately — no persistent storage required.
-                // This covers the common pattern: run finishes → watch stays on →
-                // user walks to phone → reconnects within a few minutes.
-                if (_storageWriteFailed && !_isRunning && _offlineBuffer.size() > 0) {
-                    var memSid = App.Storage.getValue("offlineBatchSessionId");
-                    if (memSid != null) {
-                        Sys.println("Storage-full fallback: uploading " + _offlineBuffer.size() + " pts from memory");
-                        var memDist = App.Storage.getValue("offlineBatchDistance");
-                        var memDur  = App.Storage.getValue("offlineBatchDuration");
-                        var memAsc  = App.Storage.getValue("offlineBatchAscent");
-                        _dataStreamer.uploadOfflineBatch(memSid, _offlineBuffer, memDist, memDur, memAsc);
-                        _storageWriteFailed = false;
-                    }
-                }
+            var mhr   = data.get("maxHr");
+            _applyAuthToken(tok, rname, (mhr != null && mhr > 0) ? mhr.toNumber() : null, "ble");
             Ui.requestUpdate();
 
         } else if (t.equals("startAck")) {
@@ -914,6 +862,106 @@ class RunView extends Ui.View {
             Ui.requestUpdate();
             _isFinishing = false;  // Reset AFTER cleanup — unblocks the next run
         }
+    }
+
+    // ── Shared auth-success path ──────────────────────────────────────────────
+    // Called from BOTH the BLE "auth" message (ConnectIQ phone pairing, the original
+    // path) and PairingCodeManager's confirmed-code callback (the fallback path that
+    // doesn't depend on ConnectIQ's device-selection UI at all — see PairingCodeManager.mc
+    // for why that hand-off is unreliable). Whichever arrives first wins; calling this
+    // twice (e.g. BLE auth arrives after a code was already confirmed) is harmless — every
+    // step below is itself idempotent (guarded by _gpsListening / _isRunning checks).
+    private function _applyAuthToken(tok, rname, maxHr, source) {
+        if (tok == null || tok.length() == 0) { return; }
+        App.Storage.setValue("authToken", tok);
+        _isAuthenticated  = true;
+        _isConnected      = true;
+        _connectWaitTicks = CONNECT_WAIT_MAX; // Mark grace period done
+        if (maxHr != null && maxHr > 0) { _maxHr = maxHr; }
+        // Refresh DataStreamer token in case the old one expired mid-session
+        if (_dataStreamer != null) { _dataStreamer.setAuthToken(tok); }
+        // No further need to poll the backend for a pairing-code confirmation once
+        // authenticated via either path — avoid pointless HTTP traffic afterwards.
+        if (_pairingCodeManager != null) { _pairingCodeManager.cancel(); }
+        if (!_isRunning) {
+            if (!_gpsListening) {
+                Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
+                _gpsListening = true;
+            }
+            _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
+        }
+        Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
+        // Tell the phone which watch app version is installed so the
+        // "Watch App Update" notification screen can show the diff.
+        _phoneLink.sendHello("3.4.0"); // keep in sync with manifest.xml's iq:application version
+        // If GPS was already locked before auth arrived, notify phone now
+        if (_gpsReady && !_isRunning && !_sessionReadySent) {
+            _phoneLink.sendCommand("sessionReady");
+            _sessionReadySent = true;
+        }
+        if (rname != null) { App.Storage.setValue("runnerName", rname); }
+
+        // ── Upload any pending offline batch from a previous phone-less run ──
+        // DEFENSIVE: pendingPts MUST be a Lang.Array — stale data from an old
+        // store version may have been serialised as another type.  Calling
+        // .size() on a non-Array raises "Failed invoking <symbol>" (IQ crash).
+        // CRITICAL: do NOT clear the batch before the upload confirms success.
+        // The upload is async and often fails on the first reconnect (relay
+        // settling, token just refreshed). Clearing up-front would lose the run
+        // with no chance for the 20-min BackgroundService retry. Storage is now
+        // cleared only after a confirmed 200 (see onBatchUploaded()).
+        var pendingSid = App.Storage.getValue("offlineBatchSessionId");
+        var pendingPts = App.Storage.getValue("offlineBatchPoints");
+        if (pendingSid != null && (pendingPts instanceof Lang.Array) && pendingPts.size() > 0) {
+            Sys.println("Pending offline batch: " + pendingPts.size() + " pts for " + pendingSid);
+            var pendingDist = App.Storage.getValue("offlineBatchDistance");
+            var pendingDur  = App.Storage.getValue("offlineBatchDuration");
+            var pendingAsc  = App.Storage.getValue("offlineBatchAscent");
+            _dataStreamer.uploadOfflineBatch(pendingSid, pendingPts, pendingDist, pendingDur, pendingAsc);
+        } else if (pendingSid != null) {
+            Sys.println("Discarded corrupt offline batch (wrong type) — keys cleared");
+            _clearOfflineBatchStorage();
+        }
+
+        // ── In-memory fallback: storage-full runs ────────────────────
+        // If the batch save in finishRun() hit the storage quota, the GPS
+        // points were kept in _offlineBuffer (in memory) rather than being
+        // written to App.Storage.  The phone is now connected, so we upload
+        // the buffer via BT immediately — no persistent storage required.
+        // This covers the common pattern: run finishes → watch stays on →
+        // user walks to phone → reconnects within a few minutes.
+        if (_storageWriteFailed && !_isRunning && _offlineBuffer.size() > 0) {
+            var memSid = App.Storage.getValue("offlineBatchSessionId");
+            if (memSid != null) {
+                Sys.println("Storage-full fallback: uploading " + _offlineBuffer.size() + " pts from memory");
+                var memDist = App.Storage.getValue("offlineBatchDistance");
+                var memDur  = App.Storage.getValue("offlineBatchDuration");
+                var memAsc  = App.Storage.getValue("offlineBatchAscent");
+                _dataStreamer.uploadOfflineBatch(memSid, _offlineBuffer, memDist, memDur, memAsc);
+                _storageWriteFailed = false;
+            }
+        }
+    }
+
+    // ── PairingCodeManager callbacks ──────────────────────────────────────────
+    // NOT private: passed to PairingCodeManager.setCallbacks() via method(:...),
+    // which cannot resolve a private member (same constraint DataStreamer documents
+    // for its own Comm.makeWebRequest callbacks).
+
+    function _onPairingCodeReceived(code) {
+        _pairingCode = code;
+        Sys.println("RunView: pairing code displayed — " + code);
+        Ui.requestUpdate();
+    }
+
+    function _onPairingCodeConfirmed(token) {
+        // No runnerName/maxHr on this path — the phone already knows who the user is;
+        // it isn't sent back over this unauthenticated channel. Both arrive (or get
+        // refreshed) via the normal BLE "auth" message once ConnectIQ registers app
+        // messages against this now-linked device, same as any other reconnect.
+        _applyAuthToken(token, null, null, "pairingCode");
+        _pairingCode = null;
+        Ui.requestUpdate();
     }
 
     // ── Timer tick (250 ms) ───────────────────────────────────────────────────
@@ -1631,12 +1679,30 @@ class RunView extends Ui.View {
 
         var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy - 22, Gfx.FONT_SMALL, "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
-        dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy + 8,  Gfx.FONT_XTINY, "Open Ai Run Coach on your", Gfx.TEXT_JUSTIFY_CENTER);
-        dc.drawText(cx, cy + 22, Gfx.FONT_XTINY, "phone to connect.", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cy - 44, Gfx.FONT_SMALL, "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+
+        if (_pairingCode != null) {
+            // Pairing-code fallback got a code before the ConnectIQ BLE auth arrived —
+            // show it so the user can type it into the phone app directly instead of
+            // waiting on a device pairing hand-off that may never complete.
+            dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, cy - 18, Gfx.FONT_XTINY, "Or enter this code in", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, cy - 4,  Gfx.FONT_XTINY, "Ai Run Coach on your phone:", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, cy + 12, Gfx.FONT_NUMBER_MEDIUM, _formatPairingCode(_pairingCode), Gfx.TEXT_JUSTIFY_CENTER);
+        } else {
+            dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, cy + 8,  Gfx.FONT_XTINY, "Open Ai Run Coach on your", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, cy + 22, Gfx.FONT_XTINY, "phone to connect.", Gfx.TEXT_JUSTIFY_CENTER);
+        }
         dc.setColor(0x00AA55, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy + 40, Gfx.FONT_XTINY, "You only need to do this once.", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(cx, cy + 52, Gfx.FONT_XTINY, "You only need to do this once.", Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    // "482913" -> "482 913" — easier to read/type accurately on a small round screen.
+    private function _formatPairingCode(code) {
+        if (code == null || code.length() != 6) { return code; }
+        return code.substring(0, 3) + " " + code.substring(3, 6);
     }
 
     // ── Start hint: green half-moon at top-right button + play icon ──────────

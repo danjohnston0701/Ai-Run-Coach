@@ -1217,6 +1217,55 @@ export const garminCompanionSessions = pgTable("garmin_companion_sessions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Garmin ConnectIQ pairing diagnostics — the SDK's device-selection hand-off to Garmin
+// Connect Mobile fails silently on-device with no error surfaced to the app, so this is
+// our only server-side visibility into where pairing broke down for a given user/build.
+// Console logs alone don't scale once this is shipped to thousands of users, so events
+// are persisted here (in addition to the console.log) for querying/aggregating drop-off.
+// userId is nullable: the pairing-code flow (see garminPairingCodes below) logs events
+// from the watch before it has any authenticated user — those rows carry pairingCode
+// instead and get no userId until POST /pairing/confirm links the code to an account.
+export const garminPairingDiagnostics = pgTable("garmin_pairing_diagnostics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  pairingCode: text("pairing_code"), // set for pairing-code-flow events; correlates start/status/confirm for one attempt
+  event: text("event").notNull(), // e.g. "pairDevice", "needsToInstallConnectMobile", "pairingCode.start", "pairingCode.confirm.success"
+  details: jsonb("details"), // event-specific key/value details reported by the client
+  appVersion: text("app_version"),
+  iosVersion: text("ios_version"),
+  deviceModel: text("device_model"), // iPhone model
+  watchModel: text("watch_model"), // Garmin watch model/name, when known
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Self-configured pairing-code fallback — does not depend on Garmin's ConnectIQ SDK
+// device-selection UI at all. The watch (unauthenticated) requests a short-lived code
+// from the backend and displays it; the user types it into the already-logged-in iOS
+// app; the backend links the code to that user and hands the watch a companion JWT on
+// its next status poll. Exists because the ConnectIQ hand-off to Garmin Connect Mobile
+// is confirmed unreliable (see garminPairingDiagnostics) and this path has no dependency
+// on GCM's own UI ever rendering correctly.
+export const garminPairingCodes = pgTable("garmin_pairing_codes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // 6-digit numeric. NOT a DB-level unique constraint — codes are reused over the app's
+  // lifetime once expired/confirmed, so uniqueness is only enforced app-side among
+  // currently-pending, non-expired rows (see pairing/start handler) to avoid exhausting
+  // the ~900k code space at scale.
+  code: text("code").notNull(),
+  watchDeviceId: text("watch_device_id").notNull(), // Sys.getDeviceSettings().uniqueIdentifier
+  watchModel: text("watch_model"), // Sys.getDeviceSettings().partNumber
+  watchAppVersion: text("watch_app_version"),
+  status: text("status").notNull().default("pending"), // pending | confirmed | expired | invalidated
+  userId: varchar("user_id").references(() => users.id), // set on confirm
+  companionToken: text("companion_token"), // set on confirm; delivered to the watch on its next status poll
+  attemptCount: integer("attempt_count").default(0), // failed /confirm attempts against this code
+  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+  confirmedAt: timestamp("confirmed_at"),
+});
+
 // ==================== FITNESS & FRESHNESS TABLES ====================
 
 // Daily Fitness table (stores daily CTL/ATL/TSB calculations)
@@ -1677,6 +1726,8 @@ export type GarminBodyComposition = typeof garminBodyComposition.$inferSelect;
 export type GarminSkinTemperature = typeof garminSkinTemperature.$inferSelect;
 export type GarminRealtimeData = typeof garminRealtimeData.$inferSelect;
 export type GarminCompanionSession = typeof garminCompanionSessions.$inferSelect;
+export type GarminPairingDiagnostic = typeof garminPairingDiagnostics.$inferSelect;
+export type GarminPairingCode = typeof garminPairingCodes.$inferSelect;
 export type DailyFitness = typeof dailyFitness.$inferSelect;
 export type Segment = typeof segments.$inferSelect;
 export type SegmentEffort = typeof segmentEfforts.$inferSelect;

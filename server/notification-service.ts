@@ -259,6 +259,14 @@ export async function sendWatchSessionStartedPush(
       token: user.fcmToken,
       data: { type: "watchSessionStarted", sessionId },
       android: { priority: "high", ttl: 20000 },
+      // Required for iOS to wake the app for this data-only push at all — without
+      // content-available:1 + the background push-type, APNs has no reason to deliver
+      // it to a backgrounded/terminated app. AppDelegate.application(_:didReceiveRemoteNotification:)
+      // (Ai_Run_CoachApp.swift) is what actually acts on it once delivered.
+      apns: {
+        headers: { "apns-priority": "5", "apns-push-type": "background" },
+        payload: { aps: { "content-available": 1 } },
+      },
     };
 
     const messaging = adminSDK.messaging
@@ -310,6 +318,11 @@ export async function sendWatchSessionEndedPush(
       token: user.fcmToken,
       data: { type: "watchSessionEnded", sessionId, ...(runId ? { runId } : {}) },
       android: { priority: "high", ttl: 20000 },
+      // See sendWatchSessionStartedPush above for why this block is required for iOS delivery.
+      apns: {
+        headers: { "apns-priority": "5", "apns-push-type": "background" },
+        payload: { aps: { "content-available": 1 } },
+      },
     };
 
     const messaging = adminSDK.messaging
