@@ -192,7 +192,7 @@ fun InSessionCoachingSettingsScreen(
                 item {
                     CoachingFeatureToggle(
                         title = "500m Check-In",
-                        description = "Initial pace assessment at 500 metres into your run",
+                        description = "Initial pace assessment at 500 metres in",
                         enabled = halfKmCheckInEnabled,
                         onToggle = viewModel::onHalfKmCheckInToggled
                     )

@@ -3132,9 +3132,19 @@ class RunTrackingService : Service(), SensorEventListener {
             }
             // Distance sanity: min 2m (GPS drift), max 100m between points (teleport/spike)
             val isDistanceReasonable = distanceIncrement >= 2.0 && distanceIncrement <= 100.0
-            // Speed sanity: reject points implying >40 km/h (impossible running speed)
+            // Speed sanity: reject points implying an impossible speed for the activity.
+            // Walks: cap at 15 km/h (well above brisk race-walk pace ~7-8 km/h) — a generic
+            // 40 km/h cap (tuned for running) let real-world artifacts through undetected on a
+            // walk: signal-reacquisition "teleport" jumps of 20-95m over 3-9s imply 32-40 km/h,
+            // which is impossible for a walker but passed the running-tuned cap cleanly. Found via
+            // GPS-track analysis of a reported ~1.1km distance over-count on a phone-only walk
+            // test (30 such jumps totaling ~1.5km of an 5.46km reported distance).
+            // Runs: capped at 35 km/h — above elite marathon pace (~20 km/h) and elite 5K/10K
+            // (~24 km/h) with headroom for GPS jitter on downhills, but tighter than the old 40
+            // km/h ceiling which was closer to sprinting speed than any distance-running pace.
             val impliedSpeedKmh = if (timeSinceLastPoint > 0) (distanceIncrement / timeSinceLastPoint) * 3.6 else 0.0
-            val isSpeedReasonable = impliedSpeedKmh < 40.0 || isFirstLocations
+            val maxReasonableSpeedKmh = if (currentActivityType == "walk") 15.0 else 35.0
+            val isSpeedReasonable = impliedSpeedKmh < maxReasonableSpeedKmh || isFirstLocations
 
             if (location.accuracy <= maxAcceptableAccuracy && isDistanceReasonable && isSpeedReasonable) {
                 lastGpsAccuracyM = location.accuracy  // Track latest accepted GPS accuracy for sensor confidence reporting

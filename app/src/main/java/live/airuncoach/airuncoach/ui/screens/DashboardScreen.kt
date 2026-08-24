@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Watch
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -33,6 +34,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -88,6 +90,7 @@ fun DashboardScreen(
     onNavigateToLocationPermission: () -> Unit = {},
     onCreateGoal: () -> Unit = {},
     onNavigateToWorkoutDetail: () -> Unit = {},
+    onNavigateToColorOSSetup: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel(),
     // Key to trigger refresh when returning from other screens
     refreshKey: Int = 0
@@ -109,6 +112,7 @@ fun DashboardScreen(
     val trainingLoad by viewModel.trainingLoad.collectAsState()
     val hasPendingWatchSync by viewModel.hasPendingWatchSync.collectAsState()
     val todayActivePlans by viewModel.todayActivePlans.collectAsState()
+    val showOemBatteryPrompt by viewModel.showOemBatteryPrompt.collectAsState()
     val isKeyboardVisible = WindowInsets.isImeVisible
     val density = LocalDensity.current
     val context = LocalContext.current
@@ -289,6 +293,36 @@ fun DashboardScreen(
             )
         }
         item { Spacer(modifier = Modifier.height(Spacing.xxl)) }
+    }
+
+    // One-time nudge for ColorOS (Oppo/OnePlus/Realme) devices — shown here on the dashboard,
+    // not mid-run, so there's actually time to go set it up before starting. Routes to a
+    // dedicated step-by-step screen (ColorOSSetupScreen) rather than firing a deep link
+    // straight from the dialog, so the user gets clear instructions for every step instead of
+    // being dropped into a settings screen with no context.
+    if (showOemBatteryPrompt) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissOemBatteryPrompt() },
+            title = { Text("Reliable tracking on your phone") },
+            text = {
+                Text(
+                    "Your phone's manufacturer has its own background-restriction settings, separate from Android's — " +
+                        "if left on the default, it can throttle GPS and Bluetooth partway through a run. " +
+                        "We'll walk you through fixing it — it only takes a minute."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.dismissOemBatteryPrompt()
+                        onNavigateToColorOSSetup()
+                    }
+                ) { Text("Set up now") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissOemBatteryPrompt() }) { Text("Not now") }
+            }
+        )
     }
 }
 

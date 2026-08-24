@@ -88,6 +88,22 @@ class DashboardViewModel @Inject constructor(
     private val _isAiCoachEnabled = MutableStateFlow(true)
     val isAiCoachEnabled: StateFlow<Boolean> = _isAiCoachEnabled.asStateFlow()
 
+    // ── ColorOS (Oppo/OnePlus/Realme) Background-Restriction Prompt ────────────
+    /**
+     * One-time nudge shown on the dashboard for ColorOS devices, pointing the user at
+     * ColorOS's separate Autostart/Battery-management allowlist — a second background-killer
+     * layer that standard Android battery-optimisation exemption doesn't cover, and which can
+     * silently throttle GPS/Bluetooth mid-run. Shown here (not mid-run) so the user has time to
+     * actually go set it up before starting, rather than being told once a run is already live.
+     * See [live.airuncoach.airuncoach.utils.OemBatteryHelper].
+     */
+    private val _showOemBatteryPrompt = MutableStateFlow(false)
+    val showOemBatteryPrompt: StateFlow<Boolean> = _showOemBatteryPrompt.asStateFlow()
+
+    fun dismissOemBatteryPrompt() {
+        _showOemBatteryPrompt.value = false
+    }
+
     // Training Load / Recovery Engine
     private val _trainingLoad = MutableStateFlow<live.airuncoach.airuncoach.network.model.TrainingLoadResponse?>(null)
     val trainingLoad: StateFlow<live.airuncoach.airuncoach.network.model.TrainingLoadResponse?> = _trainingLoad.asStateFlow()  // Displayed in DashboardScreen
@@ -175,7 +191,13 @@ class DashboardViewModel @Inject constructor(
                 Log.e("DashboardViewModel", "Error loading target distance/time preference: ${e.message}", e)
             }
         }
-        
+
+        try {
+            checkOemBatteryPrompt()
+        } catch (e: Exception) {
+            Log.e("DashboardViewModel", "Error checking OEM battery prompt: ${e.message}", e)
+        }
+
         viewModelScope.launch {
             try {
                 loadWeather()
@@ -216,6 +238,17 @@ class DashboardViewModel @Inject constructor(
     
     private fun loadAiCoachPreference() {
         _isAiCoachEnabled.value = sharedPrefs.getBoolean("ai_coach_enabled", true)
+    }
+
+    // Only ever shown once per install — set the flag immediately so it can't re-fire on
+    // every dashboard visit even if the user dismisses without acting.
+    private fun checkOemBatteryPrompt() {
+        if (live.airuncoach.airuncoach.utils.OemBatteryHelper.isColorOSDevice() &&
+            !sharedPrefs.getBoolean("oem_battery_prompt_shown", false)
+        ) {
+            sharedPrefs.edit().putBoolean("oem_battery_prompt_shown", true).apply()
+            _showOemBatteryPrompt.value = true
+        }
     }
 
     // Remembers the free-run/free-walk target distance & time the user last picked on

@@ -43,6 +43,7 @@ private data class Tip(
     val summary: String,
     val bullets: List<TipBullet>,
     val note: String? = null,
+    val hasColorOSGuide: Boolean = false,
 )
 
 private val usefulTips = listOf(
@@ -66,6 +67,7 @@ private val usefulTips = listOf(
             TipBullet("Settings → Privacy → Startup Manager (Autostart) → enable AI Run Coach."),
             TipBullet("Open Recent Apps, find AI Run Coach's card, and tap the lock icon so it isn't cleared automatically."),
         ),
+        hasColorOSGuide = true,
     ),
     Tip(
         icon = Icons.Default.BatteryAlert,
@@ -121,7 +123,8 @@ private val usefulTips = listOf(
 
 @Composable
 fun UsefulTipsScreen(
-    onNavigateBack: () -> Unit = {}
+    onNavigateBack: () -> Unit = {},
+    onNavigateToColorOSSetup: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -174,14 +177,14 @@ fun UsefulTipsScreen(
                 )
             }
             items(usefulTips) { tip ->
-                TipCard(tip)
+                TipCard(tip, onNavigateToColorOSSetup)
             }
         }
     }
 }
 
 @Composable
-private fun TipCard(tip: Tip) {
+private fun TipCard(tip: Tip, onNavigateToColorOSSetup: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
 
     Card(
@@ -267,6 +270,15 @@ private fun TipCard(tip: Tip) {
                                 color = Colors.textPrimary,
                                 lineHeight = 18.sp
                             )
+                        }
+                    }
+                    if (tip.hasColorOSGuide) {
+                        Spacer(modifier = Modifier.height(Spacing.sm))
+                        Button(
+                            onClick = onNavigateToColorOSSetup,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(text = "Open Step-by-Step Setup Guide", fontSize = 13.sp)
                         }
                     }
                     tip.note?.let { note ->

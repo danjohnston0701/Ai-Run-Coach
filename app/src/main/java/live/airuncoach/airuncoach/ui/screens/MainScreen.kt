@@ -309,6 +309,9 @@ fun MainScreen(
                     onNavigateToWorkoutDetail = {
                         navController.navigate("workout_detail")
                     },
+                    onNavigateToColorOSSetup = {
+                        navController.navigate("color_os_setup")
+                    },
                     refreshKey = refreshKey
                 )
             }
@@ -362,6 +365,12 @@ fun MainScreen(
             }
             composable("useful_tips") {
                 UsefulTipsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToColorOSSetup = { navController.navigate("color_os_setup") }
+                )
+            }
+            composable("color_os_setup") {
+                ColorOSSetupScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
