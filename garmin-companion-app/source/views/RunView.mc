@@ -36,6 +36,10 @@ class RunView extends Ui.View {
     private var _dotCount        = 0;
     // Personalised max HR from phone (Tanaka formula). Default 185 until auth received.
     private var _maxHr           = 185;
+    // True only once the phone has actually sent a real personalised maxHr (i.e. the
+    // user has a known age/DOB). Stays false for users who never set one — in that case
+    // _maxHr above is just a placeholder and must NOT be used to compute a shown HR zone.
+    private var _maxHrKnown      = false;
     // Grace period before showing "OFFLINE" label (lets auth message arrive first)
     private var _connectWaitTicks = 0;
     private const CONNECT_WAIT_MAX = 32; // 32 x 250ms = 8 seconds
@@ -877,7 +881,7 @@ class RunView extends Ui.View {
         _isAuthenticated  = true;
         _isConnected      = true;
         _connectWaitTicks = CONNECT_WAIT_MAX; // Mark grace period done
-        if (maxHr != null && maxHr > 0) { _maxHr = maxHr; }
+        if (maxHr != null && maxHr > 0) { _maxHr = maxHr; _maxHrKnown = true; }
         // Refresh DataStreamer token in case the old one expired mid-session
         if (_dataStreamer != null) { _dataStreamer.setAuthToken(tok); }
         // No further need to poll the backend for a pairing-code confirmation once
@@ -893,7 +897,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.0"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.1"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");
@@ -1378,7 +1382,17 @@ class RunView extends Ui.View {
             var circR = (w * 0.168).toNumber();
             _drawRing(dc, cx - ringR, cy, circR, 0x00BFA8, "KM",   (_dispDistance / 1000.0).format("%.2f"));
             _drawRing(dc, cx + ringR, cy, circR, 0xFFDD00, "PACE", _fmtPaceDec(_dispPace));
-            _drawRing(dc, cx, cy + ringR, circR, 0xFF3355, "HR",   _dispHR > 0 ? _dispHR.format("%d") : "--");
+            // Only show a zone number / zone-coloured ring once we have BOTH a real
+            // personalised max HR (user has a known age/DOB) AND a live HR reading —
+            // without either, a shown zone would just be a guess dressed up as fact.
+            var hrLabel = "HR";
+            var hrColor = 0xFF3355; // unpersonalised fallback — plain red, no zone shown
+            if (_maxHrKnown && _dispHR > 0) {
+                var hrZone = _hrZone(_dispHR);
+                hrLabel = "HR " + hrZone;
+                hrColor = _hrZoneColor(hrZone);
+            }
+            _drawRing(dc, cx, cy + ringR, circR, hrColor, hrLabel, _dispHR > 0 ? _dispHR.format("%d") : "--");
             _drawBattery(dc, cx, cy, ringR, circR);
             _drawStatusBar(dc, cx, w, h);
         }
@@ -1793,6 +1807,16 @@ class RunView extends Ui.View {
         if (pct < 80) { return 3; }
         if (pct < 90) { return 4; }
         return 5;
+    }
+
+    // Same 5-zone palette used on the phone app's HR zone charts (RunSummaryScreen.kt),
+    // so the ring color means the same thing across Android/iOS/Garmin.
+    private function _hrZoneColor(zone) {
+        if (zone <= 1) { return 0x42A5F5; }  // Zone 1 - blue   (recovery)
+        if (zone == 2) { return 0x4CAF50; }  // Zone 2 - green  (easy/base aerobic)
+        if (zone == 3) { return 0xFFC107; }  // Zone 3 - amber  (aerobic/tempo)
+        if (zone == 4) { return 0xFF9800; }  // Zone 4 - orange (threshold)
+        return 0xE53935;                     // Zone 5 - red    (max effort)
     }
 
     private function _haversineMeters(lat1, lon1, lat2, lon2) {

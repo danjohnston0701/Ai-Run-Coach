@@ -366,7 +366,10 @@ class GarminWatchManager(
     // (e.g. the user opens the watch app while the phone app is idle on the home screen).
     private var cachedAuthToken: String? = null
     private var cachedRunnerName: String = ""
-    private var cachedUserMaxHr: Int = 185  // Default; updated from user profile on sendAuth
+    // Null until the user's real age is known — the watch treats a missing/absent
+    // "maxHr" field as "can't personalise HR zones" rather than silently trusting
+    // a guessed fallback number as if it were the user's real max HR.
+    private var cachedUserMaxHr: Int? = null
 
     // ── Cached prepared-run payload ───────────────────────────────────────────
     // Set by sendPreparedRun(); cleared by clearPendingPreparedRun() when the
@@ -453,7 +456,8 @@ class GarminWatchManager(
      * Sends authentication and user profile to the watch.
      * @param userAge Optional user age — used to compute personalised max HR for on-watch
      *                HR zone display using the Tanaka formula (208 − 0.7 × age).
-     *                Defaults to 185 bpm if not provided.
+     *                If null/unknown, no "maxHr" is sent at all — the watch shows an
+     *                unpersonalised HR ring rather than guessing a fallback max HR.
      */
     fun sendAuth(authToken: String, runnerName: String, userAge: Int? = null) {
         // Cache credentials so we can auto-respond to future "watchReady" messages
@@ -464,12 +468,13 @@ class GarminWatchManager(
         if (userAge != null && userAge > 0) {
             cachedUserMaxHr = (208 - (0.7 * userAge).toInt()).coerceIn(155, 210)
         }
-        sendToWatch(mapOf(
+        val payload = mutableMapOf<String, Any>(
             "type"       to "auth",
             "authToken"  to authToken,
-            "runnerName" to runnerName,
-            "maxHr"      to cachedUserMaxHr
-        ))
+            "runnerName" to runnerName
+        )
+        cachedUserMaxHr?.let { payload["maxHr"] = it }
+        sendToWatch(payload)
     }
 
     fun sendRunUpdate(
