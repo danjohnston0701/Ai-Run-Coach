@@ -34,6 +34,7 @@ import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.WeatherRepository
 import live.airuncoach.airuncoach.data.SyncQueue
+import live.airuncoach.airuncoach.data.RunCrashRecoveryStore
 import live.airuncoach.airuncoach.data.workers.SyncWorker
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
@@ -75,6 +76,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private lateinit var weatherRepository: WeatherRepository
     private lateinit var sensorManager: SensorManager
     private lateinit var syncQueue: SyncQueue  // For offline run persistence
+    private lateinit var runCrashRecoveryStore: RunCrashRecoveryStore  // Crash/freeze-survival snapshot
     private var stepCounterSensor: Sensor? = null
     private var stepDetectorSensor: Sensor? = null  // Fallback: fires per step
     private var heartRateSensor: Sensor? = null
@@ -106,6 +108,8 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastWatchGpsMs: Long = 0L
     // Throttle for live-session metric sync (don't hammer the server every GPS tick)
     private var lastLiveSessionSyncMs: Long = 0L
+    // Throttle for the local crash-recovery snapshot (see RunCrashRecoveryStore)
+    private var lastCrashSnapshotSaveMs: Long = 0L
 
     // True when this run was initiated by a watch "start" command.
     // Used to: (a) pre-block phone GPS at run start and (b) skip sending redundant
@@ -695,6 +699,10 @@ class RunTrackingService : Service(), SensorEventListener {
         // 5 seconds keeps observers up-to-date without hammering the API.
         private const val LIVE_SESSION_SYNC_INTERVAL_MS = 5_000L
 
+        // How often (ms) the in-progress run state is snapshotted to local disk so a
+        // frozen/killed process loses at most this much data instead of the whole run.
+        private const val CRASH_SNAPSHOT_INTERVAL_MS = 20_000L
+
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
         const val ACTION_PAUSE_TRACKING = "ACTION_PAUSE_TRACKING"
@@ -876,7 +884,12 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Initialize offline sync queue for run persistence
         syncQueue = SyncQueue(this)
-        
+
+        // Initialize crash-recovery snapshot store, and surface (in logcat) any snapshot
+        // left over from a previous run that never ended normally — see RunCrashRecoveryStore.
+        runCrashRecoveryStore = RunCrashRecoveryStore(this)
+        runCrashRecoveryStore.logAndPruneStaleSnapshots()
+
         // Start periodic background sync work
         SyncWorker.schedulePeriodicSync(this)
         Log.d("RunTrackingService", "✅ Initialized offline sync queue and scheduled periodic sync")
@@ -3863,6 +3876,25 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
             }
         }
+
+        // ── Crash-recovery snapshot ────────────────────────────────────────
+        // Periodically persist the just-computed run state to local disk so that if the
+        // process freezes/dies mid-session (see RunCrashRecoveryStore), at most this
+        // interval's worth of data is lost instead of the whole run. Never touches the
+        // real upload/pending-sync path — see that class for why.
+        if (isTracking && startTime > 0L) {
+            val now = System.currentTimeMillis()
+            if (now - lastCrashSnapshotSaveMs >= CRASH_SNAPSHOT_INTERVAL_MS) {
+                lastCrashSnapshotSaveMs = now
+                val snapshotStartTime = startTime
+                val snapshot = _currentRunSession.value
+                if (snapshot != null) {
+                    serviceScope.launch(Dispatchers.IO) {
+                        runCrashRecoveryStore.save(snapshotStartTime, snapshot)
+                    }
+                }
+            }
+        }
     }
 
     /** Converts "M:SS" pace string → seconds/km (e.g. "4:32" → 272.0) */
@@ -4140,6 +4172,15 @@ class RunTrackingService : Service(), SensorEventListener {
         // Clear live session ID so no more syncs fire after the run ends
         activeLiveSessionId = null
         lastLiveSessionSyncMs = 0L
+        lastCrashSnapshotSaveMs = 0L
+        // Run is ending normally via the real save/upload path below — the crash-recovery
+        // snapshot's only job was to survive a freeze mid-session, so it's no longer needed.
+        if (startTime > 0L) {
+            val stoppedRunStartTime = startTime
+            serviceScope.launch(Dispatchers.IO) {
+                runCrashRecoveryStore.clear(stoppedRunStartTime)
+            }
+        }
         // Snapshot BEFORE resetting — used below to decide whether to skip the phone upload.
         // The watch calls session/end (creating a run record) only when it was disconnected at
         // run end.  If the watch was connected, the phone's upload is the sole record.
