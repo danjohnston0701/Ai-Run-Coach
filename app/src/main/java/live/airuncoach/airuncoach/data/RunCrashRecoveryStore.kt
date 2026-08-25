@@ -55,6 +55,30 @@ class RunCrashRecoveryStore(context: Context) {
     }
 
     /**
+     * Reads back the most recently written snapshot, if any — used by
+     * RunTrackingService's null-Intent (OS-restarted-the-process) recovery path when
+     * the process was killed outright rather than gracefully (onDestroy never ran, so
+     * the in-memory `_currentRunSession` companion object was lost along with the rest
+     * of the old process). The on-disk snapshot is the only surviving record of that
+     * run in that case, so this is what makes hard-kill recovery possible at all, not
+     * just the soft-kill case onDestroy() already handles.
+     *
+     * Best-effort — returns null (never throws) if nothing is found or the file is
+     * corrupt/unreadable, so a bad snapshot can't itself crash the recovery path it's
+     * meant to protect.
+     */
+    fun loadMostRecent(): RunSession? {
+        return try {
+            val files = dir.listFiles { f -> f.name.startsWith("snapshot_") && f.name.endsWith(".json") }
+            val latest = files?.maxByOrNull { it.lastModified() } ?: return null
+            gson.fromJson(latest.readText(), RunSession::class.java)
+        } catch (e: Exception) {
+            Log.w("RunCrashRecoveryStore", "loadMostRecent failed (non-fatal): ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Best-effort housekeeping: surfaces (in logcat) any snapshot left over from a run
      * that never called clear() — i.e. the app was killed/frozen mid-session rather than
      * stopped normally — and prunes anything old enough to be irrecoverable/irrelevant.

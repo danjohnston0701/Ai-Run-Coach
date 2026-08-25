@@ -156,6 +156,9 @@ private fun NavGraphBuilder.rootNavigationDestinations(
                     navController.navigate("observer_session_standalone/$sessionId") {
                         popUpTo(AppRoutes.LOGIN) { inclusive = true }
                     }
+                },
+                onNavigateToEmailVerification = { email ->
+                    navController.navigate("email_verification/${java.net.URLEncoder.encode(email, "UTF-8")}")
                 }
             )
         }
@@ -209,8 +212,13 @@ private fun NavGraphBuilder.rootNavigationDestinations(
                 email = email,
                 onNavigateBack = { navController.popBackStack() },
                 onVerificationSuccess = {
+                    // popUpTo(AppRoutes.LOGIN) rather than "sign_up" — this screen is now also
+                    // reached from LoginScreen (returning user whose account was never verified),
+                    // where "sign_up" was never pushed onto the back stack. LOGIN is the graph's
+                    // startDestination so it's always present, clearing the whole auth flow
+                    // (login/sign_up/email_verification) regardless of which one led here.
                     navController.navigate("onboarding_intro") {
-                        popUpTo("sign_up") { inclusive = true }
+                        popUpTo(AppRoutes.LOGIN) { inclusive = true }
                     }
                 }
             )

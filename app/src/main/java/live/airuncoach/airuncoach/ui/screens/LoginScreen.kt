@@ -62,6 +62,7 @@ fun LoginScreen(
     onNavigateToSignUp: () -> Unit = {},
     onNavigateToForgotPassword: () -> Unit = {},
     onNavigateToObserverSession: (sessionId: String) -> Unit = {}, // TODO: Remove when Live Share is enabled
+    onNavigateToEmailVerification: (email: String) -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -128,6 +129,18 @@ fun LoginScreen(
         // No token or token has expired — show the login screen.
         android.util.Log.d("LoginScreen", "No valid session (token missing or expired), showing login screen")
         isCheckingAuth = false
+    }
+
+    // Navigate to email verification when the server rejects login with 403/requiresVerification
+    // (LoginViewModel.login() sets these flags but deliberately leaves `error` null for this case
+    // — see the comment there — so without this the user got no feedback and stayed stuck on the
+    // login screen with the button just going back to idle. SignUpScreen already has the
+    // equivalent effect for the just-registered path; LoginScreen never had it for the
+    // returning-user path.
+    LaunchedEffect(loginState.requiresEmailVerification) {
+        if (loginState.requiresEmailVerification && loginState.pendingVerificationEmail.isNotBlank()) {
+            onNavigateToEmailVerification(loginState.pendingVerificationEmail)
+        }
     }
 
     // Navigate on successful login

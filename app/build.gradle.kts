@@ -8,6 +8,7 @@ plugins {
     id("com.google.dagger.hilt.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
 
 // ── Load local.properties for signing credentials ──────────────────────────
@@ -183,10 +184,12 @@ dependencies {
     // Requires: PICOVOICE_ACCESS_KEY in local.properties + hey_coach_android.ppn in assets/
     implementation("ai.picovoice:porcupine-android:3.0.2")
 
-    // --- Firebase: Cloud Messaging for push notifications, Analytics for funnel tracking ---
+    // --- Firebase: Cloud Messaging for push notifications, Analytics for funnel tracking,
+    // Crashlytics for real crash/ANR reporting (see RunApplication.kt for init + user tagging) ---
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
     implementation("com.google.firebase:firebase-analytics-ktx")
+    implementation("com.google.firebase:firebase-crashlytics-ktx")
 
     // --- Google Play Billing: In-app subscriptions and purchases ---
     implementation("com.android.billingclient:billing-ktx:8.0.0")

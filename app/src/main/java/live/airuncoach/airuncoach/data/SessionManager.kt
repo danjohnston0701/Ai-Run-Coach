@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 
 class SessionManager(context: Context) {
 
@@ -70,6 +71,9 @@ class SessionManager(context: Context) {
             remove("short_user_id")
             remove("user_name")
         }
+        // Detach Crashlytics reports from this user now that they're logged out —
+        // FirebaseCrashlytics has no "unset", so blank is the documented way to clear it.
+        FirebaseCrashlytics.getInstance().setUserId("")
     }
 
     /**
@@ -105,6 +109,10 @@ class SessionManager(context: Context) {
         sharedPreferences.edit {
             putString("user_id", userId)
         }
+        // Tag every subsequent Crashlytics report (crash, ANR, or recordException) with this
+        // user so a beta tester's own bug report can be matched to a real stack trace instead
+        // of guessed at from a paraphrased description.
+        FirebaseCrashlytics.getInstance().setUserId(userId)
     }
     
     /**

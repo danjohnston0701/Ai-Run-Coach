@@ -1031,6 +1031,11 @@ class GarminWatchManager(
             }
         } catch (e: Exception) {
             Log.w(TAG, "handleWatchMessage: ${e.message}")
+            // This swallows anything thrown while processing an incoming watch message —
+            // including the synchronous call into onWatchCommand (start/pause/resume/stop) and
+            // the GPS/biometric frame callbacks into RunTrackingService. Record it as a
+            // non-fatal rather than only a logcat line the device owner will never see.
+            com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 

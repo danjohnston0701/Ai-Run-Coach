@@ -115,6 +115,20 @@ class RunTrackingService : Service(), SensorEventListener {
     // Used to: (a) pre-block phone GPS at run start and (b) skip sending redundant
     // runUpdate messages back to the watch (watch has its own authoritative data).
     private var wasRunStartedByWatch: Boolean = false
+
+    // True once phone GPS + sensors have actually been requested for the current run.
+    // For a watch-initiated run this starts false — the watch is the authoritative GPS/HR/
+    // cadence source and running the phone's own GPS chip (high-accuracy, up to 2 Hz) and
+    // BODY_SENSORS listeners in parallel the whole session is pure waste: every phone fix
+    // was being computed and then thrown away downstream anyway (see the lastWatchGpsMs
+    // check in onNewLocation). That redundant radio/CPU load, stacked on top of the
+    // already-continuous ConnectIQ Bluetooth traffic, is a real contributor to watch
+    // sessions getting killed by aggressive OEM battery managers (e.g. ColorOS) in a way
+    // phone-only sessions never trigger. Phone GPS/sensors now only spin up reactively, as
+    // a fallback, if watch GPS actually goes stale (checkPhoneGpsFallback(), driven off the
+    // same 1 Hz timer tick that already drives updateRunSession()) — and once started, are
+    // left running for the rest of the session rather than flapping on/off.
+    private var phoneGpsFallbackActive: Boolean = false
     private var hasGarminData: Boolean = false   // true once any biometric frame is received
     private var garminDeviceName: String? = null // e.g. "Vívoactive 4", "Forerunner 965"
 
@@ -1364,11 +1378,51 @@ class RunTrackingService : Service(), SensorEventListener {
             if (orphanedSession?.isActive == true && !isTracking) {
                 Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent with an active orphaned session — " +
                     "service was killed and restarted by the OS mid-run. Finalizing via stopTracking() instead of continuing as a zombie.")
+                // Not a JVM crash (nothing threw), but this null-Intent respawn only ever
+                // happens when the OS killed and restarted the service mid-run — recording it
+                // as a non-fatal is what lets us see, per device/OEM (see the custom keys set
+                // in RunApplication.initCrashlytics()), how often this actually happens instead
+                // of only hearing about it when a user notices and emails us.
+                com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(
+                    RuntimeException("RunTrackingService soft-killed and respawned by OS mid-run (session survived in memory)")
+                )
                 postSessionInterruptedNotification(orphanedSession.sessionType)
                 stopTracking()
             } else {
-                Log.d("RunTrackingService", "onStartCommand: null Intent, no active session to recover — stopping self")
-                stopSelf()
+                // No in-memory session survived either — this is a HARD kill: the OS destroyed
+                // the whole process (onDestroy() never ran, so the _currentRunSession companion
+                // object reset along with everything else), not just the soft respawn the branch
+                // above handles. The on-disk crash-recovery snapshot (RunCrashRecoveryStore,
+                // written every ~20s while tracking) is the only remaining record of that run —
+                // without this fallback it's silently lost with nothing shown to the user, which
+                // is exactly what was reported (session "instantly disappeared", nothing saved).
+                val recovered = runCrashRecoveryStore.loadMostRecent()
+                if (recovered != null && recovered.isActive) {
+                    Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent, no in-memory session, but a crash-recovery " +
+                        "snapshot exists (startTime=${recovered.startTime}) — process was hard-killed. Recovering via stopTracking().")
+                    com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(
+                        RuntimeException("RunTrackingService HARD-killed by OS mid-run (in-memory session lost, recovered from disk snapshot)")
+                    )
+                    _currentRunSession.value = recovered
+                    // stopTracking() below clears the snapshot keyed on the *instance* startTime
+                    // (left at 0 here, see comment below) rather than recovered.startTime, so it
+                    // would never actually delete this file — clear it explicitly now instead.
+                    serviceScope.launch(Dispatchers.IO) {
+                        runCrashRecoveryStore.clear(recovered.startTime)
+                    }
+                    // Deliberately leave `startTime` at 0 (this fresh instance's default) rather
+                    // than seeding it from the snapshot: stopTracking()'s startTime==0 fallback
+                    // already uses session.duration directly (the last known-good duration as of
+                    // the snapshot, at most ~20s stale). Setting startTime here would instead
+                    // make it compute (now - startTime), which counts the entire unknown dead
+                    // time between the kill and this restart as active run duration — wrong in
+                    // the opposite direction.
+                    postSessionInterruptedNotification(recovered.sessionType)
+                    stopTracking()
+                } else {
+                    Log.d("RunTrackingService", "onStartCommand: null Intent, no active session to recover — stopping self")
+                    stopSelf()
+                }
             }
             return START_NOT_STICKY
         }
@@ -1614,6 +1668,7 @@ class RunTrackingService : Service(), SensorEventListener {
         targetReachedAtDurationMs = null  // Reset for new run
         hasGarminData = false       // Will be set true once first watch biometric frame arrives
         garminDeviceName = null     // Re-captured on first frame new run
+        phoneGpsFallbackActive = false  // Reset for new run — re-evaluated below / by checkPhoneGpsFallback()
         lastPhase = null        // Reset for new run - allow first phase change to trigger
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
@@ -1764,11 +1819,16 @@ class RunTrackingService : Service(), SensorEventListener {
         // Initialize pace coaching (only active when target time + distance are set)
         initPaceCoaching()
 
-        // Start location and sensors (skip real GPS/sensors during simulation — simulator feeds locations directly)
+        // Start location and sensors (skip real GPS/sensors during simulation — simulator feeds locations directly).
+        // For a watch-initiated run, skip the initial request entirely — the watch is the
+        // authoritative GPS/HR/cadence source and checkPhoneGpsFallback() (driven off the
+        // per-second timer tick) will start these reactively only if watch data actually
+        // goes stale. See phoneGpsFallbackActive's declaration for the full rationale.
         try {
-            if (!isSimulating) {
+            if (!isSimulating && !wasRunStartedByWatch) {
                 requestLocationUpdates()
                 startSensorTracking()
+                phoneGpsFallbackActive = true
             }
             startTimer()  // Start independent timer
             Log.d("RunTrackingService", "Tracking: ${if (isSimulating) "simulation mode (no real GPS)" else "GPS, sensors,"} and timer started")
@@ -1780,6 +1840,7 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         } catch (e: Exception) {
             Log.e("RunTrackingService", "Failed to start sensors", e)
+            com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(e)
         }
         
         // Fetch weather in background (non-blocking)
@@ -4099,6 +4160,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 try {
                     // Update the run session every second regardless of location
                     updateRunSession()
+                    checkPhoneGpsFallback()
                 } catch (e: Exception) {
                     Log.e("RunTrackingService", "Timer update failed", e)
                 } finally {
@@ -4128,7 +4190,33 @@ class RunTrackingService : Service(), SensorEventListener {
         Log.d("RunTrackingService", "Timer stopped")
     }
 
-    private fun pauseTracking() { 
+    /**
+     * Reactive fallback for a watch-initiated run: phone GPS/sensors are deliberately NOT
+     * requested at startTracking() time (see phoneGpsFallbackActive's declaration) since the
+     * watch is the authoritative source and running both continuously wastes battery/radio
+     * for zero benefit. If watch GPS actually goes stale — the same 15 s staleness window
+     * onNewLocation() already uses to decide whether to trust an incoming phone fix — start
+     * requesting phone GPS/sensors for real, since at that point they're the only source
+     * left, not a redundant standby. Runs off the existing 1 Hz timer tick; once triggered it
+     * stays on for the rest of the run rather than flapping with every brief BT hiccup.
+     */
+    private fun checkPhoneGpsFallback() {
+        if (!wasRunStartedByWatch || phoneGpsFallbackActive || !isTracking || isSimulating) return
+        val staleSinceMs = System.currentTimeMillis() - lastWatchGpsMs
+        if (staleSinceMs >= 15_000L) {
+            Log.w("RunTrackingService", "⌚ Watch GPS stale for ${staleSinceMs}ms — starting phone GPS/sensors as fallback")
+            phoneGpsFallbackActive = true
+            try {
+                requestLocationUpdates()
+                startSensorTracking()
+            } catch (e: Exception) {
+                Log.e("RunTrackingService", "Failed to start phone GPS fallback", e)
+                phoneGpsFallbackActive = false
+            }
+        }
+    }
+
+    private fun pauseTracking() {
         isTracking = false
         pauseStartTime = System.currentTimeMillis()  // Record when pause started
         stopTimer()  // Stop timer when paused
@@ -4153,8 +4241,15 @@ class RunTrackingService : Service(), SensorEventListener {
             pauseStartTime = 0
         }
         startTimer()  // Restart timer when resuming
-        requestLocationUpdates()
-        startSensorTracking()
+        // Only re-request phone GPS/sensors if they were actually active before the pause
+        // (phone-only run, or a watch run where the staleness fallback had already kicked
+        // in). For a healthy watch run that never fell back, leave them off — the resumed
+        // timer's tick will re-run checkPhoneGpsFallback() and start them reactively if
+        // watch GPS genuinely goes stale, same as it would mid-run.
+        if (!wasRunStartedByWatch || phoneGpsFallbackActive) {
+            requestLocationUpdates()
+            startSensorTracking()
+        }
     }
 
     /**
@@ -4883,7 +4978,10 @@ class RunTrackingService : Service(), SensorEventListener {
                             // re-evaluates the PRIORITY_HIGH_ACCURACY request under the new battery
                             // policy.  Without this the existing subscription keeps whatever
                             // interval the OS last negotiated before power saver was toggled.
-                            if (isTracking) {
+                            // Only relevant if phone GPS is actually in use — for a healthy watch-
+                            // initiated run (phoneGpsFallbackActive == false) phone GPS was never
+                            // requested in the first place, so there's nothing to re-evaluate here.
+                            if (isTracking && (!wasRunStartedByWatch || phoneGpsFallbackActive)) {
                                 Log.d("RunTrackingService", "Power saver changed mid-run — re-requesting location updates")
                                 try {
                                     fusedLocationClient.removeLocationUpdates(locationCallback)
