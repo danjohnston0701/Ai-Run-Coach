@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -71,7 +72,7 @@ sealed class Screen(val route: String, val label: String, val resourceId: Int) {
     object Home : Screen("home", "Home", R.drawable.icon_home_vector)
     object History : Screen("history", "History", R.drawable.icon_chart_vector)
     object Goals : Screen("goals", "Goals", R.drawable.icon_target_vector)
-    object AiPlans : Screen("ai_plans", "Ai Plans", R.drawable.icon_calendar_vector)
+    object AiPlans : Screen("ai_plans", "AI Plans", R.drawable.icon_calendar_vector)
     object Profile : Screen("profile", "Profile", R.drawable.icon_profile_vector)
 }
 
@@ -212,7 +213,9 @@ fun MainScreen(
                                 text = screen.label,
                                 style = AppTextStyles.caption.copy(
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                )
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         },
                         selected = isSelected,
