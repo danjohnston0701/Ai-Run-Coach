@@ -301,7 +301,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // ==================== AUTH ENDPOINTS ====================
-  
+
+  // Temporary kill-switch: the email-verification-OTP step at signup was
+  // causing new-user abandonment. Flip back to `true` to restore requiring
+  // verification before login. Both apps only react to `requiresVerification`
+  // from register/login, so this single flag is sufficient without any
+  // Android/iOS changes. (2026-08-27)
+  const EMAIL_VERIFICATION_ENABLED = false;
+
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
       const { email, password, name, timezone, country, platform } = req.body;
@@ -373,29 +380,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timezone: resolvedTimezone,
         country: resolvedCountry,
         currency: inferredCurrency,
-        emailVerified: false,
+        emailVerified: !EMAIL_VERIFICATION_ENABLED,
         emailVerificationToken: otpHash,
         emailVerificationExpiry: otpExpiry,
         deviceSource: normalizedPlatform,
       });
 
-      // Send verification email (non-blocking — don't fail registration if email fails)
-      try {
-        const { sendEmailVerificationEmail } = await import("./email-service");
-        await sendEmailVerificationEmail({ email, name, otp });
-        console.log(`[Register] Verification OTP sent to ${email}`);
-      } catch (emailErr) {
-        console.error(`[Register] Failed to send verification email to ${email}:`, emailErr);
+      if (EMAIL_VERIFICATION_ENABLED) {
+        // Send verification email (non-blocking — don't fail registration if email fails)
+        try {
+          const { sendEmailVerificationEmail } = await import("./email-service");
+          await sendEmailVerificationEmail({ email, name, otp });
+          console.log(`[Register] Verification OTP sent to ${email}`);
+        } catch (emailErr) {
+          console.error(`[Register] Failed to send verification email to ${email}:`, emailErr);
+        }
+
+        // Return requiresVerification flag with user data (but no auth token yet)
+        const { password: _, ...userWithoutPassword } = user;
+        return res.status(201).json({
+          requiresVerification: true,
+          user: userWithoutPassword,
+          email: user.email,
+          message: "Account created. Please check your email for a 6-digit verification code.",
+        });
       }
 
-      // Return requiresVerification flag with user data (but no auth token yet)
+      // Verification disabled — sign the user in immediately, same response
+      // shape as a successful login so both apps' existing "token present"
+      // auto-login handling picks it up with no client-side change.
+      const token = generateToken({ userId: user.id, email: user.email });
       const { password: _, ...userWithoutPassword } = user;
-      res.status(201).json({
-        requiresVerification: true,
-        user: userWithoutPassword,
-        email: user.email,
-        message: "Account created. Please check your email for a 6-digit verification code.",
-      });
+      res.status(201).json({ user: userWithoutPassword, token });
     } catch (error: any) {
       console.error("Register error:", error);
       res.status(500).json({ error: "Failed to register user" });
@@ -559,7 +575,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Block unverified accounts — silently resend OTP and inform the app
-      if (user.emailVerified === false) {
+      if (EMAIL_VERIFICATION_ENABLED && user.emailVerified === false) {
         try {
           const cryptoMod = await import("crypto");
           const otp = Math.floor(100000 + Math.random() * 900000).toString();
