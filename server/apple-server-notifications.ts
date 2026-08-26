@@ -369,8 +369,18 @@ export async function handleAppleServerNotification(
     if (
       notificationType === "SUBSCRIBED" ||
       notificationType === "DID_RENEW" ||
-      notificationType === "DID_CHANGE_RENEWAL_STATUS"
+      notificationType === "DID_CHANGE_RENEWAL_STATUS" ||
+      notificationType === "DID_CHANGE_RENEWAL_PREF"
     ) {
+      // DID_CHANGE_RENEWAL_PREF fires whenever a subscriber switches products —
+      // upgrade/downgrade between tiers, or toggling the AI-Plans variant of the
+      // same tier. For an immediate upgrade/crossgrade, signedTransactionInfo is
+      // already the new (switched) transaction, so this is what keeps tier/
+      // ai_plans_enabled in sync right away instead of waiting for the next
+      // DID_RENEW (which, for an annual plan, could be up to a year later). For a
+      // downgrade (which Apple defers to the next renewal boundary),
+      // signedTransactionInfo still reflects the current, unchanged transaction,
+      // so handling it here is a harmless no-op until DID_RENEW applies the switch.
       if (!transactionInfo || !renewalInfo) {
         console.error(
           "[Apple Notifications] Missing transaction or renewal info for subscription notification"
