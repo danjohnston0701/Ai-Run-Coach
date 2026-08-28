@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.os.Build
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import dagger.hilt.android.HiltAndroidApp
+import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.network.RetrofitClient
 
 @HiltAndroidApp
 class RunApplication : Application() {
@@ -14,6 +16,16 @@ class RunApplication : Application() {
         super.onCreate()
         createNotificationChannels()
         initCrashlytics()
+        // Must happen here, not only in MainActivity: on some OEMs (confirmed Oppo/ColorOS)
+        // the OS respawns the killed process directly into a background component like
+        // RunTrackingService, with MainActivity never launching. RetrofitClient.apiService
+        // was throwing IllegalStateException in that case — e.g. WeatherRepository's eager
+        // `RetrofitClient.apiService` property init in RunTrackingService.onCreate(), which
+        // runs before that method's own defensive try/catch a few lines later. Application.
+        // onCreate() is guaranteed to run before any Service/Activity in the process, so
+        // initializing here closes the gap regardless of which component starts first.
+        // initializeInternal() is idempotent, so MainActivity's own call stays a safe no-op.
+        RetrofitClient.initialize(this, SessionManager(this))
     }
 
     /**

@@ -4228,6 +4228,7 @@ class RunTrackingService : Service(), SensorEventListener {
         prevPhoneElevWindowMean = null
         updateNotification()
         Log.d("RunTrackingService", "Paused at ${pauseStartTime}ms, totalPausedMs so far: ${totalPausedMs}")
+        announcePauseResumeAudio(paused = true)
     }
 
     private fun resumeTracking() { 
@@ -4250,6 +4251,7 @@ class RunTrackingService : Service(), SensorEventListener {
             requestLocationUpdates()
             startSensorTracking()
         }
+        announcePauseResumeAudio(paused = false)
     }
 
     /**
@@ -6682,6 +6684,29 @@ class RunTrackingService : Service(), SensorEventListener {
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Real-time Polly call failed (using Android TTS): ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Polly TTS confirmation for pause/resume. Called from [pauseTracking]/[resumeTracking],
+     * which every trigger funnels through — the phone's pause button, a Garmin bezel command,
+     * and a Samsung watch command all end up here, so this single hook covers all of them.
+     * Wording is deliberately activity-agnostic (no "run"/"walk") since this fires for either.
+     */
+    private fun announcePauseResumeAudio(paused: Boolean) {
+        if (isMuted) return
+        val message = if (paused) "Session paused." else "Session resumed."
+        serviceScope.launch {
+            val base64Audio = getRealtimePollyAudio(message)
+            val audioFormat = if (base64Audio != null) "mp3" else null
+            CoachingAudioQueue.enqueue(
+                context = this@RunTrackingService,
+                base64Audio = base64Audio,
+                format = audioFormat,
+                fallbackText = message,
+                accent = currentUser?.coachAccent,
+                gender = currentUser?.coachGender
+            )
         }
     }
 

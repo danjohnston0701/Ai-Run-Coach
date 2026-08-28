@@ -42,6 +42,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.ExploreOff
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.draw.scale
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -143,6 +145,7 @@ fun RunSessionScreen(
     val liveSessionId by viewModel.liveSessionId.collectAsState()
     val liveObserverCount by viewModel.liveObserverCount.collectAsState()
     val isPowerSaverWarningVisible by viewModel.isPowerSaverWarningVisible.collectAsState()
+    val connectedWatchIsSamsung by viewModel.connectedWatchIsSamsung.collectAsState()
 
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
@@ -386,6 +389,7 @@ fun RunSessionScreen(
                     exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
                 ) {
                     WatchStandbyBanner(
+                        isSamsungWatch = connectedWatchIsSamsung,
                         modifier = Modifier
                             .padding(horizontal = Spacing.md)
                             .padding(top = Spacing.sm)
@@ -2174,44 +2178,127 @@ fun BreathingWave(active: Boolean, glow: Boolean, modifier: Modifier = Modifier)
 ===================================================================================== */
 
 @Composable
-fun WatchStandbyBanner(modifier: Modifier = Modifier) {
+fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier) {
+    val watchName = if (isSamsungWatch) "Samsung" else "Garmin"
+
+    val infiniteTransition = rememberInfiniteTransition(label = "watchStandbyPulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = Colors.primary.copy(alpha = 0.12f),
-            contentColor = Colors.primary
+            containerColor = Colors.primary.copy(alpha = 0.07f),
+            contentColor = Colors.textPrimary
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                .padding(Spacing.lg),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
-            Icon(
-                painter = painterResource(id = R.drawable.ic_garmin_tag),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = Colors.primary
-            )
-            Column {
+            // Pulsing watch icon
+            Box(contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(90.dp)
+                        .scale(pulseScale)
+                        .background(Colors.primary.copy(alpha = 0.06f), CircleShape)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(68.dp)
+                        .scale(pulseScale)
+                        .background(Colors.primary.copy(alpha = 0.12f), CircleShape)
+                )
+                Icon(
+                    painter = painterResource(id = R.drawable.icon_watch_vector),
+                    contentDescription = null,
+                    modifier = Modifier.size(30.dp),
+                    tint = Colors.primary
+                )
+            }
+
+            // Heading
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+            ) {
                 Text(
-                    text = "Ready — waiting for your watch",
-                    style = AppTextStyles.body.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        color = Colors.primary
-                    )
+                    text = "Waiting for Watch",
+                    style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold, color = Colors.textPrimary),
+                    textAlign = TextAlign.Center
                 )
                 Text(
-                    text = "Press START on your Garmin to begin the session.",
-                    style = AppTextStyles.small.copy(
-                        color = Colors.primary.copy(alpha = 0.8f)
-                    )
+                    text = "Your session is prepared and ready to go.\nStart on your $watchName watch to begin.",
+                    style = AppTextStyles.small.copy(color = Colors.textSecondary),
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            // Step-by-step instructions
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Colors.backgroundSecondary, RoundedCornerShape(8.dp))
+                    .padding(Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                WatchInstructionStep(number = "1", text = "Open the Ai Run Coach app on your $watchName watch")
+                WatchInstructionStep(number = "2", text = "Wait for GPS to lock — shown on the watch screen")
+                WatchInstructionStep(number = "3", text = "Press START on your watch — your phone begins automatically")
+            }
+
+            // Lock screen tip
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Colors.backgroundSecondary.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = Colors.textMuted
+                )
+                Text(
+                    text = "You can lock your phone screen — AI coaching will continue playing in the background",
+                    style = AppTextStyles.caption.copy(color = Colors.textMuted)
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun WatchInstructionStep(number: String, text: String) {
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .background(Colors.primary, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = number, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+        Text(
+            text = text,
+            style = AppTextStyles.small.copy(color = Colors.textSecondary),
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 

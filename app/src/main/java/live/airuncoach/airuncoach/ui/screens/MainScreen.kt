@@ -222,13 +222,24 @@ fun MainScreen(
                         enabled = !isRunSessionRoute,
                         onClick = {
                             if (isRunSessionRoute) return@NavigationBarItem
-                            navController.navigate(screen.route) {
-                                // Pop everything up to and including home to clear the back stack
-                                popUpTo(Screen.Home.route) {
-                                    inclusive = true
+                            // Guard against a rapid double-tap firing navigate() twice before
+                            // the first call's back-stack entry finishes transitioning — with
+                            // popUpTo(...){inclusive=true} below, a second navigate() can try to
+                            // destroy a "home" entry that never reached STARTED, which throws
+                            // IllegalStateException("no event down from INITIALIZED") (confirmed
+                            // via Crashlytics, Oppo CPH2695). Only navigate once the current
+                            // entry has actually settled into RESUMED.
+                            val canNavigate = navController.currentBackStackEntry
+                                ?.lifecycle?.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
+                            if (canNavigate) {
+                                navController.navigate(screen.route) {
+                                    // Pop everything up to and including home to clear the back stack
+                                    popUpTo(Screen.Home.route) {
+                                        inclusive = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = false
                                 }
-                                launchSingleTop = true
-                                restoreState = false
                             }
                         },
                         colors = NavigationBarItemDefaults.colors(

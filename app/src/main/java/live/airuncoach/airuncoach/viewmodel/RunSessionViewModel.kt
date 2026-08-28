@@ -364,6 +364,14 @@ class RunSessionViewModel @Inject constructor(
         combine(garminWatchManager.isCompanionAppInstalled, samsungWatchManager.isCompanionAppInstalled) { g, s -> g || s }
             .stateIn(viewModelScope, SharingStarted.Lazily, false)
 
+    /** Which watch brand the standby banner should talk about — whichever is actually
+     * connected right now. Garmin wins on a tie (mirrors prepareRunOnWatch's existing
+     * Garmin-first ordering elsewhere), since a user with only a Samsung watch paired
+     * should see Samsung-specific copy instead of the old hardcoded Garmin wording. */
+    val connectedWatchIsSamsung: StateFlow<Boolean> =
+        combine(garminWatchManager.isWatchConnected, samsungWatchManager.isWatchConnected) { g, s -> !g && s }
+            .stateIn(viewModelScope, SharingStarted.Lazily, false)
+
     // ── Watch send state (for PrepareRunOnWatchButton UI) ────────────────────
     private val _watchSendState = MutableStateFlow(live.airuncoach.airuncoach.ui.components.WatchSendState.IDLE)
     val watchSendState: StateFlow<live.airuncoach.airuncoach.ui.components.WatchSendState> =
