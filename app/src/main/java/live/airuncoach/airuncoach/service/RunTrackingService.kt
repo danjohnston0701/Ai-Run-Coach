@@ -38,6 +38,8 @@ import live.airuncoach.airuncoach.data.RunCrashRecoveryStore
 import live.airuncoach.airuncoach.data.workers.SyncWorker
 import live.airuncoach.airuncoach.domain.model.*
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.GarminCompanionSession
+import live.airuncoach.airuncoach.network.GarminRealtimeDataPoint
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.data.SessionManager
@@ -598,6 +600,7 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val NOTIF_ID_WATCH_RUN_STARTED = 1003
         private const val NOTIF_ID_SESSION_INTERRUPTED = 1004
         private const val NOTIF_ID_START_FAILED = 1005
+        private const val NOTIF_ID_RUN_ALREADY_SAVED = 1006
         private const val LOCATION_UPDATE_INTERVAL = 1000L  // Request GPS every 1 second (matches Garmin frequency)
         private const val LOCATION_FASTEST_INTERVAL = 500L   // Accept updates as fast as 500ms
         private const val STRUGGLE_COOLDOWN_MS = 120_000 // 2 minutes
@@ -1374,55 +1377,13 @@ class RunTrackingService : Service(), SensorEventListener {
         // silently reset to zero (which would produce a run with a real first half and a bogus,
         // zeroed-out second half baked into its averages).
         if (intent == null) {
-            val orphanedSession = _currentRunSession.value
-            if (orphanedSession?.isActive == true && !isTracking) {
-                Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent with an active orphaned session — " +
-                    "service was killed and restarted by the OS mid-run. Finalizing via stopTracking() instead of continuing as a zombie.")
-                // Not a JVM crash (nothing threw), but this null-Intent respawn only ever
-                // happens when the OS killed and restarted the service mid-run — recording it
-                // as a non-fatal is what lets us see, per device/OEM (see the custom keys set
-                // in RunApplication.initCrashlytics()), how often this actually happens instead
-                // of only hearing about it when a user notices and emails us.
-                com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(
-                    RuntimeException("RunTrackingService soft-killed and respawned by OS mid-run (session survived in memory)")
-                )
-                postSessionInterruptedNotification(orphanedSession.sessionType)
-                stopTracking()
-            } else {
-                // No in-memory session survived either — this is a HARD kill: the OS destroyed
-                // the whole process (onDestroy() never ran, so the _currentRunSession companion
-                // object reset along with everything else), not just the soft respawn the branch
-                // above handles. The on-disk crash-recovery snapshot (RunCrashRecoveryStore,
-                // written every ~20s while tracking) is the only remaining record of that run —
-                // without this fallback it's silently lost with nothing shown to the user, which
-                // is exactly what was reported (session "instantly disappeared", nothing saved).
-                val recovered = runCrashRecoveryStore.loadMostRecent()
-                if (recovered != null && recovered.isActive) {
-                    Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent, no in-memory session, but a crash-recovery " +
-                        "snapshot exists (startTime=${recovered.startTime}) — process was hard-killed. Recovering via stopTracking().")
-                    com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(
-                        RuntimeException("RunTrackingService HARD-killed by OS mid-run (in-memory session lost, recovered from disk snapshot)")
-                    )
-                    _currentRunSession.value = recovered
-                    // stopTracking() below clears the snapshot keyed on the *instance* startTime
-                    // (left at 0 here, see comment below) rather than recovered.startTime, so it
-                    // would never actually delete this file — clear it explicitly now instead.
-                    serviceScope.launch(Dispatchers.IO) {
-                        runCrashRecoveryStore.clear(recovered.startTime)
-                    }
-                    // Deliberately leave `startTime` at 0 (this fresh instance's default) rather
-                    // than seeding it from the snapshot: stopTracking()'s startTime==0 fallback
-                    // already uses session.duration directly (the last known-good duration as of
-                    // the snapshot, at most ~20s stale). Setting startTime here would instead
-                    // make it compute (now - startTime), which counts the entire unknown dead
-                    // time between the kill and this restart as active run duration — wrong in
-                    // the opposite direction.
-                    postSessionInterruptedNotification(recovered.sessionType)
-                    stopTracking()
-                } else {
-                    Log.d("RunTrackingService", "onStartCommand: null Intent, no active session to recover — stopping self")
-                    stopSelf()
-                }
+            // The actual recovery decision needs a network round-trip (asking the server whether
+            // the watch is still tracking independently — see handleNullIntentRespawn), so it
+            // can't be made synchronously here. Safe to return immediately either way: there is
+            // no other work this call needs to do, and the coroutine below owns finishing the
+            // service's lifecycle (stopSelf()/stopForeground()) once it resolves.
+            serviceScope.launch(Dispatchers.IO) {
+                handleNullIntentRespawn()
             }
             return START_NOT_STICKY
         }
@@ -1645,6 +1606,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
         // Now safely initialize everything else
         isTracking = true
+        preCacheSystemAudio()  // Warm the pause/resume audio cache before any pause can happen
         _currentRunSession.value = null  // Clear stale data from previous run
         _uploadComplete.value = null
         _isServiceRunning.value = true
@@ -3826,7 +3788,8 @@ class RunTrackingService : Service(), SensorEventListener {
             garminDeviceName = garminDeviceName,
             // Links this upload to the watch's own companion session for deterministic
             // server-side merge/enrichment (avoids the fuzzy distance-tolerance match).
-            garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId,
+            garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
+                ?: samsungWatchManager?.activeCompanionSessionId,
             // ── Running Dynamics scalars (averaged / min / max over the run) ───
             avgGroundContactTime       = if (watchGctCount > 0) watchGctSum / watchGctCount else null,
             minGroundContactTime       = null,  // not separately tracked; use series min if needed
@@ -4722,6 +4685,259 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
+     * On ColorOS (Oppo/OnePlus/Realme) devices, a confirmed OS kill mid-run is direct proof the
+     * device's proprietary Autostart/Battery-management allowlist (a second background-killer
+     * layer on top of stock Android — see [live.airuncoach.airuncoach.utils.OemBatteryHelper])
+     * either isn't set up or didn't stick. The dashboard's remediation nudge
+     * (DashboardViewModel.checkOemBatteryPrompt) was previously fire-once-ever: dismissed (or
+     * simply missed) a single time on the very first install and it would never resurface, even
+     * after the exact failure it exists to prevent happened again — confirmed via Crashlytics on
+     * Nino's Oppo CPH2695, same "no event down from INITIALIZED" navigation crash recurring on a
+     * build that had already shipped an earlier, narrower fix for it. Setting this flag here (in
+     * the same "user_prefs" file DashboardViewModel reads) re-arms that nudge with harder
+     * evidence-based copy on next dashboard load, regardless of whether it was dismissed before.
+     */
+    private fun flagOemKillDetected() {
+        if (!live.airuncoach.airuncoach.utils.OemBatteryHelper.isColorOSDevice()) return
+        try {
+            getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("oem_kill_detected", true)
+                .apply()
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to flag OEM kill detection: ${e.message}")
+        }
+    }
+
+    /**
+     * Entry point for onStartCommand's null-Intent handling (see that comment for the full
+     * "OS killed and respawned this service" background). Previously this always finalized
+     * whatever partial data survived on the phone as a *finished* run — correct for a phone-only
+     * run, but wrong whenever a Garmin watch was driving the session: the watch tracks
+     * independently via the Garmin Connect relay and was very likely never actually interrupted,
+     * so ending the phone's run truncated a walk that, from the watch's perspective, just kept
+     * going — producing a confusing "Session interrupted" notification plus a second, fragmented
+     * run record once the watch's own full-length upload landed later.
+     *
+     * Now asks the server first (GET /api/garmin-companion/session/recoverable, status-agnostic
+     * unlike the active-only /session/active used by the normal start flow) whether there's a
+     * companion session to recover into:
+     *   - active/paused  → [reattachToWatchSession]: reconnect, don't finalize anything.
+     *   - completed       → [handOffToAlreadySavedRun]: the watch already saved it, nothing to do.
+     *   - none/lookup failed → [finalizeOrphanedOrCrashedSession]: the original truncate-and-save
+     *     behavior, now only used when there's genuinely no watch session to recover from (a
+     *     phone-only run, or the watch died too).
+     */
+    private suspend fun handleNullIntentRespawn() {
+        // A kill happened regardless of which branch below we end up taking — record it once
+        // here rather than per-branch.
+        flagOemKillDetected()
+
+        val recoverable = try {
+            apiService.getRecoverableGarminCompanionSession()
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Recoverable companion-session lookup failed (non-fatal): ${e.message}")
+            null
+        }
+        val session = recoverable?.session
+
+        when {
+            session != null && (session.status == "active" || session.status == "paused") -> {
+                reattachToWatchSession(session, recoverable.latest)
+            }
+            session != null && session.status == "completed" && session.runId != null -> {
+                handOffToAlreadySavedRun(session.runId)
+            }
+            else -> {
+                finalizeOrphanedOrCrashedSession()
+            }
+        }
+    }
+
+    /**
+     * Reconnects to a Garmin-companion session that's still active or paused after an OS kill and
+     * respawn — the watch was never actually interrupted (it streams independently via the Garmin
+     * Connect relay). Restores just enough phone-side state to resume relaying/displaying and
+     * keep listening for further watch commands normally, WITHOUT finalizing or uploading
+     * anything: the watch's own eventual session/end call (or a normal phone-side stop once
+     * reattached) remains the single source of truth for when the run actually finishes. This is
+     * what turns a mid-walk kill into an invisible reconnect instead of a "Session interrupted"
+     * notification plus a fragmented extra run in history.
+     *
+     * Deliberately does NOT request phone GPS/sensors (mirrors wasRunStartedByWatch's normal
+     * behavior elsewhere) — the watch is authoritative and checkPhoneGpsFallback()'s per-second
+     * timer tick will start them reactively only if watch data actually goes stale, same as any
+     * other watch-driven run.
+     */
+    private suspend fun reattachToWatchSession(
+        session: GarminCompanionSession,
+        latest: GarminRealtimeDataPoint?
+    ) {
+        val isWalk = session.activityType == "walk"
+        Log.d("RunTrackingService", "⌚ Reattaching to live companion session ${session.sessionId} (status=${session.status})")
+
+        var startedForeground = true
+        withContext(Dispatchers.Main) {
+            try {
+                val label = if (isWalk) "Reconnecting to your walk…" else "Reconnecting to your run…"
+                startForeground(NOTIFICATION_ID, createNotification(label, "Syncing with your Garmin watch"))
+            } catch (e: Exception) {
+                Log.e("RunTrackingService", "Failed to start foreground service during reattach", e)
+                com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(e)
+                startedForeground = false
+            }
+        }
+        if (!startedForeground) {
+            // Same failure mode postTrackingStartFailedNotification exists for elsewhere — no
+            // foreground service means no legal way to keep tracking, so fall back to finalizing
+            // whatever the phone has rather than silently doing nothing.
+            postTrackingStartFailedNotification()
+            stopSelf()
+            return
+        }
+
+        // Restore on both managers — harmless no-op on whichever brand isn't actually connected
+        // (only one of Garmin/Samsung is ever paired at a time), and avoids needing the recovered
+        // session's device model to disambiguate which manager actually owns this watch.
+        garminWatchManager?.restoreActiveCompanionSession(session.sessionId)
+        samsungWatchManager?.restoreActiveCompanionSession(session.sessionId)
+        currentActivityType = if (isWalk) "walk" else "run"
+        activityTypeSetFromSessionIntent = true
+        wasRunStartedByWatch = true
+        lastWatchGpsMs = System.currentTimeMillis()
+        _isServiceRunning.value = true
+
+        val isPaused = latest?.isPaused ?: (session.status == "paused")
+        isTracking = !isPaused
+        startTime = parseIsoToMillis(session.startedAt) ?: System.currentTimeMillis()
+        val elapsedMs = (latest?.elapsedTime?.toLong() ?: 0L) * 1000L
+        // The watch's own elapsedTime already excludes its paused time going forward — we don't
+        // know the exact historical totalPausedMs, so leave it at 0 rather than guess; the next
+        // real GPS/sensor tick rebuilds _currentRunSession from live accumulators anyway (see
+        // the RunSession(...) construction further down in this file), making this placeholder
+        // self-correcting within a few seconds.
+        pauseStartTime = if (isPaused) System.currentTimeMillis() else 0L
+        totalPausedMs = 0L
+        totalDistance = latest?.cumulativeDistance?.toDouble() ?: 0.0
+        currentHeartRate = latest?.heartRate ?: 0
+        currentCadence = latest?.cadence ?: 0
+
+        _currentRunSession.value = RunSession(
+            id = UUID.randomUUID().toString(),
+            startTime = startTime,
+            endTime = null,
+            duration = elapsedMs,
+            distance = totalDistance,
+            averageSpeed = 0f,
+            maxSpeed = 0f,
+            averagePace = null,
+            calories = 0,
+            cadence = currentCadence,
+            heartRate = currentHeartRate,
+            routePoints = emptyList(),
+            kmSplits = emptyList(),
+            weatherAtStart = null,
+            weatherAtEnd = null,
+            totalElevationGain = 0.0,
+            totalElevationLoss = 0.0,
+            averageGradient = 0f,
+            maxGradient = 0f,
+            routeHash = null,
+            routeName = null,
+            sessionType = currentActivityType,
+            isActive = true,
+            garminCompanionSessionId = session.sessionId,
+            hasGarminData = true,
+        )
+
+        if (!isPaused) startTimer()
+        updateNotification()
+
+        Log.d("RunTrackingService", "⌚ Reattached — isPaused=$isPaused, distance=${totalDistance}m, elapsed=${elapsedMs}ms")
+    }
+
+    /**
+     * The Garmin watch already finished and saved this run entirely on its own (session/end
+     * already fired, runId already exists) while the phone was dead — there is nothing to
+     * finalize or upload. Just let the user know their run was saved and offer to open it,
+     * instead of the old behavior of also uploading a second, truncated copy of the same walk.
+     */
+    private fun handOffToAlreadySavedRun(runId: String) {
+        Log.d("RunTrackingService", "⌚ Companion session already completed while phone was down — run $runId already saved, nothing to upload")
+        postRunAlreadySavedNotification(runId)
+        stopSelf()
+    }
+
+    /** Parses a server ISO-8601 timestamp (e.g. "2026-08-29T03:14:19.000Z") to epoch millis. */
+    private fun parseIsoToMillis(iso: String?): Long? {
+        if (iso.isNullOrBlank()) return null
+        return try {
+            java.time.Instant.parse(iso).toEpochMilli()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * The original OS-kill recovery behavior: finalize and upload whatever partial data survived
+     * on the phone, as a finished run. Now only reached from [handleNullIntentRespawn] when there
+     * is genuinely no Garmin companion session to recover into (a phone-only run, or the watch
+     * died too) — see that function's doc comment for the full picture.
+     */
+    private fun finalizeOrphanedOrCrashedSession() {
+        val orphanedSession = _currentRunSession.value
+        if (orphanedSession?.isActive == true && !isTracking) {
+            Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent with an active orphaned session — " +
+                "service was killed and restarted by the OS mid-run. Finalizing via stopTracking() instead of continuing as a zombie.")
+            // Not a JVM crash (nothing threw), but this null-Intent respawn only ever
+            // happens when the OS killed and restarted the service mid-run — recording it
+            // as a non-fatal is what lets us see, per device/OEM (see the custom keys set
+            // in RunApplication.initCrashlytics()), how often this actually happens instead
+            // of only hearing about it when a user notices and emails us.
+            com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(
+                RuntimeException("RunTrackingService soft-killed and respawned by OS mid-run (session survived in memory)")
+            )
+            postSessionInterruptedNotification(orphanedSession.sessionType)
+            stopTracking()
+        } else {
+            // No in-memory session survived either — this is a HARD kill: the OS destroyed
+            // the whole process (onDestroy() never ran, so the _currentRunSession companion
+            // object reset along with everything else), not just the soft respawn the branch
+            // above handles. The on-disk crash-recovery snapshot (RunCrashRecoveryStore,
+            // written every ~20s while tracking) is the only remaining record of that run —
+            // without this fallback it's silently lost with nothing shown to the user, which
+            // is exactly what was reported (session "instantly disappeared", nothing saved).
+            val recovered = runCrashRecoveryStore.loadMostRecent()
+            if (recovered != null && recovered.isActive) {
+                Log.e("RunTrackingService", "⚠️ onStartCommand: null Intent, no in-memory session, but a crash-recovery " +
+                    "snapshot exists (startTime=${recovered.startTime}) — process was hard-killed. Recovering via stopTracking().")
+                com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(
+                    RuntimeException("RunTrackingService HARD-killed by OS mid-run (in-memory session lost, recovered from disk snapshot)")
+                )
+                _currentRunSession.value = recovered
+                // stopTracking() below clears the snapshot keyed on the *instance* startTime
+                // (left at 0 here, see comment below) rather than recovered.startTime, so it
+                // would never actually delete this file — clear it explicitly now instead.
+                serviceScope.launch(Dispatchers.IO) {
+                    runCrashRecoveryStore.clear(recovered.startTime)
+                }
+                // Deliberately leave `startTime` at 0 (this fresh instance's default) rather
+                // than seeding it from the snapshot: stopTracking()'s startTime==0 fallback
+                // already uses session.duration directly (the last known-good duration as of
+                // the snapshot, at most ~20s stale). Setting startTime here would instead
+                // make it compute (now - startTime), which counts the entire unknown dead
+                // time between the kill and this restart as active run duration — wrong in
+                // the opposite direction.
+                postSessionInterruptedNotification(recovered.sessionType)
+                stopTracking()
+            } else {
+                Log.d("RunTrackingService", "onStartCommand: null Intent, no active session to recover — stopping self")
+                stopSelf()
+            }
+        }
+    }
+
+    /**
      * Posts a notification telling the user their session was interrupted by the OS killing
      * this service mid-run (e.g. aggressive battery management while the screen was locked) and
      * has been saved with whatever data survived up to that point. See onStartCommand's
@@ -4771,6 +4987,58 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "⚠️ Session interrupted notification posted")
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Failed to post session interrupted notification: ${e.message}")
+        }
+    }
+
+    /**
+     * Posts a notification for [handOffToAlreadySavedRun] — the OS killed the phone app, but the
+     * Garmin watch finished the walk/run entirely on its own and it's already saved server-side.
+     * Taps straight into that run's summary via the same deeplink_run_id extra MainActivity
+     * already handles for watch-offline-sync notifications.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun postRunAlreadySavedNotification(runId: String) {
+        try {
+            val channelId = "session_interrupted" // Reuse the same high-importance channel/UX
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+            if (nm.getNotificationChannel(channelId) == null) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel(
+                        channelId,
+                        "Session Interrupted",
+                        android.app.NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Alerts when a run/walk session was interrupted by the system"
+                        enableVibration(true)
+                    }
+                )
+            }
+
+            val intent = android.content.Intent(this, live.airuncoach.airuncoach.MainActivity::class.java).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("deeplink_run_id", runId)
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                this,
+                "run_already_saved".hashCode(),
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                .setContentTitle("Your walk was saved")
+                .setContentText("Your phone lost connection briefly, but your Garmin watch kept tracking and your run has already been saved. Tap to view it.")
+                .setSmallIcon(R.drawable.notification_icon)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            nm.notify(NOTIF_ID_RUN_ALREADY_SAVED, notification)
+            Log.d("RunTrackingService", "✅ Run-already-saved notification posted for $runId")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to post run-already-saved notification: ${e.message}")
         }
     }
 
@@ -6658,6 +6926,70 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
+     * Fixed cache dir for voice-only (not per-workout) system phrases like the pause/resume
+     * confirmation — these have no `planWorkoutId` to key on (they fire on free/uncoached runs
+     * too), only the user's current voice.
+     */
+    private fun systemAudioCacheDir(): File =
+        File(applicationContext.cacheDir, "coaching_audio/system").apply { mkdirs() }
+
+    private fun systemAudioCacheKey(text: String): String =
+        textMd5("$text|${currentUser?.coachAccent}|${currentUser?.coachGender}")
+
+    private fun getCachedSystemAudio(text: String): String? {
+        return try {
+            val file = File(systemAudioCacheDir(), "${systemAudioCacheKey(text)}.mp3")
+            if (file.exists()) Base64.encodeToString(file.readBytes(), Base64.DEFAULT) else null
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Could not read cached system audio: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Pre-fetches and caches Polly audio for the pause/resume confirmation phrases, keyed by
+     * the user's current voice. Called once at the top of [startTracking] — i.e. right as a
+     * session begins, well before any pause is possible — specifically so that by the time
+     * announcePauseResumeAudio() ever fires, it can read a local file instead of making a live
+     * network call from inside the exact background-triggered window (a watch-relayed BLE pause
+     * command arriving while the phone is screen-locked/backgrounded) that a live Polly call
+     * there was previously adding to. See flagOemKillDetected() for why that window matters —
+     * that live call, introduced alongside this feature, is the most likely trigger for the
+     * ColorOS kill Nino hit pausing from his Garmin watch (2026-08-29, v2.0.22): it's a brand
+     * new background network round-trip landing exactly on a BLE-woken callback, which is the
+     * kind of background activity burst ColorOS's kill heuristics specifically watch for.
+     * Best-effort and non-fatal — announcePauseResumeAudio() still falls back to a live call
+     * (getRealtimePollyAudio) on a cache miss, e.g. if this hasn't finished yet.
+     */
+    private fun preCacheSystemAudio() {
+        val accent = currentUser?.coachAccent
+        val gender = currentUser?.coachGender
+        // Pause/resume confirmation, plus every fixed free-run start prompt for the user's
+        // current tone/activity — the only pieces of fireStartCoaching()'s free-run branch that
+        // are NOT already covered by preGenerateCoachingAudio()'s per-workout pre-cache (that one
+        // only runs for coached plans, keyed on preRunBrief). These never change per-run, so once
+        // cached here they stay warm for every future run, not just this one — the very first
+        // run on a device still pays one live call per phrase actually picked, same as before.
+        val tone = currentUser?.coachTone ?: "encouraging"
+        val texts = listOf("Session paused.", "Session resumed.") +
+            freeRunStartPromptsForTone(tone, isWalk = currentActivityType == "walk")
+        for (text in texts) {
+            val file = File(systemAudioCacheDir(), "${systemAudioCacheKey(text)}.mp3")
+            if (file.exists()) continue
+            serviceScope.launch {
+                try {
+                    val response = apiService.generateTts(
+                        GenerateTtsRequest(text = text, coachAccent = accent, coachGender = gender)
+                    )
+                    response.audio?.let { b64 -> file.writeBytes(Base64.decode(b64, Base64.DEFAULT)) }
+                } catch (e: Exception) {
+                    Log.w("RunTrackingService", "System audio pre-cache failed for \"$text\" (non-fatal): ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
      * Makes a real-time Polly TTS call for [resolvedText] (a message whose live-data
      * template variables have already been substituted, e.g. "Heart rate at 148 right now").
      *
@@ -6697,7 +7029,7 @@ class RunTrackingService : Service(), SensorEventListener {
         if (isMuted) return
         val message = if (paused) "Session paused." else "Session resumed."
         serviceScope.launch {
-            val base64Audio = getRealtimePollyAudio(message)
+            val base64Audio = getCachedSystemAudio(message) ?: getRealtimePollyAudio(message)
             val audioFormat = if (base64Audio != null) "mp3" else null
             CoachingAudioQueue.enqueue(
                 context = this@RunTrackingService,
@@ -7781,34 +8113,55 @@ class RunTrackingService : Service(), SensorEventListener {
                 ))
 
                 if (!isMuted) {
-                    try {
-                        // Include user's voice preferences so server-side Polly TTS selects the
-                        // closest matching voice to the user's configured coach voice — this keeps
-                        // the opening brief consistent with all subsequent coaching audio.
-                        val audioRequest = live.airuncoach.airuncoach.network.model.StartRunAudioRequest(
-                            motivationalText = startPrompt,
-                            coachAccent = currentUser?.coachAccent,
-                            coachGender = currentUser?.coachGender,
-                            coachName   = currentUser?.coachName,
-                            activityType = currentActivityType
-                        )
-                        
-                        val audioResponse = if (currentActivityType == "walk") {
-                            apiService.getStartWalkAudio(audioRequest)
-                        } else {
-                            apiService.getStartRunAudio(audioRequest)
-                        }
+                    // Check the local cache before ever making a live network call — this is the
+                    // single audio cue most likely to fire from directly inside a watch-relayed
+                    // BLE "start" callback while the phone is backgrounded/screen-locked (a start
+                    // command IS the BLE event here, there's no earlier foreground moment to hook
+                    // for this specific cue). A live network round-trip landing in that exact
+                    // window is the same class of background-activity burst that most likely
+                    // triggered Nino's ColorOS kill on pause — see preCacheSystemAudio(). The plan
+                    // case was ALREADY pre-generated by preGenerateCoachingAudio() at "Prepare for
+                    // Watch" time but this call site never checked it before now; the free-run
+                    // case is warmed by preCacheSystemAudio() (called at the top of startTracking,
+                    // covers every future run once any run has completed on this device).
+                    val cachedAudio = if (planPreRunBrief != null) {
+                        getPreCachedPollyAudio(startPrompt)
+                    } else {
+                        getCachedSystemAudio(startPrompt)
+                    }
+                    if (cachedAudio != null) {
+                        Log.d("RunTrackingService", "Start coaching audio from local cache (plan=${planPreRunBrief != null}) — no network call")
+                        playCoachingAudio(cachedAudio, "mp3", startPrompt)
+                    } else {
+                        try {
+                            // Include user's voice preferences so server-side Polly TTS selects the
+                            // closest matching voice to the user's configured coach voice — this keeps
+                            // the opening brief consistent with all subsequent coaching audio.
+                            val audioRequest = live.airuncoach.airuncoach.network.model.StartRunAudioRequest(
+                                motivationalText = startPrompt,
+                                coachAccent = currentUser?.coachAccent,
+                                coachGender = currentUser?.coachGender,
+                                coachName   = currentUser?.coachName,
+                                activityType = currentActivityType
+                            )
 
-                        if (audioResponse.audio != null && audioResponse.format != null) {
-                            Log.d("RunTrackingService", "Start coaching audio via Polly TTS (plan=${planPreRunBrief != null}, accent=${currentUser?.coachAccent}, gender=${currentUser?.coachGender})")
-                            playCoachingAudio(audioResponse.audio, audioResponse.format, startPrompt)
-                        } else {
-                            // Polly returned no audio — fall back to device TTS with user's voice settings
+                            val audioResponse = if (currentActivityType == "walk") {
+                                apiService.getStartWalkAudio(audioRequest)
+                            } else {
+                                apiService.getStartRunAudio(audioRequest)
+                            }
+
+                            if (audioResponse.audio != null && audioResponse.format != null) {
+                                Log.d("RunTrackingService", "Start coaching audio via Polly TTS (plan=${planPreRunBrief != null}, accent=${currentUser?.coachAccent}, gender=${currentUser?.coachGender})")
+                                playCoachingAudio(audioResponse.audio, audioResponse.format, startPrompt)
+                            } else {
+                                // Polly returned no audio — fall back to device TTS with user's voice settings
+                                playCoachingAudio(null, null, startPrompt)
+                            }
+                        } catch (e: Exception) {
+                            Log.w("RunTrackingService", "Failed to get Polly TTS audio: ${e.message}, using device TTS fallback")
                             playCoachingAudio(null, null, startPrompt)
                         }
-                    } catch (e: Exception) {
-                        Log.w("RunTrackingService", "Failed to get Polly TTS audio: ${e.message}, using device TTS fallback")
-                        playCoachingAudio(null, null, startPrompt)
                     }
                 }
 
@@ -7826,89 +8179,81 @@ class RunTrackingService : Service(), SensorEventListener {
      * (already activity-aware) generation fails, so it must not default to running language
      * for a walk session. See RunTrackingService.currentActivityType.
      */
-    private fun generateStartPromptByTone(tone: String): String {
-        val isWalk = currentActivityType == "walk"
+    private fun generateStartPromptByTone(tone: String): String =
+        freeRunStartPromptsForTone(tone, isWalk = currentActivityType == "walk").random()
+
+    /**
+     * The fixed pool [generateStartPromptByTone] picks randomly from for a given tone/activity —
+     * extracted so [preCacheSystemAudio] can pre-warm the Polly cache for all of them (they never
+     * change per-run), not just whichever one happens to get picked live.
+     */
+    private fun freeRunStartPromptsForTone(tone: String, isWalk: Boolean): List<String> {
         return when (tone.lowercase()) {
-            "technical" -> {
-                val prompts = if (isWalk) listOf(
-                    "Focus on posture, steady rhythm, optimize your stride.",
-                    "Maintain steady effort, monitor your pace.",
-                    "Execute your walking technique, control your effort.",
-                    "Optimize pace, focus on rhythm and efficiency.",
-                    "Engage core, maintain form, control your pace."
-                ) else listOf(
-                    "Focus on form, steady cadence, optimize your stride.",
-                    "Maintain steady effort, monitor your pace zones.",
-                    "Execute your running technique, control your effort.",
-                    "Optimize pace, focus on rhythm and efficiency.",
-                    "Engage core, maintain form, control your pace."
-                )
-                prompts.random()
-            }
-            "calm" -> {
-                val prompts = if (isWalk) listOf(
-                    "Breathe easy, enjoy the moment, you've got this.",
-                    "Find your rhythm, settle into a comfortable pace.",
-                    "Take it easy, trust the process, relax.",
-                    "Ease into it, trust your body, breathe.",
-                    "Let's flow, stay composed, find your groove."
-                ) else listOf(
-                    "Breathe easy, enjoy the moment, you've got this.",
-                    "Find your rhythm, settle into a comfortable pace.",
-                    "Take it easy, trust your training, relax.",
-                    "Ease into it, trust your body, breathe.",
-                    "Let's flow, stay composed, find your groove."
-                )
-                prompts.random()
-            }
-            "motivational" -> {
-                val prompts = if (isWalk) listOf(
-                    "This is your moment — let's make it count!",
-                    "Push yourself, chase greatness, give it your all!",
-                    "You're stronger than you think — prove it today!",
-                    "Go all in, embrace the challenge, own it!",
-                    "This is your time — show what you're made of!"
-                ) else listOf(
-                    "This is your moment — let's crush it!",
-                    "Push hard, chase greatness, leave it all out there!",
-                    "You're stronger than you think — prove it today!",
-                    "Go all in, embrace the challenge, dominate!",
-                    "This is your time — show what you're made of!"
-                )
-                prompts.random()
-            }
-            "playful" -> {
-                val prompts = if (isWalk) listOf(
-                    "Let's have fun out there, one foot after another!",
-                    "Time to play, bring your energy, enjoy the walk!",
-                    "Make it fun, smile and go, walking is awesome!",
-                    "Let's go, have a blast, enjoy every step!",
-                    "Have fun, be silly, embrace the joy of walking!"
-                ) else listOf(
-                    "Let's have fun out there, one foot after another!",
-                    "Time to play, bring your energy, enjoy the run!",
-                    "Make it fun, smile and go, running is awesome!",
-                    "Let's play, have a blast, enjoy every step!",
-                    "Have fun, be silly, embrace the joy of running!"
-                )
-                prompts.random()
-            }
-            else -> { // "encouraging" or default
-                val prompts = if (isWalk) listOf(
-                    "Let's go! You've got this.",
-                    "You're ready — let's walk.",
-                    "Trust the process — let's go.",
-                    "Great start — keep it going.",
-                    "You've got everything you need."
-                ) else listOf(
-                    "Let's go! You've got this.",
-                    "You're ready — let's run.",
-                    "Trust your training — let's go.",
-                    "Great start — keep it going.",
-                    "You've got everything you need."
-                )
-                prompts.random()
-            }
+            "technical" -> if (isWalk) listOf(
+                "Focus on posture, steady rhythm, optimize your stride.",
+                "Maintain steady effort, monitor your pace.",
+                "Execute your walking technique, control your effort.",
+                "Optimize pace, focus on rhythm and efficiency.",
+                "Engage core, maintain form, control your pace."
+            ) else listOf(
+                "Focus on form, steady cadence, optimize your stride.",
+                "Maintain steady effort, monitor your pace zones.",
+                "Execute your running technique, control your effort.",
+                "Optimize pace, focus on rhythm and efficiency.",
+                "Engage core, maintain form, control your pace."
+            )
+            "calm" -> if (isWalk) listOf(
+                "Breathe easy, enjoy the moment, you've got this.",
+                "Find your rhythm, settle into a comfortable pace.",
+                "Take it easy, trust the process, relax.",
+                "Ease into it, trust your body, breathe.",
+                "Let's flow, stay composed, find your groove."
+            ) else listOf(
+                "Breathe easy, enjoy the moment, you've got this.",
+                "Find your rhythm, settle into a comfortable pace.",
+                "Take it easy, trust your training, relax.",
+                "Ease into it, trust your body, breathe.",
+                "Let's flow, stay composed, find your groove."
+            )
+            "motivational" -> if (isWalk) listOf(
+                "This is your moment — let's make it count!",
+                "Push yourself, chase greatness, give it your all!",
+                "You're stronger than you think — prove it today!",
+                "Go all in, embrace the challenge, own it!",
+                "This is your time — show what you're made of!"
+            ) else listOf(
+                "This is your moment — let's crush it!",
+                "Push hard, chase greatness, leave it all out there!",
+                "You're stronger than you think — prove it today!",
+                "Go all in, embrace the challenge, dominate!",
+                "This is your time — show what you're made of!"
+            )
+            "playful" -> if (isWalk) listOf(
+                "Let's have fun out there, one foot after another!",
+                "Time to play, bring your energy, enjoy the walk!",
+                "Make it fun, smile and go, walking is awesome!",
+                "Let's go, have a blast, enjoy every step!",
+                "Have fun, be silly, embrace the joy of walking!"
+            ) else listOf(
+                "Let's have fun out there, one foot after another!",
+                "Time to play, bring your energy, enjoy the run!",
+                "Make it fun, smile and go, running is awesome!",
+                "Let's play, have a blast, enjoy every step!",
+                "Have fun, be silly, embrace the joy of running!"
+            )
+            else -> if (isWalk) listOf( // "encouraging" or default
+                "Let's go! You've got this.",
+                "You're ready — let's walk.",
+                "Trust the process — let's go.",
+                "Great start — keep it going.",
+                "You've got everything you need."
+            ) else listOf(
+                "Let's go! You've got this.",
+                "You're ready — let's run.",
+                "Trust your training — let's go.",
+                "Great start — keep it going.",
+                "You've got everything you need."
+            )
         }
     }
     

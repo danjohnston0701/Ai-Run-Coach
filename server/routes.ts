@@ -13958,6 +13958,54 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // Get the user's single most-recent companion session regardless of status, for phone-side
+  // OS-kill recovery: after ColorOS (or any OEM) kills and respawns RunTrackingService mid-run,
+  // the phone has lost all in-memory run state, but the watch tracks independently via the
+  // Garmin Connect relay and may still be actively running, may be paused, or may have already
+  // finished and saved its own run. This lets the phone recover real state and either reattach
+  // to a live session or hand off to an already-saved run, instead of finalizing a truncated
+  // partial run and creating a duplicate/fragmented history entry (see
+  // RunTrackingService.handleNullIntentRespawn on Android).
+  //
+  // Deliberately a separate endpoint from /session/active (which only ever returns 'active' rows
+  // and is used by the normal "Prepare for Watch" companion-session-ID caching flow) — widening
+  // that endpoint's status filter would risk it picking up a stale abandoned/completed session
+  // during normal operation.
+  app.get("/api/garmin-companion/session/recoverable", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+
+      const [session] = await db.select().from(garminCompanionSessions)
+        .where(and(
+          eq(garminCompanionSessions.userId, userId),
+          gte(garminCompanionSessions.startedAt, sixHoursAgo),
+        ))
+        .orderBy(sql`started_at DESC`)
+        .limit(1);
+
+      if (!session) {
+        return res.json({ session: null, latest: null });
+      }
+
+      // Only bother fetching a live data point for a session the phone might actually reattach
+      // to — a completed/abandoned session's summary stats already live on the session row itself.
+      let latest: typeof garminRealtimeData.$inferSelect | null = null;
+      if (session.status === "active" || session.status === "paused") {
+        const [latestPoint] = await db.select().from(garminRealtimeData)
+          .where(eq(garminRealtimeData.sessionId, session.sessionId))
+          .orderBy(sql`timestamp DESC`)
+          .limit(1);
+        latest = latestPoint ?? null;
+      }
+
+      res.json({ session, latest });
+    } catch (error: any) {
+      console.error("Get recoverable companion session error:", error);
+      res.status(500).json({ error: "Failed to get recoverable session" });
+    }
+  });
+
   // Get user's active companion sessions
   app.get("/api/garmin-companion/sessions/active", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

@@ -100,6 +100,12 @@ class DashboardViewModel @Inject constructor(
     private val _showOemBatteryPrompt = MutableStateFlow(false)
     val showOemBatteryPrompt: StateFlow<Boolean> = _showOemBatteryPrompt.asStateFlow()
 
+    // True when this showing was forced by RunTrackingService.flagOemKillDetected() —
+    // i.e. we have direct proof the OS actually killed the app mid-run, not just a first-run
+    // guess — so DashboardScreen shows stronger, evidence-based copy instead of the generic one.
+    private val _oemBatteryPromptIsUrgent = MutableStateFlow(false)
+    val oemBatteryPromptIsUrgent: StateFlow<Boolean> = _oemBatteryPromptIsUrgent.asStateFlow()
+
     fun dismissOemBatteryPrompt() {
         _showOemBatteryPrompt.value = false
     }
@@ -240,13 +246,29 @@ class DashboardViewModel @Inject constructor(
         _isAiCoachEnabled.value = sharedPrefs.getBoolean("ai_coach_enabled", true)
     }
 
-    // Only ever shown once per install — set the flag immediately so it can't re-fire on
-    // every dashboard visit even if the user dismisses without acting.
+    // Normally shown once per install — set the flag immediately so it can't re-fire on every
+    // dashboard visit even if the user dismisses without acting. EXCEPTION: if
+    // RunTrackingService has since flagged an actual confirmed OS kill ("oem_kill_detected",
+    // set by flagOemKillDetected() — direct proof the allowlist isn't set up or didn't stick),
+    // that overrides the one-shot guard and re-shows the prompt with urgent copy, because at
+    // that point "already shown once" clearly didn't work.
     private fun checkOemBatteryPrompt() {
-        if (live.airuncoach.airuncoach.utils.OemBatteryHelper.isColorOSDevice() &&
-            !sharedPrefs.getBoolean("oem_battery_prompt_shown", false)
-        ) {
+        if (!live.airuncoach.airuncoach.utils.OemBatteryHelper.isColorOSDevice()) return
+
+        val killDetected = sharedPrefs.getBoolean("oem_kill_detected", false)
+        if (killDetected) {
+            sharedPrefs.edit()
+                .putBoolean("oem_kill_detected", false)
+                .putBoolean("oem_battery_prompt_shown", true)
+                .apply()
+            _oemBatteryPromptIsUrgent.value = true
+            _showOemBatteryPrompt.value = true
+            return
+        }
+
+        if (!sharedPrefs.getBoolean("oem_battery_prompt_shown", false)) {
             sharedPrefs.edit().putBoolean("oem_battery_prompt_shown", true).apply()
+            _oemBatteryPromptIsUrgent.value = false
             _showOemBatteryPrompt.value = true
         }
     }

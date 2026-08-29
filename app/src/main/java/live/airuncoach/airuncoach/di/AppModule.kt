@@ -77,9 +77,10 @@ object AppModule {
     @Provides
     fun provideSamsungWatchManager(
         @ApplicationContext context: Context,
-        runRepository: RunRepository
+        runRepository: RunRepository,
+        apiService: ApiService
     ): SamsungWatchManager {
-        return SamsungWatchManager(context, runRepository)
+        return SamsungWatchManager(context, runRepository, apiService)
     }
 
     @Singleton

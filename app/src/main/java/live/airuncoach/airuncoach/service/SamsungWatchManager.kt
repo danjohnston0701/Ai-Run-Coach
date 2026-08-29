@@ -50,7 +50,8 @@ import org.json.JSONObject
  */
 class SamsungWatchManager(
     private val context: Context,
-    private val runRepository: RunRepository? = null
+    private val runRepository: RunRepository? = null,
+    private val apiService: live.airuncoach.airuncoach.network.ApiService? = null
 ) {
 
     companion object {
@@ -87,6 +88,52 @@ class SamsungWatchManager(
 
     private val _runSyncedEvent = MutableStateFlow(0L)
     val runSyncedEvent: StateFlow<Long> = _runSyncedEvent
+
+    /**
+     * Companion session ID fetched when the watch starts a run. Sent with the phone's own
+     * run upload so the backend can deterministically link/enrich from the companion batch
+     * instead of relying on a fuzzy distance-tolerance match. Mirrors
+     * [GarminWatchManager.activeCompanionSessionId] exactly — see that property's doc comment
+     * for the full rationale; the Wear OS watch app's DirectHttpApiClient posts to the exact
+     * same garmin-companion endpoint family (shared table, brand-agnostic).
+     */
+    var activeCompanionSessionId: String? = null
+        private set
+
+    private var companionSessionFetchJob: kotlinx.coroutines.Job? = null
+
+    /** Re-sent on retry since the session row may not exist server-side the instant "start" fires. */
+    private fun fetchAndCacheCompanionSession(retries: Int = 5) {
+        val api = apiService ?: return
+        companionSessionFetchJob?.cancel()
+        activeCompanionSessionId = null
+        companionSessionFetchJob = CoroutineScope(Dispatchers.IO).launch {
+            for (attempt in 1..retries) {
+                try {
+                    val response = api.getGarminCompanionSession()
+                    val sessionId = response.session?.sessionId
+                    if (sessionId != null) {
+                        activeCompanionSessionId = sessionId
+                        Log.d(TAG, "cached companion session $sessionId")
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "could not fetch companion session (attempt $attempt) — ${e.message}")
+                }
+                if (attempt < retries) kotlinx.coroutines.delay(1000)
+            }
+        }
+    }
+
+    /**
+     * Restores [activeCompanionSessionId] after an OS-kill respawn — see
+     * RunTrackingService.reattachToWatchSession. The ID here comes from
+     * GET /api/garmin-companion/session/recoverable, not a fresh fetch.
+     */
+    fun restoreActiveCompanionSession(sessionId: String) {
+        companionSessionFetchJob?.cancel()
+        activeCompanionSessionId = sessionId
+    }
 
     /** Invoked when a command message arrives from the watch. */
     var onWatchCommand: ((action: String) -> Unit)? = null
@@ -474,6 +521,8 @@ class SamsungWatchManager(
                 dismissPendingSyncNotification()
             }
             sendStartAck()
+            // Fetch the active companion session ID so it can be linked at upload time
+            fetchAndCacheCompanionSession()
         }
 
         if (action == "stop") {

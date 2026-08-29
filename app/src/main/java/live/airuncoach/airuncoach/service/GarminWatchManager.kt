@@ -70,6 +70,18 @@ class GarminWatchManager(
     var activeCompanionSessionId: String? = null
         private set
 
+    /**
+     * Restores [activeCompanionSessionId] after an OS-kill respawn, where the normal
+     * "start" → [fetchAndCacheCompanionSession] flow never ran on this fresh instance because
+     * the watch's "start" command was never re-delivered (the watch was never actually
+     * interrupted — see RunTrackingService.reattachToWatchSession). The ID here comes from
+     * GET /api/garmin-companion/session/recoverable, not a fresh fetch.
+     */
+    fun restoreActiveCompanionSession(sessionId: String) {
+        companionSessionFetchJob?.cancel()
+        activeCompanionSessionId = sessionId
+    }
+
     /** The in-flight companion-session fetch, if any — cancelled before starting a new one so a
      * quick stop/start/stop cycle can't leave two overlapping retry loops racing to set
      * [activeCompanionSessionId], where a slow, stale response from the FIRST (superseded) fetch

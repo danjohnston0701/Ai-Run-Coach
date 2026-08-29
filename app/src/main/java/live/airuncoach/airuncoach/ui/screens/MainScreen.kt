@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,14 +35,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavOptionsBuilder
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.google.gson.Gson
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 import live.airuncoach.airuncoach.AppRoutes
 import live.airuncoach.airuncoach.data.SessionManager
@@ -84,6 +90,36 @@ val items = listOf(
     Screen.Profile,
 )
 
+/**
+ * Navigates once the current back-stack entry has actually settled into RESUMED, deferring
+ * (polling every 50ms, not dropping) otherwise.
+ *
+ * Guards against IllegalStateException("no event down from INITIALIZED") — the same
+ * Navigation-Compose race the bottom-nav click handler below already guards against (see its
+ * comment for the full mechanism), and that RunSessionScreen's auth-validation LaunchedEffect
+ * was separately found firing via a swallowed CancellationException (fixed at its source there).
+ * Applied here too, to every run_session → run_summary/home navigate call, because this is the
+ * highest-stakes call site in that same crash family: it fires exactly when a run finishes
+ * saving, including runs ended from the watch — crashing here would cost the user their
+ * just-completed run's summary screen, right after upload succeeded.
+ */
+private fun NavController.navigateWhenResumed(
+    scope: CoroutineScope,
+    route: String,
+    builder: NavOptionsBuilder.() -> Unit = {}
+) {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) {
+        navigate(route, builder)
+        return
+    }
+    scope.launch {
+        while (currentBackStackEntry?.lifecycle?.currentState != Lifecycle.State.RESUMED) {
+            delay(50)
+        }
+        navigate(route, builder)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -91,6 +127,7 @@ fun MainScreen(
     onNavigateToGarminUpdate: (version: String, releaseNote: String) -> Unit = { _, _ -> },
 ) {
     val navController = rememberNavController()
+    val navCoroutineScope = rememberCoroutineScope()
     var showLocationPermissionDialog by remember { mutableStateOf(false) }
     var onLocationPermissionGranted: (() -> Unit)? by remember { mutableStateOf(null) }
     var showPromoCodeDialog by remember { mutableStateOf(false) }
@@ -713,14 +750,14 @@ fun MainScreen(
                 RunSessionScreen(
                     hasRoute = false,
                     onEndRun = { runId ->
-                        navController.navigate("run_summary/$runId") {
+                        navController.navigateWhenResumed(navCoroutineScope, "run_summary/$runId") {
                             popUpTo("run_session") { inclusive = true }
                         }
                     },
                     onCancel = {
                         // Clear run config and go back to dashboard
                         RunConfigHolder.clearConfig()
-                        navController.navigate(Screen.Home.route) {
+                        navController.navigateWhenResumed(navCoroutineScope, Screen.Home.route) {
                             popUpTo(Screen.Home.route) { inclusive = true }
                         }
                     }
@@ -732,14 +769,14 @@ fun MainScreen(
                 RunSessionScreen(
                     hasRoute = routeId.isNotEmpty(),
                     onEndRun = { runId ->
-                        navController.navigate("run_summary/$runId") {
+                        navController.navigateWhenResumed(navCoroutineScope, "run_summary/$runId") {
                             popUpTo("run_session/{routeId}") { inclusive = true }
                         }
                     },
                     onCancel = {
                         // Clear run config and go back to dashboard
                         RunConfigHolder.clearConfig()
-                        navController.navigate(Screen.Home.route) {
+                        navController.navigateWhenResumed(navCoroutineScope, Screen.Home.route) {
                             popUpTo(Screen.Home.route) { inclusive = true }
                         }
                     }
@@ -752,7 +789,7 @@ fun MainScreen(
                     hasRoute = false,
                     groupRunId = groupRunId,  // Pass group run context to the session
                     onEndRun = { runId ->
-                        navController.navigate("run_summary/$runId") {
+                        navController.navigateWhenResumed(navCoroutineScope, "run_summary/$runId") {
                             popUpTo("run_session/group/{groupRunId}") { inclusive = true }
                         }
                     },

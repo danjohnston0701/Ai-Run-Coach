@@ -113,6 +113,7 @@ fun DashboardScreen(
     val hasPendingWatchSync by viewModel.hasPendingWatchSync.collectAsState()
     val todayActivePlans by viewModel.todayActivePlans.collectAsState()
     val showOemBatteryPrompt by viewModel.showOemBatteryPrompt.collectAsState()
+    val oemBatteryPromptIsUrgent by viewModel.oemBatteryPromptIsUrgent.collectAsState()
     val isKeyboardVisible = WindowInsets.isImeVisible
     val density = LocalDensity.current
     val context = LocalContext.current
@@ -303,12 +304,18 @@ fun DashboardScreen(
     if (showOemBatteryPrompt) {
         AlertDialog(
             onDismissRequest = { viewModel.dismissOemBatteryPrompt() },
-            title = { Text("Reliable tracking on your phone") },
+            title = { Text(if (oemBatteryPromptIsUrgent) "Your last session got interrupted" else "Reliable tracking on your phone") },
             text = {
                 Text(
-                    "Your phone's manufacturer has its own background-restriction settings, separate from Android's — " +
-                        "if left on the default, it can throttle GPS and Bluetooth partway through a run. " +
-                        "We'll walk you through fixing it — it only takes a minute."
+                    if (oemBatteryPromptIsUrgent) {
+                        "Your phone stopped the app in the background during your last session — that's your phone " +
+                            "manufacturer's own background-restriction settings, separate from Android's. It'll keep " +
+                            "happening until this is fixed. We'll walk you through it — it only takes a minute."
+                    } else {
+                        "Your phone's manufacturer has its own background-restriction settings, separate from Android's — " +
+                            "if left on the default, it can throttle GPS and Bluetooth partway through a run. " +
+                            "We'll walk you through fixing it — it only takes a minute."
+                    }
                 )
             },
             confirmButton = {

@@ -757,6 +757,16 @@ interface ApiService {
     @GET("/api/garmin-companion/session/active")
     suspend fun getGarminCompanionSession(): GarminCompanionSessionResponse
 
+    /**
+     * The user's single most-recent companion session regardless of status (active/paused/
+     * completed/abandoned), for OS-kill recovery — see RunTrackingService.handleNullIntentRespawn.
+     * Unlike [getGarminCompanionSession] above (active-only, used for the normal "Prepare for
+     * Watch" ID-caching flow), this is deliberately status-agnostic so recovery can tell an
+     * in-progress watch session apart from one that already finished while the phone was dead.
+     */
+    @GET("/api/garmin-companion/session/recoverable")
+    suspend fun getRecoverableGarminCompanionSession(): GarminRecoverableSessionResponse
+
     // ========== LIVE RUN SESSIONS ==========
     
     /**
@@ -869,7 +879,11 @@ data class GarminCompanionSession(
     val userId: String? = null,
     val startedAt: String? = null,
     val status: String? = null,
-    val activityType: String? = null
+    val activityType: String? = null,
+    // Populated once the session has ended (status == "completed") and its run record was
+    // created — lets OS-kill recovery hand off directly to an already-saved run instead of
+    // uploading a duplicate. Null for active/paused sessions.
+    val runId: String? = null
 ) {
     val isActive: Boolean get() = status == "active"
     val resolvedActivityType: String? get() = activityType
@@ -878,6 +892,24 @@ data class GarminCompanionSession(
 data class GarminCompanionSessionResponse(
     val session: GarminCompanionSession? = null,
     @SerializedName("has_active_session") val hasActiveSession: Boolean = false
+)
+
+/** One `garmin_realtime_data` row — the watch's most recent independently-streamed data point. */
+data class GarminRealtimeDataPoint(
+    val heartRate: Int? = null,
+    val cadence: Int? = null,
+    val pace: Float? = null,
+    val cumulativeDistance: Float? = null, // meters
+    val cumulativeAscent: Float? = null,
+    val cumulativeDescent: Float? = null,
+    val elapsedTime: Int? = null, // seconds
+    val isPaused: Boolean? = null,
+    val activityType: String? = null
+)
+
+data class GarminRecoverableSessionResponse(
+    val session: GarminCompanionSession? = null,
+    val latest: GarminRealtimeDataPoint? = null
 )
 
 // Observer session response - returned by GET /api/observe/{token}
