@@ -493,7 +493,7 @@ fun MainScreen(
                         // Navigate to check_route_availability - it will handle the API check itself
                         navController.navigate("check_route_availability")
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, activityTypeString ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, activityTypeString, isWatchMode ->
                         // Create RunSetupConfig and start run without route — preserve social settings
                         val activityType = if (activityTypeString.equals("walk", ignoreCase = true)) PhysicalActivityType.WALK else PhysicalActivityType.RUN
                         val config = RunSetupConfig(
@@ -506,7 +506,8 @@ fun MainScreen(
                             liveTrackingEnabled = liveTrackingEnabled,
                             liveTrackingObservers = liveTrackingObservers,
                             isGroupRun = isGroupRun,
-                            groupRunParticipants = groupRunParticipants
+                            groupRunParticipants = groupRunParticipants,
+                            isWatchMode = isWatchMode
                         )
                         RunConfigHolder.setConfig(config)
                         navController.navigate("run_session") {
@@ -689,51 +690,55 @@ fun MainScreen(
                 var selectedRouteId by remember { mutableStateOf<String?>(null) }
                 var aiCoachEnabled by remember { mutableStateOf(false) }
                 
+                // Shared by both the phone-start and watch-prepare CTAs below — the only
+                // difference is isWatchMode, which controls whether RunSessionScreen waits in
+                // standby for a watch "start" command instead of auto-starting phone tracking.
+                val startSelectedRoute: (Boolean) -> Unit = startRoute@{ isWatchMode ->
+                    // Get selected route and store in RunConfigHolder
+                    val routeId = selectedRouteId ?: return@startRoute
+                    val route = routes.find { it.id == routeId } ?: return@startRoute
+                    // Pro-rata target time based on actual route distance vs original target distance
+                    // e.g. User set 22min for 5km, picks 4.7km route → adjusted time = 22 * (4.7/5.0) = 20:41
+                    val adjustedHours: Int
+                    val adjustedMinutes: Int
+                    val adjustedSeconds: Int
+                    if (hasTargetTime && originalTargetDistanceKm > 0) {
+                        val originalTotalSeconds = targetHours * 3600 + targetMinutes * 60 + targetSeconds
+                        val ratio = route.distance / originalTargetDistanceKm
+                        val adjustedTotalSeconds = (originalTotalSeconds * ratio).toInt()
+                        adjustedHours = adjustedTotalSeconds / 3600
+                        adjustedMinutes = (adjustedTotalSeconds % 3600) / 60
+                        adjustedSeconds = adjustedTotalSeconds % 60
+                    } else {
+                        adjustedHours = targetHours
+                        adjustedMinutes = targetMinutes
+                        adjustedSeconds = targetSeconds
+                    }
+
+                    // Create RunSetupConfig with route + pro-rated target time
+                    val config = RunSetupConfig(
+                        targetDistance = route.distance.toFloat(),
+                        hasTargetTime = hasTargetTime,
+                        targetHours = adjustedHours,
+                        targetMinutes = adjustedMinutes,
+                        targetSeconds = adjustedSeconds,
+                        route = route,
+                        isWatchMode = isWatchMode
+                    )
+                    RunConfigHolder.setConfig(config)
+
+                    navController.navigate("run_session/$routeId") {
+                        popUpTo("route_selection/${distanceKm.toInt()}") { inclusive = true }
+                    }
+                }
+
                 RouteSelectionScreen(
                     routes = routes,
                     distanceKm = distanceKm,
                     selectedRouteId = selectedRouteId,
                     onRouteSelected = { selectedRouteId = it },
-                    onStartRun = {
-                        // Get selected route and store in RunConfigHolder
-                        selectedRouteId?.let { routeId ->
-                            val selectedRoute = routes.find { it.id == routeId }
-                            selectedRoute?.let { route ->
-                                // Pro-rata target time based on actual route distance vs original target distance
-                                // e.g. User set 22min for 5km, picks 4.7km route → adjusted time = 22 * (4.7/5.0) = 20:41
-                                val adjustedHours: Int
-                                val adjustedMinutes: Int
-                                val adjustedSeconds: Int
-                                if (hasTargetTime && originalTargetDistanceKm > 0) {
-                                    val originalTotalSeconds = targetHours * 3600 + targetMinutes * 60 + targetSeconds
-                                    val ratio = route.distance / originalTargetDistanceKm
-                                    val adjustedTotalSeconds = (originalTotalSeconds * ratio).toInt()
-                                    adjustedHours = adjustedTotalSeconds / 3600
-                                    adjustedMinutes = (adjustedTotalSeconds % 3600) / 60
-                                    adjustedSeconds = adjustedTotalSeconds % 60
-                                } else {
-                                    adjustedHours = targetHours
-                                    adjustedMinutes = targetMinutes
-                                    adjustedSeconds = targetSeconds
-                                }
-                                
-                                // Create RunSetupConfig with route + pro-rated target time
-                                val config = RunSetupConfig(
-                                    targetDistance = route.distance.toFloat(),
-                                    hasTargetTime = hasTargetTime,
-                                    targetHours = adjustedHours,
-                                    targetMinutes = adjustedMinutes,
-                                    targetSeconds = adjustedSeconds,
-                                    route = route
-                                )
-                                RunConfigHolder.setConfig(config)
-                                
-                                navController.navigate("run_session/$routeId") {
-                                    popUpTo("route_selection/${distanceKm.toInt()}") { inclusive = true }
-                                }
-                            }
-                        }
-                    },
+                    onStartRun = { startSelectedRoute(false) },
+                    onPrepareForWatch = { startSelectedRoute(true) },
                     onBack = { navController.popBackStack() },
                     onRegenerateRoutes = {
                         viewModel.clearRoutes()
@@ -1308,7 +1313,7 @@ fun MainScreen(
                     onGenerateRoute = { _, _, _, _, _, _, _, _, _, _ ->
                         // Group runs don't support route generation - ignore this callback
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, _ ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, _, isWatchMode ->
                         // Create RunSetupConfig with group run context
                         val config = RunSetupConfig(
                             activityType = PhysicalActivityType.RUN,
@@ -1320,7 +1325,8 @@ fun MainScreen(
                             liveTrackingEnabled = liveTrackingEnabled,
                             liveTrackingObservers = liveTrackingObservers,
                             isGroupRun = true,
-                            groupRunParticipants = emptyList() // Filled by run session
+                            groupRunParticipants = emptyList(), // Filled by run session
+                            isWatchMode = isWatchMode
                         )
                         RunConfigHolder.setConfig(config)
                         navController.navigate("run_session/group/$groupRunId") {

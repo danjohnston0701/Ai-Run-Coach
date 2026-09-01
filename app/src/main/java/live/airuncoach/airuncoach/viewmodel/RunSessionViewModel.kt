@@ -938,11 +938,31 @@ class RunSessionViewModel @Inject constructor(
         // Listen for upload completion
         viewModelScope.launch {
             RunTrackingService.uploadComplete.collect { backendRunId ->
-                backendRunId?.let {
-                    Log.d("RunSessionViewModel", "Upload complete with backend ID: $it")
+                // RunTrackingService.uploadComplete is a companion-object StateFlow (process-wide,
+                // not scoped to this ViewModel instance) that holds the LAST completed run's ID
+                // until the next run's startTracking() resets it to null. A fresh RunSessionViewModel
+                // starts collecting immediately on construction — often during the watch-standby wait,
+                // well before the watch is even started — and StateFlow replays its current value to
+                // every new collector. Previously this branch only ever SET backendRunId on a non-null
+                // emission and never mirrored a null one, so a leftover ID from a PREVIOUS (possibly
+                // since-deleted, or never-successfully-uploaded) run could get written into this run's
+                // state and then just sit there — surviving prepareRun()'s state reset if that reset
+                // happened to run first — until isRunning/isPaused/isStopping flipped true for the
+                // *actual* new run, at which point RunSessionScreen's navigation LaunchedEffect fired
+                // on the stale ID and jumped straight to that old run's summary. If the old run's fetch
+                // then failed (deleted, or a local-only ID that never made it to the server) with no
+                // local fallback available yet (real GPS distance hadn't accumulated seconds into the
+                // new run), that rendered as RunSummaryScreen's generic "Error" / "Go Back" screen —
+                // reported 2026-09 — Nino: "Error/Go back" ~50-80m into a watch-started walk, forced
+                // back to the pre-run setup screen with the watch-prepare option no longer available.
+                // Mirroring null here means startTracking()'s reset (which always runs before
+                // isTracking/_isServiceRunning flip true for the new run) reliably clears this state
+                // too, closing the race instead of leaving a stale ID to potentially outlive it.
+                _runState.update { state -> state.copy(backendRunId = backendRunId) }
+                if (backendRunId != null) {
+                    Log.d("RunSessionViewModel", "Upload complete with backend ID: $backendRunId")
                     // Keep isStopping = true so the navigation guard knows this is from the CURRENT run
                     // isStopping will be cleared after navigation happens
-                    _runState.update { state -> state.copy(backendRunId = it) }
                 }
             }
         }

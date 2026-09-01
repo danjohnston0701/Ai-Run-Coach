@@ -112,6 +112,22 @@ class RunView extends Ui.View {
     private const STOP_RETRY_MAX      = 6;   // max 6 retries (30s total)
     private const STOP_RETRY_INTERVAL = 20;  // 20 x 250ms = 5s between retries
 
+    // ── Pause/Resume-command retry ──────────────────────────────────────────────
+    // pauseRun()/resumeRun() previously sent a single fire-and-forget "pause"/"resume"
+    // transmit with no retry, unlike start/stop above. A dropped pause packet leaves the
+    // phone's timer and GPS running indefinitely while the watch is genuinely paused —
+    // the phone never learns to stop, producing a growing distance/duration gap between
+    // the watch and the phone for the rest of the session (reported 2026-09 — Nino, walk
+    // session: watch paused correctly, phone app didn't sync and kept the timer running).
+    // Mirrors the stop-retry pattern. Only one of pause/resume can be pending at a time;
+    // requesting the other one simply overwrites which action gets retried.
+    // Retry is cancelled when the phone sends pauseAck / resumeAck.
+    private var _pauseResumeRetryCount    = 0;
+    private var _pauseResumeRetryTick     = 0;
+    private var _pendingPauseResumeAction = null;  // "pause" | "resume" | null
+    private const PAUSE_RESUME_RETRY_MAX      = 6;   // max 6 retries (30s total)
+    private const PAUSE_RESUME_RETRY_INTERVAL = 20;  // 20 x 250ms = 5s between retries
+
     // Watch GPS cache
     private var _lastGpsLat    = null;
     private var _lastGpsLng    = null;
@@ -217,6 +233,18 @@ class RunView extends Ui.View {
         _phoneLink    = new PhoneLink();
         _dataStreamer = new DataStreamer();
         var tok = App.Storage.getValue("authToken");
+        // DataStreamer flags this (App.Storage, not in-memory) the moment a request comes
+        // back 401 mid-run — see DataStreamer._markAuthExpired(). Previously nothing ever
+        // consumed that flag, so a stale/invalidated token left the watch stuck forever:
+        // _isAuthenticated stayed true, the pairing-code screen (OVERLAY_WAITING) never
+        // showed again, and there was no way back in short of uninstalling the app to wipe
+        // App.Storage. Consuming it here means the very next app open drops back to
+        // OVERLAY_WAITING and re-requests a pairing code automatically.
+        if (App.Storage.getValue("authTokenExpired") == true) {
+            App.Storage.deleteValue("authToken");
+            App.Storage.deleteValue("authTokenExpired");
+            tok = null;
+        }
         _isAuthenticated = (tok != null && tok.length() > 0);
         _overlayState = _isAuthenticated ? OVERLAY_GPS_WAIT : OVERLAY_WAITING;
         // Constructed here (no Comm calls yet — see DataStreamer.initialize()'s comment on
@@ -478,6 +506,10 @@ class RunView extends Ui.View {
         _prevGpsLng = null;
         // Always notify phone, always stop local recording
         _phoneLink.sendCommand("pause");
+        // Arm retry: see _pauseResumeRetryCount declaration above.
+        _pendingPauseResumeAction = "pause";
+        _pauseResumeRetryCount    = PAUSE_RESUME_RETRY_MAX;
+        _pauseResumeRetryTick     = 0;
         if (_session != null && _session.isRecording()) { _session.stop(); }
         _vibeShort();
         Ui.requestUpdate();
@@ -488,6 +520,11 @@ class RunView extends Ui.View {
         _isPaused = false;
         // Always notify phone, always restart local recording
         _phoneLink.sendCommand("resume");
+        // Arm retry: see _pauseResumeRetryCount declaration above. Overwrites any still-
+        // pending "pause" retry — resume is now the action that matters.
+        _pendingPauseResumeAction = "resume";
+        _pauseResumeRetryCount    = PAUSE_RESUME_RETRY_MAX;
+        _pauseResumeRetryTick     = 0;
         if (_session != null && !_session.isRecording()) { _session.start(); }
         _vibeShort();
         Ui.requestUpdate();
@@ -506,12 +543,28 @@ class RunView extends Ui.View {
         Ui.requestUpdate();
     }
 
+    // Wrapped in try/catch (like onTick()/onPhoneMessage() already are) so an unhandled
+    // exception anywhere in here can't freeze the watch on the Connect IQ crash screen —
+    // this is the "user taps stop/finish" path, so a crash here is exactly what would
+    // produce "watch froze while trying to complete the session" with no trace to go on
+    // (reported 2026-09 — Nino). _recordCrash() persists a breadcrumb so the next app open
+    // surfaces what actually threw, instead of the watch just freezing silently as before.
     function finishRun() {
+        try {
+            _finishRunInner();
+        } catch (e) {
+            _recordCrash("finishRun", e);
+        }
+    }
+
+    private function _finishRunInner() {
         _isFinishing      = true;   // Block stale runUpdates from phone during shutdown
         _isRunning        = false;
         _isPaused         = false;
         _isFinished       = true;   // Keep duration visible after run ends
         _startRetryCount  = 0;      // Cancel any pending start-command retry
+        _pauseResumeRetryCount    = 0;   // Cancel any pending pause/resume-command retry
+        _pendingPauseResumeAction = null;
         _sessionReadySent = false;  // Reset so next session notifies phone again
         _overlayState = OVERLAY_READY;
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
@@ -621,6 +674,18 @@ class RunView extends Ui.View {
             Pos.enableLocationEvents(Pos.LOCATION_CONTINUOUS, method(:onPosition));
             _gpsListening = true;
         }
+        // Reset AFTER the !_phoneControlled-gated logic above (offline-buffer save,
+        // DataStreamer.endSession()) has already run for THIS session using its correct
+        // value. _phoneControlled is otherwise only ever written by two phone messages
+        // ("startRun" sets true, "sessionEnded" sets false) — stopping a phone-controlled
+        // run from the WATCH's own button never reaches "sessionEnded", so without this
+        // reset the flag stays stuck true and the very next session (even one started
+        // entirely fresh from the watch) is wrongly treated as phone-controlled: no fresh
+        // DataStreamer session ID gets generated for it (prepareSession() is skipped), so
+        // its data can end up posted under the PREVIOUS session's ID instead of a new one.
+        // Confirmed via GarminWatchManager.kt/routes.ts's session/start endpoint, which
+        // trusts whatever sessionId the watch sends with no server-side staleness check.
+        _phoneControlled = false;
         Ui.requestUpdate();
     }
 
@@ -833,6 +898,24 @@ class RunView extends Ui.View {
             // Single haptic pulse so the runner knows a cue was delivered.
             _vibeShort();
 
+        } else if (t.equals("pauseAck")) {
+            // Phone confirmed it received the "pause" command — cancel retry. Guarded on
+            // the pending action still being "pause" so a late ack arriving after the user
+            // already resumed doesn't cancel the (now more important) resume retry.
+            if (_pendingPauseResumeAction != null && _pendingPauseResumeAction.equals("pause")) {
+                _pauseResumeRetryCount    = 0;
+                _pendingPauseResumeAction = null;
+            }
+            Sys.println("Phone pauseAck received — retry cancelled");
+
+        } else if (t.equals("resumeAck")) {
+            // Phone confirmed it received the "resume" command — cancel retry (see pauseAck).
+            if (_pendingPauseResumeAction != null && _pendingPauseResumeAction.equals("resume")) {
+                _pauseResumeRetryCount    = 0;
+                _pendingPauseResumeAction = null;
+            }
+            Sys.println("Phone resumeAck received — retry cancelled");
+
         } else if (t.equals("stopAck")) {
             // Phone confirmed it received the "stop" command — cancel retry immediately.
             // The full sessionEnded message will follow once the upload completes.
@@ -844,6 +927,8 @@ class RunView extends Ui.View {
             // Phone ended the session (Scenario A) - clean up all watch resources.
             _stopRetryCount   = 0;      // Phone confirmed session ended — cancel stop retry
             _stopRetryTick    = 0;
+            _pauseResumeRetryCount    = 0;   // Session is over — cancel any pause/resume retry too
+            _pendingPauseResumeAction = null;
             _isRunning        = false;
             _isPaused         = false;
             _isFinished       = true;   // Keep duration visible after run ends
@@ -897,7 +982,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.1"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.2"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");
@@ -1002,6 +1087,18 @@ class RunView extends Ui.View {
                 _stopRetryCount -= 1;
                 _phoneLink.sendCommand("stop");
                 Sys.println(">>> finishRun retry — " + _stopRetryCount + " remaining");
+            }
+        }
+
+        // ── Pause/Resume-command retry (BT drop recovery) ──────────────────────
+        // See _pauseResumeRetryCount declaration above. Cancelled by pauseAck / resumeAck.
+        if (_pauseResumeRetryCount > 0 && _pendingPauseResumeAction != null) {
+            _pauseResumeRetryTick += 1;
+            if (_pauseResumeRetryTick >= PAUSE_RESUME_RETRY_INTERVAL) {
+                _pauseResumeRetryTick  = 0;
+                _pauseResumeRetryCount -= 1;
+                _phoneLink.sendCommand(_pendingPauseResumeAction);
+                Sys.println(">>> " + _pendingPauseResumeAction + " retry — " + _pauseResumeRetryCount + " remaining");
             }
         }
 
@@ -1263,7 +1360,14 @@ class RunView extends Ui.View {
 
         Ui.requestUpdate();
         } catch (e) {
-            Sys.println("onTick ERR: " + e.toString());
+            // Previously logged via Sys.println only, which is unrecoverable on a sideloaded
+            // build with no cable attached — a real onTick crash (this is the most likely site
+            // for "watch froze/crashed while finishing a session": target-reached, split, and
+            // stop-retry logic above all run here every 250ms) left zero trace to investigate
+            // (reported 2026-09 — Nino: watch froze on an IQ error screen mid-session, cause
+            // unknown). _recordCrash() persists it so the next app open surfaces it on-screen
+            // AND forwards it to the phone's Crashlytics via sendWatchReady's lastCrash field.
+            _recordCrash("onTick", e);
         }
     }
 
@@ -1276,7 +1380,22 @@ class RunView extends Ui.View {
 
     // ── Sensors / GPS ─────────────────────────────────────────────────────────
 
+    // Registered via method(:onPosition) (Pos.enableLocationEvents) — must stay non-private
+    // for Monkey C's indirect symbol lookup to resolve it (same constraint documented on
+    // onPhoneMessage/_onStartResponse elsewhere in this codebase). Wrapped in try/catch, like
+    // onTick()/onPhoneMessage()/finishRun() already are, so an unhandled exception here can't
+    // freeze the watch — this callback fires continuously throughout a run (not just at
+    // start/stop), so it's a plausible site for a mid-run freeze with no trace (reported
+    // 2026-09 — Nino: watch froze mid-walk, well before any stop was attempted).
     function onPosition(info as Pos.Info) as Void {
+        try {
+            _onPositionInner(info);
+        } catch (e) {
+            _recordCrash("onPosition", e);
+        }
+    }
+
+    private function _onPositionInner(info as Pos.Info) as Void {
         // CRITICAL: Guard against null info on GPS cold start.
         // Garmin fires the callback immediately after Pos.enableLocationEvents() on a cold
         // boot with info = null because no satellite data exists yet.  Accessing info.accuracy
@@ -1335,7 +1454,18 @@ class RunView extends Ui.View {
         }
     }
 
+    // Registered via method(:onSensor) (Sensor.enableSensorEvents) — must stay non-private
+    // for indirect symbol lookup (see onPosition above). Wrapped the same way for the same
+    // reason: this fires continuously throughout a run, so it's a plausible mid-run freeze site.
     function onSensor(info as Sensor.Info) as Void {
+        try {
+            _onSensorInner(info);
+        } catch (e) {
+            _recordCrash("onSensor", e);
+        }
+    }
+
+    private function _onSensorInner(info as Sensor.Info) as Void {
         // Activity.getActivityInfo() is the primary source for HR and cadence
         // in standalone mode.  onSensor provides a fallback for older devices
         // or when Activity.Info fields are null.
@@ -1357,7 +1487,19 @@ class RunView extends Ui.View {
     // DRAWING — Elite Diamond Grid
     // ==========================================================================
 
+    // Toybox.WatchUi.View lifecycle override, called by the framework every render — not an
+    // indirect method(:...) reference, but wrapped the same way as onPosition/onSensor above
+    // for the same reason: it runs continuously throughout a run and is arguably the single
+    // most plausible mid-run freeze site (most branching logic of any per-tick callback here).
     function onUpdate(dc) {
+        try {
+            _onUpdateInner(dc);
+        } catch (e) {
+            _recordCrash("onUpdate", e);
+        }
+    }
+
+    private function _onUpdateInner(dc) {
         var w  = dc.getWidth();
         var h  = dc.getHeight();
         var cx = w / 2;

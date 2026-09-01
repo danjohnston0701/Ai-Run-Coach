@@ -268,15 +268,20 @@ export async function sendFriendLiveRunInvitationEmail(
   email: string,
   friendName: string,
   runnerName: string,
-  sessionId: string
+  sessionId: string,
+  inviteCode: string
 ): Promise<boolean> {
   try {
     const { client, fromEmail } = await getResendClient();
 
     // For registered friends, we send a simpler email (they have the app)
-    // Still provide the session link for web/email viewing
-    const appLink = `airuncoach://live/${sessionId}`;
-    const webLink = `https://airuncoach.live/live/${sessionId}`;
+    // Still provide the session link for web/email viewing.
+    // Use the same airuncoach://observe/{code} deep link as the non-registered-user
+    // invite flow — the /api/observe/:code endpoint and both platforms' deep-link
+    // handlers only recognize an 8-char invite code or 64-char token, not a raw
+    // session ID, so this must stay in sync with sendObserverInvitationEmail.
+    const appLink = `airuncoach://observe/${inviteCode}`;
+    const webLink = `https://airuncoach.live/invite/${inviteCode}`;
 
     await client.emails.send({
       from: `AI Run Coach <${fromEmail}>`,

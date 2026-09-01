@@ -210,41 +210,54 @@ fun RunSessionScreen(
     }
 
     LaunchedEffect(Unit) {
-        // CRITICAL: Validate auth token before starting a run. If expired, clear session and navigate to login.
-        try {
-            val sessionManager = live.airuncoach.airuncoach.data.SessionManager(context)
-            val token = sessionManager.getAuthToken()
-            
-            if (token.isNullOrBlank()) {
-                Log.e("RunSessionScreen", "❌ No auth token found - user must login before running")
+        // CRITICAL: Validate auth token before starting a NEW run. Only for a genuinely
+        // new run — if a run is already active (isRunning/isPaused), skip this entirely.
+        // This composable gets a fresh LaunchedEffect(Unit) firing any time it's recreated,
+        // including while simply reattaching to an in-progress watch-driven session (e.g.
+        // after the OS killed and restarted the app mid-run). Previously this ran
+        // unconditionally and treated ANY exception from the network call — a plain
+        // timeout, not just an actually-expired token — as a fatal auth failure, calling
+        // cancelRunSetup() + onCancel() and discarding the live run back to the pre-run
+        // screen with whatever distance/time had already been recorded unrecoverable
+        // (reported 2026-09 — Nino: "Error/Go back" ~50-80m into a watch-started walk,
+        // forced to restart from zero on the watch).
+        val runAlreadyActive = runState.isRunning || runState.isPaused
+        if (!runAlreadyActive) {
+            try {
+                val sessionManager = live.airuncoach.airuncoach.data.SessionManager(context)
+                val token = sessionManager.getAuthToken()
+
+                if (token.isNullOrBlank()) {
+                    Log.e("RunSessionScreen", "❌ No auth token found - user must login before running")
+                    // Cancel any setup and navigate back
+                    viewModel.cancelRunSetup()
+                    onCancel()
+                    return@LaunchedEffect
+                }
+
+                // Make a simple API call to validate the token is actually valid.
+                // If the token is expired, the RetrofitClient interceptor will clear it and
+                // subsequent API calls will fail with clear errors.
+                Log.d("RunSessionScreen", "Validating auth token before run...")
+                viewModel.validateAuthToken()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // This LaunchedEffect's coroutine gets cancelled whenever this composable leaves
+                // composition while the getUser() call above is still in flight (screen navigated
+                // away from for any reason — including a process restart replaying the back stack
+                // after the OS killed the app mid-run, see RunTrackingService's null-Intent handling).
+                // That is NOT an auth failure: must rethrow so the cancellation unwinds normally,
+                // instead of falling into the catch below and firing a second, racing onCancel()
+                // navigate() call on top of whatever navigation is already in flight — that race is
+                // exactly what produces the "no event down from INITIALIZED" fatal (confirmed via
+                // Crashlytics, Oppo CPH2695, 2026-08-29 — Nino, walk session, watch-triggered pause).
+                throw e
+            } catch (e: Exception) {
+                Log.e("RunSessionScreen", "❌ Auth validation failed: ${e.message} - aborting run start")
                 // Cancel any setup and navigate back
                 viewModel.cancelRunSetup()
                 onCancel()
                 return@LaunchedEffect
             }
-            
-            // Make a simple API call to validate the token is actually valid.
-            // If the token is expired, the RetrofitClient interceptor will clear it and
-            // subsequent API calls will fail with clear errors.
-            Log.d("RunSessionScreen", "Validating auth token before run...")
-            viewModel.validateAuthToken()
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            // This LaunchedEffect's coroutine gets cancelled whenever this composable leaves
-            // composition while the getUser() call above is still in flight (screen navigated
-            // away from for any reason — including a process restart replaying the back stack
-            // after the OS killed the app mid-run, see RunTrackingService's null-Intent handling).
-            // That is NOT an auth failure: must rethrow so the cancellation unwinds normally,
-            // instead of falling into the catch below and firing a second, racing onCancel()
-            // navigate() call on top of whatever navigation is already in flight — that race is
-            // exactly what produces the "no event down from INITIALIZED" fatal (confirmed via
-            // Crashlytics, Oppo CPH2695, 2026-08-29 — Nino, walk session, watch-triggered pause).
-            throw e
-        } catch (e: Exception) {
-            Log.e("RunSessionScreen", "❌ Auth validation failed: ${e.message} - aborting run start")
-            // Cancel any setup and navigate back
-            viewModel.cancelRunSetup()
-            onCancel()
-            return@LaunchedEffect
         }
 
         val config = RunConfigHolder.getConfig()

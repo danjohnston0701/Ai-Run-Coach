@@ -103,6 +103,13 @@ class DataStreamer {
         }
     }
 
+    // Persists across app restarts (unlike _authToken=null above, which only affects this
+    // run) — consumed by RunView.initialize() on the next app open to actually drop the
+    // stale App.Storage token and fall back to the pairing-code screen. See RunView.mc.
+    private function _markAuthExpired() {
+        App.Storage.setValue("authTokenExpired", true);
+    }
+
     // Update GPS coordinates
     function updateGPS(lat, lon, alt) {
         _latitude = lat;
@@ -211,6 +218,7 @@ class DataStreamer {
             _authToken = null;  // Stop sending HTTP requests for this session
             // (App.Storage token is intentionally kept so the next open can show a proper
             //  "reconnect needed" prompt rather than a generic "waiting for phone" screen)
+            _markAuthExpired();
             var app = App.getApp();
             if (app != null && (app has :onHttpFailure)) { app.onHttpFailure(); }
         } else {
@@ -273,6 +281,12 @@ class DataStreamer {
         if (responseCode == 200) {
             Sys.println("Session started on backend");
             _startSessionRetriesLeft = 0;  // done — cancel any pending retry
+        } else if (responseCode == 401) {
+            // Retrying won't help an invalid token — same handling as onDataSent's 401.
+            Sys.println("DataStreamer.startSession: 401 Unauthorized — token invalid");
+            _authToken = null;
+            _markAuthExpired();
+            _startSessionRetriesLeft = 0;
         } else {
             Sys.println("Session start failed: " + responseCode);
             _retryStartSessionIfBudgetRemains();
@@ -367,6 +381,7 @@ class DataStreamer {
         if (responseCode == 200) {
             Sys.println("DataStreamer: session ended and run saved to AI Run Coach");
         } else {
+            if (responseCode == 401) { _markAuthExpired(); }
             Sys.println("DataStreamer: session end failed: " + responseCode);
         }
     }

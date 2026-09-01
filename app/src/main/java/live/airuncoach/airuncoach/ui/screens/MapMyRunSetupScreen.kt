@@ -84,8 +84,9 @@ fun MapMyRunSetupScreen(
         liveTrackingObservers: List<String>,
         isGroupRun: Boolean,
         groupRunParticipants: List<String>,
-        activityType: String
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> }
+        activityType: String,
+        isWatchMode: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     // Remembers the last-picked target distance/time so it survives a full app close/reopen
@@ -437,7 +438,8 @@ fun MapMyRunSetupScreen(
                                             liveTrackingEnabled = isLiveTrackingEnabled,
                                             liveTrackingObservers = watchObservers,
                                             isGroupRun = isGroupRunEnabled,
-                                            groupRunParticipants = groupRunParticipants
+                                            groupRunParticipants = groupRunParticipants,
+                                            isWatchMode = true
                                         )
                                         // Set config BEFORE preparing watch so that
                                         // prepareRunOnWatch() reads the correct sessionType
@@ -450,7 +452,7 @@ fun MapMyRunSetupScreen(
                                             runType = "free"
                                         )
                                         watchSendState = WatchSendState.SENT
-                                        
+
                                         onStartRunWithoutRoute(
                                             targetDistance,
                                             isTargetTimeEnabled,
@@ -461,7 +463,8 @@ fun MapMyRunSetupScreen(
                                             watchObservers,
                                             isGroupRunEnabled,
                                             groupRunParticipants,
-                                            if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
+                                            if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
+                                            true  // isWatchMode — navigate to the watch-standby run screen
                                         )
                                     }
                                 )
@@ -521,7 +524,8 @@ fun MapMyRunSetupScreen(
                                             phoneObservers,
                                             isGroupRunEnabled,
                                             groupRunParticipants,
-                                            if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
+                                            if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
+                                            false  // isWatchMode — phone starts tracking immediately
                                         )
                                     }
                                 )
@@ -580,7 +584,8 @@ fun MapMyRunSetupScreen(
                                     finalObservers,
                                     isGroupRunEnabled,
                                     groupRunParticipants,
-                                    if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
+                                    if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
+                                    false  // isWatchMode — phone starts tracking immediately
                                 )
                             }
                         )

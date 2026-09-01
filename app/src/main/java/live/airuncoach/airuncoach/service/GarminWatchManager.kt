@@ -647,6 +647,24 @@ class GarminWatchManager(
         Log.d(TAG, "Sent stopAck to watch")
     }
 
+    /**
+     * Acknowledge a watch "pause"/"resume" command so the watch can cancel its
+     * pause/resume-command retry (see RunView.mc's _pauseResumeRetryCount). Unlike
+     * start/stop, these commands previously had no ack at all — a dropped BLE transmit
+     * left the watch paused with the phone never finding out, silently diverging the
+     * phone's timer/distance from the watch's for the rest of the session (reported
+     * 2026-09 — Nino, walk session).
+     */
+    fun sendPauseAck() {
+        sendToWatch(mapOf("type" to "pauseAck"))
+        Log.d(TAG, "Sent pauseAck to watch")
+    }
+
+    fun sendResumeAck() {
+        sendToWatch(mapOf("type" to "resumeAck"))
+        Log.d(TAG, "Sent resumeAck to watch")
+    }
+
     // ── Private ───────────────────────────────────────────────────────────────
 
     // Persists watch-reported crash breadcrumbs to a small rolling file in app storage
@@ -914,6 +932,18 @@ class GarminWatchManager(
                         // run upload payload. It's cleared instead at the START of the *next*
                         // fetchAndCacheCompanionSession() call, so this run's ID survives until the
                         // next run actually begins fetching its own.
+                    }
+
+                    // Immediately ack "pause"/"resume" so the watch cancels its retry timer
+                    // before whatever onWatchCommand does downstream (pauseTracking() /
+                    // resumeTracking()) even runs — same reasoning as the start/stop acks
+                    // above. Previously these had no ack at all (see sendPauseAck() doc).
+                    if (action == "pause") {
+                        sendPauseAck()
+                        Log.d(TAG, "Watch PAUSE received — sent pauseAck immediately")
+                    } else if (action == "resume") {
+                        sendResumeAck()
+                        Log.d(TAG, "Watch RESUME received — sent resumeAck immediately")
                     }
 
                     // For all other commands: if no ViewModel or service is listening,

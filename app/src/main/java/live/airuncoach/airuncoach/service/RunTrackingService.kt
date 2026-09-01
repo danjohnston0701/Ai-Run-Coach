@@ -171,6 +171,16 @@ class RunTrackingService : Service(), SensorEventListener {
     // Walk sessions get a coaching update every 500m (vs every 1km for runs) because walkers
     // move slower and need more frequent check-ins to stay engaged and on pace.
     private var lastWalk500mSplit = 0
+    // Separate timing state for the walk 500m checkpoint, distinct from lastSplitTime/
+    // splitPausedMs (which belong to the real km-boundary split below). Previously the walk
+    // checkpoint shared those variables with the real km-split mechanism — since both can fire
+    // within the same tick (a 500m-block boundary and a real km boundary can land on the same
+    // distance sample), whichever ran second computed its elapsed time against a lastSplitTime
+    // the OTHER mechanism had just overwritten moments earlier, producing a near-zero or
+    // negative interval and a literal "0:00" pace (calculatePace() returns "0:00" for any
+    // speed <= 0). Reported 2026-09 — Nino: "0 minutes per kilometre" pace values during a walk.
+    private var lastWalk500mSplitTime: Long = 0
+    private var walk500mSplitPausedMs: Long = 0
     private val coachingHistory = mutableListOf<AiCoachingNote>() // Track what coaching has been given with timestamps
     private var preRunBriefingText: String? = null // Pre-run briefing text to record in coaching history
     private var isMuted = false // User can mute coach
@@ -238,6 +248,18 @@ class RunTrackingService : Service(), SensorEventListener {
     private var totalPausedMs: Long = 0          // Accumulated paused milliseconds
     private var pauseStartTime: Long = 0         // When the current pause started (0 = not paused)
     private var splitPausedMs: Long = 0          // Paused time within the current km split
+    // Start-line idle credit — some runners press Start before they actually begin moving
+    // (e.g. waiting for a race to begin, walking to the trailhead). Once the very first
+    // START_IDLE_MOVEMENT_THRESHOLD_M of real GPS distance is covered, whatever time elapsed
+    // since startTime beyond that (that isn't already an explicit manual pause) is folded into
+    // totalPausedMs/splitPausedMs exactly like a manual pause would be — so final duration,
+    // avg pace, and the km-1 split all exclude the pre-movement wait, matching how Strava
+    // reports "moving time" vs button-press-to-button-press elapsed time. Bounded by
+    // START_IDLE_MAX_CREDIT_MS so a genuinely bad GPS start (or a slow warm-up) isn't
+    // misread as idle time and silently trimmed from a real run.
+    private var hasCreditedStartIdle = false
+    private val START_IDLE_MOVEMENT_THRESHOLD_M = 15.0
+    private val START_IDLE_MAX_CREDIT_MS = 10 * 60 * 1000L
     private var currentCadence: Int = 0
     private var currentHeartRate: Int = 0
     private var maxHeartRate: Int = 0         // Peak HR seen during this run
@@ -1616,10 +1638,13 @@ class RunTrackingService : Service(), SensorEventListener {
         // Resetting it here would erase the flag before we can use it.
         startTime = System.currentTimeMillis()
         lastSplitTime = startTime
+        lastWalk500mSplitTime = startTime
         lastSplitWatchElapsedSeconds = 0
         totalPausedMs = 0      // Reset pause tracking for new run
         pauseStartTime = 0
         splitPausedMs = 0
+        walk500mSplitPausedMs = 0
+        hasCreditedStartIdle = false  // Re-arm start-line idle detection for new run
         routePoints.clear()
         kmSplits.clear()
         lastKmSplit = 0
@@ -3222,7 +3247,44 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
                     updatePaceTrendBuffer(smoothedPaceSeconds.toDouble())
                 }
-                totalDistance += distanceIncrement
+                // Product decision (2026-09 — Daniel): on a watch-driven run, the watch's own
+                // reported distance is the sole source of truth — see updateWatchSensorData(),
+                // which sets totalDistance directly from the watch firmware's
+                // Activity.Info.elapsedDistance on every incoming frame. This synthetic
+                // "garmin"-provider Location is built from that SAME incoming frame (see
+                // injectWatchLocation()), so also summing it via Haversine here would be a
+                // redundant second computation of the same movement from the same data —
+                // not a fallback, since updateWatchSensorData() already covers this frame.
+                // Real phone-native GPS fixes (location.provider != "garmin") still accumulate
+                // here as before — that's the genuine fallback for when watch GPS has actually
+                // gone stale (see checkPhoneGpsFallback()) and there is no watch frame to trust.
+                // NOTE: this removes a redundant distance computation; it has not been verified
+                // against Nino's specific reported numbers, which remain unconfirmed pending
+                // his raw session data/logs.
+                val isAuthoritativeWatchDistance = location.provider == "garmin" && wasRunStartedByWatch
+                if (!isAuthoritativeWatchDistance) {
+                    totalDistance += distanceIncrement
+                }
+
+                // First real movement detected — credit any start-line waiting time as if it
+                // were a manual pause (see hasCreditedStartIdle above). Require impliedSpeedKmh
+                // to look like genuine movement on its own merits (not just isFirstLocations'
+                // speed-check bypass above) so a single GPS-reacquisition "teleport" jump during
+                // the lenient warm-up window can't falsely trigger this.
+                if (!hasCreditedStartIdle && totalDistance >= START_IDLE_MOVEMENT_THRESHOLD_M &&
+                    impliedSpeedKmh < maxReasonableSpeedKmh) {
+                    hasCreditedStartIdle = true
+                    val elapsedSinceStartMs = newPoint.timestamp - startTime
+                    if (elapsedSinceStartMs in 0..START_IDLE_MAX_CREDIT_MS) {
+                        val idleMs = elapsedSinceStartMs - totalPausedMs
+                        if (idleMs > 0) {
+                            totalPausedMs += idleMs
+                            splitPausedMs += idleMs
+                            walk500mSplitPausedMs += idleMs
+                            Log.d("RunTrackingService", "Auto-credited ${idleMs}ms of start-line idle time before first movement")
+                        }
+                    }
+                }
                 // Accumulate speed readings for speed-based avg pace (essential for simulation where wall-clock time is compressed)
                 // Use speed from Location if available, otherwise try LocationPoint speed as fallback
                 val speedToRecord = if (location.hasSpeed() && location.speed > 0.5f) {
@@ -3434,9 +3496,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     Log.d("RunTrackingService", "Walk 500m split at ${String.format("%.1f", totalDistance / 1000)}km — triggering coaching")
                     hasCoachingFiredThisTick = true
                     recordCoachingFired()
-                    // Build a synthetic split using distance since last 500m boundary
+                    // Build a synthetic split using distance since last 500m boundary. Uses its
+                    // own lastWalk500mSplitTime/walk500mSplitPausedMs, NOT the real km-split's
+                    // lastSplitTime/splitPausedMs — see those fields' declaration for why.
                     val now = System.currentTimeMillis()
-                    val splitTime = (now - lastSplitTime) - splitPausedMs
+                    val splitTime = (now - lastWalk500mSplitTime) - walk500mSplitPausedMs
                     val distSinceLastSplit = 500.0 // Always 500m blocks for walk sessions
                     val splitSpeedKmh = if (splitTime > 0) (distSinceLastSplit / (splitTime / 1000.0) * 3.6).toFloat() else 0f
                     val walkSplit = KmSplit(
@@ -3444,9 +3508,9 @@ class RunTrackingService : Service(), SensorEventListener {
                         time = splitTime,
                         pace = calculatePace(splitSpeedKmh)
                     )
-                    lastSplitTime = now
-                    splitPausedMs = 0
-                    triggerKmSplitCoaching(walkSplit)
+                    lastWalk500mSplitTime = now
+                    walk500mSplitPausedMs = 0
+                    triggerKmSplitCoaching(walkSplit, isWalkCheckpoint = true)
                 }
             }
         }
@@ -4201,6 +4265,7 @@ class RunTrackingService : Service(), SensorEventListener {
             val thisPauseDuration = System.currentTimeMillis() - pauseStartTime
             totalPausedMs += thisPauseDuration
             splitPausedMs += thisPauseDuration  // Track pause within current km split
+            walk500mSplitPausedMs += thisPauseDuration  // Same, for the separate walk-checkpoint timer
             Log.d("RunTrackingService", "Resumed after ${thisPauseDuration}ms pause, totalPausedMs: ${totalPausedMs}")
             pauseStartTime = 0
         }
@@ -7318,7 +7383,24 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
-    private fun triggerKmSplitCoaching(split: KmSplit) {
+    /**
+     * @param isWalkCheckpoint True for the walk-session 500m check-in (see checkForKmSplit()'s
+     *   "Walk session: 500m splits" block) — that call site builds [split] with `km` set to a
+     *   500m-block COUNT (1, 2, 3…), not a real kilometre number, purely so it can reuse the
+     *   KmSplit type. Previously that fake km value was sent to the backend as `splitKm` and
+     *   used verbatim in "Km ${split.km}: ..." log/history text, which — because it increments
+     *   twice as fast as real distance — collided with the real km-boundary split below (both
+     *   feed this same function): a 4km walk could log "Km 2, Km 1, Km 3, Km 4, Km 2, Km 5, Km
+     *   6…" in that exact out-of-order, repeating sequence, and worse, the backend's
+     *   coaching-prompts-walk.ts routes any truthy splitKm into its "The walker just completed
+     *   kilometer ${splitKm}" prompt — so the AI coach was literally SAYING the wrong kilometre
+     *   out loud every 500m (reported 2026-09 — Nino, walk session, "coaching moments" showing
+     *   km markers out of order with impossible "0 min/km" paces). The server already has a
+     *   correct, distinct "500m check-in" prompt for exactly this case
+     *   (coaching-prompts-walk.ts's paceUpdatePrompt ternary) — it just needs splitKm to be
+     *   falsy to route there, which is what omitting it here now does.
+     */
+    private fun triggerKmSplitCoaching(split: KmSplit, isWalkCheckpoint: Boolean = false) {
         if (!coachingFeaturePrefs.kmSplitsEnabled) return
         serviceScope.launch {
             try {
@@ -7352,7 +7434,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     coachGender = currentUser?.coachGender,
                     coachAccent = currentUser?.coachAccent,
                     isSplit = true,
-                    splitKm = split.km,
+                    // null (not split.km) for a walk 500m checkpoint — split.km there is a
+                    // 500m-block count, not a real kilometre. A falsy splitKm routes the
+                    // backend into its correct "500m check-in" prompt instead of "completed
+                    // kilometer N" (see this function's doc comment).
+                    splitKm = if (isWalkCheckpoint) null else split.km,
                     splitPace = split.pace,   // Pace for this specific km split
                     currentGrade = currentSmoothedGrade,   // Real-time grade, not whole-run average
                     totalElevationGain = totalElevationGain,
@@ -7394,11 +7480,20 @@ class RunTrackingService : Service(), SensorEventListener {
                 // user's configured km-interval setting) rejects this split — don't log/play
                 // "Km X: null" in that case.
                 if (!response.skipped && response.message.isNotBlank()) {
+                    // "Km ${split.km}" only means something for a real km split — split.km on a
+                    // walk checkpoint is a 500m-block count, not a kilometre number (see this
+                    // function's doc comment). Label those by actual distance instead so the
+                    // coaching history never shows a fabricated/colliding km marker.
+                    val label = if (isWalkCheckpoint) {
+                        "${String.format("%.1f", totalDistance / 1000.0)}km check-in"
+                    } else {
+                        "Km ${split.km}"
+                    }
                     coachingHistory.add(AiCoachingNote(
                         time = getActiveRunDuration(),
-                        message = "Km ${split.km}: ${response.message}"
+                        message = "$label: ${response.message}"
                     ))
-                    Log.d("RunTrackingService", "Km ${split.km} split coaching: ${response.message}")
+                    Log.d("RunTrackingService", "$label split coaching: ${response.message}")
 
                     // Play OpenAI TTS audio if available, otherwise fall back to Android TTS
                     // (playCoachingAudio handles all text normalizations internally)

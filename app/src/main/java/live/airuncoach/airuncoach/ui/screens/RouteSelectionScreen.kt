@@ -45,6 +45,7 @@ fun RouteSelectionScreen(
     selectedRouteId: String?,
     onRouteSelected: (String) -> Unit,
     onStartRun: () -> Unit,
+    onPrepareForWatch: () -> Unit = {},
     onBack: () -> Unit,
     onRegenerateRoutes: () -> Unit,
     aiCoachEnabled: Boolean,
@@ -193,6 +194,13 @@ fun RouteSelectionScreen(
                                         routePolyline = selectedRoute?.polyline
                                     )
                                     watchSendState = WatchSendState.SENT
+                                    // Previously this only sent the BLE command and left the user
+                                    // stranded on this screen with just a "✓ Ready" button — unlike
+                                    // iOS, which navigates straight to the run session screen and
+                                    // shows the "lock your phone, start on watch" standby instructions
+                                    // (reported 2026-09 — Daniel: missing on Android). Now mirrors the
+                                    // no-route "Prepare for Watch" flow in MapMyRunSetupScreen.
+                                    onPrepareForWatch()
                                 }
                             )
                         }

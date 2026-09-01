@@ -27,6 +27,15 @@ class PairingCodeManager {
     private var _startInFlight = false;
     private var _pollInFlight = false;
     private var _cancelled = false;
+    // Comm.makeWebRequest's callback is confirmed (via garmin_pairing_diagnostics: every
+    // real watch that ever requested a code got one server-side, but not one of them ever
+    // reached "confirmed" — the code never even showed for some) to sometimes just never
+    // fire on real hardware — no exception, no error callback, nothing. Without a watchdog,
+    // that permanently wedges _startInFlight/_pollInFlight true, and start()/_pollStatus()'s
+    // own in-flight guards then silently block every future attempt forever, even though
+    // the repeating poll Timer keeps firing. These two timers force a reset+retry instead.
+    private var _requestTimeoutTimer = null;
+    private var _pollTimeoutTimer = null;
 
     // Set by RunView. onCodeReceived: function(code as String) — display it.
     // onConfirmed: function(token as String) — hand off to _applyAuthToken.
@@ -37,6 +46,8 @@ class PairingCodeManager {
     // Retry a failed /start (e.g. no network yet) rather than leaving the watch stuck
     // with no code and no explanation — mirrors DataStreamer's startSession retry pattern.
     private const START_RETRY_MS = 5000;
+    private const REQUEST_TIMEOUT_MS = 10000;
+    private const POLL_TIMEOUT_MS    = 10000;
 
     function initialize() {}
 
@@ -51,6 +62,8 @@ class PairingCodeManager {
     function cancel() {
         _cancelled = true;
         if (_pollTimer != null) { _pollTimer.stop(); _pollTimer = null; }
+        if (_requestTimeoutTimer != null) { _requestTimeoutTimer.stop(); _requestTimeoutTimer = null; }
+        if (_pollTimeoutTimer != null) { _pollTimeoutTimer.stop(); _pollTimeoutTimer = null; }
     }
 
     // Kick off the flow. Safe to call multiple times (e.g. RunView.onShow() re-entry) —
@@ -67,7 +80,7 @@ class PairingCodeManager {
         var payload = {
             "deviceId"        => deviceInfo.uniqueIdentifier,
             "deviceModel"     => deviceInfo.partNumber,
-            "watchAppVersion" => "3.3.9"
+            "watchAppVersion" => "3.4.2"
         };
         var url = _baseUrl + "/api/garmin-companion/pairing/start";
         var options = {
@@ -78,6 +91,9 @@ class PairingCodeManager {
         Sys.println("PairingCodeManager: requesting code — device=" + deviceInfo.uniqueIdentifier);
         try {
             Comm.makeWebRequest(url, payload, options, method(:_onStartResponse));
+            if (_requestTimeoutTimer != null) { _requestTimeoutTimer.stop(); }
+            _requestTimeoutTimer = new Timer.Timer();
+            _requestTimeoutTimer.start(method(:_onRequestTimeout), REQUEST_TIMEOUT_MS, false);
         } catch (e) {
             _startInFlight = false;
             Sys.println("PairingCodeManager._requestCode: makeWebRequest threw — " + e.toString());
@@ -85,10 +101,20 @@ class PairingCodeManager {
         }
     }
 
+    // NOT private — Timer callback. Fires if _onStartResponse never arrives at all.
+    function _onRequestTimeout() as Void {
+        _requestTimeoutTimer = null;
+        if (_cancelled || !_startInFlight) { return; } // response (or its own retry) already handled it
+        Sys.println("PairingCodeManager: /pairing/start timed out with no response — retrying");
+        _startInFlight = false;
+        _scheduleStartRetry();
+    }
+
     // NOT private: referenced via method(:_onStartResponse) — Monkey C's indirect symbol
     // lookup cannot resolve a private member (same constraint DataStreamer documents above
     // its onSessionStarted/startSession pair).
     function _onStartResponse(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
+        if (_requestTimeoutTimer != null) { _requestTimeoutTimer.stop(); _requestTimeoutTimer = null; }
         _startInFlight = false;
         if (_cancelled) { return; }
         if (responseCode == 200 && data != null && (data instanceof Lang.Dictionary)) {
@@ -130,6 +156,9 @@ class PairingCodeManager {
         };
         try {
             Comm.makeWebRequest(url, null, options, method(:_onStatusResponse));
+            if (_pollTimeoutTimer != null) { _pollTimeoutTimer.stop(); }
+            _pollTimeoutTimer = new Timer.Timer();
+            _pollTimeoutTimer.start(method(:_onPollTimeout), POLL_TIMEOUT_MS, false);
         } catch (e) {
             _pollInFlight = false;
             Sys.println("PairingCodeManager._pollStatus: makeWebRequest threw — " + e.toString());
@@ -138,8 +167,20 @@ class PairingCodeManager {
         }
     }
 
+    // NOT private — Timer callback. Fires if _onStatusResponse never arrives at all; without
+    // this, one dropped response permanently wedges _pollInFlight true and every subsequent
+    // repeating-timer tick silently no-ops forever (confirmed: no watch in garmin_pairing_codes
+    // has ever reached status="confirmed", even ones that plainly got a code from the server).
+    function _onPollTimeout() as Void {
+        _pollTimeoutTimer = null;
+        if (_cancelled) { return; }
+        Sys.println("PairingCodeManager: status poll timed out with no response — next tick will retry");
+        _pollInFlight = false;
+    }
+
     // NOT private — Comm.makeWebRequest callback.
     function _onStatusResponse(responseCode as Lang.Number, data as Lang.Dictionary or Lang.String or Null) as Void {
+        if (_pollTimeoutTimer != null) { _pollTimeoutTimer.stop(); _pollTimeoutTimer = null; }
         _pollInFlight = false;
         if (_cancelled) { return; }
 

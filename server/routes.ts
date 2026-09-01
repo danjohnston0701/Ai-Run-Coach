@@ -4855,7 +4855,8 @@ function transformRunForAndroid(run: any) {
             friend.email,
             friend.name || "Friend",
             runner.name || "A runner",
-            sessionId
+            sessionId,
+            session.inviteCode || ""
           );
         }
 
@@ -4905,7 +4906,8 @@ function transformRunForAndroid(run: any) {
               trimmedEmail,
               existingUser.name || "Friend",
               runner.name || "A runner",
-              sessionId
+              sessionId,
+              session.inviteCode || ""
             );
 
             console.log(`[Live Sessions] Invited registered friend ${existingUser.id} (${trimmedEmail}) via email lookup. Push: ${pushSent}, Email: ${emailSent}`);
@@ -12918,6 +12920,25 @@ function transformRunForAndroid(run: any) {
         return res.json({ success: true, session: existing[0], message: "Session already exists" });
       }
       
+      // Defense-in-depth for back-to-back sessions: a prior session for this user may have
+      // been left at status "active"/"paused" if it was never cleanly closed (e.g. a dropped
+      // "stop" BLE message, or a client bug that skipped calling /session/end — see the
+      // watch-side _phoneControlled reset fix, 2026-09). This endpoint has no way to tell
+      // whether a leftover row like that and the session starting now are the same real-world
+      // session or two different ones, so mark it "abandoned" rather than leaving it "active"
+      // forever. /session/active and /session/recoverable already order by started_at DESC and
+      // would correctly prefer the new row regardless — this is purely to keep session state
+      // honest and prevent any future code path from mistaking a stale row for a live one.
+      await db.update(garminCompanionSessions)
+        .set({ status: "abandoned" })
+        .where(and(
+          eq(garminCompanionSessions.userId, userId),
+          or(
+            eq(garminCompanionSessions.status, "active"),
+            eq(garminCompanionSessions.status, "paused")
+          )
+        ));
+
       // Create new session
       const [session] = await db.insert(garminCompanionSessions).values({
         userId,

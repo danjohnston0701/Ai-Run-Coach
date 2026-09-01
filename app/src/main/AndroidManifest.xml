@@ -142,6 +142,17 @@
                     android:pathPrefix="/share/" />
             </intent-filter>
 
+            <!-- Observer invite deep link (airuncoach://observe/{token}) — lets a non-registered
+                 or registered user open the app straight into the Live Share observer flow -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="airuncoach"
+                    android:host="observe" />
+            </intent-filter>
+
             <!-- Garmin Watch App Update Notification — open Connect IQ store.
                  Two intent-filters are needed:
                  1. The namespaced action fired by our own AiRunCoachMessagingService
