@@ -68,6 +68,8 @@ class RunSessionController(
         private const val START_RETRY_INTERVAL_MS = 5000L
         private const val STOP_RETRY_MAX = 6
         private const val STOP_RETRY_INTERVAL_MS = 5000L
+        private const val PAUSE_RESUME_RETRY_MAX = 6
+        private const val PAUSE_RESUME_RETRY_INTERVAL_MS = 5000L
         private const val GPS_LOST_THRESHOLD_MS = 2000L
         private const val CONNECT_WAIT_GRACE_MS = 8000L
         private const val OFFLINE_CAPTURE_INTERVAL_MS = 15_000L
@@ -109,6 +111,17 @@ class RunSessionController(
     }
     private val stopRetry = RetryLoop(scope, STOP_RETRY_MAX, STOP_RETRY_INTERVAL_MS) {
         dataLayer.sendCommand("stop")
+    }
+    // Ported from the Garmin side (2026-09): pause/resume previously had no retry at all, unlike
+    // start/stop above — a dropped Data Layer message left the phone never finding out the watch
+    // paused, silently diverging the phone's timer/distance from the watch's for the rest of the
+    // session. Two separate loops (rather than one shared "which action" tracker, as the Garmin
+    // Monkey C side needed) since Kotlin already has RetryLoop as a clean reusable primitive.
+    private val pauseRetry = RetryLoop(scope, PAUSE_RESUME_RETRY_MAX, PAUSE_RESUME_RETRY_INTERVAL_MS) {
+        dataLayer.sendCommand("pause")
+    }
+    private val resumeRetry = RetryLoop(scope, PAUSE_RESUME_RETRY_MAX, PAUSE_RESUME_RETRY_INTERVAL_MS) {
+        dataLayer.sendCommand("resume")
     }
 
     private var phoneControlled = false
@@ -221,7 +234,8 @@ class RunSessionController(
         val s = _state.value
         if (!s.isRunning || s.isPaused) return
         _state.update { it.copy(isPaused = true) }
-        dataLayer.sendCommand("pause")
+        resumeRetry.cancel() // only one of pause/resume should ever be retrying at once
+        pauseRetry.start()
         health.pauseExercise()
         vibeShort()
     }
@@ -230,7 +244,8 @@ class RunSessionController(
         val s = _state.value
         if (!s.isPaused) return
         _state.update { it.copy(isPaused = false) }
-        dataLayer.sendCommand("resume")
+        pauseRetry.cancel()
+        resumeRetry.start()
         health.resumeExercise()
         vibeShort()
     }
@@ -240,6 +255,8 @@ class RunSessionController(
         val s = _state.value
         _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE) }
         startRetry.cancel()
+        pauseRetry.cancel()
+        resumeRetry.cancel()
         sessionReadySent = false
 
         dataLayer.sendCommand("stop")
@@ -305,6 +322,15 @@ class RunSessionController(
                 }
             }
         }
+
+        // Ported from the Garmin side (2026-09): phoneControlled was previously only ever reset
+        // by the phone's "sessionEnded" message — stopping a phone-controlled run from the
+        // watch's own button (this function) never reached that message, so the flag stayed
+        // stuck true and the very next session (even one started fresh from the watch) was
+        // wrongly treated as phone-controlled: no fresh standalone session ID, no offline
+        // backup, no standalone endSession() call. Reset here, after the !phoneControlled-gated
+        // logic above has already run for THIS session using its correct value.
+        phoneControlled = false
 
         vibeLong()
     }
@@ -424,9 +450,13 @@ class RunSessionController(
                 if (msg != null) { showStatus(msg, 5000L); vibeShort() }
             }
             "coachingCue" -> vibeShort()
+            "pauseAck" -> pauseRetry.cancel()
+            "resumeAck" -> resumeRetry.cancel()
             "stopAck" -> stopRetry.cancel()
             "sessionEnded" -> {
                 stopRetry.cancel()
+                pauseRetry.cancel()
+                resumeRetry.cancel()
                 isFinishing = true
                 _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE) }
                 phoneControlled = false

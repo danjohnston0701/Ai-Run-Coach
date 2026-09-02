@@ -80,7 +80,7 @@ class PairingCodeManager {
         var payload = {
             "deviceId"        => deviceInfo.uniqueIdentifier,
             "deviceModel"     => deviceInfo.partNumber,
-            "watchAppVersion" => "3.4.2"
+            "watchAppVersion" => "3.4.3"
         };
         var url = _baseUrl + "/api/garmin-companion/pairing/start";
         var options = {

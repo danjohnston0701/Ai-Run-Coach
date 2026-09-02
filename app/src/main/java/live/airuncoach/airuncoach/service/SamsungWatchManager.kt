@@ -367,6 +367,23 @@ class SamsungWatchManager(
         Log.d(TAG, "Sent stopAck to watch")
     }
 
+    /**
+     * Acknowledge a watch "pause"/"resume" command so the watch can cancel its pause/resume
+     * retry loop (see RunSessionController.kt's pauseRetry/resumeRetry). Ported from the same
+     * fix on the Garmin side (2026-09): pause/resume previously had no ack at all, unlike
+     * start/stop — a dropped Data Layer message left the watch paused with the phone never
+     * finding out, silently diverging the phone's timer/distance from the watch's.
+     */
+    fun sendPauseAck() {
+        sendToWatch(mapOf("type" to "pauseAck"))
+        Log.d(TAG, "Sent pauseAck to watch")
+    }
+
+    fun sendResumeAck() {
+        sendToWatch(mapOf("type" to "resumeAck"))
+        Log.d(TAG, "Sent resumeAck to watch")
+    }
+
     fun disconnect() {
         sendToWatch(mapOf("type" to "disconnect"))
     }
@@ -528,6 +545,14 @@ class SamsungWatchManager(
         if (action == "stop") {
             sendStopAck()
             Log.d(TAG, "Watch STOP received — sent stopAck immediately")
+        }
+
+        if (action == "pause") {
+            sendPauseAck()
+            Log.d(TAG, "Watch PAUSE received — sent pauseAck immediately")
+        } else if (action == "resume") {
+            sendResumeAck()
+            Log.d(TAG, "Watch RESUME received — sent resumeAck immediately")
         }
 
         if (onWatchCommand == null) {

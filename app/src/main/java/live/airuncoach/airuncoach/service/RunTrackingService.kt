@@ -244,21 +244,50 @@ class RunTrackingService : Service(), SensorEventListener {
     // transient phone-GPS update must not prevent a later valid Garmin total from
     // correcting it.
     private var watchDistanceM: Float = 0f
+    // Watch's own elapsed-seconds reference (Activity.Info.timerTime, via frame.elapsedSeconds)
+    // at the moment watchDistanceM was last accepted — deliberately NOT phone wall-clock time,
+    // so a burst of queued BLE frames processed back-to-back (wall-clock gap near zero even
+    // though the watch's own clock advanced normally between the readings) can't produce a
+    // false "impossible speed" rejection below. -1 = nothing accepted yet this run.
+    private var lastWatchDistanceAcceptedAtSec: Int = -1
     // Pause tracking — ensures paused time is excluded from all duration/pace calculations
     private var totalPausedMs: Long = 0          // Accumulated paused milliseconds
     private var pauseStartTime: Long = 0         // When the current pause started (0 = not paused)
     private var splitPausedMs: Long = 0          // Paused time within the current km split
     // Start-line idle credit — some runners press Start before they actually begin moving
-    // (e.g. waiting for a race to begin, walking to the trailhead). Once the very first
-    // START_IDLE_MOVEMENT_THRESHOLD_M of real GPS distance is covered, whatever time elapsed
-    // since startTime beyond that (that isn't already an explicit manual pause) is folded into
-    // totalPausedMs/splitPausedMs exactly like a manual pause would be — so final duration,
-    // avg pace, and the km-1 split all exclude the pre-movement wait, matching how Strava
-    // reports "moving time" vs button-press-to-button-press elapsed time. Bounded by
-    // START_IDLE_MAX_CREDIT_MS so a genuinely bad GPS start (or a slow warm-up) isn't
-    // misread as idle time and silently trimmed from a real run.
+    // (e.g. waiting for a race to begin, walking to the trailhead). Whatever time elapsed
+    // since startTime up to the moment sustained genuine movement is confirmed (that isn't
+    // already an explicit manual pause) is folded into totalPausedMs/splitPausedMs exactly
+    // like a manual pause would be — so final duration, avg pace, and the km-1 split all
+    // exclude the pre-movement wait, matching how Strava reports "moving time" vs
+    // button-press-to-button-press elapsed time.
+    //
+    // Confirmation is based on SUSTAINED pace over START_IDLE_CONFIRM_SAMPLES consecutive
+    // accepted GPS points, not raw cumulative distance (2026-09 — Daniel: a fixed distance
+    // floor is too easy for GPS drift/multipath to cross while genuinely stationary — exactly
+    // the case at a crowded race-start corral near buildings — since one isolated reflection
+    // "jump" of a few metres can look fast for that ONE instant. Requiring several consecutive
+    // samples to all show a pace faster than START_IDLE_MAX_PACE_SEC_PER_KM filters that out:
+    // drift can produce an occasional fast-looking blip, but can't sustain one, while real
+    // movement can). The confirmation window is short — a handful of seconds, not minutes —
+    // specifically so it locks in at the true onset of movement almost immediately: a runner
+    // who moves for ~1 minute and then genuinely stops was already locked in well before that
+    // stop, and this mechanism (being one-shot, see hasCreditedStartIdle) never revisits an
+    // already-credited/already-running session.
+    //
+    // The credit itself is anchored to the EARLIEST sample in the confirming window (not the
+    // moment confirmation completes), and capped — not rejected outright — at
+    // START_IDLE_MAX_CREDIT_MS: a runner in a corral/wave-start for longer than that still gets
+    // credited up to the cap, rather than the previous all-or-nothing cliff that gave a longer
+    // wait ZERO adjustment at all.
     private var hasCreditedStartIdle = false
-    private val START_IDLE_MOVEMENT_THRESHOLD_M = 15.0
+    private val startIdleDistances = mutableListOf<Double>()   // metres, parallel arrays —
+    private val startIdleTimes = mutableListOf<Double>()       // seconds since previous point —
+    private val startIdleTimestamps = mutableListOf<Long>()    // point.timestamp (ms) — for anchoring
+    private val START_IDLE_CONFIRM_SAMPLES = 3
+    private val START_IDLE_MAX_PACE_SEC_PER_KM = 18.0 * 60.0   // 18 min/km — clearly moving, not drift
+    private val START_IDLE_MIN_DISTANCE_M = 5.0                // defensive floor only; the sustained-
+                                                                // pace check above is the real gate
     private val START_IDLE_MAX_CREDIT_MS = 10 * 60 * 1000L
     private var currentCadence: Int = 0
     private var currentHeartRate: Int = 0
@@ -1645,6 +1674,9 @@ class RunTrackingService : Service(), SensorEventListener {
         splitPausedMs = 0
         walk500mSplitPausedMs = 0
         hasCreditedStartIdle = false  // Re-arm start-line idle detection for new run
+        startIdleDistances.clear()
+        startIdleTimes.clear()
+        startIdleTimestamps.clear()
         routePoints.clear()
         kmSplits.clear()
         lastKmSplit = 0
@@ -1672,6 +1704,7 @@ class RunTrackingService : Service(), SensorEventListener {
         watchGpsUpdateCount = 0      // Reset warm-up counter
         watchElapsedSeconds = 0      // Reset authoritative watch timer
         watchDistanceM = 0f          // Reset authoritative Garmin distance
+        lastWatchDistanceAcceptedAtSec = -1  // Re-arm the distance-jump sanity check for new run
         totalElevationGain = 0.0
         hasGpsElevation = false
         currentSmoothedGrade = 0.0
@@ -3031,12 +3064,48 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Connect IQ may deliver queued Bluetooth frames out of order.
                     // Garmin distance must never make the persisted session move backwards.
                     if (watchDistanceM >= this.watchDistanceM) {
-                        Log.d(
-                            "RunTrackingService",
-                            "⌚ Authoritative distance: ${totalDistance.toInt()}m → ${watchDistanceM.toInt()}m"
-                        )
-                        this.watchDistanceM = watchDistanceM
-                        totalDistance = watchDistanceM.toDouble()
+                        // Sanity check: reject an implausibly fast increase, even though it
+                        // technically passed the monotonic check above. Without this, a single
+                        // corrupted/glitched frame (garbled BLE payload, or a genuine watch
+                        // GPS/firmware spike) reporting a wildly-too-large distance gets accepted
+                        // once, and every subsequent CORRECT (lower) frame is then silently
+                        // rejected as "stale" by the check above for the rest of the run —
+                        // permanently freezing distance at the wrong number with no way to
+                        // recover. Confirmed in real session data (2026-09-01, Nino): the coaching
+                        // log announced "Km 10" during a walk that only ever covered ~5km.
+                        // No baseline yet this run (first accepted frame, or fresh after a
+                        // reattach) always passes — nothing to sanity-check against, and a
+                        // legitimate first value should never be rejected. A genuine catch-up
+                        // jump after a long gap (BLE drop, reattach) also passes: dividing by the
+                        // watch's own elapsed time means a big jump over a long gap implies a
+                        // normal speed, while the same jump over a couple of seconds does not.
+                        val prevAcceptedSec = lastWatchDistanceAcceptedAtSec
+                        val elapsedSec = if (prevAcceptedSec >= 0) (frame.elapsedSeconds - prevAcceptedSec) else null
+                        val jumpM = watchDistanceM - this.watchDistanceM
+                        val impliedSpeedKmh = if (elapsedSec != null && elapsedSec > 0) (jumpM / elapsedSec) * 3.6 else 0.0
+                        val maxReasonableSpeedKmh = if (currentActivityType == "walk") 15.0 else 35.0
+                        // Generous 2x headroom over the strict per-GPS-point filter elsewhere —
+                        // this is a coarse guard meant to catch genuinely corrupted/glitched
+                        // spikes, not fine-tune normal pace variation.
+                        val isPlausible = elapsedSec == null || elapsedSec <= 0 ||
+                            impliedSpeedKmh <= maxReasonableSpeedKmh * 2.0
+                        if (isPlausible) {
+                            Log.d(
+                                "RunTrackingService",
+                                "⌚ Authoritative distance: ${totalDistance.toInt()}m → ${watchDistanceM.toInt()}m"
+                            )
+                            this.watchDistanceM = watchDistanceM
+                            totalDistance = watchDistanceM.toDouble()
+                            lastWatchDistanceAcceptedAtSec = frame.elapsedSeconds
+                        } else {
+                            Log.w(
+                                "RunTrackingService",
+                                "⚠️ Rejecting implausible Garmin distance jump: ${this.watchDistanceM.toInt()}m → " +
+                                    "${watchDistanceM.toInt()}m over ${elapsedSec}s of watch time " +
+                                    "(implied ${impliedSpeedKmh.toInt()}km/h) — treating as a corrupted/glitched " +
+                                    "frame rather than accepting it and getting permanently stuck on it"
+                            )
+                        }
                     } else {
                         Log.d(
                             "RunTrackingService",
@@ -3266,22 +3335,61 @@ class RunTrackingService : Service(), SensorEventListener {
                     totalDistance += distanceIncrement
                 }
 
-                // First real movement detected — credit any start-line waiting time as if it
-                // were a manual pause (see hasCreditedStartIdle above). Require impliedSpeedKmh
-                // to look like genuine movement on its own merits (not just isFirstLocations'
-                // speed-check bypass above) so a single GPS-reacquisition "teleport" jump during
-                // the lenient warm-up window can't falsely trigger this.
-                if (!hasCreditedStartIdle && totalDistance >= START_IDLE_MOVEMENT_THRESHOLD_M &&
-                    impliedSpeedKmh < maxReasonableSpeedKmh) {
-                    hasCreditedStartIdle = true
-                    val elapsedSinceStartMs = newPoint.timestamp - startTime
-                    if (elapsedSinceStartMs in 0..START_IDLE_MAX_CREDIT_MS) {
-                        val idleMs = elapsedSinceStartMs - totalPausedMs
-                        if (idleMs > 0) {
-                            totalPausedMs += idleMs
-                            splitPausedMs += idleMs
-                            walk500mSplitPausedMs += idleMs
-                            Log.d("RunTrackingService", "Auto-credited ${idleMs}ms of start-line idle time before first movement")
+                // Start-line idle credit — see hasCreditedStartIdle's declaration for the full
+                // design. Confirm SUSTAINED movement over a short window of consecutive accepted
+                // points (not raw cumulative distance), then credit everything since startTime
+                // up to the earliest sample in that window as if it were a manual pause.
+                if (!hasCreditedStartIdle) {
+                    if (impliedSpeedKmh < maxReasonableSpeedKmh) {
+                        startIdleDistances.add(distanceIncrement)
+                        startIdleTimes.add(timeSinceLastPoint)
+                        startIdleTimestamps.add(newPoint.timestamp)
+                        while (startIdleDistances.size > START_IDLE_CONFIRM_SAMPLES) {
+                            startIdleDistances.removeAt(0)
+                            startIdleTimes.removeAt(0)
+                            startIdleTimestamps.removeAt(0)
+                        }
+                    } else {
+                        // A single implausible-speed point (a teleport/GPS-reacquisition jump —
+                        // can slip through the lenient isFirstLocations accuracy bypass above)
+                        // must not be allowed to skew the sustained-pace confirmation window.
+                        // Drop it and restart the count from scratch rather than let one bad
+                        // sample sit alongside otherwise-genuine ones.
+                        startIdleDistances.clear()
+                        startIdleTimes.clear()
+                        startIdleTimestamps.clear()
+                    }
+
+                    if (startIdleDistances.size >= START_IDLE_CONFIRM_SAMPLES &&
+                        totalDistance >= START_IDLE_MIN_DISTANCE_M) {
+                        val windowDist = startIdleDistances.sum()
+                        val windowTime = startIdleTimes.sum()
+                        val windowPaceSecPerKm = if (windowDist > 0) (1000.0 * windowTime / windowDist) else Double.MAX_VALUE
+                        if (windowPaceSecPerKm < START_IDLE_MAX_PACE_SEC_PER_KM) {
+                            hasCreditedStartIdle = true
+                            // Anchor to the EARLIEST sample in the confirming window, not "now"
+                            // — keeps the credit as tight as possible to when movement actually
+                            // began, rather than drifting later by however long confirmation took.
+                            val movementStartMs = startIdleTimestamps.first()
+                            val elapsedSinceStartMs = movementStartMs - startTime
+                            if (elapsedSinceStartMs > 0) {
+                                // Taper, not a cliff: cap the CREDITED amount at
+                                // START_IDLE_MAX_CREDIT_MS rather than granting zero adjustment
+                                // once the real wait runs longer than that (a big corral/wave-
+                                // start wait should still get partial credit, not none).
+                                val creditableMs = elapsedSinceStartMs.coerceAtMost(START_IDLE_MAX_CREDIT_MS)
+                                val idleMs = creditableMs - totalPausedMs
+                                if (idleMs > 0) {
+                                    totalPausedMs += idleMs
+                                    splitPausedMs += idleMs
+                                    walk500mSplitPausedMs += idleMs
+                                    Log.d("RunTrackingService", "Auto-credited ${idleMs}ms of start-line idle time before first movement " +
+                                        "(confirmed sustained ${windowPaceSecPerKm.toInt()}s/km over $START_IDLE_CONFIRM_SAMPLES samples)")
+                                }
+                            }
+                            startIdleDistances.clear()
+                            startIdleTimes.clear()
+                            startIdleTimestamps.clear()
                         }
                     }
                 }
