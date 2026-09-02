@@ -399,7 +399,7 @@ class SamsungWatchManager(
     fun openPlayStoreForWatchApp() {
         try {
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                data = android.net.Uri.parse("market://details?id=live.airuncoach.airuncoach.wear")
+                data = android.net.Uri.parse("market://details?id=airuncoach.live.samsung_watch_app")
             }
             context.startActivity(intent)
         } catch (e: Exception) {

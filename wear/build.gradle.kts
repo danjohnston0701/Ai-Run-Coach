@@ -26,7 +26,9 @@ android {
     defaultConfig {
         // Standalone Wear OS app — separate applicationId from the phone app (see
         // manifest's android:name="com.google.android.wearable.standalone" = true).
-        applicationId = "live.airuncoach.airuncoach.wear"
+        // Must match the package name already reserved on the Play Console listing
+        // (carried over from the earlier Tizen samsung-watch-app/ scaffold).
+        applicationId = "airuncoach.live.samsung_watch_app"
         // Wear OS 3.0+ (API 30) is required for the Health Services ExerciseClient API
         // this app depends on — effectively Galaxy Watch4 and later.
         minSdk = 30

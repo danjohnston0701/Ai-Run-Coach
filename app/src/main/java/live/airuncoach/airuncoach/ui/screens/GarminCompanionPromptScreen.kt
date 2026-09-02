@@ -363,7 +363,7 @@ fun SamsungCompanionPromptScreen(
         Button(
             onClick = {
                 onInstall()
-                val playStoreUrl = "https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach.wear"
+                val playStoreUrl = "https://play.google.com/store/apps/details?id=airuncoach.live.samsung_watch_app"
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(playStoreUrl))
                 context.startActivity(intent)
             },
