@@ -1627,8 +1627,18 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun startTracking() {
-        if (isTracking) {
-            Log.w("RunTrackingService", "Already tracking, ignoring start request")
+        // Guard against a STALE "start" command, not just a concurrent one. The watch retries
+        // its "start" send up to 3x over 5s if unacknowledged (RunView.mc START_RETRY_*), and
+        // that retry can be queued/delayed well beyond that window when the phone screen is
+        // locked (see the 30-90s BT delivery delay noted in updateRunSession() below) — so a
+        // late-arriving retry can land after the session already began and has since been
+        // PAUSED. isTracking alone is false during a pause, so it let a stray retry sail through
+        // into a full re-init (totalDistance/routePoints/kmSplits all wiped to zero,
+        // startTime reset) on top of a run still genuinely in progress — silently discarding
+        // everything recorded before the pause. pauseStartTime > 0 is the paused-but-still-live
+        // signal (set in pauseTracking(), cleared in resumeTracking()/here), so check it too.
+        if (isTracking || pauseStartTime > 0) {
+            Log.w("RunTrackingService", "Already tracking or paused, ignoring stale start request")
             return
         }
 
@@ -4491,7 +4501,17 @@ class RunTrackingService : Service(), SensorEventListener {
                         // Fallback: use the session's last known duration which was correctly computed
                         // by the previous instance's timer (watchElapsedSeconds * 1000 or
                         // getActiveRunDuration()).  This preserves the user's true run time.
-                        val finalDurationMs = if (startTime > 0L) {
+                        //
+                        // For a watch-initiated run, prefer the watch's own authoritative elapsed
+                        // clock over the phone wall clock here too — mirroring updateRunSession()'s
+                        // duration calc above. startTime is stamped only once the phone actually
+                        // processes the "start" BT command, which (per updateRunSession()'s comment)
+                        // can lag the watch's real start by 30-90s during a screen-locked start; using
+                        // the phone-clock delta here silently re-shortens the SAVED duration by that
+                        // same gap even though the live in-session display already accounts for it.
+                        val finalDurationMs = if (watchInitiatedRun && watchElapsedSeconds > 0) {
+                            watchElapsedSeconds * 1000L
+                        } else if (startTime > 0L) {
                             (System.currentTimeMillis() - startTime) - finalPausedMs
                         } else {
                             Log.w("RunTrackingService", "stopTracking: startTime=0 — service was restarted, falling back to session.duration=${session.duration}ms")
@@ -4504,9 +4524,23 @@ class RunTrackingService : Service(), SensorEventListener {
                         // rebuilt from GPS ticks so may lag by up to one tick (~3-5 s).
                         val finalCoachingNotes = coachingHistory.toList()
 
+                        // Recompute averagePace/averageSpeed from the FINAL distance+duration rather
+                        // than inheriting session.averagePace as-is: that field was last set by
+                        // whatever live GPS/watch-data tick happened to run before Stop, using THAT
+                        // tick's own (slightly earlier) distance/duration snapshot — not necessarily
+                        // the same duration this final save now uses. Left alone, the saved run can
+                        // show an averagePace inconsistent with its own saved distance/duration.
+                        val finalDurationMsClamped = finalDurationMs.coerceAtLeast(0L)
+                        val finalDurationHours = finalDurationMsClamped / 3600000.0
+                        val finalAvgSpeedKmh = if (session.distance > 0 && finalDurationHours > 0) {
+                            (session.distance / 1000.0 / finalDurationHours).toFloat()
+                        } else 0f
+
                         val finalSession = session.copy(
                             endTime = System.currentTimeMillis(),
-                            duration = finalDurationMs.coerceAtLeast(0L),
+                            duration = finalDurationMsClamped,
+                            averagePace = if (finalAvgSpeedKmh > 0) calculatePace(finalAvgSpeedKmh) else session.averagePace,
+                            averageSpeed = if (finalAvgSpeedKmh > 0) finalAvgSpeedKmh / 3.6f else session.averageSpeed,
                             weatherAtEnd = weatherAtEnd,
                             isActive = false,
                             aiCoachingNotes = finalCoachingNotes
@@ -7583,7 +7617,19 @@ class RunTrackingService : Service(), SensorEventListener {
                     sessionTargetPaceMax = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMax,
                     activityType = currentActivityType
                 )
-                val response = apiService.getPaceUpdate(update)
+                // One retry on a transient failure before giving up. This call has no other
+                // resilience — unlike watch start/pause/resume/stop (which retry-until-acked),
+                // a single dropped network request here permanently loses that coaching moment
+                // with nothing but a Log.e nobody sees. A phone locked in a pocket for a long
+                // walk is exactly the kind of session where a brief connectivity blip is likely,
+                // so it's worth one retry rather than silently discarding the whole km/checkpoint.
+                val response = try {
+                    apiService.getPaceUpdate(update)
+                } catch (e: Exception) {
+                    Log.w("RunTrackingService", "getPaceUpdate failed, retrying once: ${e.message}")
+                    delay(2000)
+                    apiService.getPaceUpdate(update)
+                }
                 // Server returns skipped=true with no message when the shared cooldown (or the
                 // user's configured km-interval setting) rejects this split — don't log/play
                 // "Km X: null" in that case.
