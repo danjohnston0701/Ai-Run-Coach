@@ -13381,14 +13381,6 @@ function transformRunForAndroid(run: any) {
               Math.abs((r.distance ?? 0) - distanceKm) / Math.max(distanceKm, 0.1) < 0.15
             );
           }
-          if (phoneMatchedRun) {
-            console.log(`[Companion] session/end — phone run ${phoneMatchedRun.id} already exists for this session, linking instead of duplicating`);
-            await db.update(garminCompanionSessions)
-              .set({ runId: phoneMatchedRun.id })
-              .where(eq(garminCompanionSessions.sessionId, sessionId));
-            newRunId = phoneMatchedRun.id;
-          } else {
-
           // Format avg pace as mm:ss string
           let avgPaceStr: string | null = null;
           if (stats.avgPace && stats.avgPace > 0) {
@@ -13499,6 +13491,56 @@ function transformRunForAndroid(run: any) {
             if (!paceData     && kmPace.length > 0)   paceData      = kmPace;
             if (kmAlt.length > 0)                     altitudeData  = kmAlt;
           }
+
+          if (phoneMatchedRun) {
+            // ── Merge instead of silently discarding ──────────────────────────
+            // Previously this branch just linked the session to the existing phone
+            // run and threw away everything computed above — including the case
+            // this dedup guard's own comment already calls out: "a paused/frozen
+            // phone track." A phone-side bug (stale watch command resetting live
+            // tracking, an OS-kill reattach with no server-side telemetry to
+            // recover from, etc.) can leave the phone's uploaded run with a
+            // near-zero distance/duration while the watch — which tracked the
+            // whole session independently and has no knowledge anything went
+            // wrong on the phone — has the correct, complete data. Mirrors the
+            // POST /api/runs Case-0 external-id merge: only fill genuine gaps or
+            // replace data that looks clearly deficient, never overwrite a
+            // healthy phone record for cosmetic reasons (phone vs watch GPS
+            // distance can legitimately differ by the ±15% tolerance above).
+            const existingDistance = phoneMatchedRun.distance ?? 0;
+            const phoneDistanceLooksDeficient = existingDistance < distanceKm * 0.5;
+            const mergeFields: Record<string, any> = {};
+            if (phoneDistanceLooksDeficient) {
+              mergeFields.distance = distanceKm;
+              mergeFields.duration = durationSecs;
+              if (avgPaceStr) mergeFields.avgPace = avgPaceStr;
+              if (stats.avgHeartRate != null) mergeFields.avgHeartRate = stats.avgHeartRate;
+              if (stats.maxHeartRate != null) mergeFields.maxHeartRate = stats.maxHeartRate;
+              if (stats.avgCadence != null) mergeFields.cadence = stats.avgCadence;
+              if (stats.totalAscent != null) mergeFields.elevationGain = stats.totalAscent;
+              if (stats.totalDescent != null) mergeFields.elevationLoss = stats.totalDescent;
+              console.log(`[Companion] session/end — existing phone run ${phoneMatchedRun.id} distance (${existingDistance.toFixed(2)}km) looks deficient vs watch's own ${distanceKm.toFixed(2)}km — overwriting core stats from watch data`);
+            }
+            // Additive gap-fills regardless of the distance check — only written
+            // when the watch actually has data, so there's no risk of clobbering
+            // a legitimately different phone-side value with an empty one.
+            if (heartRateData && heartRateData.length > 0) mergeFields.heartRateData = heartRateData;
+            if (paceData && paceData.length > 0) mergeFields.paceData = paceData;
+            if (altitudeData && altitudeData.length > 0) mergeFields.altitudeData = altitudeData;
+            if (storedKmSplits && storedKmSplits.length > 0) mergeFields.kmSplits = storedKmSplits;
+            if (gpsTrackFromData && gpsTrackFromData.length > 0) mergeFields.gpsTrack = gpsTrackFromData;
+
+            if (Object.keys(mergeFields).length > 0) {
+              await db.update(runs).set(mergeFields).where(eq(runs.id, phoneMatchedRun.id));
+              console.log(`[Companion] session/end — merged [${Object.keys(mergeFields).join(', ')}] from watch data into run ${phoneMatchedRun.id}`);
+            } else {
+              console.log(`[Companion] session/end — phone run ${phoneMatchedRun.id} already exists for this session, linking (no gaps to fill)`);
+            }
+            await db.update(garminCompanionSessions)
+              .set({ runId: phoneMatchedRun.id })
+              .where(eq(garminCompanionSessions.sessionId, sessionId));
+            newRunId = phoneMatchedRun.id;
+          } else {
 
           const [newRun] = await db.insert(runs).values({
             userId,

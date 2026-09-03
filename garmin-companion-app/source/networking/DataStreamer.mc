@@ -143,7 +143,11 @@ class DataStreamer {
             "elapsedTime"          => data.get("elapsedTime"),
             "altitude"             => _altitude,
             "isMoving"             => true,
-            "isPaused"             => false,
+            // Was hardcoded false regardless of actual state — the server's OS-kill
+            // reattach recovery (RunTrackingService.reattachToWatchSession) trusts this
+            // field as authoritative when non-null, so a genuinely paused session was
+            // always reported as running on reattach. Now reflects the real state.
+            "isPaused"             => (data.get("isPaused") != null) ? data.get("isPaused") : false,
             // Running dynamics (null on unsupported devices, filtered server-side)
             "groundContactTime"    => data.get("groundContactTime"),
             "groundContactBalance" => data.get("groundContactBalance"),

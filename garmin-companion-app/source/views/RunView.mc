@@ -982,7 +982,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.3"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.4"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");
@@ -1311,7 +1311,8 @@ class RunView extends Ui.View {
                         // Cumulative elevation (sent every second so backend fallback
                         // path always has ascent/descent even if endSession is missed)
                         "cumulativeAscent"      => _totalAscent,
-                        "cumulativeDescent"     => _totalDescent
+                        "cumulativeDescent"     => _totalDescent,
+                        "isPaused"              => _isPaused
                     });
                 }
             }
