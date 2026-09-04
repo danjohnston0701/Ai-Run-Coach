@@ -592,8 +592,16 @@ function buildRouteIntelligenceContext(
     }
   }
 
-  // Upcoming terrain warning (within next 600m of route)
-  if (routeCtx.notableSegments && routeCtx.typicalDistanceKm && routeCtx.typicalDistanceKm > 0) {
+  // Upcoming terrain warning (within next 600m of route) — only for a high-confidence route
+  // match ("confident"/"certain", i.e. >=60%, per route-recognition-service.ts's
+  // confidenceLabel buckets). A "tentative" match (40-59%) is exactly the case a runner on a
+  // route merely SIMILAR to a known one (not the same one) would produce — narrating a
+  // specific upcoming hill with "MENTION THIS FIRST" confidence from an uncertain match risks
+  // describing terrain that isn't actually on today's route. The route name/PB/last-run lines
+  // above stay visible at any matched confidence — only this forward-looking terrain claim
+  // needs the higher bar, since it's the one piece of route memory that reads to the runner
+  // as the AI genuinely knowing what's ahead, not just recalling past performance.
+  if (routeCtx.confidence >= 0.6 && routeCtx.notableSegments && routeCtx.typicalDistanceKm && routeCtx.typicalDistanceKm > 0) {
     const progressPct = currentDistanceKm / routeCtx.typicalDistanceKm;
     const lookaheadPct = 0.6 / routeCtx.typicalDistanceKm; // 600m lookahead
     const approaching = routeCtx.notableSegments.find((seg) =>

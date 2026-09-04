@@ -747,7 +747,17 @@ class RunTrackingService : Service(), SensorEventListener {
         private const val UPHILL_GRADE_THRESHOLD = 3.0
         private const val DOWNHILL_GRADE_THRESHOLD = -3.0
         private const val STEEP_UPHILL_GRADE_THRESHOLD = 5.0
-        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -5.0
+        // Deliberately steeper in magnitude than the uphill threshold — gravity assists a
+        // descent, so the same grade feels meaningfully easier going down than up. Was
+        // symmetric at -5.0, which a real user report confirmed was miscalibrated: an -8%
+        // descent they described as "super gently, nearly unnoticeable" was correctly
+        // classified as steep_descent per the old threshold and coached with that template's
+        // emphatic "gravity is helping significantly" framing — the classification was
+        // working exactly as configured, the configured value was just too aggressive. -9.0
+        // puts that real -8% descent (and, per the same logic, most everyday gentle downhill
+        // stretches) into gradual_descent instead, reserving steep_descent's language for
+        // grades that are actually steep.
+        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -9.0
 
         // A terrain state must be sustained for at least this distance before the classifier
         // accepts it as the new state (avoids flipping on brief GPS noise spikes).
