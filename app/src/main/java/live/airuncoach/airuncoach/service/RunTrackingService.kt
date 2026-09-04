@@ -7615,7 +7615,13 @@ class RunTrackingService : Service(), SensorEventListener {
                     // not the long-term race goal pace.
                     sessionTargetPaceMin = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMin,
                     sessionTargetPaceMax = dynamicCoachingPlan?.targetMetrics?.mainEffortPaceMax,
-                    activityType = currentActivityType
+                    activityType = currentActivityType,
+                    // Lets the backend enrich this prompt with the watch's live running-dynamics
+                    // stream when one is actually connected — null (no enrichment, same prompt as
+                    // today) for phone-only runs. Whichever watch brand is paired; only one is
+                    // ever non-null at a time.
+                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
+                        ?: samsungWatchManager?.activeCompanionSessionId
                 )
                 // One retry on a transient failure before giving up. This call has no other
                 // resilience — unlike watch start/pause/resume/stop (which retry-until-acked),

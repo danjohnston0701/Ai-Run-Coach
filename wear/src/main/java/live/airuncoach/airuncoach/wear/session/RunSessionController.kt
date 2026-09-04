@@ -577,7 +577,12 @@ class RunSessionController(
     }
 
     private fun maybeSendHttpData(now: Long, m: live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics) {
-        if (_state.value.isPhoneConnected) return // standalone-only, mirrors Garmin's !_isConnected gate
+        // Always streams now, connected or not — previously gated to standalone-only
+        // (mirroring Garmin's old !_isConnected gate), which left the backend with zero
+        // live data for the common phone-connected case. That's the only source
+        // RunTrackingService's OS-kill reattach recovery and server-side coaching
+        // enrichment read from, so gating it defeated both for the common case. See
+        // garmin-companion-app's RunView.mc for the equivalent fix and full rationale.
         if (now - lastHttpDataSentMs < HTTP_DATA_INTERVAL_MS) return
         lastHttpDataSentMs = now
         val sid = sessionId ?: return
@@ -594,7 +599,7 @@ class RunSessionController(
                     elapsedTime = m.elapsedMs / 1000,
                     altitude = m.altM,
                     isMoving = true,
-                    isPaused = false,
+                    isPaused = _state.value.isPaused,
                     latitude = m.lat,
                     longitude = m.lng
                 )

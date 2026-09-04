@@ -730,6 +730,14 @@ export async function generatePaceUpdate(params: {
   // Topic keys ("terrain" | "hr_trend" | "cadence" | "pace_trend") used in recent coaching
   // messages this session, most-recent last — used to avoid repeating the same angle twice in a row.
   recentCoachingTopics?: string[];
+  // Enriched running-dynamics from a live paired watch (Garmin or Wear OS — see
+  // garminRealtimeData, populated only while a watch is actually connected and streaming).
+  // All optional/independent: any subset may be present depending on watch model. Absent
+  // entirely for phone-only runs, which get the exact same prompt as before this existed.
+  groundContactTimeMs?: number;
+  verticalOscillationMm?: number;
+  strideLengthM?: number;
+  runningPowerWatts?: number;
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory, heartRate, heartRateZoneTarget } = params;
   const workoutType = (params as any).workoutType as string | undefined;
@@ -873,9 +881,21 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
   // Cadence context — always included when a reading is present (previously gated to training
   // sessions only, which silently dropped cadence data for free runs even when it was sent).
   // Pass raw cadence data without pre-interpreted verdicts — let GPT decide if cadence needs comment
-  const cadenceContext = (currentCadence && currentCadence > 0)
+  let cadenceContext = (currentCadence && currentCadence > 0)
     ? `\n- Current cadence: ${currentCadence} spm${workoutType === 'tempo' || workoutType === 'threshold' ? ` (for ${workoutType.replace(/_/g, ' ')} effort)` : ''}`
     : '';
+
+  // Watch running-dynamics — same raw-data, no-pre-interpreted-verdict philosophy as cadence
+  // above. Only present when a watch is actually paired and streaming (see garminRealtimeData);
+  // absent entirely otherwise, so a phone-only run's prompt is byte-for-byte unchanged.
+  const dynamicsParts: string[] = [];
+  if (params.groundContactTimeMs)   dynamicsParts.push(`ground contact time ${Math.round(params.groundContactTimeMs)}ms`);
+  if (params.verticalOscillationMm) dynamicsParts.push(`vertical oscillation ${params.verticalOscillationMm.toFixed(1)}mm`);
+  if (params.strideLengthM)         dynamicsParts.push(`stride length ${params.strideLengthM.toFixed(2)}m`);
+  if (params.runningPowerWatts)     dynamicsParts.push(`running power ${Math.round(params.runningPowerWatts)}W`);
+  if (dynamicsParts.length > 0) {
+    cadenceContext += `\n- Watch running dynamics: ${dynamicsParts.join(', ')}`;
+  }
 
   const trainingSessionContext = isTrainingSession
     ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the ${personLabel}'s coaching plan — NOT a race or goal attempt. Do NOT compare their pace to their long-term race goal. Instead, frame the coaching around what this session is building.${sessionSplitContext}`

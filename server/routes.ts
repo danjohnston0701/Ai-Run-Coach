@@ -11801,6 +11801,7 @@ function transformRunForAndroid(run: any) {
         hrTrend: 'hr_trend_direction',
         paceTrendDirection: 'pace_trend_direction',
         recentCoachingTopics: 'recent_coaching_topics',
+        garminCompanionSessionId: 'garmin_companion_session_id',
       };
       for (const [camel, snake] of Object.entries(snakeCaseAliases)) {
         if (req.body[camel] === undefined && req.body[snake] !== undefined) {
@@ -11813,6 +11814,42 @@ function transformRunForAndroid(run: any) {
       if (req.body.currentGrade !== undefined && typeof req.body.currentGrade !== 'number') {
         const parsed = parseFloat(req.body.currentGrade);
         req.body.currentGrade = isNaN(parsed) ? undefined : parsed;
+      }
+
+      // ── Watch running-dynamics enrichment ──────────────────────────────────
+      // garminCompanionSessionId is only present when a Garmin or Wear OS watch is
+      // actually paired and streaming (see PaceUpdate.garminCompanionSessionId on
+      // Android/RunTrackingService) — absent for phone-only runs, in which case this
+      // whole block is skipped and the prompt is unchanged from before this existed.
+      // Pulls the most recent garminRealtimeData row for that session and, only if it's
+      // genuinely fresh (not a stale row from a watch that's since gone quiet), merges
+      // its running-dynamics fields in for generatePaceUpdate() to reference.
+      const watchCompanionSessionId = req.body.garminCompanionSessionId as string | undefined;
+      if (watchCompanionSessionId) {
+        try {
+          const [latestDynamics] = await db.select({
+            groundContactTime: garminRealtimeData.groundContactTime,
+            verticalOscillation: garminRealtimeData.verticalOscillation,
+            strideLength: garminRealtimeData.strideLength,
+            power: garminRealtimeData.power,
+            timestamp: garminRealtimeData.timestamp,
+          })
+            .from(garminRealtimeData)
+            .where(eq(garminRealtimeData.sessionId, watchCompanionSessionId))
+            .orderBy(sql`timestamp DESC`)
+            .limit(1);
+          const isFresh = latestDynamics?.timestamp
+            && (Date.now() - new Date(latestDynamics.timestamp).getTime()) < 10_000;
+          if (isFresh) {
+            if (latestDynamics.groundContactTime)   req.body.groundContactTimeMs   = latestDynamics.groundContactTime;
+            if (latestDynamics.verticalOscillation) req.body.verticalOscillationMm = latestDynamics.verticalOscillation;
+            if (latestDynamics.strideLength)        req.body.strideLengthM         = latestDynamics.strideLength;
+            if (latestDynamics.power)                req.body.runningPowerWatts     = latestDynamics.power;
+          }
+        } catch (enrichError: any) {
+          // Non-fatal — coaching must still fire even if enrichment lookup fails.
+          console.warn("[pace-update] Watch dynamics enrichment failed (non-fatal):", enrichError?.message);
+        }
       }
 
       const aiService = await import("./ai-service");
