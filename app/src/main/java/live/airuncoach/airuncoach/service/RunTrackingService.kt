@@ -3657,19 +3657,34 @@ class RunTrackingService : Service(), SensorEventListener {
 
         if (currentKm > lastKmSplit) {
             val now = System.currentTimeMillis()
-            val splitTime = if (wasRunStartedByWatch && watchElapsedSeconds > 0) {
+            val totalSplitTime = if (wasRunStartedByWatch && watchElapsedSeconds > 0) {
                 ((watchElapsedSeconds - lastSplitWatchElapsedSeconds).coerceAtLeast(0) * 1000L)
             } else {
                 (now - lastSplitTime) - splitPausedMs  // Exclude paused time from this split
             }
+            // A single update can cross more than one km boundary at once — a GPS gap, a watch
+            // relay catching up after a BLE stall, or a large accepted distance correction (see
+            // the watch-distance sanity check elsewhere in this file). Looping through every
+            // boundary crossed, rather than recording only the highest one, avoids two problems:
+            // silently dropping the skipped km(s) from the permanent split record/upload, and
+            // attributing the ENTIRE multi-km elapsed time to a single km's pace (a wildly
+            // wrong, N-times-too-slow-looking split). There's no real per-boundary timestamp
+            // available, so elapsed time is divided evenly across however many boundaries were
+            // crossed — mirrors the same fix already in place on iOS for this exact class of
+            // bug (see iOS_GPS_DISTANCE_FILTER_AND_KM_SPLIT_AUDIT_BRIEF.md).
+            val numSplitsCrossed = currentKm - lastKmSplit
+            val splitTime = totalSplitTime / numSplitsCrossed
             val splitSpeedKmh = if (splitTime > 0) (1000f / (splitTime / 1000f)) * 3.6f else 0f // m/s → km/h
             val split = KmSplit(km = currentKm, time = splitTime, pace = calculatePace(splitSpeedKmh))
-            kmSplits.add(split)
+            for (km in (lastKmSplit + 1)..currentKm) {
+                val boundarySplit = if (km == currentKm) split else KmSplit(km = km, time = splitTime, pace = calculatePace(splitSpeedKmh))
+                kmSplits.add(boundarySplit)
+            }
             lastKmSplit = currentKm
             lastSplitTime = now
             lastSplitWatchElapsedSeconds = watchElapsedSeconds
             splitPausedMs = 0  // Reset pause accumulator for next split
-            Log.d("RunTrackingService", "Reached ${currentKm}km split")
+            Log.d("RunTrackingService", "Reached ${currentKm}km split" + if (numSplitsCrossed > 1) " ($numSplitsCrossed boundaries crossed in one update)" else "")
 
             // Coaching plan session gate for km splits:
             //
