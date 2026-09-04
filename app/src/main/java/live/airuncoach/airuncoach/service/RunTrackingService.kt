@@ -3629,10 +3629,21 @@ class RunTrackingService : Service(), SensorEventListener {
             // Skip the very first block (0-500m) — handled by check500mMilestones() as the initial check-in
             // Skip if in the final stretch — final 500m coaching takes over
             if (current500mBlock > lastWalk500mSplit && current500mBlock >= 2 && !isInFinalStretch()) {
+                // A single update can cross more than one 500m boundary at once — same class of
+                // bug as checkForKmSplit()'s real km-split fix below, and the same root causes
+                // (a GPS gap, a watch relay catching up after a BLE stall, a large accepted
+                // distance correction). Unlike that fix, there's no permanent per-block data
+                // record to preserve here — this only drives a single spoken check-in — so the
+                // correct fix is simpler: use the REAL distance covered since the last checkpoint
+                // (which may be more than 500m) rather than assuming exactly 500m. The old
+                // hardcoded 500.0 made the reported pace look up to N times too slow whenever N
+                // boundaries were crossed in one update, since the same elapsed time was divided
+                // by only a fraction of the distance actually covered.
+                val blocksCrossed = current500mBlock - lastWalk500mSplit
                 lastWalk500mSplit = current500mBlock
                 val hasReachedTarget = targetDistance != null && totalDistance >= (targetDistance!! * 0.99)
                 if (!hasReachedTarget && !hasCoachingFiredThisTick && canFireCoaching()) {
-                    Log.d("RunTrackingService", "Walk 500m split at ${String.format("%.1f", totalDistance / 1000)}km — triggering coaching")
+                    Log.d("RunTrackingService", "Walk 500m split at ${String.format("%.1f", totalDistance / 1000)}km — triggering coaching" + if (blocksCrossed > 1) " ($blocksCrossed boundaries crossed in one update)" else "")
                     hasCoachingFiredThisTick = true
                     recordCoachingFired()
                     // Build a synthetic split using distance since last 500m boundary. Uses its
@@ -3640,7 +3651,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     // lastSplitTime/splitPausedMs — see those fields' declaration for why.
                     val now = System.currentTimeMillis()
                     val splitTime = (now - lastWalk500mSplitTime) - walk500mSplitPausedMs
-                    val distSinceLastSplit = 500.0 // Always 500m blocks for walk sessions
+                    val distSinceLastSplit = 500.0 * blocksCrossed
                     val splitSpeedKmh = if (splitTime > 0) (distSinceLastSplit / (splitTime / 1000.0) * 3.6).toFloat() else 0f
                     val walkSplit = KmSplit(
                         km = current500mBlock, // Use 500m block count as the "km" index for the API

@@ -2623,7 +2623,15 @@ export async function generateEmotionalCoaching(params: {
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
   const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
 
-  // Build emotional coaching prompts by category
+  // Build emotional coaching prompts by category.
+  // Each category previously ended with a "Key themes/phrases/cues:" line of fully
+  // quoted, ready-to-speak lines ("You CAN do this", "Try a smile", "Drop your
+  // shoulders" etc.) presented as literal examples to draw from — the same anti-pattern
+  // found and fixed in elevation coaching and the technique-hints map: an AI reliably
+  // echoes distinctive quoted phrasing from a prompt near-verbatim, and every user's
+  // emotional-coaching moments draw from these same six category blocks. Rewritten to
+  // describe the theme/concept instead, with an explicit instruction to generate
+  // original wording each time — same fix, same reasoning, applied here.
   const emotionalPrompts: Record<string, string> = {
     positive_self_talk: `You are ${coachName}, an AI running coach with a ${coachTone} style.
 
@@ -2636,7 +2644,7 @@ Generate 2-3 sentences of positive self-talk coaching that:
 3. Provides an empowering perspective shift
 4. Is delivered in your natural ${coachTone} coach voice
 
-Focus on: "You CAN do this", "You're stronger than this moment", "Every difficult moment builds your resilience"
+Build the message around genuine self-belief and resilience — that they're capable right now, and that pushing through this exact moment is itself what builds strength. Invent your own original phrasing every time; do not reuse a stock affirmation.
 Do NOT be generic — reference their actual data (pace: ${currentPace}, distance: ${formatDistanceForCoaching(distance)}).
 Make it personal and genuine.`,
 
@@ -2651,7 +2659,7 @@ Generate 2-3 sentences that:
 3. Inspire them to push through
 4. Reference their actual effort level
 
-Key themes: "This is the part where runners get stronger", "Discomfort is temporary, progress is permanent", "You're built for this"
+Build the message around the idea that this uncomfortable stretch is exactly where fitness and mental toughness get built, and that the discomfort itself is temporary even though what it builds isn't. Invent your own original phrasing every time; do not reuse a stock line.
 Make it feel like a challenge you BELIEVE they can overcome, not doubt.`,
 
     focus_mindfulness: `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -2664,7 +2672,7 @@ Generate 2-3 sentences that:
 3. Simplify their focus to just the next kilometer or segment
 4. Create a sense of calm control
 
-Key approaches: "Breathe in 4, out 4", "Feel the rhythm of your feet", "One step at a time", "Be present for this moment"
+Anchor them in one concrete physical sensation — their breath, their footstrike rhythm, or a simple counted breathing pattern — as a way to pull focus out of spiraling thoughts and into the present moment. Invent your own original phrasing every time; do not reuse a stock cue.
 Use a calm, measured tone even if the coach is normally energetic.`,
 
     smiling_coaching: `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -2677,7 +2685,7 @@ Generate 2-3 sentences that:
 3. Make it feel achievable and fun
 4. Be encouraging about the result
 
-Key phrases: "Try a smile", "Give me a quick grin", "Smiling relaxes your body", "It tells your brain you've got this"
+Invite a genuine smile as a real, physiologically-backed trick — it relaxes facial tension and signals to the brain that this effort is manageable. Invent your own original, playful phrasing every time; do not reuse a stock line.
 Make it feel like a game or challenge, not an order.`,
 
     relaxation: `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -2690,7 +2698,7 @@ Generate 2-3 sentences that:
 3. Help them feel more efficient immediately
 4. Be direct and actionable
 
-Key cues: "Drop your shoulders", "Loosen your hands", "Relax your jaw", "Smooth and easy", "Let it flow"
+Pick one or two genuine tension points — shoulders, hands, or jaw are common ones — and cue releasing them, briefly explaining that held tension wastes energy. Invent your own original phrasing every time; do not reuse a stock cue.
 Reference their current effort level to show you understand.`,
 
     end_of_run: `You are ${coachName}, an AI running coach with a ${coachTone} style.
@@ -2703,11 +2711,13 @@ Generate 2-3 sentences that:
 3. Recognize their growth or strength
 4. End on an inspiring note
 
-Key themes: "You DID that", "Look what you just accomplished", "Be proud of yourself", "This is how champions are built"
+Build the message around genuine pride in what they just completed and recognition of the effort or growth it took. Invent your own original phrasing every time; do not reuse a stock celebratory line.
 Make it feel personal and genuine — reference something specific about their run.`
   };
 
-  const prompt = emotionalPrompts[category] || emotionalPrompts.positive_self_talk;
+  const prompt = `${emotionalPrompts[category] || emotionalPrompts.positive_self_talk}
+
+${VARIETY_INSTRUCTION}`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -6723,7 +6733,7 @@ ${athleteRespondedToLastCue === true ? '✓ ATHLETE IS RESPONDING to previous co
 ━━ TREND CONTEXT (last ~40 seconds) ━━━━━━━━━━━━━━━━━━━━
 ${hrTrendDirection ? `Heart rate trend: ${hrTrendDirection.toUpperCase()} — ${hrTrendDirection === 'falling' ? 'moving toward target' : hrTrendDirection === 'rising' ? 'moving away from target' : 'holding steady'}` : ''}
 ${paceTrendDirection ? `Pace trend: ${paceTrendDirection.toUpperCase()} — ${paceTrendDirection === 'slowing' ? 'athlete is easing off' : paceTrendDirection === 'speeding_up' ? 'athlete is pushing harder' : 'pace is steady'}` : ''}
-${isAthleteAlreadyResponding ? `⚠️ ATHLETE IS ALREADY SELF-CORRECTING — heart rate is falling AND pace is easing back. Do NOT issue a directive. ACKNOWLEDGE the response instead: "Good — you're already easing back" or similar. The corrective coaching is NOT needed; positive acknowledgement IS.` : ''}
+${isAthleteAlreadyResponding ? `⚠️ ATHLETE IS ALREADY SELF-CORRECTING — heart rate is falling AND pace is easing back. Do NOT issue a directive. Acknowledge that response in your own words instead — the corrective coaching is NOT needed; positive acknowledgement IS.` : ''}
 ${triggerType === 'hr_recovery_acknowledgement' ? `This trigger fires because heart rate has returned to zone after being above it. The athlete did the right thing — acknowledge positively and concisely.` : ''}
 
 ━━ YOUR COACHING MESSAGE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
