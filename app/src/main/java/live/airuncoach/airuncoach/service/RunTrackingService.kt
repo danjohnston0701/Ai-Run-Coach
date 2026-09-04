@@ -4307,6 +4307,15 @@ class RunTrackingService : Service(), SensorEventListener {
     private var timerRunnable: Runnable? = null
     
     private fun startTimer() {
+        // Defensive idempotency: cancel any previously scheduled runnable before posting a new
+        // one. Without this, calling startTimer() twice (e.g. a caller that forgets to guard
+        // against reentry) leaves the OLD runnable still posted and self-rescheduling forever —
+        // timerRunnable only ever holds a reference to the newest one, so stopTimer() can never
+        // reach the orphaned older ones. Each duplicate becomes a permanent extra 1-second tick
+        // loop for the rest of the session. resumeTracking() now guards against the specific
+        // case that surfaced this (a redundant "resume" command), but this makes the timer
+        // itself safe regardless of what calls it.
+        timerRunnable?.let { timerHandler.removeCallbacks(it) }
         timerRunnable = object : Runnable {
             override fun run() {
                 if (!isTracking) {
@@ -4374,6 +4383,14 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun pauseTracking() {
+        // Guard against a redundant "pause" — the watch retries this command every 5s (up to
+        // 6x) if its pauseAck doesn't get back to it, and that ack is itself a fire-and-forget
+        // BLE send with no delivery guarantee (same unreliable link the retry exists to work
+        // around). Without this guard, each redelivered "pause" re-stamps pauseStartTime to a
+        // later timestamp, silently under-counting the true paused duration once resumeTracking()
+        // eventually computes (now - pauseStartTime) — and re-fires the "Session paused" audio
+        // announcement every time. Mirrors the equivalent guard in resumeTracking() below.
+        if (!isTracking) return
         isTracking = false
         pauseStartTime = System.currentTimeMillis()  // Record when pause started
         stopTimer()  // Stop timer when paused
@@ -4388,7 +4405,24 @@ class RunTrackingService : Service(), SensorEventListener {
         announcePauseResumeAudio(paused = true)
     }
 
-    private fun resumeTracking() { 
+    private fun resumeTracking() {
+        // Guard against a redundant "resume" command. The watch retries "resume" every 5s
+        // (up to 6x/30s) whenever its resumeAck doesn't arrive back — and that ack is itself a
+        // fire-and-forget BLE send with no delivery guarantee, the same unreliable link the
+        // retry mechanism exists to work around. Without this guard, every redelivered
+        // "resume" re-ran this whole function, including a fresh startTimer() call.
+        // startTimer() is NOT idempotent — it always creates a brand-new Runnable and posts it
+        // without cancelling any previous one, and stopTimer() can only ever cancel whichever
+        // Runnable the single timerRunnable field currently points to (the most recent one) —
+        // so each redundant resumeTracking() call left an orphaned, uncancellable extra 1-second
+        // tick loop running for the rest of the session. Three redundant resumes (matching a
+        // real report: "Session resumed" announced three times in a row right before a watch
+        // crash) means three concurrent tick loops, each calling updateRunSession() — which
+        // sends a watch BLE update every tick — every second. That triples the rate of BLE
+        // traffic hitting the watch from that moment on, a very plausible trigger for the
+        // watch's own Connect IQ crash immediately following. This guard stops the cascade at
+        // its source: only the first "resume" while genuinely paused has any effect.
+        if (isTracking) return
         isTracking = true
         // Accumulate the paused duration
         if (pauseStartTime > 0) {
