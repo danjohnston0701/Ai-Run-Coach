@@ -216,9 +216,15 @@ class RunTrackingService : Service(), SensorEventListener {
     private val routePoints = mutableListOf<LocationPoint>()
     private val kmSplits = mutableListOf<KmSplit>()
     private var lastKmSplit = 0
-    // Pending km split that was skipped because the global cooldown was active exactly at the
-    // km crossing.  Retried on subsequent location updates until the cooldown clears.
-    private var pendingKmSplitCoaching: KmSplit? = null
+    // Queue of km splits skipped because the global cooldown was active exactly at the km
+    // crossing. Retried, oldest first, on subsequent location updates until the cooldown
+    // clears. A queue (not a single nullable slot) so that if the cooldown stays blocked
+    // across more than one km crossing — a fast pace combined with a short split interval,
+    // or another trigger repeatedly re-arming the shared cooldown — an earlier deferred split
+    // is retried in turn rather than being silently overwritten and permanently lost. Capped
+    // defensively; see MAX_PENDING_KM_SPLITS.
+    private val pendingKmSplitCoachingQueue = mutableListOf<KmSplit>()
+    private val MAX_PENDING_KM_SPLITS = 5
     private var startTime: Long = 0
     private var lastSplitTime: Long = 0
     // Watch timer at the last km boundary. For companion-initiated sessions,
@@ -1690,7 +1696,7 @@ class RunTrackingService : Service(), SensorEventListener {
         routePoints.clear()
         kmSplits.clear()
         lastKmSplit = 0
-        pendingKmSplitCoaching = null  // Clear any deferred split from previous run
+        pendingKmSplitCoachingQueue.clear()  // Clear any deferred splits from previous run
         last500mMilestone = 0  // Reset for new run
         lastWalk500mSplit = 0  // Reset for new walk session
         hasFiredTargetReachedCoaching = false  // Reset for new run
@@ -3633,11 +3639,11 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // ── Retry any pending split from a previous tick where cooldown blocked it ──
-        val pending = pendingKmSplitCoaching
+        // ── Retry the oldest pending split from a previous tick where cooldown blocked it ──
+        val pending = pendingKmSplitCoachingQueue.firstOrNull()
         if (pending != null && !hasCoachingFiredThisTick && canFireCoaching() && !isInFinalStretch()) {
-            Log.d("RunTrackingService", "Retrying pending km split coaching at ${pending.km}km")
-            pendingKmSplitCoaching = null
+            Log.d("RunTrackingService", "Retrying pending km split coaching at ${pending.km}km (${pendingKmSplitCoachingQueue.size - 1} more queued)")
+            pendingKmSplitCoachingQueue.removeAt(0)
             hasCoachingFiredThisTick = true
             recordCoachingFired()
             triggerKmSplitCoaching(pending)
@@ -3691,9 +3697,15 @@ class RunTrackingService : Service(), SensorEventListener {
                     recordCoachingFired()
                     triggerKmSplitCoaching(split)
                 } else {
-                    // Cooldown active at the exact km crossing — store and retry next tick
-                    Log.d("RunTrackingService", "Km split at ${currentKm}km deferred (cooldown active) — will retry")
-                    pendingKmSplitCoaching = split
+                    // Cooldown active at the exact km crossing — queue and retry on later ticks.
+                    // Queued (not overwritten) so a still-unfired earlier split from a previous
+                    // km crossing isn't silently dropped by this newer one.
+                    if (pendingKmSplitCoachingQueue.size >= MAX_PENDING_KM_SPLITS) {
+                        val dropped = pendingKmSplitCoachingQueue.removeAt(0)
+                        Log.w("RunTrackingService", "Km split coaching queue full — dropping oldest pending split at ${dropped.km}km to queue ${currentKm}km")
+                    }
+                    Log.d("RunTrackingService", "Km split at ${currentKm}km deferred (cooldown active) — will retry (${pendingKmSplitCoachingQueue.size + 1} now queued)")
+                    pendingKmSplitCoachingQueue.add(split)
                 }
             } else if (hasReachedTarget) {
                 Log.d("RunTrackingService", "Target distance reached at ${currentKm}km (target was ${(targetDistance!! / 1000.0).toInt()}km) — suppressing km split coaching")

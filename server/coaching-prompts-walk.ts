@@ -274,6 +274,7 @@ ${ctx.metricsStatus}
 ${ctx.splitAnalysis}
 ${ctx.coachingInstructions}
 
+${VARIETY_INSTRUCTION}
 Give a coaching message (2-3 sentences). Sound like you KNOW this route inside and out — reference specific data points from their splits and metrics. This is spoken while walking via TTS, so keep it conversational and actionable.`;
 
   const system = `You are ${ctx.coachName}, an elite walking coach who specializes in terrain analysis and elevation-based pacing strategy. You've analyzed thousands of walks and can instantly correlate how terrain affects a walker's pace and heart rate.

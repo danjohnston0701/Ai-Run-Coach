@@ -2417,7 +2417,7 @@ export async function getElevationCoaching(params: {
 COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Acknowledge the climb they are ON: grade, metres climbed, how the effort feels relative to their data
 - Technique on a gradual climb: lean slightly forward from the ankles, shorten the steps a little, keep a steady rhythm — do NOT mention spm or a numeric step target
-- If HR is elevated: coach effort control — "keep it conversational, let the hill come to you"
+- If HR is elevated: coach effort control — encourage them to keep it conversational and let the climb set the pace, in your own words
 - Correlate pace drop with grade: a 3-4% grade typically costs 15-25s/km — if they're in that range they're managing it well
 - Do NOT say the summit/top is near; do NOT say "it gets easier from here"
 - Reference their actual numbers` : `GRADUAL CLIMB — ${elevPersonCap} is currently on a ${Math.abs(grade).toFixed(1)}% incline.${params.segmentElevationGain ? ` They have climbed ${Math.round(params.segmentElevationGain)}m in this segment.` : ''}${distanceInStateM ? ` They have been climbing for ${distanceInStateM}m.` : segmentM ? ` Segment distance: ${segmentM}m.` : ''}
@@ -2425,8 +2425,8 @@ COACHING FOCUS (current terrain only — do NOT predict what comes after):
 COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Acknowledge the climb they are ON: grade, metres climbed, how the effort feels relative to their data
 - Technique on a gradual climb: shorten stride, keep cadence up (target ${cadenceHint}), stay tall through hips
-- If HR is elevated: coach effort control — "keep it conversational, let the hill come to you"
-- If cadence is low: "quick feet — shorter, lighter steps are more efficient than big powerful strides uphill"
+- If HR is elevated: coach effort control — encourage them to keep it conversational and let the climb set the pace, in your own words
+- If cadence is low: encourage shorter, lighter steps over big powerful strides uphill — explain briefly why, in your own words
 - Correlate pace drop with grade: a 3-4% grade typically costs 15-25s/km — if they're in that range they're managing it well
 - Do NOT say the summit/top is near; do NOT say "it gets easier from here"
 - Reference their actual numbers`;
@@ -2435,18 +2435,18 @@ COACHING FOCUS (current terrain only — do NOT predict what comes after):
     coachingInstructions = isWalkElevation ? `STEEP CLIMB — ${elevPersonCap} is on a ${Math.abs(grade).toFixed(1)}% grade.${params.segmentElevationGain ? ` Climbed ${Math.round(params.segmentElevationGain)}m so far in this segment.` : ''}${distanceInStateM ? ` Has been on this steep section for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what follows):
-- Name the challenge directly: "You're on a steep one right now — ${Math.abs(grade).toFixed(0)}% grade"
+- Name the challenge directly — this is a steep grade (${Math.abs(grade).toFixed(0)}%) and it's worth acknowledging plainly, in your own words
 - This is the most important time to manage EFFORT not pace — HR is the real gauge here
 - Technique cues for steep: lean slightly forward from the ankles (not the waist), pump the arms more for momentum, shorten the steps, eyes down 2-3m ahead — do NOT mention spm or a numeric step target
-- If HR is very high (>85% max): "dial back — a shorter, steadier step at this grade costs less energy than pushing through"
+- If HR is very high (>85% max): tell them to dial back — a shorter, steadier step at this grade costs less energy than pushing through, in your own words
 - Do NOT say "the top is coming" or "nearly there" — you don't know that. Stay grounded in NOW.
 - Reference their actual numbers` : `STEEP CLIMB — ${elevPersonCap} is on a ${Math.abs(grade).toFixed(1)}% grade.${params.segmentElevationGain ? ` Climbed ${Math.round(params.segmentElevationGain)}m so far in this segment.` : ''}${distanceInStateM ? ` Has been on this steep section for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what follows):
-- Name the challenge directly: "You're on a steep one right now — ${Math.abs(grade).toFixed(0)}% grade"
+- Name the challenge directly — this is a steep grade (${Math.abs(grade).toFixed(0)}%) and it's worth acknowledging plainly, in your own words
 - This is the most important time to manage EFFORT not pace — HR is the real gauge here
 - Technique cues for steep: lean slightly forward from ankles (not waist), pump arms more, shorten stride dramatically, eyes down 2-3m ahead
-- If HR is very high (>85% max): "dial back — power-hiking at this grade costs less energy than shuffling"
+- If HR is very high (>85% max): tell them to dial back — power-hiking at this grade costs less energy than shuffling, in your own words
 - If cadence is low (<140): this is the risk zone for quad overload — quick light steps are critical
 - Do NOT say "the top is coming" or "nearly there" — you don't know that. Stay grounded in NOW.
 - Reference their actual numbers`;
@@ -2460,16 +2460,16 @@ COACHING FOCUS (current terrain only — no predictions about what comes next):
 - NEVER say descending "slows you down" or "makes things harder" — it does the opposite
 - Technique on a gradual descent: stay light on the feet, lean slightly forward, let gravity carry the pace — do NOT mention spm or a numeric step target
 - Use the descent to RECOVER aerobically: HR should drop, breathing should ease — if it's not, they're braking
-- If they're braking (heavy heel striking): "land under your hips, not in front — let the hill flow under you"
+- If they're braking (heavy heel striking): coach them to land under their hips rather than out in front, letting the hill flow under them — in your own words
 - Reference their actual numbers` : `GRADUAL DESCENT — ${elevPersonCap} is currently descending at ${Math.abs(grade).toFixed(1)}%.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — no predictions about what comes next):
 - Gravity is working FOR them right now — pace naturally picks up, that is correct and expected
 - NEVER say descending "slows you down" or "makes things harder" — it does the opposite
 - Technique on a gradual descent: let the legs turnover quickly, stay light on feet, lean slightly forward, quick cadence (target ${cadenceHint})
-- If cadence is low: encourage quicker turnover — "let gravity do the work, quick light steps"
+- If cadence is low: encourage quicker turnover, letting gravity do the work with quick light steps — in your own words
 - Use the descent to RECOVER aerobically: HR should drop, breathing should ease — if it's not, they're braking
-- If they're braking (heavy heel striking): "land under your hips, not in front — let the hill flow under you"
+- If they're braking (heavy heel striking): coach them to land under their hips rather than out in front, letting the hill flow under them — in your own words
 - Reference their actual numbers`;
 
   } else if (eventType === 'steep_descent') {
@@ -2480,8 +2480,8 @@ COACHING FOCUS (current terrain only — do NOT predict what follows):
 - NEVER imply descent is harder or slower — it is faster, but the challenge is CONTROL not effort
 - Steep descents are hard on the knees and quads (eccentric load) — controlled steps beat rushing downhill
 - Key technique: lean INTO the slope (slight forward lean), stay light on the feet, mid-foot placement, arms out for balance — do NOT mention spm or a numeric step target
-- If HR is still high from a prior climb: "the hill's doing the work now — let your breathing settle"
-- If this descent follows a big climb: "your legs will thank you for staying light right now — protect those knees"
+- If HR is still high from a prior climb: reassure them the hill is doing the work now and it's a good moment to let their breathing settle — in your own words
+- If this descent follows a big climb: acknowledge that staying light here protects their knees for the rest of the walk — in your own words
 - Reference their actual numbers` : `STEEP DESCENT — ${elevPersonCap} is on a ${Math.abs(grade).toFixed(1)}% downgrade.${params.segmentElevationLoss ? ` Descended ${Math.round(params.segmentElevationLoss)}m in this segment.` : ''}${distanceInStateM ? ` Has been descending for ${distanceInStateM}m.` : segmentM ? ` Segment: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what follows):
@@ -2489,9 +2489,9 @@ COACHING FOCUS (current terrain only — do NOT predict what follows):
 - NEVER imply descent is harder or slower — it is faster, but the challenge is CONTROL not effort
 - Steep descents are hard on quads (eccentric load) — controlled turnover beats braking hard
 - Key technique: lean INTO the slope (slight forward lean), high cadence (175-185+), mid-foot strike, arms out for balance
-- If cadence is too low: braking risk — "quick feet, don't let the hill run away with you"
-- If HR is still high from a prior climb: "the hill's doing the work now — let your breathing settle"
-- If this descent follows a big climb: "your legs will thank you for light feet right now — protect those quads"
+- If cadence is too low: warn of braking risk — quick feet, don't let the hill run away with them, in your own words
+- If HR is still high from a prior climb: reassure them the hill is doing the work now and it's a good moment to let their breathing settle — in your own words
+- If this descent follows a big climb: acknowledge that staying light here protects their quads for the rest of the run — in your own words
 - Reference their actual numbers`;
 
   } else if (eventType === 'downhill_finish') {
@@ -2513,12 +2513,12 @@ ${gainM !== null && lossM !== null ? `The terrain has delivered approximately ${
 
 COACHING FOCUS (no predictions — describe what is happening NOW):
 - This is NOT a big climb or a steep descent — it is a rolling, undulating pattern
-- Use language like: "rolling terrain", "undulating route", "gentle rises and dips" — not "hill"
+- Use language like "rolling terrain", "undulating route", "gentle rises and dips" — not "hill"
 - Key insight: on rolling terrain the goal is CONSISTENT EFFORT, not consistent pace. Pace will vary 5-10s/km naturally.
 - Don't fight the small rises — relax and absorb them; the dips give free recovery
-- If pace spread is high (>15s between splits): that's the terrain doing it — "focus on effort, not the watch"
-- If HR is elevated: "the rolls accumulate — stay relaxed on the ups, recover on the dips"
-- ONE specific tip: "think smooth wheels, not a piston engine — absorb the undulations, don't attack them"
+- If pace spread is high (>15s between splits): explain that's the terrain doing it, not a form issue — encourage them to focus on effort rather than the watch, in your own words
+- If HR is elevated: reassure them the small rises accumulate — encourage staying relaxed on the ups and recovering on the dips, in your own words
+- Give ONE original, specific tip about relaxing into the terrain's natural rhythm rather than fighting each rise — invent your own wording and metaphor each time; do NOT reuse a stock phrase across coaching messages
 - Reference their actual numbers`;
 
   } else if (eventType === 'flat_terrain') {
@@ -2526,7 +2526,7 @@ COACHING FOCUS (no predictions — describe what is happening NOW):
 
 COACHING FOCUS:
 - Flat terrain is ideal for rhythm, pace consistency, and finding flow
-- If pace is consistent (spread < 15s): "your splits are rock solid — that's disciplined ${isWalkElevation ? 'walking' : 'running'}"
+- If pace is consistent (spread < 15s): acknowledge that as disciplined, well-controlled ${isWalkElevation ? 'walking' : 'running'} — in your own words
 - If negative splitting: exceptional — call it out
 - If pace is drifting (spread > 20s): on flat terrain there's no excuse — suggest a form reset or effort check
 ${isWalkElevation
