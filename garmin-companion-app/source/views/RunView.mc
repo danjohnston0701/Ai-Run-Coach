@@ -982,7 +982,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.4"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.5"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");
@@ -1281,9 +1281,17 @@ class RunView extends Ui.View {
                 }
             }
 
-            // HTTP stream ONLY when offline. When phone is connected, it receives data
-            // via BT watchData messages — no need to double-report via HTTP relay.
-            if (!_isConnected) {
+            // HTTP stream ALWAYS runs for a watch-initiated session, connected or not.
+            // Previously gated behind !_isConnected on the assumption that a connected
+            // phone already relays everything it needs over BT — but that left the
+            // backend (garminRealtimeData, used by RunTrackingService's OS-kill reattach
+            // recovery AND by every server-side coaching trigger) with ZERO live data for
+            // the common phone-connected case, silently defeating both. The watch is the
+            // authoritative data source for a watch-initiated run either way, so it always
+            // streams directly — this is what makes the backend, the phone app, and the
+            // watch itself consistent, and gives coaching prompts/triggers the full
+            // enriched watch dataset (running dynamics, training effect, etc.) regardless
+            // of whether BT happens to be connected at any given moment.
             _streamAccumMs += _tickMs;
             if (_streamAccumMs >= 1000) {
                 _streamAccumMs = 0;
@@ -1316,7 +1324,6 @@ class RunView extends Ui.View {
                     });
                 }
             }
-            } // end !_isConnected HTTP stream
         }
 
         if (_isConnected && _isRunning && !_isPaused) { // Stream GPS to phone only when connected (saves BT in Scenario C)
