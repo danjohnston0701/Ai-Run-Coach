@@ -235,6 +235,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private var maxSpeed: Float = 0f
     private var currentPace: String = "0:00" // Real-time/instant pace based on recent GPS
     private var isTracking = false
+    // Guards stopTracking() against reentry — see that function for why isTracking itself
+    // can't be used for this (a legitimate stop can arrive while genuinely paused, i.e. while
+    // isTracking is already false).
+    private var isFinalizingStop = false
     private var aiCoachEnabledForSession = true
     // Watch speed smoothing — exponential moving average applied to raw Garmin GPS speed
     // before converting to pace, to suppress brief GPS jitter spikes (which would otherwise
@@ -1687,6 +1691,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastSplitWatchElapsedSeconds = 0
         totalPausedMs = 0      // Reset pause tracking for new run
         pauseStartTime = 0
+        isFinalizingStop = false  // Re-arm stopTracking() for this new run
         splitPausedMs = 0
         walk500mSplitPausedMs = 0
         hasCreditedStartIdle = false  // Re-arm start-line idle detection for new run
@@ -4456,6 +4461,23 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     private fun stopTracking() {
+        // Guard against a redundant "stop" — same class of bug as resumeTracking()/
+        // pauseTracking() above. The watch retries "stop" every 5s (up to 6x/30s) whenever its
+        // stopAck doesn't arrive back, and that ack is itself a fire-and-forget BLE send with
+        // no delivery guarantee. Without this guard, every redelivered "stop" re-ran this whole
+        // function — including launching a BRAND NEW uploadScope coroutine each time. Multiple
+        // concurrent coroutines would then race to read the same mutable instance state
+        // (weatherAtEnd, coachingHistory, pauseStartTime/totalPausedMs) and each independently
+        // POST the run to the backend and call stopSelf() on the service out from under one
+        // another — silent data corruption at best, an actual crash at worst. It also re-sent
+        // sendSessionEnded() to the watch on every redundant call. Can't reuse isTracking as
+        // the guard here (a legitimate stop can arrive while genuinely paused, i.e. while
+        // isTracking is already false) — needs its own dedicated flag.
+        if (isFinalizingStop) {
+            Log.d("RunTrackingService", "stopTracking: already finalizing — ignoring redundant stop")
+            return
+        }
+        isFinalizingStop = true
         isTracking = false
         isSimulating = false
         // Clear live session ID so no more syncs fire after the run ends
