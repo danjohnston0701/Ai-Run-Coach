@@ -88,6 +88,7 @@ ${ctx.terrainContext}
 ${ctx.trainingStruggleContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
+${VARIETY_INSTRUCTION}
 Give a brief (1-2 sentences) supportive message tailored to this walker's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Be supportive during tough moments — always reference actual data. Keep it brief.${STRUGGLE_WALK_PROHIBITION} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;

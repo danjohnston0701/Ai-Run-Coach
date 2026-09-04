@@ -9096,55 +9096,67 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
+    // Technique focus areas — deliberately CONCEPT-level (the technical point to coach),
+    // not ready-to-speak sentences. These used to be fully-written prose with vivid,
+    // reusable imagery ("like a wheel rolling", "'Strong. Smooth. Fast.'", "running on hot
+    // coals"), sent to the backend framed as "the exact cue to deliver" and merely
+    // reworded by the AI — so the same distinctive phrases got echoed across nearly every
+    // user's runs regardless of the "make it natural" instruction (confirmed: this is the
+    // root cause of user reports of coaching sounding hardcoded/repetitive, e.g. "moving
+    // like a piston engine", "smooth" — those exact-feeling phrases came from entries here
+    // and from a similar issue in the server's elevation-coaching prompt, fixed separately).
+    // Kept as short factual/technical descriptions; the backend prompt (ai-service.ts,
+    // 'technique_form' case) explicitly instructs the AI to generate original wording and
+    // metaphor from these, never to echo a stock phrase.
     private val techniqueHints = mapOf(
         // Posture
-        "posture_head_neck" to "Look 20-30m ahead, not at feet. Imagine being pulled up by a string from the crown of your head. Keep chin level.",
-        "posture_shoulders" to "Drop your shoulders away from your ears. Shake them out if they've crept up. Relaxed shoulders = efficient running.",
-        "posture_torso_lean" to "Lean slightly forward from your ankles (not waist). Your body should be a straight line from ankle to head. Think 'tall and tilted'.",
-        "posture_core_engagement" to "Gently brace your core — imagine you're about to be lightly tapped on the stomach. Keep your pelvis neutral, avoid arching your back.",
+        "posture_head_neck" to "Eyes forward rather than down at the feet; chin level; head tall.",
+        "posture_shoulders" to "Shoulders relaxed and dropped away from the ears — they tend to creep up under fatigue.",
+        "posture_torso_lean" to "A slight forward lean from the ankles, not a bend at the waist — a straight line from ankle to head.",
+        "posture_core_engagement" to "A gentle core brace with a neutral pelvis, avoiding an arched lower back.",
 
         // Arms
-        "arms_swing_direction" to "Swing arms forward and back, not across your body. Your hands should never cross your midline. Think 'hip pocket to chest pocket'.",
-        "arms_elbow_angle" to "Keep elbows at about 90 degrees. Compact arms are more efficient. If they're straightening out, you're wasting energy.",
-        "arms_hand_relaxation" to "Unclench your fists! Imagine holding a crisp in each hand without crushing it. Loose hands = relaxed arms = relaxed shoulders.",
-        "arms_drive_power" to "Drive your elbows back powerfully — the harder you pump your arms, the more your legs respond. Use your arms to power through this section.",
+        "arms_swing_direction" to "Forward-and-back arm swing rather than across the body.",
+        "arms_elbow_angle" to "Elbows at roughly 90 degrees — compact arm carriage is more efficient than letting them straighten out.",
+        "arms_hand_relaxation" to "Loose, unclenched hands — tension here travels up into the arms and shoulders.",
+        "arms_drive_power" to "A more powerful backward elbow drive to help power the legs through this effort.",
 
         // Hips
-        "hips_extension" to "On each stride, fully extend your hip behind you before your foot leaves the ground. More extension = more power = longer stride.",
-        "hips_alignment" to "Keep your hips level — don't let one side drop when the opposite foot lifts. Strong glutes keep you stable.",
-        "hips_forward_drive" to "Drive your knee forward and up. Think 'run from the hips' rather than reaching with your feet.",
+        "hips_extension" to "Fully extending the hip behind the body before the foot leaves the ground, for more power per stride.",
+        "hips_alignment" to "Level hips rather than dropping on one side as the opposite foot lifts — a stability/glute-strength cue.",
+        "hips_forward_drive" to "Driving the knee forward and up from the hip, rather than reaching out with the foot.",
 
         // Knees
-        "knees_lift" to "Lift your knees to a height that matches your pace. Higher knee drive = faster pace. At easy pace, a gentle lift is fine.",
-        "knees_alignment" to "Make sure your knees track directly over your toes. If they collapse inward, focus on 'pushing knees out' slightly.",
-        "knees_soft_landing" to "Land with a soft, slightly bent knee. Never lock your knee on impact — that's how injuries happen. Absorb the ground.",
+        "knees_lift" to "Knee height scaled to the current pace — more drive for faster efforts, a gentle lift at easy pace.",
+        "knees_alignment" to "Knees tracking directly over the toes rather than collapsing inward.",
+        "knees_soft_landing" to "A soft, slightly bent knee on landing rather than locking it out, to reduce impact/injury risk.",
 
         // Feet
-        "feet_cadence" to "Quick light steps! Aim for 170-180 steps per minute. If your feet feel heavy, imagine running on hot coals.",
-        "feet_strike_pattern" to "Land with your foot directly under your body, not out in front. Midfoot strike, soft and quiet. If you can hear your feet slapping, you're overstriding.",
-        "feet_push_off" to "Push off strongly through your big toe. Feel the ground spring you forward. Active ankle extension adds free speed.",
-        "feet_ground_contact" to "Minimise time on the ground — quick turnover, like a wheel rolling. The less time each foot spends on the ground, the faster and more efficient you are.",
+        "feet_cadence" to "Quicker, lighter steps, targeting roughly 170-180 steps per minute.",
+        "feet_strike_pattern" to "Landing under the body rather than reaching out in front, with a soft midfoot strike — loud footfall signals overstriding.",
+        "feet_push_off" to "A strong push through the big toe and active ankle extension for extra forward propulsion.",
+        "feet_ground_contact" to "Minimising ground-contact time per foot with a quicker turnover — shorter contact means a more efficient stride.",
 
         // Hills
-        "hill_uphill_technique" to "Shorten your stride, increase cadence, lean into the hill from your ankles. Pump your arms harder. Attack the hill with quick feet, not big strides.",
-        "hill_downhill_technique" to "Let gravity help! Lean slightly forward (don't lean back). Quick light steps, slightly wider foot placement. Control your speed with cadence, not braking.",
+        "hill_uphill_technique" to "Shorter stride, higher cadence, a slight forward lean from the ankles, and a more active arm drive uphill.",
+        "hill_downhill_technique" to "A slight forward lean (not leaning back), quick light steps, controlling speed through cadence rather than braking.",
 
         // Breathing
-        "breathing_rhythm" to "Match your breathing to your stride. Try a 2:2 pattern — breathe in for 2 steps, out for 2 steps. At easy pace, try 3:3.",
-        "breathing_deep_belly" to "Breathe from your belly, not your chest. Put your hand on your stomach — it should push out when you inhale. Belly breathing gets more oxygen to your muscles.",
-        "breathing_exhale_power" to "Focus on a strong exhale — blow the air out forcefully. The inhale will happen naturally. A powerful exhale clears CO2 and makes room for fresh oxygen.",
+        "breathing_rhythm" to "Matching breath to stride — roughly a 2-step-in/2-step-out pattern at moderate effort, 3:3 at easy pace.",
+        "breathing_deep_belly" to "Breathing from the belly/diaphragm rather than the chest, for better oxygen delivery.",
+        "breathing_exhale_power" to "A stronger, more deliberate exhale — the inhale takes care of itself — to clear CO2 more effectively.",
 
         // Mental
-        "mental_smile" to "Smile! Seriously — studies show smiling while running reduces perceived effort by up to 2%. It relaxes your face and tricks your brain into thinking this is easier.",
-        "mental_mantras" to "Pick a power word and repeat it with each step. 'Strong. Smooth. Fast.' or 'I. Am. Running.' A mantra drowns out the voice that says to slow down.",
-        "mental_chunking" to "Don't think about the whole distance. Just focus on the next 500 metres. Then the next 500. Small chunks are always manageable.",
-        "mental_focus_reset" to "Do a quick body scan: head relaxed, shoulders down, arms loose, core engaged, hips forward, feet light. Fix anything that's tensed up.",
-        "mental_visualisation" to "Picture yourself crossing the finish line strong. Visualise your best running form — smooth, powerful, effortless. Run like that person in your mind.",
+        "mental_smile" to "A genuine smile measurably reduces perceived effort by relaxing the face — worth mentioning as a real, studied effect, not just a platitude.",
+        "mental_mantras" to "Encourage picking a short personal word or phrase to repeat with each step to quiet the urge to slow down — invent a fresh example each time, never the same stock mantra twice.",
+        "mental_chunking" to "Breaking the remaining distance into small, manageable chunks instead of thinking about the whole thing at once.",
+        "mental_focus_reset" to "A quick top-to-bottom body scan (head, shoulders, arms, core, hips, feet), releasing anything found tensed up.",
+        "mental_visualisation" to "Picturing a strong finish and their own best form, then running toward that mental image.",
 
         // Recovery/Shake-out
-        "recovery_arm_shakeout" to "Drop your arms to your sides and shake them out for 10 seconds. Let them go completely limp. Then bring them back up refreshed.",
-        "recovery_shoulder_roll" to "Roll your shoulders backward 5 times, big circles. Release any tension that's built up. Your upper body should feel loose and free.",
-        "recovery_hand_flex" to "Open and close your fists 10 times. Wiggle your fingers. If you've been clenching, this releases tension all the way up your arms to your shoulders."
+        "recovery_arm_shakeout" to "Dropping the arms and shaking them loose for a few seconds to release tension, then resetting.",
+        "recovery_shoulder_roll" to "A few big backward shoulder circles to release built-up upper-body tension.",
+        "recovery_hand_flex" to "Opening and closing the fists a few times to release tension that's crept up through the arms and shoulders."
     )
 
     private fun fireElevationInsightCoaching(distKm: Double, duration: Long, avgSpeed: Float) {

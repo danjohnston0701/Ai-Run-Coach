@@ -127,6 +127,7 @@ ${ctx.terrainContext}
 ${ctx.trainingStruggleContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
+${VARIETY_INSTRUCTION}
 Give a brief (1-2 sentences) supportive message tailored to this runner's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
@@ -383,6 +384,7 @@ ${ctx.hrContext}
 ${ctx.totalIntervals ? `This is rep ${ctx.intervalNumber} of ${ctx.totalIntervals} total.` : ''}
 ${ctx.planContextBlock}
 
+${VARIETY_INSTRUCTION}
 Give 1–2 punchy, direct sentences. ${ctx.isWorkPhase ? 'Push them hard but safely.' : 'Help them recover and prepare for the next effort. If it fits, remind them how this session serves their training goal.'}`;
 
   const system = `You are ${ctx.coachName}, an AI running coach with a ${ctx.coachTone} style, delivering live interval coaching mid-session. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
@@ -430,6 +432,7 @@ ${ctx.heartRate ? `- Heart rate: ${ctx.heartRate} bpm` : ''}
 ${ctx.physicalContext}
 
 ${PACE_FORMAT_RULE}
+${VARIETY_INSTRUCTION}
 Decide whether cadence coaching is needed right now. If yes, reference their actual number (they can't see the screen). Keep it 2-3 sentences, spoken aloud. If cadence isn't the priority, coach what matters more. No emojis. No markdown.`;
 
   const system = `You are ${ctx.coachName}, an elite ${ctx.coachTone} running coach. You understand biomechanics, but you prioritize what matters most RIGHT NOW. Reference actual numbers. Keep it 2-3 sentences spoken aloud. No emojis. ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;

@@ -1096,14 +1096,13 @@ COMPLETION STATS:
 - Total time: ${totalTimeStr}${targetTime ? ` (target was ${Math.floor(targetTime / 60)} min ${Math.round(targetTime % 60)}s)` : ''}
 - Final pace: ${finalPace}
 
-Give ONE SENTENCE of brief, celebratory congratulations. 
+Give ONE SENTENCE of brief, celebratory congratulations.
 - Use their name naturally if provided.
 - Reference the specific distance or time they just completed.
 - NO coaching advice or tips — this is the finish line moment.
 - Short and punchy — maximum 2 sentences.
 - ${toneDirective(coachTone)}
-
-Example: "You crushed that 10 kilometres in 50 minutes! Well done!"`;
+- This moment repeats every run — invent fresh wording each time rather than a stock celebratory phrase.`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -1239,7 +1238,7 @@ export async function generatePhaseCoaching(params: {
       cadenceAction = `Their cadence of ${cadence} spm is ${cadenceRange.deficit} spm below their personal optimal of ${cadenceRange.optimal} spm for their height and current pace. Gently encourage quicker feet — a small increase will improve efficiency without feeling harder.`;
     } else if (cadenceRange.isLow) {
       cadenceAssessment = `low (personal target: ${cadenceRange.optimal} spm)`;
-      cadenceAction = `⚠️ Their cadence of ${cadence} spm is ${cadenceRange.deficit} spm below their personal optimal of ${cadenceRange.optimal} spm. For their height (${runnerHeight ?? 170}cm) at this pace, they should target ${cadenceRange.low}–${cadenceRange.high} spm. Coach them: shorten the stride, increase foot turnover, think "quick light feet". This is specific to THEM, not a generic target.`;
+      cadenceAction = `⚠️ Their cadence of ${cadence} spm is ${cadenceRange.deficit} spm below their personal optimal of ${cadenceRange.optimal} spm. For their height (${runnerHeight ?? 170}cm) at this pace, they should target ${cadenceRange.low}–${cadenceRange.high} spm. Coach them to shorten the stride and increase foot turnover — put this in your own words each time, don't reuse the same cue phrase. This is specific to THEM, not a generic target.`;
     } else {
       cadenceAssessment = `good`;
       cadenceAction = '';
@@ -2194,7 +2193,7 @@ With a low cadence, each stride is longer than efficient — the foot tends to l
 
 The correction: shorten the stride, increase turnover, shift foot strike closer to beneath the hips.
 
-Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment. Arms drive, mental metronome, "light quick feet", foot placement — pick what will land best for this runner.`;
+Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment — arm drive, mental metronome/rhythm, quicker and lighter foot turnover, or foot placement are all valid angles. Pick what will land best for this runner, and phrase it in your own original words rather than a stock cue.`;
   } else if (cadenceExcessPercent > 10) {
     // Cadence significantly TOO HIGH → understriding / spinning: short shuffling steps.
     // Each step generates less propulsion; can signal fatigue or an overcorrected form.
@@ -5343,10 +5342,16 @@ export interface EliteCoachingParams {
 
   // ── Technique coaching — specific category selected by the Android app ──────
   // The app picks a category (e.g. "breathing_rhythm", "mental_smile") from its
-  // rotation system and sends the exact coaching cue to deliver here so the AI
-  // focuses on that one area rather than choosing generically.
+  // rotation system and sends a short factual description of that technique point
+  // here so the AI focuses on that one area rather than choosing generically. This
+  // is deliberately a concept description, not ready-to-speak prose — the AI is
+  // instructed to write its own original coaching language from it (see the
+  // 'technique_form' case below). Kept concept-level after a real-world report of
+  // coaching sounding hardcoded/repetitive traced back to this hint text (and a
+  // similar issue in the elevation-coaching prompt) previously being full,
+  // reusable, quotable sentences that the AI echoed near-verbatim across runs.
   techniqueCategory?: string;          // e.g. "posture_shoulders", "breathing_rhythm"
-  techniqueHint?: string;              // The specific cue text for this category
+  techniqueHint?: string;              // Factual description of the technique point — not a script
   runPhase?: string;                   // EARLY | BUILDING | SUSTAINING | FINISHING
   isUphill?: boolean;
   fatigueLevel?: string;               // FRESH | MODERATE | FATIGUED
@@ -5617,9 +5622,9 @@ ${status}
 ${noTerrainRule}
 
 ASSIGNED TECHNIQUE AREA: ${categoryLabel}
-COACHING CUE TO DELIVER: "${techniqueHint}"
+TECHNIQUE FOCUS (the factual coaching point — NOT a script; write your own original coaching language from it): ${techniqueHint}
 
-Your task: Turn this coaching cue into a natural, conversational 2-3 sentence spoken coaching message.
+Your task: coach this technique point in a natural, conversational 2-3 sentence spoken coaching message, in your own words.
 ${isWalkSession ? 'This is a WALK session — NEVER say "run", "running", "runner", or "sprint". Say "walk", "walking", "walker" instead.\n' : ''}
 Rules:
 1. Coach ONLY the "${categoryLabel}" area — do NOT switch to a different technique.
@@ -5627,6 +5632,7 @@ Rules:
 3. Reference at least one real data point from their run (pace, HR, distance, elapsed time) to make it feel personalised.
 4. Do NOT say "great job" or give generic praise — just coach the technique.
 5. Keep it natural and conversational — this is spoken aloud while the runner is moving.
+6. Invent your own phrasing, imagery, and metaphor — do not reuse a stock or clichéd cue phrase. The same technique area will come up again on future runs and for other runners; make this instance sound freshly generated, not recited.
 ${cadence ? `\nCurrent cadence: ${cadence} spm` : ''}
 ${heartRate ? `\nCurrent heart rate: ${heartRate} bpm` : ''}
 ${isUphill || (currentGrade && Math.abs(currentGrade) > 3) ? `\nCurrently ${currentGrade && currentGrade > 0 ? 'climbing' : 'descending'} (grade: ${currentGrade?.toFixed(1)}%)` : ''}
@@ -5657,11 +5663,11 @@ Give a 2-3 sentence conversational coaching message. Reference at least one data
         // This should rarely fire now that the app always sends a category.
         // Deliberately avoids the arm-swing default by cycling through areas.
         const genericAreas = [
-          { area: 'posture', cue: 'Check your posture — tall spine, chin level, shoulders relaxed and down away from your ears.' },
-          { area: 'breathing', cue: 'Focus on your breathing — breathe from your belly, not your chest. Try matching your breath to your steps.' },
-          { area: 'foot strike', cue: 'Land your feet under your hips, not in front of you. Quick, light steps reduce impact and save energy.' },
-          { area: 'core engagement', cue: 'Gently brace your core — imagine someone is about to lightly tap your stomach. This stabilises your entire stride.' },
-          { area: 'mental focus', cue: 'Quick body scan — where are you holding tension? Jaw, hands, shoulders? Release it now.' },
+          { area: 'posture', focus: 'tall spine, level chin, shoulders relaxed and dropped away from the ears' },
+          { area: 'breathing', focus: 'belly breathing rather than chest breathing, roughly matched to their stride' },
+          { area: 'foot strike', focus: 'landing under the hips rather than out in front — quick, light steps reduce impact' },
+          { area: 'core engagement', focus: 'a gentle core brace that stabilises the whole stride' },
+          { area: 'mental focus', focus: 'a quick scan for held tension (jaw, hands, shoulders) and consciously releasing it' },
         ];
         // Pick pseudo-randomly based on elapsed time so different cues fire at different points
         const pick = genericAreas[Math.floor(elapsedTime / 120) % genericAreas.length];
@@ -5673,9 +5679,9 @@ ${noTerrainRule}
 ${recentCatContext}
 
 Coach this specific area: ${pick.area}
-Cue: "${pick.cue}"
+Technique focus (a factual point, not a script — write your own original coaching language from it): ${pick.focus}
 
-Give a 2-3 sentence conversational coaching message. Make it immediately actionable. Reference at least one data point from their run.`;
+Give a 2-3 sentence conversational coaching message. Make it immediately actionable. Reference at least one data point from their run. Invent your own phrasing — do not reuse a stock cue phrase across different runs.`;
         systemExtra = 'Deliver one specific, actionable form cue. Never use arm swing as the default — there are many coaching areas to explore.';
       }
       break;
@@ -5764,7 +5770,7 @@ TREND DETECTED: ${
 
 Give a trend-aware coaching message (2-3 sentences):
 ${paceTrendDirection === 'slowing' ? `- Acknowledge the gradual slowdown without alarming them
-- Give a specific technique cue to arrest the fade (e.g., "reset your form — drop your shoulders, pump your arms, quicken your feet")
+- Give a specific technique cue to arrest the fade — pick a genuine form reset (posture, shoulders, arm drive, foot turnover, breathing) relevant to what their data shows, and phrase it in your own original words each time, not a stock line
 - Remind them of their target or what good pacing looks like` :
   paceTrendDirection === 'speeding_up' ? `- Reinforce the positive trend — they're ${isWalkSession ? 'walking' : 'running'} smart
 - Caution against going too fast too early if they're under 60% done
@@ -5939,8 +5945,7 @@ The ${isWalkSession ? 'walker' : 'runner'} has ${remainingMeters || 250} meters 
 The walker has approximately 100 meters to the finish. THIS IS IT.
 ${targetContext100}
 
-Give the most uplifting, powerful 1-2 sentence send-off possible:
-- "100 meters! Finish tall, finish strong!"
+Give the most uplifting, powerful 1-2 sentence send-off possible, in your own original words — do not reuse a stock finish-line phrase:
 - This is pure encouragement. No data, no technique. Just raw, passionate coaching.
 - Make them feel like a champion crossing the finish line.
 - Keep it SHORT — NEVER say "run", "running", "runner", or "sprint". They are WALKING.`
@@ -5949,8 +5954,7 @@ Give the most uplifting, powerful 1-2 sentence send-off possible:
 The runner has approximately 100 meters to the finish. THIS IS IT.
 ${targetContext100}
 
-Give the most intense, powerful 1-2 sentence motivational burst possible:
-- "100 meters! EVERYTHING YOU'VE GOT! FINISH STRONG!"
+Give the most intense, powerful 1-2 sentence motivational burst possible, in your own original words — do not reuse a stock finish-line phrase:
 - This is pure adrenaline. No data, no technique. Just raw, passionate coaching.
 - Make them feel like a champion crossing the finish line.
 - Keep it SHORT — they're sprinting.`;
@@ -5965,6 +5969,7 @@ Give the most intense, powerful 1-2 sentence motivational burst possible:
 ${walkSessionRule}
 ${typePrompt}
 ${PACE_FORMAT_RULE}
+${VARIETY_INSTRUCTION}
 
 Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add value.`;
 
@@ -6721,7 +6726,8 @@ Deliver ONE message (max 20 words, spoken aloud) that reacts to what is ACTUALLY
 - Reference the session context — this is a ${safeSessionType.replace(/_/g, ' ')} session with specific objectives, not a free run
 - Use session memory to pick the most valuable coaching focus for THIS moment — vary topics, don't repeat
 - Write "heart rate" never "HR"
-${PACE_FORMAT_RULE}`;
+${PACE_FORMAT_RULE}
+${VARIETY_INSTRUCTION}`;
 
   const systemPrompt = `You are ${coachName}, a ${coachTone} ${triggerCoachLabel} with full knowledge of this ${triggerPersonLabel}'s training session objectives.${triggerWalkProhibition}
 You have been given the complete session context above — use it. A tempo trigger is not the same as an easy session trigger. An interval session rep 3 of 5 message should acknowledge where they are in the session.
