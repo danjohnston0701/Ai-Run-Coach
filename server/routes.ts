@@ -17859,6 +17859,10 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       // Per-point speed (m/s) + timestamp power the pace-coloured route,
       // exactly like the app's run summary map
       ...(typeof p.speed === 'number' && p.speed > 0 ? { speed: p.speed } : {}),
+      // Garmin GPS tracks commonly store pace directly in min/km instead of
+      // speed. Preserve it so the share map can use the identical fine-grained
+      // colour variation shown on the Android run summary.
+      ...(typeof p.pace === 'number' && p.pace > 0 ? { pace: p.pace } : {}),
       ...(typeof p.timestamp === 'number' ? { timestamp: p.timestamp } : {}),
     })).filter((p: any) => p.lat !== 0 && p.lng !== 0) : undefined;
     
@@ -17884,6 +17888,25 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         // Flat number[] series (1 sample/sec, sec/km) — convert to {time, value}
         paceSamples = (paceDataRaw as number[]).map((v: number, i: number) => ({ time: i, value: v }));
       }
+    } else if (paceDataRaw && Array.isArray(paceDataRaw.samples) && paceDataRaw.samples.length > 0) {
+      // Garmin activities store fine-grained pace as
+      // { avg, samples: [{ timestamp, pace }] }, where pace is min/km.
+      // Some older records instead contain { time, value } samples in sec/km.
+      paceSamples = paceDataRaw.samples
+        .map((sample: any, index: number) => {
+          const rawPace = typeof sample.value === 'number' ? sample.value : sample.pace;
+          if (typeof rawPace !== 'number' || !Number.isFinite(rawPace) || rawPace <= 0) return null;
+
+          // Values below 30 are min/km; larger values are already sec/km.
+          const value = rawPace < 30 ? rawPace * 60 : rawPace;
+          const time = typeof sample.time === 'number'
+            ? sample.time
+            : (typeof sample.timestamp === 'number' ? sample.timestamp : index);
+          return { time, value };
+        })
+        .filter((sample: any): sample is { time: number; value: number } => sample != null);
+
+      if (paceSamples.length < 2) paceSamples = undefined;
     }
 
     // Fall back to kmSplits if no valid km-split paceData

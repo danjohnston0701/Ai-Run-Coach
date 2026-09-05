@@ -78,7 +78,7 @@ export interface RunDataForImage {
   elevationGain?: number;
   elevationLoss?: number;
   difficulty?: string;
-  gpsTrack?: Array<{ lat: number; lng: number; elevation?: number; alt?: number; altitude?: number; speed?: number; timestamp?: number }>;
+  gpsTrack?: Array<{ lat: number; lng: number; elevation?: number; alt?: number; altitude?: number; speed?: number; pace?: number; timestamp?: number }>;
   heartRateData?: Array<{ timestamp: number; value: number }>;
   paceData?: Array<{ km: number; pace: string; paceSeconds: number }>;
   /** Raw fine-grained pace samples ({time: elapsed seconds, value: pace sec/km}) — used for per-point route colouring */
@@ -277,7 +277,7 @@ function percentileOf(sorted: number[], p: number): number {
  * Returns null when no pace information exists at all.
  */
 function computePointPaces(
-  track: Array<{ lat: number; lng: number; speed?: number; timestamp?: number }>,
+  track: Array<{ lat: number; lng: number; speed?: number; pace?: number; timestamp?: number }>,
   paceSamples?: Array<{ time: number; value: number }>,
   paceData?: Array<{ km: number; pace: string; paceSeconds: number }>
 ): number[] | null {
@@ -285,10 +285,19 @@ function computePointPaces(
   if (n < 2) return null;
   let paces: Array<number | null> | null = null;
 
-  // 1. Per-point speed embedded in the GPS track (best — exactly what the app uses)
+  // 1. Per-point speed/pace embedded in the GPS track (best — exactly what the app uses)
   const speedCount = track.reduce((c, p) => c + (typeof p.speed === "number" && p.speed > 0.3 ? 1 : 0), 0);
   if (speedCount > n * 0.5) {
     paces = track.map(p => (typeof p.speed === "number" && p.speed > 0.3 ? 1000 / p.speed : null));
+  }
+
+  // Garmin GPS points store pace as min/km; some legacy points use sec/km.
+  const paceCount = track.reduce((c, p) => c + (typeof p.pace === "number" && p.pace > 0 ? 1 : 0), 0);
+  if (!paces && paceCount > n * 0.5) {
+    paces = track.map(p => {
+      if (typeof p.pace !== "number" || p.pace <= 0) return null;
+      return p.pace < 30 ? p.pace * 60 : p.pace;
+    });
   }
 
   // 2. Raw pace samples ({time, value} in sec/km)
@@ -746,7 +755,7 @@ function computeMapView(
  */
 function buildMercatorRouteSvg(
   svgW: number, svgH: number,
-  track: Array<{ lat: number; lng: number; speed?: number; timestamp?: number }>,
+  track: Array<{ lat: number; lng: number; speed?: number; pace?: number; timestamp?: number }>,
   paceData: Array<{ km: number; pace: string; paceSeconds: number }> | undefined,
   centerLat: number, centerLng: number,
   zoom: number,
