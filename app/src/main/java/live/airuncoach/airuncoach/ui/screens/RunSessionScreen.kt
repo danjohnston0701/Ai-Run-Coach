@@ -6,6 +6,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.util.Log
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -188,6 +189,7 @@ fun RunSessionScreen(
     BackHandler(enabled = isRunActive) {}
 
     val cameraPositionState = rememberCameraPositionState()
+    val scope = rememberCoroutineScope()
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -195,6 +197,48 @@ fun RunSessionScreen(
             if (isGranted) viewModel.startListening()
         }
     )
+
+    // Resolves the system's native "Turn on Location" dialog when Location Services are off.
+    // See RunSessionViewModel.checkLocationEnabled() for why this check exists — the
+    // ACCESS_FINE_LOCATION permission being granted (even as "Precise") says nothing about
+    // whether the OS-level Location toggle is actually on, and starting a run with it off
+    // previously tracked a normal timer for the whole run while silently getting zero GPS.
+    // Checked at TWO points (see checkLocationEnabled's doc): once before prepareRun() so the
+    // user gets this prompt as early as possible, with the whole setup window to fix it, and
+    // again as a hard gate right before the run actually starts — catching Location being
+    // switched off again in the gap between, however long that gap is.
+    var pendingLocationResolution by remember { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
+    val locationResolutionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult(),
+        onResult = { result ->
+            pendingLocationResolution?.complete(result.resultCode == android.app.Activity.RESULT_OK)
+            pendingLocationResolution = null
+        }
+    )
+
+    // Suspends until Location is confirmed on (or the user declines the prompt, returning
+    // false). Safe to call repeatedly — each call re-checks current status.
+    suspend fun ensureLocationEnabled(): Boolean {
+        return when (val result = viewModel.checkLocationEnabled()) {
+            is RunSessionViewModel.LocationEnabledResult.Enabled -> true
+            is RunSessionViewModel.LocationEnabledResult.NeedsResolution -> {
+                val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                pendingLocationResolution = deferred
+                locationResolutionLauncher.launch(result.intentSenderRequest)
+                deferred.await()
+            }
+        }
+    }
+
+    val startRunIfLocationEnabled: () -> Unit = {
+        scope.launch {
+            if (ensureLocationEnabled()) {
+                viewModel.startRun()
+            } else {
+                Log.w("RunSessionScreen", "User declined to enable Location — run not started")
+            }
+        }
+    }
 
     // Wake word detection: start when run is active, stop when run ends
     val audioPermissionGranted = remember(context) {
@@ -278,6 +322,17 @@ fun RunSessionScreen(
         // This prevents: (1) briefing from playing again when resuming from Dashboard,
         // (2) prepareRun from resetting state after stop is triggered (clearing backendRunId)
         if (!runState.isRunning && !runState.isPaused && !runState.isStopping) {
+            // Surface the "turn on Location" prompt as early as possible — before spending
+            // time on prepareRun()'s briefing/weather calls — rather than only discovering it
+            // at Start, potentially minutes later (e.g. at a race start line, no time to fix
+            // it). Not a hard gate here since prepareRun() itself doesn't need GPS; the real
+            // gate is startRunIfLocationEnabled() below, which re-checks right before tracking
+            // actually begins (catching Location being switched off again in between).
+            // Skipped for watch mode: phone GPS is never used when the watch is authoritative.
+            if (!isWatchMode) {
+                ensureLocationEnabled()
+            }
+
             viewModel.prepareRun()
 
             // For coached workouts, auto-start GPS tracking so the pre-run briefing
@@ -286,7 +341,7 @@ fun RunSessionScreen(
             // when the user presses START on the watch, which sends a command to the service.
             if (isCoachedWorkout && !isWatchMode) {
                 delay(800) // Allow prepareRun() to initiate the API call first
-                viewModel.startRun()
+                startRunIfLocationEnabled()
             }
         }
     }
@@ -309,7 +364,7 @@ fun RunSessionScreen(
                 isPaused = runState.isPaused,
                 isStopping = runState.isStopping,
                 isWatchRun = isWatchMode,
-                onStart = { viewModel.startRun() },
+                onStart = startRunIfLocationEnabled,
                 onPause = { showPauseConfirm = true },
                 onResume = { viewModel.resumeRun() },
                 onStop = { showStopConfirm = true },

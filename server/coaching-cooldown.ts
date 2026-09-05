@@ -26,36 +26,34 @@
  *   POST_MILESTONE_BUFFER   — 45 seconds of silence after a milestone before
  *                             non-milestone coaching can resume
  *                             (avoids e.g. elevation coaching firing 7s after a km split)
+ *
+ * ── Why this state lives in the database, not process memory ────────────────
+ * The backend runs on Replit's autoscale deployment, which can run several
+ * identical server instances simultaneously behind a load balancer. An
+ * in-memory Map of "last cue time per user" is invisible across instances —
+ * whenever two consecutive coaching requests for the same user land on
+ * different instances, each thinks it's the first cue of the run and lets it
+ * through. Confirmed 2026-09-05 (Daniel's Garmin run): coaching cues fired as
+ * close as 18-23 seconds apart despite this exact 90s/45s rule being in the
+ * code the whole time. The per-user settings cache below is NOT subject to
+ * this problem — it caches near-static DB values with a short TTL, so a few
+ * minutes of cross-instance staleness there is harmless, unlike the cooldown
+ * timestamps, which are the actual coordination primitive and must be shared.
  */
 
 import { db } from './db';
-import { users } from '../shared/schema';
+import { users, coachingCooldownState } from '../shared/schema';
 import { eq } from 'drizzle-orm';
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 const NON_MILESTONE_COOLDOWN_MS = 90_000;   // 90 s between non-milestone cues
 const POST_MILESTONE_BUFFER_MS  = 45_000;   // 45 s quiet time after any milestone
-const SESSION_TTL_MS = 4 * 60 * 60 * 1000; // discard state after 4 h inactivity
-const SETTINGS_CACHE_TTL_MS = 2 * 60 * 1000; // user settings cache TTL
-
-// ── Per-user coaching state ───────────────────────────────────────────────────
-interface CoachingState {
-  lastNonMilestoneAt: number;
-  lastMilestoneAt: number;
-  updatedAt: number;
-}
-
-const stateMap = new Map<string, CoachingState>();
-
-// Cleanup stale sessions every 30 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, state] of stateMap) {
-    if (now - state.updatedAt > SESSION_TTL_MS) stateMap.delete(key);
-  }
-}, 30 * 60 * 1000);
 
 // ── User settings cache ───────────────────────────────────────────────────────
+// Safe to keep per-instance/in-memory: near-static settings, short TTL, no
+// cross-request coordination requirement (see file doc comment above).
+const SETTINGS_CACHE_TTL_MS = 2 * 60 * 1000; // user settings cache TTL
+
 interface CachedSettings {
   kmInterval: number;
   halfKmEnabled: boolean;
@@ -95,6 +93,28 @@ export type CooldownResult =
   | { allowed: false; reason: 'half_km_disabled' };
 
 /**
+ * Reads this user's shared cooldown state from the database.
+ * Returns null (never throws) on any failure — callers treat that as "no prior
+ * cue on record", which is the same permissive fallback the old in-memory
+ * version used for a brand-new session.
+ */
+async function readCooldownState(userId: string): Promise<{ lastNonMilestoneAt: number; lastMilestoneAt: number } | null> {
+  try {
+    const row = await db.query.coachingCooldownState.findFirst({
+      where: eq(coachingCooldownState.userId, userId),
+    });
+    if (!row) return null;
+    return {
+      lastNonMilestoneAt: row.lastNonMilestoneAt ? row.lastNonMilestoneAt.getTime() : 0,
+      lastMilestoneAt:    row.lastMilestoneAt    ? row.lastMilestoneAt.getTime()    : 0,
+    };
+  } catch (e) {
+    console.warn(`[CooldownMgr] Failed to read cooldown state for ${userId} (non-fatal, treating as no prior cue): ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
  * Determine whether a coaching request should fire or be suppressed.
  *
  * Call this at the start of every coaching endpoint handler, BEFORE calling
@@ -116,7 +136,7 @@ export async function checkCooldown(
   const isSplit: boolean    = body.isSplit === true;
   const splitKm: number     = typeof body.splitKm === 'number' ? body.splitKm : 0;
 
-  // ── 1. Unconditional milestones ───────────────────────��─────────────────────
+  // ── 1. Unconditional milestones ─────────────────────────────────────────────
   if (triggerType === 'final_500m' || triggerType === 'final_100m') {
     return { allowed: true, isMilestone: true };
   }
@@ -154,7 +174,7 @@ export async function checkCooldown(
   // No userId means we have no state to check — let it through
   if (!uid) return { allowed: true, isMilestone: false };
 
-  const state = stateMap.get(uid);
+  const state = await readCooldownState(uid);
   if (state) {
     // Post-milestone buffer: enforce quiet period after any milestone fires
     const sinceMilestone = now - state.lastMilestoneAt;
@@ -178,17 +198,32 @@ export async function checkCooldown(
 /**
  * Record that a coaching cue was delivered successfully.
  * Call this AFTER res.json() so the timestamp is as late as possible.
+ *
+ * Upserts into the shared coachingCooldownState table — visible to every
+ * autoscale instance immediately, unlike the old in-memory Map.
  */
-export function recordFired(userId: string | null | undefined, isMilestone: boolean): void {
+export async function recordFired(userId: string | null | undefined, isMilestone: boolean): Promise<void> {
   if (!userId) return;
-  const now = Date.now();
+  const now = new Date();
   const uid = String(userId);
-  const prev = stateMap.get(uid) ?? { lastNonMilestoneAt: 0, lastMilestoneAt: 0, updatedAt: 0 };
-  stateMap.set(uid, {
-    lastNonMilestoneAt: isMilestone ? prev.lastNonMilestoneAt : now,
-    lastMilestoneAt:    isMilestone ? now                     : prev.lastMilestoneAt,
-    updatedAt:          now,
-  });
+  try {
+    const insertValues: typeof coachingCooldownState.$inferInsert = { userId: uid, updatedAt: now };
+    if (isMilestone) insertValues.lastMilestoneAt = now;
+    else insertValues.lastNonMilestoneAt = now;
+
+    await db.insert(coachingCooldownState)
+      .values(insertValues)
+      .onConflictDoUpdate({
+        target: coachingCooldownState.userId,
+        set: isMilestone
+          ? { lastMilestoneAt: now, updatedAt: now }
+          : { lastNonMilestoneAt: now, updatedAt: now },
+      });
+  } catch (e) {
+    // Non-fatal: worst case a future cue's cooldown check doesn't see this one,
+    // firing a bit early — never worth failing the coaching response over.
+    console.warn(`[CooldownMgr] Failed to record cooldown state for ${uid} (non-fatal): ${(e as Error).message}`);
+  }
 }
 
 /**

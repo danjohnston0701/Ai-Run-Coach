@@ -339,6 +339,12 @@ interface ApiService {
         @Body request: RenameRunRequest
     ): RunSession
 
+    @PATCH("/api/runs/{id}/coaching-notes")
+    suspend fun patchCoachingNotes(
+        @Path("id") runId: String,
+        @Body request: PatchCoachingNotesRequest
+    ): Unit
+
     // Garmin OAuth
     @GET("/api/auth/garmin")
     suspend fun initiateGarminAuth(

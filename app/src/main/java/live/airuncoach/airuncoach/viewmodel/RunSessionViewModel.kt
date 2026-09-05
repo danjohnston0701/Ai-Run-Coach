@@ -19,6 +19,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeout
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
@@ -1594,6 +1595,67 @@ class RunSessionViewModel @Inject constructor(
         } catch (e: Exception) {
             Log.e("RunSessionViewModel", "Failed to start navigation simulation", e)
         }
+    }
+
+    /**
+     * Checks whether the device's Location Services are actually turned on — NOT the same
+     * as the ACCESS_FINE_LOCATION runtime permission, which only says the app is allowed to
+     * ask for location, not that the OS-level Location toggle is on. A user can have granted
+     * "Precise" location to this app while Location itself is switched off system-wide (e.g.
+     * toggled off in Quick Settings), and requestLocationUpdates() will accept that request
+     * and simply never deliver a single callback — no exception, no error, for the entire run.
+     *
+     * Confirmed real-world case (2026-09-05, Wayne, phone-only 5K parkrun): timer ran the
+     * full ~23 minutes, zero GPS updates the whole time (so zero distance/pace-dependent
+     * coaching), and the final save failed with "distance must be > 0, got 0" — despite Wayne
+     * having granted Precise location and having no battery-saver mode active. There was
+     * previously NO check anywhere in the app for this — startTracking() only checks the
+     * permission, never whether Location is actually enabled.
+     *
+     * Checked at TWO points, not just once: right before [prepareRun] starts (so a user who
+     * disabled Location gets the system prompt immediately, with the whole run-setup window
+     * left to fix it — not just seconds before the actual start, e.g. at a race start line)
+     * and again right before the run actually starts (the hard gate — catches Location being
+     * turned back off in between, e.g. minutes later, which is exactly the gap that let Wayne's
+     * run through undetected the first time).
+     *
+     * Returns [LocationEnabledResult.Enabled] immediately if Location is already on.
+     * Returns [LocationEnabledResult.NeedsResolution] with the system's built-in "Turn on
+     * Location" resolution (from Play Services' SettingsClient) when it's off and fixable with
+     * a one-tap dialog. On any non-resolvable failure (e.g. no Google Play Services), returns
+     * Enabled as a fallback — matching the app's existing behavior of not blocking a run on
+     * anything outside this specific fixable case.
+     */
+    suspend fun checkLocationEnabled(): LocationEnabledResult {
+        val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
+            com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 10_000L
+        ).build()
+        val settingsRequest = com.google.android.gms.location.LocationSettingsRequest.Builder()
+            .addLocationRequest(locationRequest)
+            .build()
+        return try {
+            com.google.android.gms.location.LocationServices.getSettingsClient(context)
+                .checkLocationSettings(settingsRequest)
+                .await()
+            LocationEnabledResult.Enabled
+        } catch (e: com.google.android.gms.common.api.ResolvableApiException) {
+            try {
+                LocationEnabledResult.NeedsResolution(
+                    androidx.activity.result.IntentSenderRequest.Builder(e.resolution).build()
+                )
+            } catch (buildError: Exception) {
+                Log.w("RunSessionViewModel", "Failed to build location resolution request: ${buildError.message}")
+                LocationEnabledResult.Enabled
+            }
+        } catch (e: Exception) {
+            Log.w("RunSessionViewModel", "Location settings check failed non-resolvably (non-fatal): ${e.message}")
+            LocationEnabledResult.Enabled
+        }
+    }
+
+    sealed class LocationEnabledResult {
+        object Enabled : LocationEnabledResult()
+        data class NeedsResolution(val intentSenderRequest: androidx.activity.result.IntentSenderRequest) : LocationEnabledResult()
     }
 
     fun startRun() {

@@ -793,6 +793,14 @@ class RunTrackingService : Service(), SensorEventListener {
 
         const val ACTION_START_TRACKING = "ACTION_START_TRACKING"
         const val ACTION_STOP_TRACKING = "ACTION_STOP_TRACKING"
+        /**
+         * Optional String extra on [ACTION_STOP_TRACKING] carrying the run ID the server already
+         * created for this session — sent by the FCM "watchSessionEnded" fallback (AiRunCoachMessagingService),
+         * which itself comes from the Garmin companion session/end response's `runId`. When present,
+         * stopTracking() uses it as the fallback save target instead of orphaning the local session:
+         * see the companionRunId handling in stopTracking()/uploadRunToBackend() below.
+         */
+        const val EXTRA_COMPANION_RUN_ID = "companionRunId"
         const val ACTION_PAUSE_TRACKING = "ACTION_PAUSE_TRACKING"
         const val ACTION_RESUME_TRACKING = "ACTION_RESUME_TRACKING"
         const val ACTION_START_SIMULATION = "ACTION_START_SIMULATION"
@@ -1556,7 +1564,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
         when (intent?.action) {
             ACTION_START_TRACKING -> startTracking()
-            ACTION_STOP_TRACKING -> stopTracking()
+            ACTION_STOP_TRACKING -> stopTracking(intent?.getStringExtra(EXTRA_COMPANION_RUN_ID))
             ACTION_PAUSE_TRACKING -> pauseTracking()
             ACTION_RESUME_TRACKING -> resumeTracking()
             ACTION_START_SIMULATION -> startSimulation()
@@ -1582,11 +1590,30 @@ class RunTrackingService : Service(), SensorEventListener {
                     Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — watch run ended (stop was dropped), stopping tracking now")
                     stopTracking()
                 } else {
-                    // Service wasn't tracking a watch-initiated run — nothing to do.
-                    // Call stopSelf() to clean up in case we were started fresh by this intent.
+                    // wasRunStartedByWatch/isTracking are FALSE here in two very different
+                    // situations that look identical from this fresh instance's point of view:
+                    //   1. Genuinely nothing to do — an old/stale offline-batch pending-sync
+                    //      ping arrived with no run actually in flight.
+                    //   2. This service (and wasRunStartedByWatch/isTracking with it) was killed
+                    //      by the OS mid-run and just got recreated by this very Intent — the
+                    //      watch's session may have already completed and saved server-side, but
+                    //      this fresh instance has no memory of ever having tracked it, so it
+                    //      would previously just self-destruct here, leaving the user's still-open
+                    //      run screen silently stuck forever with nothing to resolve it.
+                    // Ask the server (the same recoverable-session lookup stopTracking()'s
+                    // fresh-instance fallback and handleNullIntentRespawn() both use) before
+                    // giving up, so case 2 gets a real resolution instead of silence.
                     if (!isTracking) {
-                        Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — not tracking, nothing to stop")
-                        stopSelf()
+                        Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — not tracking, checking for an already-saved companion run before giving up")
+                        serviceScope.launch {
+                            val recoveredRunId = resolveCompanionRunIdFallback()
+                            if (recoveredRunId != null) {
+                                handOffToAlreadySavedRun(recoveredRunId)
+                            } else {
+                                Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — nothing recoverable, stopping self")
+                                stopSelf()
+                            }
+                        }
                     }
                 }
             }
@@ -2329,10 +2356,17 @@ class RunTrackingService : Service(), SensorEventListener {
     
     /**
      * Initialize pace coaching if the run has both a target distance and target time.
-     * Called from startTracking().
+     * Called from startTracking() — before any distance has accumulated, so
+     * inferredTargetDistance (set once the runner passes 85% of a common race distance,
+     * see maybeInferTargetDistance()) is necessarily still null at that first call. Also
+     * re-called from maybeInferTargetDistance() itself once inference succeeds, so a user who
+     * set a target TIME but no explicit target DISTANCE (e.g. "finish in 23 minutes" for an
+     * obviously-5K parkrun) still gets this engine turned on retroactively mid-run instead of
+     * it staying permanently disabled for the whole session — that gate check only ever ran
+     * once, at the one moment inference couldn't possibly have fired yet.
      */
     private fun initPaceCoaching() {
-        val tDist = targetDistance
+        val tDist = targetDistance ?: inferredTargetDistance
         val tTime = targetTime
         if (tDist != null && tDist > 0 && tTime != null && tTime > 0) {
             val targetDistKm = tDist / 1000.0
@@ -2385,8 +2419,8 @@ class RunTrackingService : Service(), SensorEventListener {
         if (isCoachingPlanActive) return
         
         val now = System.currentTimeMillis()
-        val tDist = targetDistance ?: return
-        
+        val tDist = targetDistance ?: inferredTargetDistance ?: return
+
         // Cooldown check
         if (now - lastPaceCoachingTime < PACE_COOLDOWN_MS && lastPaceCoachingTime > 0) return
         
@@ -4496,7 +4530,7 @@ class RunTrackingService : Service(), SensorEventListener {
         return totalElapsed - totalPausedMs
     }
 
-    private fun stopTracking() {
+    private fun stopTracking(companionRunId: String? = null) {
         // Guard against a redundant "stop" — same class of bug as resumeTracking()/
         // pauseTracking() above. The watch retries "stop" every 5s (up to 6x/30s) whenever its
         // stopAck doesn't arrive back, and that ack is itself a fire-and-forget BLE send with
@@ -4662,7 +4696,36 @@ class RunTrackingService : Service(), SensorEventListener {
                         // session/end path: it checks for an existing Garmin-companion run for
                         // this user with a similar distance and returns it rather than inserting
                         // a second record.  The server is therefore the authoritative dedup layer.
-                        uploadRunToBackend(finalSession)
+                        //
+                        // BUT that dedup only runs if this device's own distance clears the
+                        // server's ">0" validation first. On a genuinely fresh/restarted instance
+                        // (startTime==0L, same signal used for the duration fallback above) this
+                        // process has no real GPS/watch data of its own to report — session here
+                        // is just the companion object's last-known (possibly zeroed) state, not
+                        // this run's actual data. Ask the server directly whether the watch's
+                        // companion session already finished and has a real run before wasting an
+                        // upload attempt that would only 400 on distance and orphan the notes.
+                        val effectiveCompanionRunId = companionRunId ?: if (startTime == 0L) {
+                            resolveCompanionRunIdFallback()
+                        } else null
+                        uploadRunToBackend(finalSession, effectiveCompanionRunId)
+                    } ?: run {
+                        // _currentRunSession.value is null outright — the most blank possible
+                        // instance (e.g. the whole app process was killed and restarted fresh by
+                        // an explicit stop Intent rather than Android's own null-Intent respawn,
+                        // which is the only path that pre-seeds this from a crash-recovery
+                        // snapshot). There is no local RunSession to build an upload from at all,
+                        // so the ONLY way to avoid silently stranding this stop is the same
+                        // server-side companion lookup used above.
+                        Log.w("RunTrackingService", "stopTracking: _currentRunSession is null — nothing local to upload, checking for a companion-saved run")
+                        val fallbackRunId = companionRunId ?: resolveCompanionRunIdFallback()
+                        if (fallbackRunId != null) {
+                            attachCoachingNotesToCompanionRun(fallbackRunId, coachingHistory.toList())
+                            recordRunIdMapping("", fallbackRunId)
+                            _uploadComplete.value = fallbackRunId
+                        }
+                        // If there's truly nothing recoverable either, there is nothing to upload
+                        // and nothing to navigate to — this is a genuine no-op stop.
                     }
                 } catch (e: Exception) {
                     // Safety net: any other unexpected failure while finalizing/uploading must
@@ -4672,7 +4735,17 @@ class RunTrackingService : Service(), SensorEventListener {
                     // reconciles the record later if the upload itself didn't complete.
                     Log.e("RunTrackingService", "stopTracking: unexpected error finalizing/uploading run — navigating with local ID as fallback", e)
                     _currentRunSession.value = _currentRunSession.value?.copy(isActive = false)
-                    _uploadComplete.value = _currentRunSession.value?.id
+                    val companionRunId = companionRunId ?: if (startTime == 0L) resolveCompanionRunIdFallback() else null
+                    if (companionRunId != null) {
+                        // The watch's companion session already created the authoritative run
+                        // server-side — attach whatever coaching notes we accumulated locally to
+                        // THAT run and navigate there instead of a local ID nothing points to.
+                        attachCoachingNotesToCompanionRun(companionRunId, _currentRunSession.value?.aiCoachingNotes ?: emptyList())
+                        recordRunIdMapping(_currentRunSession.value?.id ?: "", companionRunId)
+                        _uploadComplete.value = companionRunId
+                    } else {
+                        _uploadComplete.value = _currentRunSession.value?.id
+                    }
                 } finally {
                     // Only stop the service after upload completes or fails
                     releaseWakeLock()
@@ -4683,7 +4756,7 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
     
-    private suspend fun uploadRunToBackend(runSession: RunSession) {
+    private suspend fun uploadRunToBackend(runSession: RunSession, companionRunId: String? = null) {
         // Compute true average HR from accumulated samples (not just the last reading)
         val computedAvgHR = if (heartRateSampleCount > 0)
             (heartRateSum / heartRateSampleCount).toInt()
@@ -4860,9 +4933,23 @@ class RunTrackingService : Service(), SensorEventListener {
                         return
                     }
                     e.code() in 400..499 -> {
-                        // Client error - no point retrying
+                        // Client error - no point retrying. Most commonly a 400 "distance must be
+                        // > 0" — this phone had no real GPS/watch distance of its own for this run
+                        // (e.g. the Garmin watch tracked it standalone over its own HTTP relay).
+                        // When the watch's companion session/end already created the authoritative
+                        // run server-side, fall back to attaching this device's locally-accumulated
+                        // coaching notes to THAT run instead of orphaning a local ID the server has
+                        // never heard of (the phone would otherwise get stuck trying to load a run
+                        // that was never created — see stopTracking()'s companionRunId handling).
                         Log.e("RunTrackingService", "HTTP ${e.code()} client error uploading run: ${e.message()}")
-                        _uploadComplete.value = runSession.id
+                        if (companionRunId != null) {
+                            Log.d("RunTrackingService", "⌚ Falling back to companion-created run $companionRunId")
+                            attachCoachingNotesToCompanionRun(companionRunId, runSession.aiCoachingNotes)
+                            recordRunIdMapping(runSession.id, companionRunId)
+                            _uploadComplete.value = companionRunId
+                        } else {
+                            _uploadComplete.value = runSession.id
+                        }
                         return
                     }
                     e.code() >= 500 && attempt < maxRetries -> {
@@ -4887,9 +4974,9 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // All retries exhausted - queue for background retry
+        // All retries exhausted (server errors / network failures — not client 4xx, handled above)
         Log.e("RunTrackingService", "Upload failed after $maxRetries retries, queuing for background sync", lastException)
-        
+
         // Add to sync queue for persistent retry
         try {
             syncQueue.addPendingRun(runSession)
@@ -4899,8 +4986,62 @@ class RunTrackingService : Service(), SensorEventListener {
         } catch (e: Exception) {
             Log.e("RunTrackingService", "Failed to queue run for sync: ${e.message}")
         }
-        
-        _uploadComplete.value = runSession.id
+
+        // Best-effort: still attach coaching notes to the companion-created run now rather than
+        // waiting on the queued retry (which uploads a brand new run and relies on server-side
+        // dedup to merge them back in) — this device already knows the definitive run ID.
+        if (companionRunId != null) {
+            attachCoachingNotesToCompanionRun(companionRunId, runSession.aiCoachingNotes)
+            recordRunIdMapping(runSession.id, companionRunId)
+            _uploadComplete.value = companionRunId
+        } else {
+            _uploadComplete.value = runSession.id
+        }
+    }
+
+    /**
+     * Asks the server (GET /api/garmin-companion/session/recoverable — the same lookup
+     * [handleNullIntentRespawn] uses) whether the watch's companion session already completed
+     * and saved a real run, for use as a fallback save target on a fresh/restarted service
+     * instance that has no legitimate distance data of its own (startTime==0L).
+     *
+     * Exists because that null-Intent recovery path only runs when the OS itself auto-respawns
+     * this service (START_STICKY) — it never runs when something else (a manual Stop tap in the
+     * UI, the FCM watchSessionEnded fallback, or GarminWatchManager's own BT-drop recovery) sends
+     * an explicit start*Service() Intent to a service the OS already killed: that just spins up a
+     * brand-new instance and hands it straight to onStartCommand's `when (intent?.action)` below,
+     * bypassing the recoverable-session check entirely. This call closes that gap generically for
+     * every ACTION_STOP_TRACKING caller, not just the FCM one which already carries a runId.
+     */
+    private suspend fun resolveCompanionRunIdFallback(): String? {
+        return try {
+            val recoverable = apiService.getRecoverableGarminCompanionSession()
+            val session = recoverable.session
+            if (session?.status == "completed" && session.runId != null) {
+                Log.d("RunTrackingService", "⌚ Resolved fresh-instance stop to already-saved companion run ${session.runId}")
+                session.runId
+            } else null
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "resolveCompanionRunIdFallback lookup failed (non-fatal): ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Attaches this device's locally-accumulated coaching notes to a run the server already
+     * created (the Garmin companion session/end path). Used whenever this device's own
+     * POST /api/runs upload can't proceed (e.g. no real distance of its own to report) but we
+     * know — via the FCM watchSessionEnded runId — which run to patch instead. Best-effort:
+     * failure here must never block navigation to the run summary.
+     */
+    private suspend fun attachCoachingNotesToCompanionRun(runId: String, notes: List<AiCoachingNote>) {
+        if (notes.isEmpty()) return
+        try {
+            apiService.patchCoachingNotes(runId, PatchCoachingNotesRequest(notes))
+            Log.d("RunTrackingService", "✅ Patched ${notes.size} coaching note(s) onto companion run $runId")
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Failed to patch coaching notes onto companion run $runId: ${e.message}")
+        }
     }
 
     /**
@@ -5169,14 +5310,29 @@ class RunTrackingService : Service(), SensorEventListener {
 
     /**
      * The Garmin watch already finished and saved this run entirely on its own (session/end
-     * already fired, runId already exists) while the phone was dead — there is nothing to
-     * finalize or upload. Just let the user know their run was saved and offer to open it,
-     * instead of the old behavior of also uploading a second, truncated copy of the same walk.
+     * already fired, runId already exists) — there is nothing left to finalize or upload.
+     *
+     * Called from two different situations, both ending up here with real notes possibly still
+     * in memory: (1) [handleNullIntentRespawn], where this is a genuinely fresh OS-restarted
+     * instance with an empty coachingHistory (patch below is a safe no-op there), and (2) the
+     * ACTION_WATCH_RUN_FINISHED "not tracking" branch, which is reached while this SAME
+     * long-lived instance is merely paused (isTracking==false by design during a pause) — real
+     * coaching notes accumulated during the live run are still sitting in coachingHistory and
+     * would otherwise be silently discarded. Patch them onto the authoritative run either way,
+     * and set _uploadComplete so a still-open RunSessionScreen (staring at a "paused" run stuck
+     * waiting for the dropped watch "stop") navigates to the summary immediately instead of only
+     * a system notification the user has to notice and tap.
      */
     private fun handOffToAlreadySavedRun(runId: String) {
-        Log.d("RunTrackingService", "⌚ Companion session already completed while phone was down — run $runId already saved, nothing to upload")
-        postRunAlreadySavedNotification(runId)
-        stopSelf()
+        Log.d("RunTrackingService", "⌚ Companion session already completed — run $runId already saved, nothing to upload")
+        serviceScope.launch {
+            attachCoachingNotesToCompanionRun(runId, coachingHistory.toList())
+            recordRunIdMapping(_currentRunSession.value?.id ?: "", runId)
+            _currentRunSession.value = _currentRunSession.value?.copy(isActive = false)
+            _uploadComplete.value = runId
+            postRunAlreadySavedNotification(runId)
+            stopSelf()
+        }
     }
 
     /** Parses a server ISO-8601 timestamp (e.g. "2026-08-29T03:14:19.000Z") to epoch millis. */
@@ -5770,6 +5926,12 @@ class RunTrackingService : Service(), SensorEventListener {
         } ?: return
         inferredTargetDistance = inferred
         Log.d("RunTrackingService", "⚡ Inferred target distance: ${inferred.toInt()}m (runner at ${totalDistance.toInt()}m) — final-stretch coaching now active")
+        // Retroactively turn on the pace-vs-target-time engine for a runner who set a target
+        // TIME but no explicit target distance — initPaceCoaching()'s only other call site
+        // (startTracking()) ran before any distance existed, so it had no way to see this.
+        if (targetTime != null && !paceCoachingEnabled) {
+            initPaceCoaching()
+        }
     }
 
     private fun check500mMilestones() {
@@ -5789,11 +5951,18 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "Reached 500m - triggering initial coaching (targetTime=$targetTime, targetDistance=$targetDistance)")
             serviceScope.launch {
                 try {
-                    // Calculate target pace from target time and distance if available
+                    // Calculate target pace from target time and distance if available.
+                    // Falls back to inferredTargetDistance (set once the runner passes 85% of
+                    // a common race distance, see maybeInferTargetDistance()) so a user who set
+                    // a target TIME but no explicit target DISTANCE (e.g. "finish in 23 minutes"
+                    // for an obviously-5K parkrun) still gets a real target pace once the system
+                    // has enough data to infer the distance, instead of every target-time-aware
+                    // coaching path staying permanently silent for the whole run.
                     // targetTime is in milliseconds, targetDistance is in metres
-                    val targetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
+                    val effectiveTargetDistance = targetDistance ?: inferredTargetDistance
+                    val targetPaceStr = if (targetTime != null && effectiveTargetDistance != null && effectiveTargetDistance > 0) {
                         val totalSeconds = targetTime!! / 1000.0
-                        val targetDistKm = targetDistance!! / 1000.0
+                        val targetDistKm = effectiveTargetDistance / 1000.0
                         val paceSecondsPerKm = totalSeconds / targetDistKm
                         val paceMin = (paceSecondsPerKm / 60).toInt()
                         val paceSec = (paceSecondsPerKm % 60).toInt()
@@ -7479,11 +7648,15 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService", "Phase changed to $newPhase at ${totalDistance/1000.0}km - triggering coaching")
             serviceScope.launch {
                 try {
-                    // Calculate target pace from target time and distance if available
+                    // Calculate target pace from target time and distance if available.
+                    // Falls back to inferredTargetDistance — see the matching comment in
+                    // check500mMilestones() for why (target TIME set without an explicit target
+                    // DISTANCE must not leave every target-time-aware coaching path silent).
                     // targetTime is in milliseconds, targetDistance is in metres
-                    val phaseTargetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
+                    val effectiveTargetDistance = targetDistance ?: inferredTargetDistance
+                    val phaseTargetPaceStr = if (targetTime != null && effectiveTargetDistance != null && effectiveTargetDistance > 0) {
                         val totalSeconds = targetTime!! / 1000.0
-                        val targetDistKm = targetDistance!! / 1000.0
+                        val targetDistKm = effectiveTargetDistance / 1000.0
                         val paceSecondsPerKm = totalSeconds / targetDistKm
                         val paceMin = (paceSecondsPerKm / 60).toInt()
                         val paceSec = (paceSecondsPerKm % 60).toInt()
@@ -7663,16 +7836,22 @@ class RunTrackingService : Service(), SensorEventListener {
                     formatPace(elapsedSec / distKm)
                 } else "0:00"
 
-                // Compute target pace string (from target time + distance) for split comparison
-                val targetPaceStr = if (targetTime != null && targetDistance != null && targetDistance!! > 0) {
+                // Compute target pace string (from target time + distance) for split comparison.
+                // Falls back to inferredTargetDistance — see the matching comment in
+                // check500mMilestones() for why (target TIME set without an explicit target
+                // DISTANCE must not leave every target-time-aware coaching path silent, which is
+                // exactly what made km-split coaching unable to say anything about pace-vs-goal
+                // for a user who only set a target time).
+                val effectiveTargetDistance = targetDistance ?: inferredTargetDistance
+                val targetPaceStr = if (targetTime != null && effectiveTargetDistance != null && effectiveTargetDistance > 0) {
                     val totalSec = targetTime!! / 1000.0
-                    val tDistKm = targetDistance!! / 1000.0
+                    val tDistKm = effectiveTargetDistance / 1000.0
                     formatPace(totalSec / tDistKm)
                 } else null
 
                 val update = PaceUpdate(
                     distance = totalDistance / 1000.0,
-                    targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
+                    targetDistance = effectiveTargetDistance?.let { it / 1000.0 },  // Convert metres to km
                     currentPace = overallAvgPaceStr,  // Overall avg pace (for context/trend)
                     elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
                     coachName = currentUser?.coachName,

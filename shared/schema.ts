@@ -1266,6 +1266,23 @@ export const garminPairingCodes = pgTable("garmin_pairing_codes", {
   confirmedAt: timestamp("confirmed_at"),
 });
 
+// ==================== COACHING COOLDOWN STATE ====================
+// Cross-instance shared state for the in-run coaching cooldown manager
+// (server/coaching-cooldown.ts). Must be persisted here rather than kept in
+// process memory: the backend runs on Replit's autoscale deployment, which can
+// run multiple server instances simultaneously behind a load balancer — an
+// in-memory Map is invisible across instances, silently defeating the cooldown
+// whenever two consecutive coaching requests for the same user land on
+// different instances. Confirmed 2026-09-05: coaching cues firing as close as
+// 18-23s apart in production despite the intended 90s non-milestone / 45s
+// post-milestone rule.
+export const coachingCooldownState = pgTable("coaching_cooldown_state", {
+  userId: varchar("user_id").primaryKey().references(() => users.id),
+  lastNonMilestoneAt: timestamp("last_non_milestone_at"),
+  lastMilestoneAt: timestamp("last_milestone_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // ==================== FITNESS & FRESHNESS TABLES ====================
 
 // Daily Fitness table (stores daily CTL/ATL/TSB calculations)

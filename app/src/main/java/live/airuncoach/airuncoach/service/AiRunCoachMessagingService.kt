@@ -106,7 +106,7 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         // run record server-side.
         if (type == "watchSessionEnded") {
             Log.d(TAG, "FCM watchSessionEnded — stopping RunTrackingService via FCM fallback")
-            stopWatchSessionFromFcm()
+            stopWatchSessionFromFcm(runId)
             return  // Silent — no notification shown to user
         }
 
@@ -152,8 +152,14 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
      * BT command both eventually land), and stopTracking() has no idempotency
      * guard of its own, so re-invoking it on an already-stopped service would
      * needlessly re-run the finalize/upload flow.
+     *
+     * [runId] is the run the server's companion session/end handler already created
+     * (sendWatchSessionEndedPush's `runId` param, server/routes.ts) — passed through so
+     * stopTracking() can fall back to attaching this device's coaching notes to that
+     * exact run rather than orphaning a local ID if its own upload can't proceed (e.g.
+     * this device has no distance of its own to report for a watch-standalone session).
      */
-    private fun stopWatchSessionFromFcm() {
+    private fun stopWatchSessionFromFcm(runId: String?) {
         if (!RunTrackingService.isServiceRunning.value) {
             Log.d(TAG, "FCM watchSessionEnded: RunTrackingService not running — already stopped, ignoring")
             return
@@ -161,9 +167,10 @@ class AiRunCoachMessagingService : com.google.firebase.messaging.FirebaseMessagi
         try {
             val intent = Intent(this, RunTrackingService::class.java).apply {
                 action = RunTrackingService.ACTION_STOP_TRACKING
+                runId?.let { putExtra(RunTrackingService.EXTRA_COMPANION_RUN_ID, it) }
             }
             startService(intent)
-            Log.d(TAG, "FCM watchSessionEnded: RunTrackingService stop triggered ✅")
+            Log.d(TAG, "FCM watchSessionEnded: RunTrackingService stop triggered ✅ (companionRunId=$runId)")
         } catch (e: Exception) {
             Log.e(TAG, "FCM watchSessionEnded: failed to stop RunTrackingService: ${e.message}")
         }

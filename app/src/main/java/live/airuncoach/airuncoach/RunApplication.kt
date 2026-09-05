@@ -4,10 +4,13 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import android.util.Log
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import dagger.hilt.android.HiltAndroidApp
+import live.airuncoach.airuncoach.data.RunCrashRecoveryStore
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.service.RunTrackingService
 
 @HiltAndroidApp
 class RunApplication : Application() {
@@ -16,6 +19,7 @@ class RunApplication : Application() {
         super.onCreate()
         createNotificationChannels()
         initCrashlytics()
+        installGarminSdkCrashGuard()
         // Must happen here, not only in MainActivity: on some OEMs (confirmed Oppo/ColorOS)
         // the OS respawns the killed process directly into a background component like
         // RunTrackingService, with MainActivity never launching. RetrofitClient.apiService
@@ -54,6 +58,82 @@ class RunApplication : Application() {
         live.airuncoach.airuncoach.data.SessionManager(this).getUserId()?.let { userId ->
             crashlytics.setUserId(userId)
         }
+    }
+
+    /**
+     * Wraps the default uncaught-exception handler (Crashlytics' own, already installed via its
+     * ContentProvider by the time this runs) to specifically recognize one known Garmin Connect
+     * IQ SDK bug: a corrupted BLE payload can make IQMessageReceiver's SerializedObject/
+     * DataBlock/StringBlock byte-array parsing throw an IllegalArgumentException from a
+     * corrupted/overflowed length prefix (e.g. "8 > -1469887392") entirely inside Garmin's
+     * closed-source SDK, on its own dynamically-registered BroadcastReceiver — confirmed via
+     * decompiling ciq-companion-app-sdk 2.3.0 AND the newer 2.4.0 (the relevant classes are
+     * byte-for-byte identical between them; there is no newer SDK release that fixes this, and
+     * there's no public source to patch directly). So far confirmed only on Oppo/ColorOS
+     * (Nino's CPH2695, via Gemini-analyzed Crashlytics traces from an old app build).
+     *
+     * IMPORTANT — this CANNOT prevent the crash. An uncaught exception on the main thread still
+     * terminates the process: Android's Looper does not resume after an exception propagates out
+     * of dispatchMessage(), so returning normally from this handler does not save the app. What
+     * this DOES do, in the brief window before the process actually dies:
+     *  1. Tags it with a distinguishing Crashlytics custom key so it's trivially filterable as
+     *     "known third-party SDK bug" instead of getting confused with a real bug in our code
+     *     when triaging crash-free-rate regressions.
+     *  2. Synchronously flushes whatever run is currently in progress to the crash-recovery
+     *     snapshot store right now, instead of relying on the periodic ~20s snapshot timer —
+     *     so RunTrackingService.finalizeOrphanedOrCrashedSession()'s existing hard-kill recovery
+     *     path (see handleNullIntentRespawn()) has the freshest possible data to recover on the
+     *     next launch instead of losing up to 20s of the run.
+     * It then ALWAYS delegates to the previous handler so normal Crashlytics fatal reporting and
+     * process termination proceed exactly as before — this must never mask or suppress a crash,
+     * known or otherwise.
+     */
+    private fun installGarminSdkCrashGuard() {
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                if (isKnownGarminSdkDeserializationBug(throwable)) {
+                    Log.e("RunApplication", "Known Garmin SDK deserialization bug hit — flushing any in-progress run before the process dies", throwable)
+                    FirebaseCrashlytics.getInstance().apply {
+                        setCustomKey("known_garmin_sdk_bug", "serialized_object_corrupt_length")
+                        recordException(throwable)
+                    }
+                    RunTrackingService.currentRunSession.value
+                        ?.takeIf { it.isActive }
+                        ?.let { session -> RunCrashRecoveryStore(this).save(session.startTime, session) }
+                }
+            } catch (e: Exception) {
+                // The guard itself must never throw and mask the real crash underneath it.
+                Log.w("RunApplication", "installGarminSdkCrashGuard: guard itself failed: ${e.message}")
+            } finally {
+                previousHandler?.uncaughtException(thread, throwable)
+            }
+        }
+    }
+
+    /**
+     * Matches only the specific corrupted-payload bug inside Garmin's closed-source
+     * SerializedObject/DataBlock/StringBlock parsing (com.garmin.monkeybrains.serialization) or
+     * its IQMessageReceiver caller (com.garmin.android.connectiq) — scoped to both the exception
+     * type AND the SDK's own package appearing in the stack trace (walking the full cause chain,
+     * since the crash may surface wrapped in a RuntimeException from the broadcast dispatcher)
+     * so this can never accidentally swallow an unrelated IllegalArgumentException thrown by our
+     * own code.
+     */
+    private fun isKnownGarminSdkDeserializationBug(root: Throwable): Boolean {
+        var cause: Throwable? = root
+        while (cause != null) {
+            if (cause is IllegalArgumentException &&
+                cause.stackTrace.any {
+                    it.className.startsWith("com.garmin.monkeybrains.serialization") ||
+                        it.className.startsWith("com.garmin.android.connectiq")
+                }
+            ) {
+                return true
+            }
+            cause = cause.cause.takeIf { it !== cause }
+        }
+        return false
     }
 
     /**

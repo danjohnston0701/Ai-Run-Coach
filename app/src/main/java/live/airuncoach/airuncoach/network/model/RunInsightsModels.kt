@@ -219,3 +219,11 @@ data class UpdateStrugglePointCommentRequest(
 data class RenameRunRequest(
     @SerializedName("name") val name: String?
 )
+
+/**
+ * Request: attach locally-accumulated coaching notes to a run the server already created
+ * (e.g. via the Garmin companion session/end path) without this device's own coaching context.
+ */
+data class PatchCoachingNotesRequest(
+    @SerializedName("aiCoachingNotes") val aiCoachingNotes: List<live.airuncoach.airuncoach.domain.model.AiCoachingNote>
+)
