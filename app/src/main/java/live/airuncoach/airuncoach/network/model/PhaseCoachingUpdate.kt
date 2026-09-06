@@ -51,7 +51,14 @@ data class PhaseCoachingUpdate(
     @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
     @SerializedName("session_structure") val sessionStructure: SessionStructure? = null,
     // User identity — allows server to inject the living AI runner profile
-    @SerializedName("userId") val userId: String? = null
+    @SerializedName("userId") val userId: String? = null,
+    // The live Garmin-companion session ID (shared table/endpoints for Garmin AND Wear OS —
+    // see GarminWatchManager/SamsungWatchManager.activeCompanionSessionId), when a watch is
+    // actually paired and streaming. Lets the backend enrich this coaching prompt with the
+    // watch's live running-dynamics data (ground contact time, vertical oscillation, stride
+    // length, running power, respiration rate, training effect) from garminRealtimeData.
+    // Null for phone-only runs — the prompt is then built exactly as before, with no enrichment.
+    @SerializedName("garminCompanionSessionId") val garminCompanionSessionId: String? = null
 )
 
 data class ActiveGoalInfo(

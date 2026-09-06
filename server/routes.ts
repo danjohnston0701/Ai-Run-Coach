@@ -11764,6 +11764,53 @@ function transformRunForAndroid(run: any) {
     }
   };
 
+  // ── Watch running-dynamics enrichment (shared across all live-coaching routes) ─────────
+  // garminCompanionSessionId is only present when a Garmin or Wear OS watch is actually
+  // paired and streaming (see PaceUpdate.garminCompanionSessionId / RunTrackingService on
+  // Android) — absent for phone-only runs, in which case this is a no-op and every prompt
+  // is unchanged from before this existed. Pulls the most recent garminRealtimeData row for
+  // that session and, only if it's genuinely fresh (not a stale row from a watch that's
+  // since gone quiet), merges its running-dynamics fields into req.body for whichever
+  // ai-service generate*() function the caller invokes next to reference.
+  async function enrichReqBodyWithWatchDynamics(reqBody: Record<string, any>): Promise<void> {
+    const watchCompanionSessionId = (reqBody.garminCompanionSessionId ?? reqBody.garmin_companion_session_id) as string | undefined;
+    if (!watchCompanionSessionId) return;
+    try {
+      const [latestDynamics] = await db.select({
+        groundContactTime: garminRealtimeData.groundContactTime,
+        groundContactBalance: garminRealtimeData.groundContactBalance,
+        verticalOscillation: garminRealtimeData.verticalOscillation,
+        verticalRatio: garminRealtimeData.verticalRatio,
+        strideLength: garminRealtimeData.strideLength,
+        power: garminRealtimeData.power,
+        respirationRate: garminRealtimeData.respirationRate,
+        aerobicTrainingEffect: garminRealtimeData.aerobicTrainingEffect,
+        anaerobicTrainingEffect: garminRealtimeData.anaerobicTrainingEffect,
+        timestamp: garminRealtimeData.timestamp,
+      })
+        .from(garminRealtimeData)
+        .where(eq(garminRealtimeData.sessionId, watchCompanionSessionId))
+        .orderBy(sql`timestamp DESC`)
+        .limit(1);
+      const isFresh = latestDynamics?.timestamp
+        && (Date.now() - new Date(latestDynamics.timestamp).getTime()) < 10_000;
+      if (isFresh) {
+        if (latestDynamics.groundContactTime)        reqBody.groundContactTimeMs        = latestDynamics.groundContactTime;
+        if (latestDynamics.groundContactBalance)     reqBody.groundContactBalancePercent = latestDynamics.groundContactBalance;
+        if (latestDynamics.verticalOscillation)      reqBody.verticalOscillationMm      = latestDynamics.verticalOscillation;
+        if (latestDynamics.verticalRatio)            reqBody.verticalRatioPercent        = latestDynamics.verticalRatio;
+        if (latestDynamics.strideLength)             reqBody.strideLengthM               = latestDynamics.strideLength;
+        if (latestDynamics.power)                    reqBody.runningPowerWatts           = latestDynamics.power;
+        if (latestDynamics.respirationRate)          reqBody.respirationRateBpm          = latestDynamics.respirationRate;
+        if (latestDynamics.aerobicTrainingEffect)    reqBody.aerobicTrainingEffect       = latestDynamics.aerobicTrainingEffect;
+        if (latestDynamics.anaerobicTrainingEffect)  reqBody.anaerobicTrainingEffect     = latestDynamics.anaerobicTrainingEffect;
+      }
+    } catch (enrichError: any) {
+      // Non-fatal — coaching must still fire even if enrichment lookup fails.
+      console.warn("[watch-dynamics-enrichment] lookup failed (non-fatal):", enrichError?.message);
+    }
+  }
+
   // Pace Update Coaching with TTS
   app.post("/api/coaching/pace-update", async (req: Request, res: Response) => {
     try {
@@ -11816,41 +11863,7 @@ function transformRunForAndroid(run: any) {
         req.body.currentGrade = isNaN(parsed) ? undefined : parsed;
       }
 
-      // ── Watch running-dynamics enrichment ──────────────────────────────────
-      // garminCompanionSessionId is only present when a Garmin or Wear OS watch is
-      // actually paired and streaming (see PaceUpdate.garminCompanionSessionId on
-      // Android/RunTrackingService) — absent for phone-only runs, in which case this
-      // whole block is skipped and the prompt is unchanged from before this existed.
-      // Pulls the most recent garminRealtimeData row for that session and, only if it's
-      // genuinely fresh (not a stale row from a watch that's since gone quiet), merges
-      // its running-dynamics fields in for generatePaceUpdate() to reference.
-      const watchCompanionSessionId = req.body.garminCompanionSessionId as string | undefined;
-      if (watchCompanionSessionId) {
-        try {
-          const [latestDynamics] = await db.select({
-            groundContactTime: garminRealtimeData.groundContactTime,
-            verticalOscillation: garminRealtimeData.verticalOscillation,
-            strideLength: garminRealtimeData.strideLength,
-            power: garminRealtimeData.power,
-            timestamp: garminRealtimeData.timestamp,
-          })
-            .from(garminRealtimeData)
-            .where(eq(garminRealtimeData.sessionId, watchCompanionSessionId))
-            .orderBy(sql`timestamp DESC`)
-            .limit(1);
-          const isFresh = latestDynamics?.timestamp
-            && (Date.now() - new Date(latestDynamics.timestamp).getTime()) < 10_000;
-          if (isFresh) {
-            if (latestDynamics.groundContactTime)   req.body.groundContactTimeMs   = latestDynamics.groundContactTime;
-            if (latestDynamics.verticalOscillation) req.body.verticalOscillationMm = latestDynamics.verticalOscillation;
-            if (latestDynamics.strideLength)        req.body.strideLengthM         = latestDynamics.strideLength;
-            if (latestDynamics.power)                req.body.runningPowerWatts     = latestDynamics.power;
-          }
-        } catch (enrichError: any) {
-          // Non-fatal — coaching must still fire even if enrichment lookup fails.
-          console.warn("[pace-update] Watch dynamics enrichment failed (non-fatal):", enrichError?.message);
-        }
-      }
+      await enrichReqBodyWithWatchDynamics(req.body);
 
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
@@ -11960,6 +11973,8 @@ function transformRunForAndroid(run: any) {
       req.body.coachTone   = dbCoachTone;
       req.body.coachName   = dbCoachName;
 
+      await enrichReqBodyWithWatchDynamics(req.body);
+
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
 
@@ -12036,6 +12051,8 @@ function transformRunForAndroid(run: any) {
         req.body.phase
       );
       req.body.coachTone = effectiveTone;
+
+      await enrichReqBodyWithWatchDynamics(req.body);
 
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
@@ -12287,6 +12304,8 @@ function transformRunForAndroid(run: any) {
       );
       req.body.coachTone = effectiveTone;
 
+      await enrichReqBodyWithWatchDynamics(req.body);
+
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generatePhaseCoaching({ ...req.body, runnerProfile });
@@ -12495,6 +12514,8 @@ function transformRunForAndroid(run: any) {
         req.body.phase
       );
 
+      await enrichReqBodyWithWatchDynamics(req.body);
+
       const aiService = await import("./ai-service");
       // Prefer age sent from the device (req.body.runnerAge), fall back to profile
       const runnerAge = req.body.runnerAge ?? (user as any)?.age ?? undefined;
@@ -12514,6 +12535,15 @@ function transformRunForAndroid(run: any) {
         runnerName: req.body.runnerName ?? user?.name ?? undefined,
         runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
         activityType,
+        groundContactTimeMs: req.body.groundContactTimeMs,
+        groundContactBalancePercent: req.body.groundContactBalancePercent,
+        verticalOscillationMm: req.body.verticalOscillationMm,
+        verticalRatioPercent: req.body.verticalRatioPercent,
+        strideLengthM: req.body.strideLengthM,
+        runningPowerWatts: req.body.runningPowerWatts,
+        respirationRateBpm: req.body.respirationRateBpm,
+        aerobicTrainingEffect: req.body.aerobicTrainingEffect,
+        anaerobicTrainingEffect: req.body.anaerobicTrainingEffect,
       });
 
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
@@ -13095,6 +13125,12 @@ function transformRunForAndroid(run: any) {
         verticalOscillation: data.verticalOscillation,
         verticalRatio: data.verticalRatio,
         power: data.power,
+        // Watch sends these as "respirationRate"/"aerobicTE"/"anaerobicTE" (RunView.mc) —
+        // accept both that naming and the schema's own field names in case a client (iOS,
+        // Wear OS) ever sends the long form instead.
+        respirationRate: data.respirationRate,
+        aerobicTrainingEffect: data.aerobicTE ?? data.aerobicTrainingEffect,
+        anaerobicTrainingEffect: data.anaerobicTE ?? data.anaerobicTrainingEffect,
         temperature: data.temperature,
         activityType: data.activityType,
         isMoving: data.isMoving ?? true,
@@ -13246,6 +13282,12 @@ function transformRunForAndroid(run: any) {
         verticalOscillation: data.verticalOscillation,
         verticalRatio: data.verticalRatio,
         power: data.power,
+        // Watch sends these as "respirationRate"/"aerobicTE"/"anaerobicTE" (RunView.mc) —
+        // accept both that naming and the schema's own field names in case a client (iOS,
+        // Wear OS) ever sends the long form instead.
+        respirationRate: data.respirationRate,
+        aerobicTrainingEffect: data.aerobicTE ?? data.aerobicTrainingEffect,
+        anaerobicTrainingEffect: data.anaerobicTE ?? data.anaerobicTrainingEffect,
         temperature: data.temperature,
         activityType: data.activityType,
         isMoving: data.isMoving ?? true,

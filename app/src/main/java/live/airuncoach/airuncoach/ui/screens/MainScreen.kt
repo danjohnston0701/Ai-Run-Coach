@@ -205,16 +205,17 @@ fun MainScreen(
         MainActivity.pendingDeepLink.value = null // consume
     }
 
-    // Hide bottom navigation during run session
+    // Hide bottom navigation during run session and the full-screen onboarding tour
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val isRunSession = currentRoute?.startsWith("run_session") == true
+    val isOnboardingTour = currentRoute == "onboarding_tour"
 
     Scaffold(
         containerColor = Colors.backgroundRoot,
         bottomBar = {
-            // Completely hide navigation bar during run session
-            if (isRunSession) return@Scaffold
+            // Completely hide navigation bar during run session or the onboarding tour
+            if (isRunSession || isOnboardingTour) return@Scaffold
             
             NavigationBar(
                 containerColor = Colors.backgroundRoot.copy(alpha = 0.95f),
@@ -1405,6 +1406,13 @@ fun MainScreen(
                     onNavigateToStrava = { navController.navigate("strava_oauth") },
                     onNavigateToSamsungWatchApp = { navController.navigate("samsung_watch_app") }
                 )
+            }
+            // Illustrated feature-tour carousel — reached from OnboardingSubscriptionScreen's
+            // "Take a tour" option via MainActivity.pendingDeepLink (see the deep-link
+            // consumption LaunchedEffect above). Bottom nav is hidden for it below, same as
+            // run_session, so it reads as a distraction-free full-screen flow.
+            composable("onboarding_tour") {
+                OnboardingTourScreen(onFinish = { navController.popBackStack() })
             }
             composable("garmin_connect") {
                 GarminConnectScreen(onNavigateBack = { navController.popBackStack() })

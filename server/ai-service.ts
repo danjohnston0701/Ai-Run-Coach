@@ -682,6 +682,38 @@ function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string, 
   return ctx + '.';
 }
 
+// ── Watch running-dynamics context (shared across all live-coaching prompts) ──────────────
+// Populated from garminRealtimeData via the /api/coaching/* routes' watch-enrichment lookup
+// (see getWatchDynamicsEnrichment() in routes.ts) whenever a Garmin/Wear OS watch is actually
+// paired and streaming. Absent entirely for phone-only runs, so those prompts are unchanged.
+// Raw-data, no-pre-interpreted-verdict — same philosophy as cadence/terrain context elsewhere:
+// let GPT decide what's worth commenting on rather than baking in a threshold verdict here.
+export interface WatchDynamicsParams {
+  groundContactTimeMs?: number;
+  groundContactBalancePercent?: number;
+  verticalOscillationMm?: number;
+  verticalRatioPercent?: number;
+  strideLengthM?: number;
+  runningPowerWatts?: number;
+  respirationRateBpm?: number;
+  aerobicTrainingEffect?: number;
+  anaerobicTrainingEffect?: number;
+}
+
+function buildWatchDynamicsText(p: WatchDynamicsParams): string {
+  const parts: string[] = [];
+  if (p.groundContactTimeMs)        parts.push(`ground contact time ${Math.round(p.groundContactTimeMs)}ms`);
+  if (p.groundContactBalancePercent) parts.push(`ground contact balance ${p.groundContactBalancePercent.toFixed(1)}% L/R`);
+  if (p.verticalOscillationMm)      parts.push(`vertical oscillation ${p.verticalOscillationMm.toFixed(1)}mm`);
+  if (p.verticalRatioPercent)       parts.push(`vertical ratio ${p.verticalRatioPercent.toFixed(1)}%`);
+  if (p.strideLengthM)              parts.push(`stride length ${p.strideLengthM.toFixed(2)}m`);
+  if (p.runningPowerWatts)          parts.push(`running power ${Math.round(p.runningPowerWatts)}W`);
+  if (p.respirationRateBpm)         parts.push(`respiration rate ${Math.round(p.respirationRateBpm)} breaths/min`);
+  if (p.aerobicTrainingEffect)      parts.push(`aerobic training effect ${p.aerobicTrainingEffect.toFixed(1)}`);
+  if (p.anaerobicTrainingEffect)    parts.push(`anaerobic training effect ${p.anaerobicTrainingEffect.toFixed(1)}`);
+  return parts.length > 0 ? parts.join(', ') : '';
+}
+
 export async function generatePaceUpdate(params: {
   distance: number;
   targetDistance: number;
@@ -743,9 +775,14 @@ export async function generatePaceUpdate(params: {
   // All optional/independent: any subset may be present depending on watch model. Absent
   // entirely for phone-only runs, which get the exact same prompt as before this existed.
   groundContactTimeMs?: number;
+  groundContactBalancePercent?: number;
   verticalOscillationMm?: number;
+  verticalRatioPercent?: number;
   strideLengthM?: number;
   runningPowerWatts?: number;
+  respirationRateBpm?: number;
+  aerobicTrainingEffect?: number;
+  anaerobicTrainingEffect?: number;
 }): Promise<string> {
   const { distance, targetDistance, currentPace, elapsedTime, coachName, coachTone, isSplit, splitKm, splitPace, currentGrade, totalElevationGain, isOnHill, kmSplits, hasRoute, fitnessLevel, runnerName, runHistory, heartRate, heartRateZoneTarget } = params;
   const workoutType = (params as any).workoutType as string | undefined;
@@ -896,13 +933,9 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
   // Watch running-dynamics — same raw-data, no-pre-interpreted-verdict philosophy as cadence
   // above. Only present when a watch is actually paired and streaming (see garminRealtimeData);
   // absent entirely otherwise, so a phone-only run's prompt is byte-for-byte unchanged.
-  const dynamicsParts: string[] = [];
-  if (params.groundContactTimeMs)   dynamicsParts.push(`ground contact time ${Math.round(params.groundContactTimeMs)}ms`);
-  if (params.verticalOscillationMm) dynamicsParts.push(`vertical oscillation ${params.verticalOscillationMm.toFixed(1)}mm`);
-  if (params.strideLengthM)         dynamicsParts.push(`stride length ${params.strideLengthM.toFixed(2)}m`);
-  if (params.runningPowerWatts)     dynamicsParts.push(`running power ${Math.round(params.runningPowerWatts)}W`);
-  if (dynamicsParts.length > 0) {
-    cadenceContext += `\n- Watch running dynamics: ${dynamicsParts.join(', ')}`;
+  const watchDynamicsText = buildWatchDynamicsText(params);
+  if (watchDynamicsText) {
+    cadenceContext += `\n- Watch running dynamics: ${watchDynamicsText}`;
   }
 
   const trainingSessionContext = isTrainingSession
@@ -1165,7 +1198,7 @@ export async function generatePhaseCoaching(params: {
   planGoalType?: string;
   planWeekNumber?: number;
   planTotalWeeks?: number;
-}): Promise<string> {
+} & WatchDynamicsParams): Promise<string> {
   const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, coachAccent, coachGender, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance, fitnessLevel, runnerName, runnerAge, runnerWeight, runnerHeight } = params;
   
   const timeMin = Math.floor(elapsedTime / 60);  // kept for backward compat
@@ -1254,6 +1287,14 @@ export async function generatePhaseCoaching(params: {
 
     cadenceInfo = `- Cadence: ${cadence} spm (${cadenceAssessment})`;
     cadenceCoachingDirective = cadenceAction;
+  }
+
+  // Watch running-dynamics — only present when a watch is actually paired and streaming
+  // (see getWatchDynamicsEnrichment() in routes.ts); absent entirely otherwise, so a
+  // phone-only run's prompt is unchanged.
+  const phaseWatchDynamicsText = buildWatchDynamicsText(params);
+  if (phaseWatchDynamicsText) {
+    cadenceInfo += `${cadenceInfo ? '\n' : ''}- Watch running dynamics: ${phaseWatchDynamicsText}`;
   }
 
   // Build target pace comparison if available (use spoken format for TTS)
@@ -1920,7 +1961,7 @@ export async function generateStruggleCoaching(params: {
   // Activity type — "run" or "walk" — determines coach vocabulary
   activityType?: string;
   sessionType?: string;
-}): Promise<string> {
+} & WatchDynamicsParams): Promise<string> {
   const { distance, elapsedTime, currentPace, baselinePace, paceDropPercent, currentGrade, totalElevationGain, coachName, coachTone, coachAccent, hasRoute, fitnessLevel, runnerName, runHistory, targetHeartRateZone } = params;
   const workoutTypeStruggle = (params as any).workoutType as string | undefined;
   const struggleActivityType = resolveActivityType(params);
@@ -2001,6 +2042,7 @@ CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do 
     spokenCurrentPace: spokenCurrentPaceStruggle, spokenBaselinePace, timeMin,
     terrainContext, trainingStruggleContext, noTerrainRule,
     runnerContext: struggleRunnerContext, runnerProfile: params.runnerProfile,
+    watchDynamicsContext: buildWatchDynamicsText(params),
   };
   const struggleModule = isWalkStruggle ? walkPrompts : runPrompts;
   const { system, user } = struggleModule.struggleCoachingPrompt(struggleCtx);
@@ -3823,7 +3865,7 @@ export async function generateHeartRateCoaching(params: {
   // Values: flat | rolling | gradual_climb | steep_climb | gradual_descent | steep_descent
   terrain_context?: string;
   activityType?: string;
-}): Promise<string> {
+} & WatchDynamicsParams): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
   // currentHR/avgHR/maxHR are required by the type signature but unvalidated — a missing
   // value doesn't crash here (arithmetic on undefined just yields NaN), but NaN comparisons
@@ -3935,6 +3977,7 @@ export async function generateHeartRateCoaching(params: {
     targetZone, targetZoneName: targetZone ? zoneNames[targetZone] : undefined,
     wellnessContext, terrainContextBlock, sensorNote, sessionMemoryBlock, physioBlock,
     targetZoneGuidance, runnerProfile: params.runnerProfile,
+    watchDynamicsContext: buildWatchDynamicsText(params),
   });
 
   try {
@@ -4502,6 +4545,32 @@ Think of yourself analyzing a training session you coached in person - you'd und
 - Elevation Gain: ${runData.elevationGain || garminActivity?.elevationGain || 0}m
 - Elevation Loss: ${runData.elevationLoss || garminActivity?.elevationLoss || 0}m
 `;
+
+  // Heart rate + cadence from the run record itself — added because these were previously
+  // ONLY read from `garminActivity` (see hasGarminMetrics block below), a separate table
+  // populated exclusively by the legacy Garmin Connect Activity webhook sync. Runs recorded
+  // via the live companion app (the app's primary path today) never get a garminActivities
+  // row, so HR/cadence were silently dropped from every comprehensive analysis for those
+  // runs even though `runData` (the plain runs-table record, always present) has its own
+  // avgHeartRate/maxHeartRate/cadence columns. Mirrors the runData-first, garminActivity-
+  // fallback pattern the elevation fields above already use.
+  const effectiveAvgHR = runData.avgHeartRate || garminActivity?.averageHeartRate;
+  const effectiveMaxHR = runData.maxHeartRate || garminActivity?.maxHeartRate;
+  const effectiveMinHR = runData.minHeartRate;
+  const effectiveAvgCadence = runData.cadence || garminActivity?.averageCadence;
+  const effectiveMaxCadence = runData.maxCadence || garminActivity?.maxCadence;
+  if (effectiveAvgHR || effectiveMaxHR || effectiveAvgCadence) {
+    prompt += `
+## HEART RATE & CADENCE:
+`;
+    if (effectiveAvgHR) prompt += `- Average Heart Rate: ${effectiveAvgHR} bpm\n`;
+    if (effectiveMaxHR) prompt += `- Max Heart Rate: ${effectiveMaxHR} bpm\n`;
+    if (effectiveMinHR) prompt += `- Min Heart Rate: ${effectiveMinHR} bpm\n`;
+    if (runData.avgHeartRateZone) prompt += `- Average Heart Rate Zone: Zone ${runData.avgHeartRateZone}\n`;
+    if (effectiveAvgCadence) prompt += `- Average Cadence: ${Math.round(effectiveAvgCadence)} spm\n`;
+    if (effectiveMaxCadence) prompt += `- Max Cadence: ${Math.round(effectiveMaxCadence)} spm\n`;
+    prompt += `Comment on heart rate and effort where it's meaningful — e.g. whether pace and heart rate moved together (consistent effort) or diverged (fading effort, or conversely holding pace despite rising HR), and reference the actual bpm/zone numbers rather than a vague "effort was high" statement.\n`;
+  }
 
   if (runData.targetTime || runData.targetDistance) {
     const targetMinutes = runData.targetTime ? Math.round(runData.targetTime / 60000) : null;
@@ -6566,7 +6635,7 @@ export async function generateSessionTriggerMessage(params: {
   athleteRespondedToLastCue?: boolean;
   // Activity type — "walk" or "run" — controls coach vocabulary
   activityType?: string;
-}): Promise<string> {
+} & WatchDynamicsParams): Promise<string> {
   const {
     triggerId, triggerType, triggerCondition,
     preRunBrief, whyThisSession, sessionInstructions, cueingStrategy,
@@ -6684,6 +6753,10 @@ export async function generateSessionTriggerMessage(params: {
     livePhilosophyBlock,
   ].filter(Boolean).join('\n');
 
+  // Watch running-dynamics — only present when a watch is actually paired and streaming
+  // (see getWatchDynamicsEnrichment() in routes.ts); absent entirely otherwise.
+  const sessionTriggerWatchDynamicsText = buildWatchDynamicsText(params);
+
   // ── Build the prompt ───────────────────────────────────────────────────────
   const prompt = `You are ${coachName}, an elite AI ${triggerCoachLabel}. A coaching trigger just fired during a live training session.${triggerWalkProhibition}
 
@@ -6702,7 +6775,7 @@ ${safeTriggerType.replace(/_/g, ' ')}
 Heart rate: ${hrStatus}
 Pace: ${paceStatus}${currentCadence && currentCadence > 0 ? `\nCadence: ${currentCadence} spm` : ''}
 Distance: ${safeDistanceKm.toFixed(2)} km${targetDistanceKm ? ` of ${targetDistanceKm} km (${progressPct}%)` : ''}${remainingKm !== null ? ` — ${remainingKm.toFixed(1)} km to go` : ''}
-Time elapsed: ${elapsedMinutes} min${gradeStr ? `\nTerrain: ${gradeStr}` : ''}${elevationGainM ? `\nElevation gained: ${Math.round(elevationGainM)}m` : ''}
+Time elapsed: ${elapsedMinutes} min${gradeStr ? `\nTerrain: ${gradeStr}` : ''}${elevationGainM ? `\nElevation gained: ${Math.round(elevationGainM)}m` : ''}${sessionTriggerWatchDynamicsText ? `\nWatch running dynamics: ${sessionTriggerWatchDynamicsText}` : ''}
 ${splitSummary}
 
 Phase targets: ${[

@@ -425,11 +425,25 @@ class GarminWatchManager(
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    /**
+     * TETHERED vs WIRELESS is driven by BuildConfig.USE_TETHERED_GARMIN_SIM (app/build.gradle.kts),
+     * which only exists as `true` when a debug build was explicitly assembled with
+     * `-PtetheredGarminSim=true` — see launch-garmin-simulator-tethered.sh. That's what lets this
+     * app connect to the desktop Connect IQ Simulator over `adb forward tcp:7381 tcp:7381`
+     * (Garmin's documented TETHERED workflow) instead of real BLE — and it works identically
+     * against an Android emulator or a real USB-connected phone, since `adb forward` is just an
+     * ADB target either way. Always WIRELESS in a normal build/release, with no flag to flip.
+     */
     fun initialize() {
         try {
-            connectIQ = ConnectIQ.getInstance(context, ConnectIQ.IQConnectType.WIRELESS)
+            val connectType = if (live.airuncoach.airuncoach.BuildConfig.USE_TETHERED_GARMIN_SIM) {
+                ConnectIQ.IQConnectType.TETHERED
+            } else {
+                ConnectIQ.IQConnectType.WIRELESS
+            }
+            connectIQ = ConnectIQ.getInstance(context, connectType)
             connectIQ?.initialize(context, false, sdkListener)
-            Log.d(TAG, "ConnectIQ SDK initialised")
+            Log.d(TAG, "ConnectIQ SDK initialised (connectType=$connectType)")
         } catch (e: Exception) {
             Log.e(TAG, "ConnectIQ init failed: ${e.message}")
         }

@@ -3,9 +3,13 @@ package live.airuncoach.airuncoach.ui.screens
 import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.delay
+import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -162,6 +167,36 @@ fun OnboardingSubscriptionScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                )
+            }
+
+            // Quick-access options — surfaced here (rather than left for the user to discover
+            // once already on the dashboard) so a user with a watch on hand can pair it
+            // immediately, and a new user can see what the app actually does before landing
+            // cold on an empty dashboard. Both reuse MainActivity.pendingDeepLink, the same
+            // mechanism notification deep-links use, to jump straight to the destination once
+            // the remaining onboarding/permission/consent steps resolve — see MainScreen.kt.
+            item {
+                OnboardingQuickActionCard(
+                    icon = Icons.Filled.Watch,
+                    text = "Have an Apple Watch or Garmin watch? Tap here to connect it now",
+                    onClick = {
+                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_CONNECT_WATCH_TAPPED)
+                        sessionManager.clearOnboardingFlags()
+                        MainActivity.pendingDeepLink.value = "connected_devices"
+                        onNavigateToPermissions()
+                    }
+                )
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                OnboardingQuickActionCard(
+                    icon = Icons.Filled.Explore,
+                    text = "New here? Take a quick tour of Ai Run Coach",
+                    onClick = {
+                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TAKE_TOUR_TAPPED)
+                        sessionManager.clearOnboardingFlags()
+                        MainActivity.pendingDeepLink.value = "onboarding_tour"
+                        onNavigateToPermissions()
+                    }
                 )
             }
 
@@ -314,6 +349,49 @@ fun OnboardingSubscriptionScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Secondary quick-action row used for the "connect a watch" / "take a tour" onboarding
+ * shortcuts — a tappable outlined card, less prominent than the primary CTA but not buried
+ * behind a toggle the way the pricing section is.
+ */
+@Composable
+private fun OnboardingQuickActionCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        shape = RoundedCornerShape(BorderRadius.md),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.md, vertical = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Colors.primary,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Text(
+                text = text,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = Colors.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }

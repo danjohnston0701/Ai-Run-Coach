@@ -84,6 +84,7 @@ The walker is struggling. Their pace has dropped ${Math.round(ctx.paceDropPercen
 - Current pace: ${ctx.spokenCurrentPace} (baseline was ${ctx.spokenBaselinePace})
 - Distance: ${formatDistanceForCoaching(ctx.distance)}
 - Time: ${ctx.timeMin} minutes
+${ctx.watchDynamicsContext ? `- Watch running dynamics: ${ctx.watchDynamicsContext}` : ''}
 ${ctx.terrainContext}
 ${ctx.trainingStruggleContext}
 ${ctx.noTerrainRule}
@@ -304,6 +305,7 @@ Current stats (${ctx.elapsedMinutes} minutes into walk):
 - Current Zone: Zone ${ctx.currentZone} (${ctx.zoneName})
 - Average HR this walk: ${ctx.avgHR} bpm
 ${ctx.targetZone ? `- Target Zone: Zone ${ctx.targetZone} (${ctx.targetZoneName})` : ''}
+${ctx.watchDynamicsContext ? `- Watch running dynamics: ${ctx.watchDynamicsContext}` : ''}
 ${ctx.wellnessContext ? `\nWellness context: ${ctx.wellnessContext}` : ''}
 ${ctx.terrainContextBlock}${ctx.sensorNote}${ctx.sessionMemoryBlock}${ctx.physioBlock}
 Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their actual heart rate (${ctx.currentHR} bpm) and zone (Zone ${ctx.currentZone}). ${ctx.targetZoneGuidance}

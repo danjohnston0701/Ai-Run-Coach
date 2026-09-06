@@ -1165,7 +1165,16 @@ export const garminRealtimeData = pgTable("garmin_realtime_data", {
   
   // Power & Performance (if available)
   power: integer("power"), // watts
-  
+
+  // Respiration & Training Effect — the watch has been sending these in its per-second
+  // stream (RunView.mc) since the live-coaching-dynamics enrichment feature, but until this
+  // column existed they were silently dropped on ingest (POST /api/garmin-companion/data
+  // accepted them in the payload with nowhere to put them). Added 2026-09 so live-coaching
+  // enrichment (getWatchDynamicsEnrichment() in routes.ts) can reference them.
+  respirationRate: real("respiration_rate"), // breaths/min
+  aerobicTrainingEffect: real("aerobic_training_effect"), // 0-5
+  anaerobicTrainingEffect: real("anaerobic_training_effect"), // 0-5
+
   // Environmental
   temperature: real("temperature"), // celsius
   

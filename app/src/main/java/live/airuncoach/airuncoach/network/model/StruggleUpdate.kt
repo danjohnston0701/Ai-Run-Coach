@@ -32,5 +32,12 @@ data class StruggleUpdate(
     @SerializedName("workoutType") val workoutType: String? = null,
     // "run" | "walk" — was previously never sent, so struggle coaching always defaulted to
     // running vocabulary for walk sessions. See RunTrackingService.currentActivityType.
-    @SerializedName("activityType") val activityType: String? = null
+    @SerializedName("activityType") val activityType: String? = null,
+    // The live Garmin-companion session ID (shared table/endpoints for Garmin AND Wear OS —
+    // see GarminWatchManager/SamsungWatchManager.activeCompanionSessionId), when a watch is
+    // actually paired and streaming. Lets the backend enrich this coaching prompt with the
+    // watch's live running-dynamics data (ground contact time, vertical oscillation, stride
+    // length, running power, respiration rate, training effect) from garminRealtimeData.
+    // Null for phone-only runs — the prompt is then built exactly as before, with no enrichment.
+    @SerializedName("garminCompanionSessionId") val garminCompanionSessionId: String? = null
 )

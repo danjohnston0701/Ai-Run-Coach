@@ -15,6 +15,10 @@ object AppAnalytics {
         const val ONBOARDING_CONTINUE_TO_DASHBOARD_TAPPED = "onboarding_continue_to_dashboard_tapped"
         const val ONBOARDING_SEE_PLANS_TAPPED = "onboarding_see_plans_tapped"
         const val ONBOARDING_PLAN_PURCHASE_TAPPED = "onboarding_plan_purchase_tapped"
+        const val ONBOARDING_CONNECT_WATCH_TAPPED = "onboarding_connect_watch_tapped"
+        const val ONBOARDING_TAKE_TOUR_TAPPED = "onboarding_take_tour_tapped"
+        const val ONBOARDING_TOUR_COMPLETED = "onboarding_tour_completed"
+        const val ONBOARDING_TOUR_SKIPPED = "onboarding_tour_skipped"
         const val DASHBOARD_REACHED = "dashboard_reached"
     }
 

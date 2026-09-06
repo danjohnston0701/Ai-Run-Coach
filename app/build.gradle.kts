@@ -27,8 +27,8 @@ android {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
         targetSdk = 36          // Google Play requires 36+ as of Aug 2026
-        versionCode = 76          // ← Increment by 1 for every Play Store upload
-        versionName = "2.0.34"   // ← Human-readable version shown in Play Store
+        versionCode = 77          // ← Increment by 1 for every Play Store upload
+        versionName = "2.0.35"   // ← Human-readable version shown in Play Store
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -63,6 +63,8 @@ android {
             buildConfigField("String", "GOOGLE_API_KEY", "\"${localProp("GOOGLE_API_KEY")}\"")
             // Picovoice Porcupine AccessKey — set PICOVOICE_ACCESS_KEY in local.properties
             buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProp("PICOVOICE_ACCESS_KEY")}\"")
+            // Always false in release — see the debug block below for what this is.
+            buildConfigField("boolean", "USE_TETHERED_GARMIN_SIM", "false")
         }
         debug {
             // Define the base URL for the debug (local development) build.
@@ -71,6 +73,15 @@ android {
             buildConfigField("String", "GOOGLE_API_KEY", "\"${localProp("GOOGLE_API_KEY")}\"")
             // Picovoice Porcupine AccessKey — set PICOVOICE_ACCESS_KEY in local.properties
             buildConfigField("String", "PICOVOICE_ACCESS_KEY", "\"${localProp("PICOVOICE_ACCESS_KEY")}\"")
+            // Dev-only Garmin Connect IQ Simulator tethering (see GarminWatchManager.initialize()
+            // and launch-garmin-simulator-tethered.sh). Off by default even in debug builds —
+            // only on when the script explicitly passes -PtetheredGarminSim=true, so a normal
+            // `installDebug` for real-watch testing is never accidentally affected. Only exists
+            // in the debug build type at all, so a release build can never pick it up regardless.
+            buildConfigField(
+                "boolean", "USE_TETHERED_GARMIN_SIM",
+                (project.findProperty("tetheredGarminSim") == "true").toString()
+            )
         }
     }
     compileOptions {

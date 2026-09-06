@@ -2307,7 +2307,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     // ========== NEW: Session Coaching Context ==========
                     linkedWorkoutId = planWorkoutId,
                     sessionStructure = sessionInstructions?.sessionStructure,
-                    userId = currentUser?.id
+                    userId = currentUser?.id,
+                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
                 )
                 
                 val response = apiService.getPhaseCoaching(update)
@@ -2634,7 +2635,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     progressPercent = progressFraction * 100,
                     // Plateau detection
                     consecutiveBehindCues = consecutiveBehindTargetCues,
-                    userId = currentUser?.id
+                    userId = currentUser?.id,
+                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
                 )
                 
                 Log.d("PaceCoaching", "Requesting LLM pace coaching: triggerType=${update.triggerType}, " +
@@ -4251,9 +4253,18 @@ class RunTrackingService : Service(), SensorEventListener {
      *   5–20 m/km → Rolling   (e.g. parkrun with 40m range over 5km = 8 m/km)
      *   20–50 m/km → Hilly
      *   > 50 m/km → Mountainous
+     *
+     * Requires at least ROLLING_TERRAIN_WINDOW_KM of real distance before classifying anything
+     * beyond Flat — same reasoning as the live rolling-terrain detector's own 1km window below.
+     * Below that, per-km normalisation blows up: the old `.coerceAtLeast(0.1)` floor let even a
+     * genuinely flat, very short walk (e.g. pacing indoors, ~50-100m total) get divided by a
+     * ~100m denominator, turning 1-2m of ordinary smoothed-altitude drift into a 10-20 m/km rate
+     * that lands squarely in Rolling — a division-by-tiny-distance artifact, not real terrain.
+     * Confirmed 2026-09-05: an indoor test walk reported "Rolling" on a completely flat house.
      */
     private fun determineTerrainType(): TerrainType {
-        val distanceKm = (totalDistance / 1000.0).coerceAtLeast(0.1)
+        if (totalDistance < ROLLING_TERRAIN_WINDOW_KM * 1000.0) return TerrainType.FLAT
+        val distanceKm = totalDistance / 1000.0
         val minElev = smoothedMinElevation
         val maxElev = smoothedMaxElevation
         if (minElev == null || maxElev == null || maxElev <= minElev) return TerrainType.FLAT
@@ -4442,17 +4453,42 @@ class RunTrackingService : Service(), SensorEventListener {
      * stays on for the rest of the run rather than flapping with every brief BT hiccup.
      */
     private fun checkPhoneGpsFallback() {
-        if (!wasRunStartedByWatch || phoneGpsFallbackActive || !isTracking || isSimulating) return
+        if (!wasRunStartedByWatch || !isTracking || isSimulating) return
         val staleSinceMs = System.currentTimeMillis() - lastWatchGpsMs
-        if (staleSinceMs >= 15_000L) {
-            Log.w("RunTrackingService", "⌚ Watch GPS stale for ${staleSinceMs}ms — starting phone GPS/sensors as fallback")
-            phoneGpsFallbackActive = true
+        if (!phoneGpsFallbackActive) {
+            if (staleSinceMs >= 15_000L) {
+                Log.w("RunTrackingService", "⌚ Watch GPS stale for ${staleSinceMs}ms — starting phone GPS/sensors as fallback")
+                phoneGpsFallbackActive = true
+                try {
+                    requestLocationUpdates()
+                    startSensorTracking()
+                } catch (e: Exception) {
+                    Log.e("RunTrackingService", "Failed to start phone GPS fallback", e)
+                    phoneGpsFallbackActive = false
+                }
+            }
+        } else if (staleSinceMs < 5_000L) {
+            // Recovery — the watch is sending fresh data again. Previously phoneGpsFallbackActive
+            // was one-way: once a single ≥15s BLE gap flipped it on, it never flipped back off for
+            // the rest of the run (this function's old first line returned immediately once it was
+            // true), so the phone's own GPS and step-counter/step-detector sensors kept running in
+            // parallel with the watch for the remainder of the session. Distance had some
+            // protection (phone GPS points are only accepted into totalDistance while stale — see
+            // lastWatchGpsMs usage there), but the phone's step counter has no such dedup: it feeds
+            // cadenceSum/cadenceCount/totalStepsDuringRun unconditionally whenever registered, and
+            // a phone bouncing in a pocket reliably over-counts steps. Confirmed against a real
+            // ColorOS user's reported step/distance overcounts (2026-09, Nino — AiRunCoach showed
+            // 13,166 steps / 9.44km vs Garmin Connect's genuine 8,442 steps / 7.59km for the same
+            // walk). Unregistering here — the same two calls pauseTracking()/stopTracking() already
+            // use — stops the phone sensors from firing at all once the watch has recovered, so
+            // there's nothing left to dedup: no more events, no more contribution to the totals.
+            Log.d("RunTrackingService", "⌚ Watch GPS fresh again after fallback — stopping phone GPS/sensors")
+            phoneGpsFallbackActive = false
             try {
-                requestLocationUpdates()
-                startSensorTracking()
+                fusedLocationClient.removeLocationUpdates(locationCallback)
+                sensorManager.unregisterListener(this)
             } catch (e: Exception) {
-                Log.e("RunTrackingService", "Failed to start phone GPS fallback", e)
-                phoneGpsFallbackActive = false
+                Log.w("RunTrackingService", "Failed to stop phone GPS fallback cleanly (non-fatal): ${e.message}")
             }
         }
     }
@@ -6003,7 +6039,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         targetPace = targetPaceStr,
                         triggerType = "500m_checkin",
                         totalRunsAllTime = runHistoryStats?.totalRunsAllTime,
-                        userId = currentUser?.id
+                        userId = currentUser?.id,
+                        garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
                     )
                     val response = apiService.getPhaseCoaching(update)
                     // Server returns skipped=true with no message when the shared cooldown rejects
@@ -6713,6 +6750,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     athleteRespondedToLastCue = respondedSnap,
                     // Activity type — tells GPT to use walk/run vocabulary
                     activityType = currentActivityType,
+                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId,
                 )
 
                 val response = withTimeoutOrNull(3_500L) {
@@ -7699,7 +7737,8 @@ class RunTrackingService : Service(), SensorEventListener {
                         // Explicit target flag — LLM must never mention a target when this is false
                         hasTarget = (targetTime != null || phaseTargetPaceStr != null),
                         totalRunsAllTime = runHistoryStats?.totalRunsAllTime,
-                        userId = currentUser?.id
+                        userId = currentUser?.id,
+                        garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
                     )
                     val response = apiService.getPhaseCoaching(update)
                     // Server returns skipped=true with no message when the shared cooldown rejects
@@ -7779,7 +7818,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     sessionStructure = sessionInstructions?.sessionStructure,
                     expectedMetricsFilters = sessionInstructions?.insightFilters,
                     workoutType = planWorkoutType,  // Tells AI this is a training session (not a race)
-                    activityType = currentActivityType
+                    activityType = currentActivityType,
+                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
                 )
                 val response = apiService.getStruggleCoaching(update)
                 // Note: Struggle point already added above before launching coroutine
@@ -8228,7 +8268,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Terrain context — HR coach can contextualise elevated HR against current terrain
                     // (e.g. "HR high because you're on a steep climb" vs "HR high on flat — check effort")
                     terrainContext = currentTerrainState.takeIf { it != "flat" },
-                    activityType = currentActivityType
+                    activityType = currentActivityType,
+                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 // Server returns skipped=true with no message when the shared per-user coaching
