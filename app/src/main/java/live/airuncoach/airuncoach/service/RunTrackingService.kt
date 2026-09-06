@@ -651,6 +651,11 @@ class RunTrackingService : Service(), SensorEventListener {
     // Weather and terrain
     private var weatherAtStart: WeatherData? = null
     private var weatherAtEnd: WeatherData? = null
+    // Guards the one-shot weather fetch in onNewLocation() so it only fires once per run —
+    // on the FIRST accepted GPS fix (phone or watch), rather than racing GPS cold-start with
+    // its own separate location request (the old startTracking()-eager approach — see the
+    // fetch this replaced). Any accuracy is fine for weather; no need to wait for a good fix.
+    private var weatherFetchAttempted = false
     private var totalElevationGain: Double = 0.0
     private var totalElevationLoss: Double = 0.0
     
@@ -1771,6 +1776,7 @@ class RunTrackingService : Service(), SensorEventListener {
         prevGarminElevWindowMean = null
         weatherAtStart = null
         weatherAtEnd = null
+        weatherFetchAttempted = false  // Reset for new run — see onNewLocation()'s first-fix weather fetch
         currentCadence = 0
         cadenceSum = 0
         cadenceCount = 0
@@ -1920,16 +1926,15 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.e("RunTrackingService", "Failed to start sensors", e)
             com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(e)
         }
-        
-        // Fetch weather in background (non-blocking)
-        serviceScope.launch { 
-            try {
-                weatherAtStart = weatherRepository.getCurrentWeather()
-                Log.d("RunTrackingService", "Weather fetched: $weatherAtStart")
-            } catch (e: Exception) {
-                Log.e("RunTrackingService", "Failed to fetch weather", e)
-            }
-        }
+
+        // Weather is no longer fetched here. Firing a separate one-shot GPS location request
+        // (WeatherRepository.getCurrentWeather()'s own getCurrentLocation() call) at the exact
+        // moment tracking starts competes with the run's own GPS for a cold lock, and silently
+        // swallowed exceptions meant it could fail with zero record of why — confirmed against a
+        // real run where weather_data ended up null despite the run itself having a clean GPS
+        // track throughout (the very first fix was 17m accuracy, consistent with a cold-start
+        // race). It now fires from onNewLocation() using that first real fix's own coordinates
+        // instead — see weatherFetchAttempted.
 
         // Refresh run history stats with target distance for better similarity matching
         serviceScope.launch {
@@ -3263,6 +3268,24 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun onNewLocation(location: Location) {
         if (!isTracking) return
+
+        // Fetch weather from the first real fix this run sees (phone or watch — either one
+        // reaches here). Deliberately fire-and-forget and non-blocking: weather is a nice-to-
+        // have for the run record, never something worth delaying tracking for. Any accuracy is
+        // fine here — unlike distance-relevant fixes below, weather doesn't need precision.
+        if (!weatherFetchAttempted) {
+            weatherFetchAttempted = true
+            val weatherLat = location.latitude
+            val weatherLng = location.longitude
+            serviceScope.launch {
+                try {
+                    weatherAtStart = weatherRepository.getCurrentWeather(weatherLat, weatherLng)
+                    Log.d("RunTrackingService", "Weather fetched using first GPS fix (${location.provider}): $weatherAtStart")
+                } catch (e: Exception) {
+                    Log.e("RunTrackingService", "Failed to fetch weather", e)
+                }
+            }
+        }
 
         // If the watch is actively streaming GPS (within the last 15 s), skip phone GPS
         // updates entirely to prevent double-counting distance.  The watch's Garmin

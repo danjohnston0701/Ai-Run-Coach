@@ -2053,7 +2053,13 @@ CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do 
       { role: "system", content: system },
       { role: "user", content: user }
     ],
-    max_tokens: 100,
+    // Was 100 — too tight for this prompt's actual output length (empathy framing + a
+    // specific number + form/breathing guidance routinely runs to 2-3 full sentences despite
+    // the "brief" instruction), so real responses were getting cut off mid-word/mid-sentence
+    // rather than finishing early. Matches generatePaceUpdate's budget (150) for a message of
+    // similar length. Confirmed via a real run's ai_coaching_notes — two of two struggle
+    // messages were truncated ("...maintaining good form; it" / "...sustainable for").
+    max_tokens: 150,
     temperature: 0.7,
   });
 

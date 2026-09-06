@@ -22,18 +22,31 @@ class WeatherRepository(private val context: Context) {
     private val apiService = RetrofitClient.apiService
     
     /**
-     * Fetches current weather data via backend proxy
+     * Fetches current weather data via backend proxy.
+     *
+     * @param latitude/longitude Use an already-known fix (e.g. a run's first GPS point) instead
+     *   of requesting a fresh one. Prefer this overload wherever a fix already exists — a caller
+     *   requesting its own fresh [getCurrentLocation] at the same moment another GPS-dependent
+     *   flow is cold-starting (e.g. right as run tracking begins) can simply fail with nothing to
+     *   show for it, since [getCurrentLocation] has no retry and its own [Exception] catch
+     *   returns null silently. Confirmed via a real run where weather ended up null despite a
+     *   clean GPS track throughout — the very first tracked fix was 17m accuracy, consistent
+     *   with a cold-start race between two simultaneous location requests.
      * @return WeatherData object with real-time weather information, or null if unable to fetch
      */
-    suspend fun getCurrentWeather(): WeatherData? {
+    suspend fun getCurrentWeather(latitude: Double? = null, longitude: Double? = null): WeatherData? {
         return try {
-            // Get current location
-            val location = getCurrentLocation() ?: return null
-            
+            val (lat, lng) = if (latitude != null && longitude != null) {
+                latitude to longitude
+            } else {
+                val location = getCurrentLocation() ?: return null
+                location.latitude to location.longitude
+            }
+
             // Fetch weather data from backend proxy (which calls Open-Meteo API)
             val response = apiService.getWeather(
-                latitude = location.latitude,
-                longitude = location.longitude
+                latitude = lat,
+                longitude = lng
             )
             
             // Convert API response to domain model
