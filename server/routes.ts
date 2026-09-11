@@ -18003,7 +18003,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundColor, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -18032,6 +18032,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
         customBackground: customBackground || undefined,
+        backgroundColor: backgroundColor || undefined,
         backgroundOpacity: backgroundOpacity ?? undefined,
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,
@@ -18054,7 +18055,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
   app.post("/api/share/preview", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
+      const { templateId, aspectRatio, stickers, runId, customBackground, backgroundColor, backgroundOpacity, backgroundBlur, customStickers, ringLayout, customCaption } = req.body;
       if (!templateId || !runId) {
         return res.status(400).json({ error: "templateId and runId are required" });
       }
@@ -18083,6 +18084,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         runData: buildShareRunData(run, userTimezone),
         userName: user?.name || undefined,
         customBackground: customBackground || undefined,
+        backgroundColor: backgroundColor || undefined,
         backgroundOpacity: backgroundOpacity ?? undefined,
         backgroundBlur: backgroundBlur ?? undefined,
         customStickers: customStickers || undefined,

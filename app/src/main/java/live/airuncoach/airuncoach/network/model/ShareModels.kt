@@ -27,6 +27,7 @@ data class ShareImageRequest(
     val aspectRatio: String = "9:16",
     val stickers: List<PlacedSticker> = emptyList(),
     val customBackground: String? = null,
+    val backgroundColor: String? = null,
     val backgroundOpacity: Float? = null,
     val backgroundBlur: Int? = null,
     val customStickers: List<CustomSticker>? = null,

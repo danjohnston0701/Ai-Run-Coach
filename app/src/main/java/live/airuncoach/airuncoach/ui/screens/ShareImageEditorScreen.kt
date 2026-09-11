@@ -71,6 +71,7 @@ fun ShareImageEditorScreen(
     var isStickerPanelExpanded by remember { mutableStateOf(false) }
     var isBackgroundPanelExpanded by remember { mutableStateOf(false) }
     var isRingsPanelExpanded by remember { mutableStateOf(false) }
+    var showBackgroundColorPicker by remember { mutableStateOf(false) }
 
     // Collapsible control strip state
     var isControlStripExpanded by remember { mutableStateOf(true) }
@@ -156,11 +157,14 @@ fun ShareImageEditorScreen(
                         // Background
                         isBackgroundPanelExpanded = isBackgroundPanelExpanded,
                         onToggleBackground = { isBackgroundPanelExpanded = !isBackgroundPanelExpanded },
-                        hasCustomBackground = state.customBackgroundBase64 != null,
+                        hasCustomBackground = state.customBackgroundBase64 != null || state.backgroundColor != null,
+                        hasPhotoBackground = state.customBackgroundBase64 != null,
+                        backgroundColor = state.backgroundColor,
                         backgroundOpacity = state.backgroundOpacity,
                         backgroundBlur = state.backgroundBlur,
                         onPickBackground = { backgroundPickerLauncher.launch("image/*") },
                         onTakePhoto = { cameraLauncher.launch(cameraPhotoUri) },
+                        onPickBackgroundColor = { showBackgroundColorPicker = true },
                         onRemoveBackground = { viewModel.removeCustomBackground() },
                         onBackgroundOpacityChange = { viewModel.setBackgroundOpacity(it) },
                         onBackgroundBlurChange = { viewModel.setBackgroundBlur(it) },
@@ -177,6 +181,17 @@ fun ShareImageEditorScreen(
                         onShare = { viewModel.shareImage() },
                         // Collapse
                         onCollapse = { isControlStripExpanded = false }
+                    )
+                }
+
+                if (showBackgroundColorPicker) {
+                    BackgroundColorPickerDialog(
+                        initialHex = state.backgroundColor ?: "#0D47A1",
+                        onDismiss = { showBackgroundColorPicker = false },
+                        onConfirm = { hex ->
+                            viewModel.setBackgroundColor(hex)
+                            showBackgroundColorPicker = false
+                        }
                     )
                 }
                 
@@ -488,10 +503,13 @@ private fun ControlStrip(
     isBackgroundPanelExpanded: Boolean,
     onToggleBackground: () -> Unit,
     hasCustomBackground: Boolean,
+    hasPhotoBackground: Boolean,
+    backgroundColor: String?,
     backgroundOpacity: Float,
     backgroundBlur: Int,
     onPickBackground: () -> Unit,
     onTakePhoto: () -> Unit,
+    onPickBackgroundColor: () -> Unit,
     onRemoveBackground: () -> Unit,
     onBackgroundOpacityChange: (Float) -> Unit,
     onBackgroundBlurChange: (Int) -> Unit,
@@ -711,14 +729,14 @@ private fun ControlStrip(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Image,
+                        imageVector = Icons.Default.Palette,
                         contentDescription = null,
                         tint = if (hasCustomBackground) Colors.success else Colors.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Background Photo",
+                        text = "Background",
                         style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
                         color = Colors.textPrimary,
                         modifier = Modifier.weight(1f)
@@ -748,10 +766,13 @@ private fun ControlStrip(
             ) {
                 BackgroundControlPanel(
                     hasCustomBackground = hasCustomBackground,
+                    hasPhotoBackground = hasPhotoBackground,
+                    backgroundColor = backgroundColor,
                     backgroundOpacity = backgroundOpacity,
                     backgroundBlur = backgroundBlur,
                     onPickBackground = onPickBackground,
                     onTakePhoto = onTakePhoto,
+                    onPickBackgroundColor = onPickBackgroundColor,
                     onRemoveBackground = onRemoveBackground,
                     onOpacityChange = onBackgroundOpacityChange,
                     onBlurChange = onBackgroundBlurChange
@@ -1257,10 +1278,13 @@ private fun StickerGridItemCompact(
 @Composable
 private fun BackgroundControlPanel(
     hasCustomBackground: Boolean,
+    hasPhotoBackground: Boolean,
+    backgroundColor: String?,
     backgroundOpacity: Float,
     backgroundBlur: Int,
     onPickBackground: () -> Unit,
     onTakePhoto: () -> Unit,
+    onPickBackgroundColor: () -> Unit,
     onRemoveBackground: () -> Unit,
     onOpacityChange: (Float) -> Unit,
     onBlurChange: (Int) -> Unit
@@ -1270,55 +1294,50 @@ private fun BackgroundControlPanel(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        if (!hasCustomBackground) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onPickBackground,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
-                ) {
-                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Gallery", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
-                OutlinedButton(
-                    onClick = onTakePhoto,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
-                ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Camera", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            BackgroundSourceButton(
+                label = "Gallery",
+                icon = Icons.Default.PhotoLibrary,
+                onClick = onPickBackground,
+                modifier = Modifier.weight(1f)
+            )
+            BackgroundSourceButton(
+                label = "Camera",
+                icon = Icons.Default.CameraAlt,
+                onClick = onTakePhoto,
+                modifier = Modifier.weight(1f)
+            )
+            BackgroundSourceButton(
+                label = "Colour",
+                icon = Icons.Default.Palette,
+                onClick = onPickBackgroundColor,
+                modifier = Modifier.weight(1f),
+                swatchHex = backgroundColor
+            )
+        }
+
+        if (hasCustomBackground) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Default.CheckCircle, null, tint = Colors.success, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Background set", style = AppTextStyles.small, color = Colors.textSecondary, modifier = Modifier.weight(1f))
-                TextButton(onClick = onPickBackground) {
-                    Text("Change", fontSize = 12.sp, color = Colors.primary)
-                }
-                TextButton(onClick = onTakePhoto) {
-                    Text("Camera", fontSize = 12.sp, color = Colors.primary)
-                }
+                Text(
+                    if (hasPhotoBackground) "Photo background set" else "Colour ${backgroundColor ?: ""}",
+                    style = AppTextStyles.small,
+                    color = Colors.textSecondary,
+                    modifier = Modifier.weight(1f)
+                )
                 TextButton(onClick = onRemoveBackground) {
                     Text("Remove", fontSize = 12.sp, color = Colors.error)
                 }
             }
 
-            // Opacity slider
-            Row(
+            if (hasPhotoBackground) Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1342,8 +1361,7 @@ private fun BackgroundControlPanel(
                 )
             }
 
-            // Blur slider
-            Row(
+            if (hasPhotoBackground) Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1367,6 +1385,134 @@ private fun BackgroundControlPanel(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun BackgroundSourceButton(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    swatchHex: String? = null
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+        border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.5f)),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary)
+    ) {
+        if (swatchHex != null) {
+            Box(
+                modifier = Modifier
+                    .size(17.dp)
+                    .clip(CircleShape)
+                    .background(Color(android.graphics.Color.parseColor(swatchHex)))
+                    .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape)
+            )
+        } else {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp))
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun BackgroundColorPickerDialog(
+    initialHex: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    val initialColor = remember(initialHex) {
+        runCatching { android.graphics.Color.parseColor(initialHex) }
+            .getOrDefault(android.graphics.Color.rgb(13, 71, 161))
+    }
+    var red by remember(initialHex) {
+        mutableStateOf(android.graphics.Color.red(initialColor).toFloat())
+    }
+    var green by remember(initialHex) {
+        mutableStateOf(android.graphics.Color.green(initialColor).toFloat())
+    }
+    var blue by remember(initialHex) {
+        mutableStateOf(android.graphics.Color.blue(initialColor).toFloat())
+    }
+    val selectedHex = String.format(
+        java.util.Locale.US,
+        "#%02X%02X%02X",
+        red.toInt(),
+        green.toInt(),
+        blue.toInt()
+    )
+    val selectedColor = Color(
+        android.graphics.Color.rgb(red.toInt(), green.toInt(), blue.toInt())
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose background colour") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(84.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(selectedColor)
+                        .border(1.dp, Colors.border, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        selectedHex,
+                        color = if ((red * 0.299f + green * 0.587f + blue * 0.114f) > 150f) Color.Black else Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                ColorChannelSlider("Red", red, Color.Red) { red = it }
+                ColorChannelSlider("Green", green, Color.Green) { green = it }
+                ColorChannelSlider("Blue", blue, Color.Blue) { blue = it }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(selectedHex) }) {
+                Text("Use colour", color = Colors.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Colors.textSecondary)
+            }
+        }
+    )
+}
+
+@Composable
+private fun ColorChannelSlider(
+    label: String,
+    value: Float,
+    channelColor: Color,
+    onValueChange: (Float) -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = AppTextStyles.caption, modifier = Modifier.width(48.dp))
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..255f,
+            modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(
+                thumbColor = channelColor,
+                activeTrackColor = channelColor
+            )
+        )
+        Text(
+            value.toInt().toString(),
+            style = AppTextStyles.caption,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(28.dp)
+        )
     }
 }
 

@@ -58,6 +58,7 @@ export interface GenerateImageRequest {
   runData: RunDataForImage;
   userName?: string;
   customBackground?: string;
+  backgroundColor?: string;
   backgroundOpacity?: number;
   backgroundBlur?: number;
   customStickers?: CustomStickerData[];
@@ -1588,6 +1589,27 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
   }
 
   const hasCustomBg = !!req.customBackground;
+  const backgroundColor = typeof req.backgroundColor === "string"
+    && /^#[0-9A-Fa-f]{6}$/.test(req.backgroundColor)
+      ? req.backgroundColor
+      : null;
+
+  // Replace the template's base canvas colour before rasterization. This keeps
+  // every template layer, ring, and sticker unchanged while allowing a solid
+  // user-selected background instead of the default white.
+  if (backgroundColor && !hasCustomBg) {
+    const bgRectPattern = `<rect width="${w}" height="${h}" fill="`;
+    const bgRectIdx = svgContent.indexOf(bgRectPattern);
+    if (bgRectIdx >= 0) {
+      const fillStart = bgRectIdx + bgRectPattern.length;
+      const fillEnd = svgContent.indexOf('"', fillStart);
+      if (fillEnd >= 0) {
+        svgContent = svgContent.substring(0, fillStart)
+          + backgroundColor
+          + svgContent.substring(fillEnd);
+      }
+    }
+  }
 
   if (hasCustomBg) {
     const bgRectPattern = `<rect width="${w}" height="${h}" fill="`;

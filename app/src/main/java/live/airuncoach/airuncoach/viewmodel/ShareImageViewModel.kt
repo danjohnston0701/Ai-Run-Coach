@@ -45,6 +45,7 @@ data class ShareEditorState(
     val runId: String = "",
     // Custom background
     val customBackgroundBase64: String? = null,
+    val backgroundColor: String? = null,
     val backgroundOpacity: Float = 0.4f,
     val backgroundBlur: Int = 8,
     // Custom stickers (user-uploaded images)
@@ -249,7 +250,7 @@ class ShareImageViewModel @Inject constructor(
                         outputStream.toByteArray(), Base64.NO_WRAP
                     )
 
-                    _state.update { it.copy(customBackgroundBase64 = base64) }
+                    _state.update { it.copy(customBackgroundBase64 = base64, backgroundColor = null) }
                     requestPreviewDebounced()
                 }
             } catch (e: Exception) {
@@ -277,7 +278,23 @@ class ShareImageViewModel @Inject constructor(
     }
 
     fun removeCustomBackground() {
-        _state.update { it.copy(customBackgroundBase64 = null) }
+        _state.update { it.copy(customBackgroundBase64 = null, backgroundColor = null) }
+        requestPreviewDebounced()
+    }
+
+    fun setBackgroundColor(hex: String) {
+        val normalized = hex.trim().uppercase()
+        if (!Regex("^#[0-9A-F]{6}$").matches(normalized)) {
+            _state.update { it.copy(error = "Invalid background colour") }
+            return
+        }
+        _state.update {
+            it.copy(
+                backgroundColor = normalized,
+                customBackgroundBase64 = null,
+                error = null
+            )
+        }
         requestPreviewDebounced()
     }
 
@@ -421,6 +438,7 @@ class ShareImageViewModel @Inject constructor(
             aspectRatio = s.selectedAspectRatio,
             stickers = s.placedStickers,
             customBackground = s.customBackgroundBase64,
+            backgroundColor = s.backgroundColor,
             backgroundOpacity = if (s.customBackgroundBase64 != null) s.backgroundOpacity else null,
             backgroundBlur = if (s.customBackgroundBase64 != null) s.backgroundBlur else null,
             customStickers = s.customStickers.ifEmpty { null },
