@@ -116,9 +116,10 @@ import kotlin.math.absoluteValue
  * rather than free exploration. See MainScreen.kt's "onboarding_tour" route for how this is
  * reached via MainActivity.pendingDeepLink.
  *
- * Opens with a device-choice question (Garmin Watch / Samsung Watch / Phone only — Apple Watch
- * is intentionally not offered here, since it cannot pair with an Android phone at all; iOS's
- * equivalent OnboardingTourScreen.swift offers Apple Watch instead of Samsung) so later steps
+ * Opens with a device-choice question (Garmin Watch / Phone only — Apple Watch is intentionally
+ * not offered here, since it cannot pair with an Android phone at all, and Samsung Watch is held
+ * back until the Wear OS companion is published; iOS's equivalent OnboardingTourScreen.swift
+ * offers Apple Watch / Garmin Watch / Phone only) so later steps
  * can skip whichever watch-brand page doesn't apply, and the Run Without a Route step can
  * correctly show "Prepare for Watch" only for users who have a watch to prepare for.
  */
@@ -197,8 +198,10 @@ private fun WatchChoiceScreen(
             Spacer(modifier = Modifier.height(Spacing.xl))
             WatchChoiceOption(R.drawable.icon_watch_vector, "Garmin Watch") { onChoose(TourWatchChoice.GARMIN_WATCH) }
             Spacer(modifier = Modifier.height(Spacing.sm))
-            WatchChoiceOption(R.drawable.icon_watch_vector, "Samsung Watch") { onChoose(TourWatchChoice.SAMSUNG_WATCH) }
-            Spacer(modifier = Modifier.height(Spacing.sm))
+            // Samsung Watch deliberately not offered yet (2026-09-12): the Wear OS companion
+            // (`wear/`) isn't published on Google Play / Galaxy Store, so a user who picked it
+            // would be toured through a device they can't actually pair. TourWatchChoice
+            // .SAMSUNG_WATCH stays so re-adding the option is a one-liner once it ships.
             WatchChoiceOption(R.drawable.icon_profile_vector, "Phone only") { onChoose(TourWatchChoice.PHONE_ONLY) }
         }
     }
