@@ -389,12 +389,29 @@ function computePointPaces(
         }
       }
       if (monotonic) {
-        let j = 0;
-        paces = track.map(p => {
-          const t = p.timestamp as number;
-          while (j < valid.length - 1 && valid[j + 1].time <= t) j++;
-          return valid[j].value;
-        });
+        const trackTimes = track.map(p => p.timestamp as number);
+        const trackMin = trackTimes[0];
+        const trackMax = trackTimes[trackTimes.length - 1];
+        const sampleMin = valid[0].time;
+        const sampleMax = valid[valid.length - 1].time;
+        const domainsOverlap = sampleMax >= trackMin && sampleMin <= trackMax;
+
+        if (domainsOverlap) {
+          let j = 0;
+          paces = track.map(p => {
+            const t = p.timestamp as number;
+            while (j < valid.length - 1 && valid[j + 1].time <= t) j++;
+            return valid[j].value;
+          });
+        } else {
+          // Common watch-run shape: GPS timestamps are absolute milliseconds,
+          // while flat pace_data samples become elapsed seconds (0, 1, 2…).
+          // Align by relative progress rather than comparing incompatible clocks,
+          // which otherwise advances every GPS point to the final pace sample.
+          paces = track.map((_, i) =>
+            valid[Math.min(Math.floor((i / Math.max(1, n - 1)) * (valid.length - 1)), valid.length - 1)].value
+          );
+        }
       } else {
         paces = track.map((_, i) => valid[Math.min(Math.floor((i / n) * valid.length), valid.length - 1)].value);
       }

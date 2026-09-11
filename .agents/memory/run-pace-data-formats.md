@@ -7,6 +7,8 @@ The `runs.pace_data` jsonb column stores one of THREE shapes depending on upload
 2. Raw per-second samples: `[{time: elapsedSec, value: paceSecPerKm}]` (Garmin offline batch)
 3. Flat `number[]` (phone watchPaceSeries, 1 sample/sec, sec/km)
 
-**Why:** Treating raw samples as km splits once drew hundreds of km-marker circles on share images; conversely discarding them loses fine-grained pace colouring.
+GPS tracks and pace samples may also use incompatible time domains: GPS timestamps can be absolute milliseconds while flat pace samples are implicitly elapsed seconds (`0, 1, 2…`). Comparing those directly advances every GPS point to the final pace sample and produces a solid-colour route.
 
-**How to apply:** Detect the shape via the first element (object with paceSeconds/pace = splits; object with time/value = samples; number = flat series). For route colouring, prefer per-point `speed` (m/s) embedded in gpsTrack points (Garmin runs), then samples, then splits — see computePointPaces in the share-image service, which mirrors the Android summary map's per-point colouring.
+**Why:** Treating raw samples as km splits once drew hundreds of km-marker circles; aligning elapsed-second samples against absolute-millisecond GPS timestamps flattened an entire share route to one pace.
+
+**How to apply:** Detect the shape via the first element. For route colouring, prefer per-point speed/pace, then derive ~50m buckets from GPS coordinates and timestamps (matching Android), then align samples only when time domains overlap; otherwise align by relative index. Use splits last.
