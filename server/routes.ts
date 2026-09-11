@@ -17930,6 +17930,33 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       });
     }
 
+    // Normalize every historical heart-rate shape to the format expected by
+    // share-image charts: [{ timestamp, value }].
+    // Phone/watch runs commonly store a flat number[] at one sample per second;
+    // Garmin records may use { samples: [{ timestamp, hr }] }.
+    const heartRateRaw = run.heartRateData as any;
+    const heartRateSource = Array.isArray(heartRateRaw)
+      ? heartRateRaw
+      : (heartRateRaw && Array.isArray(heartRateRaw.samples) ? heartRateRaw.samples : []);
+    const heartRateData = heartRateSource
+      .map((sample: any, index: number) => {
+        if (typeof sample === 'number') {
+          return Number.isFinite(sample) && sample > 0
+            ? { timestamp: index, value: sample }
+            : null;
+        }
+        if (!sample || typeof sample !== 'object') return null;
+        const value = typeof sample.value === 'number'
+          ? sample.value
+          : (typeof sample.hr === 'number' ? sample.hr : sample.heartRate);
+        if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+        const timestamp = typeof sample.timestamp === 'number'
+          ? sample.timestamp
+          : (typeof sample.time === 'number' ? sample.time : index);
+        return { timestamp, value };
+      })
+      .filter((sample: any): sample is { timestamp: number; value: number } => sample != null);
+
     return {
       distance: distanceKm,
       duration: durationSec,
@@ -17944,7 +17971,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       elevationLoss: run.elevationLoss || undefined,
       difficulty: run.difficulty || undefined,
       gpsTrack,
-      heartRateData: (run.heartRateData as any) || undefined,
+      heartRateData: heartRateData.length > 0 ? heartRateData : undefined,
       cadenceData: (run.cadenceData as any) || undefined,
       paceData,
       paceSamples,
