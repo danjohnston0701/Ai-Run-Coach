@@ -34,6 +34,7 @@ import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
+import live.airuncoach.airuncoach.ui.dialogs.FriendPickerDialog
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
 import live.airuncoach.airuncoach.ui.components.WatchSendState
@@ -69,11 +70,13 @@ fun MapMyRunSetupScreen(
         minutes: Int,
         seconds: Int,
         liveTrackingEnabled: Boolean,
+        liveTrackingObservers: List<String>,
         isGroupRun: Boolean,
+        groupRunParticipants: List<String>,
         latitude: Double,
         longitude: Double,
         aiCoachEnabled: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> },
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _ -> },
     onStartRunWithoutRoute: (
         distance: Float,
         targetTimeEnabled: Boolean,
@@ -96,6 +99,12 @@ fun MapMyRunSetupScreen(
     val targetPrefs = remember { context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE) }
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
     val runState by runSessionViewModel.runState.collectAsState()
+    // "Prepare for Watch" fires from THIS screen, before RunSessionScreen (which normally sets
+    // the group ID) ever mounts — so set it here too, or prepareServiceForWatch() has no
+    // groupRunId to hand the service and a watch-started group run is uploaded unlinked.
+    LaunchedEffect(groupRunId) {
+        groupRunId?.let { runSessionViewModel.setGroupRunId(it) }
+    }
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
     var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
     
@@ -326,6 +335,12 @@ fun MapMyRunSetupScreen(
                         else -> emptyList()
                     }
                     GroupRunSection(
+                        liveTrackingEnabled = isLiveTrackingEnabled,
+                        onToggleLiveTracking = { isLiveTrackingEnabled = it },
+                        liveTrackingObservers = liveTrackingObservers,
+                        onObserversChanged = { liveTrackingObservers = it },
+                        pendingEmail = liveTrackingPendingEmail,
+                        onPendingEmailChange = { liveTrackingPendingEmail = it },
                         groupRunEnabled = isGroupRunEnabled,
                         onToggleGroupRun = { isGroupRunEnabled = it },
                         groupRunParticipants = groupRunParticipants,
@@ -380,6 +395,15 @@ fun MapMyRunSetupScreen(
                         enabled = canProceed,
                         onClick = {
                             currentLocation?.let { (lat, lng) ->
+                                // Flush any typed-but-not-confirmed observer email, mirroring
+                                // the no-route Prepare Run flush below.
+                                val trimmedPending = liveTrackingPendingEmail.trim()
+                                val finalObservers = if (trimmedPending.contains("@") && trimmedPending.isNotEmpty()
+                                    && !liveTrackingObservers.contains(trimmedPending)) {
+                                    liveTrackingObservers + trimmedPending
+                                } else {
+                                    liveTrackingObservers
+                                }
                                 onGenerateRoute(
                                     targetDistance,
                                     isTargetTimeEnabled,
@@ -387,7 +411,9 @@ fun MapMyRunSetupScreen(
                                     minutesInt,
                                     secondsInt,
                                     isLiveTrackingEnabled,
+                                    finalObservers,
                                     isGroupRunEnabled,
+                                    groupRunParticipants,
                                     lat,
                                     lng,
                                     isAiCoachEnabled
@@ -608,10 +634,14 @@ fun MapMyRunSetupScreen(
 
 /* =====================================================================================
    HEADER + GPS
+   (SetupHeader / CompactModeRow / CompactTargetTimeSection / AiCoachToggleSection /
+   GroupRunSection / PrimaryCtaButton are `internal` rather than private so the onboarding
+   feature tour — OnboardingTourScreen.kt's MockRunSetupScreen — can compose a pixel-faithful
+   clone of this screen from the real building blocks instead of hand-drawing an approximation.)
 ===================================================================================== */
 
 @Composable
-private fun SetupHeader(
+internal fun SetupHeader(
     title: String,
     subtitle: String,
     gpsLocked: Boolean,
@@ -663,7 +693,7 @@ private fun SetupHeader(
 }
 
 @Composable
-private fun GpsAlertIfNeeded(
+internal fun GpsAlertIfNeeded(
     isGettingLocation: Boolean,
     gpsError: String?,
     hasPermission: Boolean,
@@ -775,10 +805,10 @@ private fun Pill(
    MODE TOGGLE (Run/Walk) — compact, minor UI
 ===================================================================================== */
 
-private enum class ActivityMode { RUN, WALK }
+internal enum class ActivityMode { RUN, WALK }
 
 @Composable
-private fun CompactModeRow(
+internal fun CompactModeRow(
     mode: ActivityMode,
     onModeChanged: (ActivityMode) -> Unit
 ) {
@@ -918,7 +948,7 @@ fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
 ===================================================================================== */
 
 @Composable
-private fun CompactTargetTimeSection(
+internal fun CompactTargetTimeSection(
     isEnabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     hours: String,
@@ -1029,7 +1059,7 @@ private fun TimeField(
 ===================================================================================== */
 
 @Composable
-private fun AiCoachToggleSection(
+internal fun AiCoachToggleSection(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
     mode: String = "route"
@@ -1099,11 +1129,17 @@ private fun AiCoachToggleSection(
 }
 
 /* =====================================================================================
-   GROUP RUN SECTION — standalone (Live Tracking hidden until iOS app launch)
+   SOCIAL SECTION — Live Tracking + Group Run
 ===================================================================================== */
 
 @Composable
-private fun GroupRunSection(
+internal fun GroupRunSection(
+    liveTrackingEnabled: Boolean,
+    onToggleLiveTracking: (Boolean) -> Unit,
+    liveTrackingObservers: List<String>,
+    onObserversChanged: (List<String>) -> Unit,
+    pendingEmail: String,
+    onPendingEmailChange: (String) -> Unit,
     groupRunEnabled: Boolean,
     onToggleGroupRun: (Boolean) -> Unit,
     groupRunParticipants: List<String>,
@@ -1125,6 +1161,30 @@ private fun GroupRunSection(
             colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.65f))
         ) {
             Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                // Live Tracking toggle + expandable observer picker
+                Column {
+                    SocialRowToggle(
+                        title = "Live Tracking",
+                        subtitle = "Share your live location",
+                        enabled = liveTrackingEnabled,
+                        onToggle = { onToggleLiveTracking(it) }
+                    )
+
+                    // Expandable observer section (shown when Live Tracking is enabled)
+                    if (liveTrackingEnabled) {
+                        HorizontalDivider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
+                        LiveTrackingObserverSection(
+                            observers = liveTrackingObservers,
+                            onObserversChanged = onObserversChanged,
+                            pendingEmail = pendingEmail,
+                            onPendingEmailChange = onPendingEmailChange,
+                            friends = friends
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
+
                 // Group Run toggle + expandable participant picker
                 Column {
                     SocialRowToggle(
@@ -1339,12 +1399,10 @@ private fun GroupRunParticipantSection(
 
 /* =====================================================================================
    LIVE TRACKING — Observer Picker (expanded when Live Tracking enabled)
-   TODO: Uncomment when iOS app is launched for Live Share compatibility
 ===================================================================================== */
 
-/*
 @Composable
-private fun LiveTrackingObserverSection(
+internal fun LiveTrackingObserverSection(
     observers: List<String>,
     onObserversChanged: (List<String>) -> Unit,
     pendingEmail: String,
@@ -1586,7 +1644,6 @@ private fun LiveTrackingObserverSection(
         }
     }
 }
-*/
 
 /* =====================================================================================
    OPTIONAL AI SUMMARY (no longer blocks Start Run)
@@ -1636,7 +1693,7 @@ private fun AiSummaryCard(
 ===================================================================================== */
 
 @Composable
-private fun PrimaryCtaButton(
+internal fun PrimaryCtaButton(
     text: String,
     leadingIconRes: Int?,
     enabled: Boolean,

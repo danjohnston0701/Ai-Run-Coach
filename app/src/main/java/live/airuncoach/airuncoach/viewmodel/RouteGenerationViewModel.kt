@@ -62,12 +62,41 @@ class RouteGenerationViewModel @Inject constructor(
     private val _originalTargetDistanceKm = MutableStateFlow(5.0)
     val originalTargetDistanceKm: StateFlow<Double> = _originalTargetDistanceKm.asStateFlow()
 
+    // Social settings picked on MapMyRunSetupScreen — carried through route generation →
+    // selection (via this parent-scoped ViewModel, since RouteGenerationParamsHolder is
+    // consumed/nulled once route generation starts) so the final RunSetupConfig for a
+    // routed run doesn't silently drop them the way it previously did.
+    private val _liveTrackingEnabled = MutableStateFlow(false)
+    val liveTrackingEnabled: StateFlow<Boolean> = _liveTrackingEnabled.asStateFlow()
+    private val _liveTrackingObservers = MutableStateFlow<List<String>>(emptyList())
+    val liveTrackingObservers: StateFlow<List<String>> = _liveTrackingObservers.asStateFlow()
+    private val _isGroupRun = MutableStateFlow(false)
+    val isGroupRun: StateFlow<Boolean> = _isGroupRun.asStateFlow()
+    private val _groupRunParticipants = MutableStateFlow<List<String>>(emptyList())
+    val groupRunParticipants: StateFlow<List<String>> = _groupRunParticipants.asStateFlow()
+    private val _aiCoachEnabled = MutableStateFlow(false)
+    val aiCoachEnabled: StateFlow<Boolean> = _aiCoachEnabled.asStateFlow()
+
     fun setTargetTime(hasTime: Boolean, hours: Int, minutes: Int, seconds: Int, distanceKm: Double) {
         _hasTargetTime.value = hasTime
         _targetHours.value = hours
         _targetMinutes.value = minutes
         _targetSeconds.value = seconds
         _originalTargetDistanceKm.value = distanceKm
+    }
+
+    fun setSocialSettings(
+        liveTrackingEnabled: Boolean,
+        liveTrackingObservers: List<String>,
+        isGroupRun: Boolean,
+        groupRunParticipants: List<String>,
+        aiCoachEnabled: Boolean
+    ) {
+        _liveTrackingEnabled.value = liveTrackingEnabled
+        _liveTrackingObservers.value = liveTrackingObservers
+        _isGroupRun.value = isGroupRun
+        _groupRunParticipants.value = groupRunParticipants
+        _aiCoachEnabled.value = aiCoachEnabled
     }
 
     fun generateRoutes(request: RouteGenerationRequest) {

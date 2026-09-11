@@ -31,7 +31,11 @@ import com.google.maps.android.compose.*
 fun ObserverRunSessionScreen(
     sessionId: String,
     onNavigateBack: () -> Unit,
-    isStandaloneObserver: Boolean = false  // True when accessed from login screen (no back nav)
+    isStandaloneObserver: Boolean = false,  // True when accessed from login screen (no back nav)
+    // Opens the runner's full run summary once their phone has linked the finished session to
+    // its uploaded run. Only offered to signed-in observers (the run endpoints need auth), so
+    // the standalone/token path leaves this as the default no-op and the button is hidden.
+    onViewRunSummary: ((runId: String) -> Unit)? = null
 ) {
     val viewModel: ObserverRunSessionViewModel = hiltViewModel()
     val liveSession by viewModel.liveSession.collectAsState()
@@ -169,9 +173,10 @@ fun ObserverRunSessionScreen(
                 liveSession?.isActive == false -> {
                     // Run has ended — show the finished screen
                     RunFinishedScreen(
-                        runnerName = liveSession?.runnerName ?: "The runner",
+                        session = liveSession!!,
                         onNavigateBack = onNavigateBack,
-                        isStandaloneObserver = isStandaloneObserver
+                        isStandaloneObserver = isStandaloneObserver,
+                        onViewRunSummary = if (isStandaloneObserver) null else onViewRunSummary
                     )
                 }
                 liveSession?.hasStarted != true -> {
@@ -256,11 +261,34 @@ fun LiveRunMapScreen(
     var mapReady by remember { mutableStateOf(false) }
     val cameraPositionState = rememberCameraPositionState()
 
+    // Follow the runner. The camera was only positioned once in onMapLoaded, so after the
+    // first fix the marker ran straight off-screen. Only re-centre while the observer isn't
+    // dragging the map themselves, so they can still look around the route.
+    LaunchedEffect(session.currentLat, session.currentLng, mapReady) {
+        val lat = session.currentLat ?: return@LaunchedEffect
+        val lng = session.currentLng ?: return@LaunchedEffect
+        if (!mapReady || cameraPositionState.isMoving) return@LaunchedEffect
+        cameraPositionState.animate(CameraUpdateFactory.newLatLng(LatLng(lat, lng)))
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Colors.backgroundRoot)
     ) {
+        if (session.isPaused) {
+            Text(
+                "${session.runnerName} has paused",
+                style = AppTextStyles.body,
+                color = Colors.buttonText,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Colors.warning)
+                    .padding(vertical = 8.dp)
+            )
+        }
+
         // Map area
         Box(
             modifier = Modifier
@@ -348,6 +376,28 @@ fun MetricsPanel(session: ObserverLiveRunSession) {
             color = Colors.textPrimary
         )
 
+        // Staleness line — the runner syncs every 5 s, so anything past ~20 s means the phone
+        // has stopped reporting (no signal, backgrounded, dead battery). Without this the
+        // observer can't tell frozen numbers from a steady runner. Re-evaluated every second.
+        val lastSyncMs = session.lastSyncedAtMs
+        if (lastSyncMs != null && !session.isPaused) {
+            var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(1000)
+                    nowMs = System.currentTimeMillis()
+                }
+            }
+            val ageSecs = ((nowMs - lastSyncMs) / 1000L).coerceAtLeast(0)
+            if (ageSecs >= 20) {
+                Text(
+                    "Last update ${formatTime(ageSecs.toInt())} ago — ${session.runnerName} may have lost signal",
+                    style = AppTextStyles.caption,
+                    color = Colors.warning
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(12.dp))
 
         // Metrics grid
@@ -427,10 +477,12 @@ fun formatTime(seconds: Int): String {
  */
 @Composable
 fun RunFinishedScreen(
-    runnerName: String,
+    session: ObserverLiveRunSession,
     onNavigateBack: () -> Unit,
-    isStandaloneObserver: Boolean = false
+    isStandaloneObserver: Boolean = false,
+    onViewRunSummary: ((runId: String) -> Unit)? = null
 ) {
+    val runnerName = session.runnerName
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -462,7 +514,43 @@ fun RunFinishedScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // Final numbers — the runner's phone sends its finishing distance/time/pace/HR in
+            // the same sync that ends the session, so these are the real totals, not the last
+            // 5 s-throttled update. Only shown if the run actually got going.
+            if (session.hasStarted && (session.distanceCovered > 0 || session.elapsedTime > 0)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MetricBox("Distance", "%.2f km".format(session.distanceCovered), Modifier.weight(1f))
+                    MetricBox("Time", formatTime(session.elapsedTime), Modifier.weight(1f))
+                    MetricBox("Pace", session.currentPace ?: "--:--", Modifier.weight(1f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            val resultRunId = session.resultRunId
+            if (onViewRunSummary != null && !resultRunId.isNullOrBlank()) {
+                Button(
+                    onClick = { onViewRunSummary(resultRunId) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) {
+                    Text("View ${runnerName}'s full run", fontSize = 16.sp, color = Colors.buttonText)
+                }
+            } else if (onViewRunSummary != null && session.hasStarted) {
+                // The runner's phone links the run a few seconds after finishing (once its
+                // upload completes) — the VM's final poll picks it up.
+                Text(
+                    "Full run summary will be available shortly…",
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted,
+                    textAlign = TextAlign.Center
+                )
+            }
 
             Button(
                 onClick = onNavigateBack,
@@ -496,7 +584,10 @@ data class ObserverLiveRunSession(
     val isActive: Boolean = true,  // false means run has ended
     val startedAt: Long?,
     val routeId: String?,
-    val gpsTrack: List<GpsPoint>?
+    val gpsTrack: List<GpsPoint>?,
+    val isPaused: Boolean = false,      // runner paused — shown instead of silently frozen metrics
+    val resultRunId: String? = null,    // the runner's uploaded run, once their phone links it
+    val lastSyncedAtMs: Long? = null    // server-side last update, for the "last update Xs ago" line
 )
 
 data class GpsPoint(

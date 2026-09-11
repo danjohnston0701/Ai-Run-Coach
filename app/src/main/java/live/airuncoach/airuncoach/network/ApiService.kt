@@ -113,6 +113,22 @@ interface ApiService {
     @POST("/api/friend-requests/{id}/withdraw")
     suspend fun withdrawFriendRequest(@Path("id") requestId: String)
 
+    /** Remove an existing friendship (both directions). userId must be the signed-in user. */
+    @DELETE("/api/friends/{userId}/{friendId}")
+    suspend fun removeFriend(@Path("userId") userId: String, @Path("friendId") friendId: String)
+
+    // ==================== SUPPORT ====================
+
+    /** Logs a support ticket server-side (emails support@airuncoach.live + auto-replies to
+     *  the user). Name/email are filled from the signed-in account by the server. */
+    @POST("/api/support/contact")
+    suspend fun submitSupportRequest(@Body request: SupportRequest): SupportRequestResponse
+
+    // ==================== ONBOARDING TOUR TRACKING ====================
+
+    @POST("/api/user/onboarding-tour-event")
+    suspend fun recordOnboardingTourEvent(@Body request: live.airuncoach.airuncoach.network.model.OnboardingTourEventRequest)
+
     // ==================== INJURY MANAGEMENT ====================
 
     @GET("/api/user/injuries")
@@ -948,6 +964,22 @@ data class GpsPoint(
     val altitude: Double? = null
 )
 
+// POST /api/support/contact — in-app "Get Support" ticket
+data class SupportRequest(
+    val subject: String,
+    val message: String,
+    val platform: String = "android",
+    val appVersion: String? = null,
+    val deviceInfo: String? = null,
+    val name: String? = null,       // optional — server fills from the signed-in account
+    val email: String? = null
+)
+
+data class SupportRequestResponse(
+    val ok: Boolean = false,
+    val error: String? = null
+)
+
 // Request body for creating a new live tracking session
 data class CreateLiveSessionRequest(
     val runnerName: String     // Display name shown to observers
@@ -977,7 +1009,9 @@ data class SyncLiveSessionRequest(
     val distanceCovered: Double? = null,
     val elapsedTime: Int? = null,
     val currentPace: String? = null,
-    val currentHeartRate: Int? = null
+    val currentHeartRate: Int? = null,
+    val isPaused: Boolean? = null,      // Runner paused/resumed — observers show a "Paused" state
+    val resultRunId: String? = null     // The uploaded `runs` id, sent once after the run's upload succeeds
 )
 
 // Request body for inviting observers to a live session

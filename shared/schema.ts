@@ -41,6 +41,14 @@ export const users = pgTable("users", {
   distanceDecimalsEnabled: boolean("distance_decimals_enabled").default(false),
   userCode: text("user_code").unique(),
   shortUserId: text("short_user_id").unique(), // 8-digit numeric ID for friend sharing (e.g., "12345678")
+  // First-occurrence timestamps for the onboarding feature tour (OnboardingTourScreen) — null
+  // means the user has never done that step. Set once and preserved on repeat visits (a user
+  // can retake the tour from Profile later, but this tracks the FIRST start/completion so
+  // "who is and isn't using it" reads as adoption, not a running total). "Started" = the tour
+  // screen was actually reached (not just the onboarding button tapped); "completed" = the
+  // user reached the natural end (tapped "Get Started"), not Skip at any point.
+  onboardingTourStartedAt: timestamp("onboarding_tour_started_at"),
+  onboardingTourCompletedAt: timestamp("onboarding_tour_completed_at"),
   // In-Run AI Coaching feature preferences (all default to enabled)
   coachPaceEnabled: boolean("coach_pace_enabled").default(true),
   coachNavigationEnabled: boolean("coach_navigation_enabled").default(true),
@@ -595,6 +603,13 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   observerCount: integer("observer_count").default(0),  // Count of active distinct observers
   inviteCode: varchar("invite_code").unique(),  // Session-level 8-char invite code for runners to share
   lastSyncedAt: timestamp("last_synced_at").defaultNow(),
+  // Runner paused the run — observers show a "Paused" state instead of silently frozen metrics
+  // (runner phones stop syncing while paused, so without this the observer can't tell a pause
+  // from lost signal).
+  isPaused: boolean("is_paused").default(false),
+  // The `runs` row the finished session became, set by the runner's phone once its upload
+  // succeeds — lets a signed-in observer open the full run summary from the finished screen.
+  resultRunId: varchar("result_run_id"),
 });
 
 // Push Subscriptions table

@@ -468,17 +468,17 @@ fun MainScreen(
                     initialAiCoachEnabled = aiCoach,
                     initialSessionType = sessionType,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, _, _, latitude, longitude, aiCoach ->
+                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, latitude, longitude, aiCoach ->
                         // Guard against double-taps - only allow one navigation at a time
                         if (isNavigatingToRoute) return@MapMyRunSetupScreen
                         isNavigatingToRoute = true
-                        
+
                         // Clear any previous routes/error so route_generating starts fresh
                         // (without this, stale routes from a previous generation cause immediate
                         //  auto-navigation to route_selection with old results)
                         routeViewModel.clearRoutes()
                         routeViewModel.clearError()
-                        
+
                         // Store route generation params to RouteGenerationParamsHolder for later use
                         live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.setParams(
                             distance = distance,
@@ -488,7 +488,11 @@ fun MainScreen(
                             seconds = seconds,
                             latitude = latitude,
                             longitude = longitude,
-                            aiCoachEnabled = aiCoach
+                            aiCoachEnabled = aiCoach,
+                            liveTrackingEnabled = liveTrackingEnabled,
+                            liveTrackingObservers = liveTrackingObservers,
+                            isGroupRun = isGroupRun,
+                            groupRunParticipants = groupRunParticipants
                         )
                         
                         // Navigate to check_route_availability - it will handle the API check itself
@@ -619,7 +623,17 @@ fun MainScreen(
                         
                         // Store target time + distance so it persists through route generation → selection → run session
                         viewModel.setTargetTime(params.hasTime, params.hours, params.minutes, params.seconds, params.distance.toDouble())
-                        
+                        // Same for the social settings picked on the setup screen — RouteGenerationParamsHolder
+                        // is consumed/nulled right after this, so anything not copied onto this
+                        // parent-scoped ViewModel here would be silently dropped by route_selection.
+                        viewModel.setSocialSettings(
+                            liveTrackingEnabled = params.liveTrackingEnabled,
+                            liveTrackingObservers = params.liveTrackingObservers,
+                            isGroupRun = params.isGroupRun,
+                            groupRunParticipants = params.groupRunParticipants,
+                            aiCoachEnabled = params.aiCoachEnabled
+                        )
+
                         // Generate routes with GPS location
                         val targetTimeMinutes = if (params.hasTime) params.hours * 60 + params.minutes else null
                         
@@ -688,8 +702,16 @@ fun MainScreen(
                 val targetMinutes by viewModel.targetMinutes.collectAsState()
                 val targetSeconds by viewModel.targetSeconds.collectAsState()
                 val originalTargetDistanceKm by viewModel.originalTargetDistanceKm.collectAsState()
+                val liveTrackingEnabled by viewModel.liveTrackingEnabled.collectAsState()
+                val liveTrackingObservers by viewModel.liveTrackingObservers.collectAsState()
+                val isGroupRun by viewModel.isGroupRun.collectAsState()
+                val groupRunParticipants by viewModel.groupRunParticipants.collectAsState()
+                val socialAiCoachEnabled by viewModel.aiCoachEnabled.collectAsState()
                 var selectedRouteId by remember { mutableStateOf<String?>(null) }
-                var aiCoachEnabled by remember { mutableStateOf(false) }
+                // Seeded from the setup screen's AI Coach toggle (previously always started
+                // false here regardless of what was chosen on MapMyRunSetupScreen) — still
+                // freely re-toggleable on this screen via onAiCoachToggle below.
+                var aiCoachEnabled by remember { mutableStateOf(socialAiCoachEnabled) }
                 
                 // Shared by both the phone-start and watch-prepare CTAs below — the only
                 // difference is isWatchMode, which controls whether RunSessionScreen waits in
@@ -724,7 +746,14 @@ fun MainScreen(
                         targetMinutes = adjustedMinutes,
                         targetSeconds = adjustedSeconds,
                         route = route,
-                        isWatchMode = isWatchMode
+                        isWatchMode = isWatchMode,
+                        aiCoachEnabled = aiCoachEnabled,
+                        // Social settings picked on MapMyRunSetupScreen — previously dropped
+                        // entirely for routed runs (only "Start without route" carried these).
+                        liveTrackingEnabled = liveTrackingEnabled,
+                        liveTrackingObservers = liveTrackingObservers,
+                        isGroupRun = isGroupRun,
+                        groupRunParticipants = groupRunParticipants
                     )
                     RunConfigHolder.setConfig(config)
 
@@ -847,7 +876,8 @@ fun MainScreen(
                 ObserverRunSessionScreen(
                     sessionId = sessionId,
                     onNavigateBack = { navController.popBackStack() },
-                    isStandaloneObserver = false
+                    isStandaloneObserver = false,
+                    onViewRunSummary = { runId -> navController.navigate("run_summary/$runId") }
                 )
             }
 
@@ -1222,7 +1252,10 @@ fun MainScreen(
                                 planWeekNumber      = planCtx?.weekNumber,
                                 planTotalWeeks      = planCtx?.totalWeeks,
                                 // Watch mode: run screen waits for watch "start" command instead of auto-starting
-                                isWatchMode         = isWatchMode
+                                isWatchMode         = isWatchMode,
+                                // Live Tracking observers invited from WorkoutDetailScreen (planned workout start)
+                                liveTrackingEnabled     = WorkoutHolder.liveTrackingEnabled,
+                                liveTrackingObservers   = WorkoutHolder.liveTrackingObservers
                             )
                             RunConfigHolder.setConfig(config)
                             // Clear AFTER setting config so recomposition of this composable
@@ -1302,6 +1335,16 @@ fun MainScreen(
                 )
             }
             
+            // Group run results table — the detail screen's "View Results" navigated here but the
+            // route was never registered, so the button crashed.
+            composable("group_run_results/{groupRunId}") { backStackEntry ->
+                val groupRunId = backStackEntry.arguments?.getString("groupRunId") ?: return@composable
+                GroupRunResultsScreen(
+                    groupRunId = groupRunId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
             // ── Group Run Setup Screen ──────────────────────────────────────
             // Allow users to configure run settings before starting group run
             composable("group_run_setup/{groupRunId}") { backStackEntry ->
@@ -1311,7 +1354,7 @@ fun MainScreen(
                     isGroupRun = true,
                     groupRunId = groupRunId,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { _, _, _, _, _, _, _, _, _, _ ->
+                    onGenerateRoute = { _, _, _, _, _, _, _, _, _, _, _, _ ->
                         // Group runs don't support route generation - ignore this callback
                     },
                     onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, _, isWatchMode ->

@@ -40,17 +40,36 @@ export async function sendSupportEmail(opts: {
   subject: string;
   message: string;
   screenshots?: Array<{ filename: string; base64: string; mimeType: string }>;
+  // Set by the mobile apps' in-app "Get Support" form — lets support see who/what without
+  // asking. All optional; the public web contact form sends none of them.
+  userId?: string | null;
+  platform?: string | null;     // "android" | "ios" | "web"
+  appVersion?: string | null;
+  deviceInfo?: string | null;
 }): Promise<void> {
   const { client, fromEmail } = await getResendClient();
   const subjectLine = opts.subject?.trim() || "Support Request";
 
-  // Use the real notification inbox; fall back to noreply (visible in logs) if not set
-  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || fromEmail;
+  // Explicit support@ default. This used to fall back to fromEmail (noreply@airuncoach.live),
+  // so with SUPPORT_NOTIFICATION_EMAIL unset every support ticket went to an inbox nobody
+  // reads. Same fix sendAccountDeletionNotification below already had.
+  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || "support@airuncoach.live";
 
   const screenshotCount = opts.screenshots?.length ?? 0;
   const attachmentNote = screenshotCount > 0
     ? `<p style="margin: 16px 0 0; color: #94a3b8; font-size: 13px;">📎 ${screenshotCount} screenshot${screenshotCount > 1 ? "s" : ""} attached.</p>`
     : "";
+
+  const contextRows = [
+    opts.userId ? ["User ID", opts.userId] : null,
+    opts.platform ? ["Platform", opts.platform] : null,
+    opts.appVersion ? ["App version", opts.appVersion] : null,
+    opts.deviceInfo ? ["Device", opts.deviceInfo] : null,
+  ].filter((r): r is [string, string] => !!r);
+  const contextHtml = contextRows
+    .map(([k, v]) => `<tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">${k}</td><td style="padding: 8px 0; color: #ffffff;">${v}</td></tr>`)
+    .join("");
+  const contextText = contextRows.map(([k, v]) => `${k}: ${v}`).join("\n");
 
   const attachments = (opts.screenshots ?? []).map((s, i) => ({
     filename: s.filename || `screenshot-${i + 1}.png`,
@@ -74,6 +93,7 @@ export async function sendSupportEmail(opts: {
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
             <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px; width: 80px;">From</td><td style="padding: 8px 0; color: #ffffff;">${opts.name} &lt;${opts.email}&gt;</td></tr>
             <tr><td style="padding: 8px 0; color: #94a3b8; font-size: 13px;">Subject</td><td style="padding: 8px 0; color: #ffffff;">${subjectLine}</td></tr>
+            ${contextHtml}
           </table>
           <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #00D4FF;">
             <p style="margin: 0; color: #e2e8f0; line-height: 1.7; white-space: pre-wrap;">${opts.message}</p>
@@ -83,10 +103,27 @@ export async function sendSupportEmail(opts: {
         </div>
       </div>
     `,
-    text: `Support request from ${opts.name} <${opts.email}>\nSubject: ${subjectLine}\n\n${opts.message}${screenshotCount > 0 ? `\n\n[${screenshotCount} screenshot(s) attached]` : ""}`,
+    text: `Support request from ${opts.name} <${opts.email}>\nSubject: ${subjectLine}\n${contextText ? contextText + "\n" : ""}\n${opts.message}${screenshotCount > 0 ? `\n\n[${screenshotCount} screenshot(s) attached]` : ""}`,
   });
 
-  // Auto-reply to the user
+  // Auto-reply to the user. Non-fatal: the ticket has already reached support above, so a
+  // failure here (e.g. a typo'd address) must not turn into a 500 that tells the user
+  // their request failed when it didn't.
+  try {
+    await sendSupportAutoReply(client, fromEmail, opts.name, opts.email, opts.message);
+  } catch (err) {
+    console.warn(`[Support] Ticket delivered to ${notifyEmail} but auto-reply to ${opts.email} failed (non-fatal):`, err);
+  }
+}
+
+async function sendSupportAutoReply(
+  client: Resend,
+  fromEmail: string,
+  name: string,
+  email: string,
+  message: string,
+): Promise<void> {
+  const opts = { name, email, message };
   await client.emails.send({
     from: `AI Run Coach <${fromEmail}>`,
     to: opts.email,

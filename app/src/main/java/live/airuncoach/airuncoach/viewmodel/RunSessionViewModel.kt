@@ -284,13 +284,17 @@ class RunSessionViewModel @Inject constructor(
     }
 
     /** Fetch observer count from the live session endpoint.
-     *  Prefers viewerCount (active viewers who joined) over observers.size (invited). */
+     *  Uses the server's passive `observer_count` (who actually polled in the last 10 s). */
     private suspend fun fetchObserverCount() {
         val sessionId = _liveSessionId.value ?: return
         try {
             val session = apiService.getLiveSession(sessionId)
-            // Prefer viewerCount (users who called /join) over the invited observers list
-            val count = session.viewerCount
+            // observer_count is the only live number. viewerCount is a DB column that defaults
+            // to 0 and is never written (its /join endpoint doesn't exist), so preferring it
+            // meant the runner always saw "0 watching" — and because 0 is non-null the
+            // invited-list fallback never fired either.
+            val count = session.observerCount
+                ?: session.viewerCount?.takeIf { it > 0 }
                 ?: when (val obs = session.observers) {
                     is List<*> -> obs.size
                     else -> 0
@@ -624,6 +628,11 @@ class RunSessionViewModel @Inject constructor(
                     cfg.planWeekNumber?.let { w  -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
                     cfg.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
                 }
+                // Group run context — a watch-started run never goes through startRun() (the
+                // watch's "start" reaches the service directly), so this is the only chance to
+                // hand the service the group ID. Without it the upload had no groupRunId and the
+                // participant never appeared in the group results.
+                groupRunId?.let { grId -> putExtra(RunTrackingService.EXTRA_GROUP_RUN_ID, grId) }
                 // Legacy session-instructions JSON not passed (retired) — only the rich dynamic plan is used.
                 activeSessionCoachingPlan?.let { plan ->
                     try {
@@ -1825,6 +1834,13 @@ class RunSessionViewModel @Inject constructor(
                 }
                 val sessionId = createResponse.id
                 _liveSessionId.value = sessionId // Store so the run screen can show observer count
+                // Hand the ID to the service NOW, not only in startRun(): a "Prepare for Watch"
+                // run never goes through startRun() — the watch's "start" reaches the service's
+                // own onWatchCommand → startTracking() — so without this the session was never
+                // armed and observers stayed on "Waiting for X to start" for the whole run. Safe
+                // to set early: the service only syncs while isTracking, and startTracking()
+                // is what flips hasStarted=true.
+                RunTrackingService.activeLiveSessionId = sessionId
                 Log.d("RunSessionViewModel", "✅ Live session created: $sessionId")
 
                 // Start polling observer count now that the session exists
@@ -2241,6 +2257,19 @@ class RunSessionViewModel @Inject constructor(
         runConfig = null
         // Stop live observer polling if cancelled before run started
         stopObserverCountPolling()
+        // A cancelled run must end the live session too, otherwise invited observers sit on
+        // "Waiting for X to start" forever (the session was created at prepare time, before
+        // the run ever began). RunTrackingService.stopTracking() handles the normal-stop case.
+        _liveSessionId.value?.let { cancelledLiveId ->
+            viewModelScope.launch {
+                try {
+                    apiService.syncLiveSession(SyncLiveSessionRequest(sessionId = cancelledLiveId, isActive = false))
+                    Log.d("RunSessionViewModel", "Live session $cancelledLiveId ended for observers (run cancelled)")
+                } catch (e: Exception) {
+                    Log.w("RunSessionViewModel", "Failed to end cancelled live session (non-fatal): ${e.message}")
+                }
+            }
+        }
         _liveSessionId.value = null
         RunTrackingService.activeLiveSessionId = null
         // If the service was pre-started in standby (ACTION_PREPARE_FOR_WATCH) and the run has

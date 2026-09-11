@@ -110,6 +110,38 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastWatchGpsMs: Long = 0L
     // Throttle for live-session metric sync (don't hammer the server every GPS tick)
     private var lastLiveSessionSyncMs: Long = 0L
+    /** Km whose mid-point elite slot has already been used (or attempted) — see maybeFireMidKmEliteCoaching(). */
+    private var lastMidKmEliteKm: Int = -1
+
+    /**
+     * Elite-coaching variety guarantee for distance-only free runs (no target time, so
+     * checkPaceCoaching()'s on-pace substitution never runs). Fires in the MIDDLE of a km
+     * (350–650 m past the boundary) once ELITE_COACHING_SUBSTITUTION_INTERVAL_MS has passed
+     * without an elite cue — a slot the km split never uses, so this can't cost a split callout
+     * (previously it swapped the split's spoken callout, which broke the "splits always
+     * announced" rule). Once per km; goes through the same tick/global gates as everything else.
+     */
+    private fun maybeFireMidKmEliteCoaching() {
+        if (paceCoachingEnabled) return                       // time-goal runs use the on-pace slot
+        if (isCoachingPlanActive || isInFinalStretch()) return
+        if (hasCoachingFiredThisTick || !canFireCoaching()) return
+        val now = System.currentTimeMillis()
+        if ((now - lastEliteCoachingTime) < ELITE_COACHING_SUBSTITUTION_INTERVAL_MS) return
+        val distFromKm = totalDistance % 1000.0
+        if (distFromKm < 350.0 || distFromKm > 650.0) return
+        val km = (totalDistance / 1000.0).toInt()
+        if (km == lastMidKmEliteKm) return
+        lastMidKmEliteKm = km
+        val distKm = totalDistance / 1000.0
+        val elapsedMs = getActiveRunDuration()
+        val elapsedSec = elapsedMs / 1000.0
+        val avgSpeedKmh = if (elapsedSec > 0) (distKm / (elapsedSec / 3600.0)).toFloat() else 0f
+        val effectiveTargetKm = (targetDistance ?: inferredTargetDistance)?.let { it / 1000.0 }
+        maybeFireEliteCoaching(totalDistance, elapsedMs, avgSpeedKmh, determinePhase(distKm, effectiveTargetKm), forceBypassCooldown = true)
+    }
+
+    /** The live session a just-stopped run belonged to — see linkLiveSessionToResultRun(). */
+    private var endedLiveSessionId: String? = null
     // Throttle for the local crash-recovery snapshot (see RunCrashRecoveryStore)
     private var lastCrashSnapshotSaveMs: Long = 0L
 
@@ -200,7 +232,7 @@ class RunTrackingService : Service(), SensorEventListener {
     private var lastGlobalCoachingDistance: Double = 0.0   // Distance at which last coaching fired
     private val GLOBAL_COACHING_MIN_GAP_MS = 15_000L      // Minimum 15 seconds between ANY coaching audio
     private val GLOBAL_COACHING_MIN_GAP_M = 150.0         // Minimum 150m between ANY coaching audio
-    private val NAV_COACHING_MIN_GAP_MS = 8_000L          // Navigation gets shorter gap (safety-critical) but still prevents overlap
+    private val NAV_COACHING_MIN_GAP_MS = 3_000L          // Nav interrupts coaching audio and defers if blocked, so this only needs to prevent overlapping speech
     private val KM_SPLIT_EXCLUSION_ZONE_M = 200.0         // Suppress pace coaching within 200m of a km boundary
     
     // Run data
@@ -493,6 +525,13 @@ class RunTrackingService : Service(), SensorEventListener {
     private val ELITE_COACHING_COOLDOWN_MS = 45_000L // 45 second gap between elite coaching
     private var lastTechniqueCoachingTime: Long = 0
     private val TECHNIQUE_INTERVAL_MS = 300_000L // Technique coaching every ~5 minutes (reduced repetition)
+    // Elite coaching sits last in per-tick priority and shares its slot/cooldown with phase-change,
+    // 500m-milestone, HR, and cadence coaching — on sessions where those fire often it can be
+    // crowded out for the whole run (confirmed: a real 32-min free run got zero elite coaching).
+    // Rather than adding more coaching messages on top, checkPaceCoaching() periodically SWAPS one
+    // of its own routine pace-status updates for an elite-coaching moment once this much time has
+    // passed without one — same total message count, more variety.
+    private val ELITE_COACHING_SUBSTITUTION_INTERVAL_MS = 360_000L // At least one elite swap every 6 minutes
 
     // Technique coaching category rotation — ensures variety across 30+ technique areas
     // Each category is tracked so we never repeat the same one consecutively
@@ -633,20 +672,39 @@ class RunTrackingService : Service(), SensorEventListener {
     private var speedReadingCount: Int = 0
 
     // ==================== NAVIGATION ENGINE ====================
-    // Turn-by-turn navigation state for route-guided runs
+    // Turn-by-turn navigation state for route-guided runs — see the engine section below.
     private var navTurnInstructions: List<TurnInstruction> = emptyList()
     private var navPolylinePoints: List<com.google.android.gms.maps.model.LatLng> = emptyList()
+    private var navCumulativeMeters: DoubleArray = DoubleArray(0)      // metres along route at each polyline vertex
+    private var navInstructionRouteMeters: DoubleArray = DoubleArray(0) // each instruction's along-route position
+    private var navInstructionRouteIndex: IntArray = IntArray(0)
+    private var navRouteTotalMeters: Double = 0.0
     private var navCurrentInstructionIndex: Int = 0  // Index of the NEXT instruction to deliver
-    private var navLastAnnouncedIndex: Int = -1      // Prevents double-announcing same instruction
-    private var navLastWarningIndex: Int = -1         // Prevents double-warning same instruction
+    private var navLastAnnouncedIndex: Int = -1      // Prevents double "now" cue for the same instruction
+    private var navLastWarningIndex: Int = -1        // Prevents double warning for the same instruction
     private var navMissedWaypointCount: Int = 0
     private var navLastCheckTime: Long = 0
-    private val NAV_CHECK_INTERVAL_MS = 2_000L       // Check navigation every 2 seconds (was 3s)
-    private val NAV_WAYPOINT_REACHED_RADIUS_M = 45.0  // Within 45m = reached waypoint (was 35m — phone GPS is less precise than Garmin)
-    private val NAV_WARNING_RADIUS_M = 100.0           // Within 100m = announce upcoming turn (was 80m — earlier warning gives runner more time)
-    private val NAV_MISSED_WAYPOINT_RADIUS_M = 150.0   // Beyond 150m past waypoint = missed it (was 120m — more forgiving)
-    @Suppress("unused")
-    private val NAV_SKIP_DISTANCE_BEHIND_M = 60.0      // If user is 60m+ past the waypoint along the route, skip it
+    private var navProgressIndex: Int = 0            // polyline segment the runner was last projected onto
+    private var navProgressMeters: Double = 0.0      // metres along the route (monotonic)
+    private var navOffRoute: Boolean = false
+    private var navOffRouteStrikes: Int = 0
+    private var navReachedFixes: Int = 0             // consecutive fixes at the turn (needs 2)
+    private var navPendingCue: String? = null        // cue deferred by the post-coaching gap
+    private var navCompletionAnnounced: Boolean = false
+    private val NAV_CHECK_INTERVAL_MS = 2_000L
+    private val NAV_WAYPOINT_REACHED_RADIUS_M = 45.0 // radial "at the turn" fallback (phone GPS)
+    private val NAV_TURN_NOW_M = 30.0                // along-route distance for the "now" cue
+    private val NAV_WARNING_LEAD_SECONDS = 25.0      // warn this many seconds ahead at current pace…
+    private val NAV_WARNING_MIN_M = 70.0             // …but never closer than this
+    private val NAV_WARNING_MAX_M = 160.0            // …or further than this
+    private val NAV_SKIP_DISTANCE_BEHIND_M = 60.0    // instruction is "behind" once the runner is 60 m past it along the route
+    private val NAV_OFF_ROUTE_M = 50.0               // cross-track distance that counts as off-route
+    private val NAV_REJOIN_M = 30.0                  // …and that counts as back on it (hysteresis)
+    private val NAV_OFF_ROUTE_STRIKES = 3            // consecutive off-route checks before announcing (~6 s)
+    private val NAV_MAX_ACCURACY_M = 40f             // ignore fixes worse than this for nav
+    private val NAV_SEARCH_BACK_SEGMENTS = 5
+    private val NAV_SEARCH_AHEAD_SEGMENTS = 60
+    private val NAV_COMPLETION_M = 30.0
     
     // Weather and terrain
     private var weatherAtStart: WeatherData? = null
@@ -904,6 +962,20 @@ class RunTrackingService : Service(), SensorEventListener {
         private val _latestCoachingText = MutableStateFlow<String?>(null)
         val latestCoachingText: StateFlow<String?> = _latestCoachingText
 
+        /** Navigation state shared with the run screen's map HUD, so screen and voice agree on
+         *  where the runner is along the route and which turn is next. */
+        data class NavUiState(
+            val hasRoute: Boolean = false,
+            val nextInstructionIndex: Int = 0,
+            val nextInstruction: String? = null,
+            val distanceToNextTurnM: Double? = null,
+            val routeProgressIndex: Int = 0,
+            val routeProgressMeters: Double = 0.0,
+            val isOffRoute: Boolean = false
+        )
+        private val _navUiState = MutableStateFlow(NavUiState())
+        val navUiState: StateFlow<NavUiState> = _navUiState
+
         // Talk-to-Coach trigger — set to true when watch taps to request coach conversation.
         // Observed by RunSessionViewModel; reset to false after handled.
         private val _watchTalkToCoachRequest = MutableStateFlow(false)
@@ -960,7 +1032,15 @@ class RunTrackingService : Service(), SensorEventListener {
         stepDetectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
         heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
         Log.d("RunTrackingService", "Sensors available - StepCounter: ${stepCounterSensor != null}, StepDetector: ${stepDetectorSensor != null}, HeartRate: ${heartRateSensor != null}")
-        
+
+        // Every upload path (phone, watch-merged, companion) ends by setting uploadComplete, so
+        // this single collector is where the finished live session gets linked to its run.
+        serviceScope.launch {
+            _uploadComplete.collect { runId ->
+                if (!runId.isNullOrBlank()) linkLiveSessionToResultRun(runId)
+            }
+        }
+
         // Initialize session manager and coaching feature preferences
         sessionManager = SessionManager(this)
         coachingFeaturePrefs = live.airuncoach.airuncoach.data.CoachingFeaturePreferences(this)
@@ -1731,6 +1811,24 @@ class RunTrackingService : Service(), SensorEventListener {
         lastSplitTime = startTime
         lastWalk500mSplitTime = startTime
         lastSplitWatchElapsedSeconds = 0
+
+        // Flip observers from "Waiting for X to start" to the live map. Done here — in the one
+        // place every run passes through — rather than only in RunSessionViewModel.startRun(),
+        // because a watch-started ("Prepare for Watch") run never calls startRun(): the watch's
+        // "start" arrives via onWatchCommand → here. Idempotent, so the VM's own hasStarted
+        // sync on the phone-start path doubling up is harmless.
+        activeLiveSessionId?.takeIf { it.isNotBlank() }?.let { liveId ->
+            serviceScope.launch {
+                try {
+                    apiService.syncLiveSession(
+                        live.airuncoach.airuncoach.network.SyncLiveSessionRequest(sessionId = liveId, hasStarted = true)
+                    )
+                    Log.d("RunTrackingService", "Live session $liveId marked started for observers")
+                } catch (e: Exception) {
+                    Log.w("RunTrackingService", "Failed to mark live session started (non-fatal): ${e.message}")
+                }
+            }
+        }
         totalPausedMs = 0      // Reset pause tracking for new run
         pauseStartTime = 0
         isFinalizingStop = false  // Re-arm stopTracking() for this new run
@@ -1833,7 +1931,12 @@ class RunTrackingService : Service(), SensorEventListener {
         baselineCadence = 0
         cadenceSamplesForBaseline = 0
 
-        lastEliteCoachingTime = 0
+        // Seeded with the start time, not 0: the DIVERSIFY substitution fires once
+        // ELITE_COACHING_SUBSTITUTION_INTERVAL_MS has passed since the last elite cue, so with 0
+        // here the very first km split / on-pace update of EVERY run was swapped for a technique
+        // cue instead of the runner hearing their first split.
+        lastEliteCoachingTime = System.currentTimeMillis()
+        lastMidKmEliteKm = -1
         lastTechniqueCoachingTime = 0
         lastGlobalCoachingTime = 0
         lastGlobalCoachingDistance = 0.0
@@ -2078,11 +2181,28 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     // ==================== NAVIGATION ENGINE ====================
+    //
+    // Progress is measured ALONG THE ROUTE, not by radial distance to the next waypoint.
+    // Every check projects the runner onto the nearest polyline segment (cross-track distance +
+    // metres along the route) and:
+    //   • advances past any instruction whose route position is behind the runner — so cutting
+    //     a corner or running the far pavement can never leave the coach stuck on a turn behind
+    //     you (the previous engine only skipped a turn once you were >150 m past it AND moving
+    //     away, or 2× closer to the next one — on a suburban grid that rarely triggered);
+    //   • warns at a pace-scaled distance (a 4:00/km runner covers 100 m in ~24 s, most of
+    //     which the LLM round-trip used to eat), then gives a short device-TTS "now" cue at the
+    //     turn with no network round-trip;
+    //   • detects off-route by cross-track distance to the nearest SEGMENT (not vertex), announces
+    //     it once, mutes turn cues while off, and re-syncs on rejoin;
+    //   • defers cues blocked by the post-coaching gap instead of dropping them;
+    //   • ignores fixes worse than NAV_MAX_ACCURACY_M rather than letting a 40 m jump fake a turn.
+    // The map HUD reads the same state (navUiState) so screen and voice agree.
 
     /**
      * Load route navigation data from the static holder.
      * Called once when tracking starts. If a route is available, sets up the
-     * turn instruction list and decodes the polyline for proximity calculations.
+     * turn instruction list, decodes the polyline and precomputes each instruction's
+     * along-route position.
      */
     private fun loadNavigationData() {
         val navData = NavigationRouteHolder.consume()
@@ -2099,115 +2219,241 @@ class RunTrackingService : Service(), SensorEventListener {
             navLastAnnouncedIndex = -1
             navLastWarningIndex = -1
             navMissedWaypointCount = 0
-            Log.d("Navigation", "Loaded ${navTurnInstructions.size} turn instructions, ${navPolylinePoints.size} polyline points")
+            navProgressIndex = 0
+            navProgressMeters = 0.0
+            navOffRoute = false
+            navOffRouteStrikes = 0
+            navReachedFixes = 0
+            navPendingCue = null
+            navCompletionAnnounced = false
+            buildNavRouteGeometry()
+            Log.d("Navigation", "Loaded ${navTurnInstructions.size} turn instructions, ${navPolylinePoints.size} polyline points, route ${navRouteTotalMeters.toInt()}m")
             navTurnInstructions.forEachIndexed { i, inst ->
-                Log.d("Navigation", "  [$i] ${inst.instruction} @ (${inst.latitude}, ${inst.longitude}) dist=${inst.distance}km")
+                Log.d("Navigation", "  [$i] ${inst.instruction} @ (${inst.latitude}, ${inst.longitude}) route=${navInstructionRouteMeters.getOrNull(i)?.toInt()}m")
             }
+            publishNavUiState()
         } else {
             Log.d("Navigation", "No navigation data available")
         }
     }
 
+    /** Cumulative metres at each polyline vertex + each instruction's along-route position. */
+    private fun buildNavRouteGeometry() {
+        val pts = navPolylinePoints
+        navCumulativeMeters = DoubleArray(pts.size)
+        for (i in 1 until pts.size) {
+            navCumulativeMeters[i] = navCumulativeMeters[i - 1] + SphericalUtil.computeDistanceBetween(pts[i - 1], pts[i])
+        }
+        navRouteTotalMeters = navCumulativeMeters.lastOrNull() ?: 0.0
+        navInstructionRouteMeters = DoubleArray(navTurnInstructions.size)
+        navInstructionRouteIndex = IntArray(navTurnInstructions.size)
+        if (pts.isEmpty()) {
+            // No polyline: fall back to the instruction's own cumulative km field.
+            navTurnInstructions.forEachIndexed { i, inst -> navInstructionRouteMeters[i] = inst.distance * 1000.0 }
+            return
+        }
+        // Instructions come from polyline vertices server-side, so the nearest vertex is exact;
+        // search forward from the previous instruction so a loop that revisits a street resolves
+        // to the correct (later) pass.
+        var searchFrom = 0
+        navTurnInstructions.forEachIndexed { i, inst ->
+            val p = com.google.android.gms.maps.model.LatLng(inst.latitude, inst.longitude)
+            var bestIdx = searchFrom
+            var bestDist = Double.MAX_VALUE
+            for (j in searchFrom until pts.size) {
+                val d = SphericalUtil.computeDistanceBetween(p, pts[j])
+                if (d < bestDist) { bestDist = d; bestIdx = j }
+            }
+            navInstructionRouteIndex[i] = bestIdx
+            navInstructionRouteMeters[i] = navCumulativeMeters[bestIdx]
+            searchFrom = bestIdx
+        }
+    }
+
+    /** Result of projecting the runner onto the route polyline. */
+    private data class NavProjection(val segmentIndex: Int, val crossTrackM: Double, val routeMeters: Double)
+
     /**
-     * Core navigation check — called on every location update.
-     * Handles:
-     *  1. Upcoming turn warnings (80m ahead)
-     *  2. Waypoint reached confirmation (35m)
-     *  3. Missed waypoint detection & auto-skip
+     * Nearest-segment projection. Searches a window ahead of the current progress first (so a
+     * loop that passes the same spot twice resolves to the pass the runner is actually on), and
+     * only falls back to a whole-route search when the windowed result is clearly off-route.
      */
-    private fun checkNavigationProgress(currentLat: Double, currentLng: Double) {
+    private fun projectOntoRoute(pos: com.google.android.gms.maps.model.LatLng): NavProjection? {
+        val pts = navPolylinePoints
+        if (pts.size < 2) return null
+        fun search(from: Int, to: Int): NavProjection {
+            var best = NavProjection(from, Double.MAX_VALUE, 0.0)
+            for (i in from until minOf(to, pts.size - 1)) {
+                val a = pts[i]; val b = pts[i + 1]
+                val d = PolyUtil.distanceToLine(pos, a, b)
+                if (d < best.crossTrackM) {
+                    // Fraction along the segment via an equirectangular projection (segments are short).
+                    val latRad = Math.toRadians(a.latitude)
+                    val ax = 0.0; val ay = 0.0
+                    val bx = Math.toRadians(b.longitude - a.longitude) * Math.cos(latRad)
+                    val by = Math.toRadians(b.latitude - a.latitude)
+                    val px = Math.toRadians(pos.longitude - a.longitude) * Math.cos(latRad)
+                    val py = Math.toRadians(pos.latitude - a.latitude)
+                    val segLen2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay)
+                    val t = if (segLen2 > 0) (((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / segLen2).coerceIn(0.0, 1.0) else 0.0
+                    val segMeters = navCumulativeMeters[i + 1] - navCumulativeMeters[i]
+                    best = NavProjection(i, d, navCumulativeMeters[i] + t * segMeters)
+                }
+            }
+            return best
+        }
+        val windowed = search(maxOf(0, navProgressIndex - NAV_SEARCH_BACK_SEGMENTS), navProgressIndex + NAV_SEARCH_AHEAD_SEGMENTS)
+        if (windowed.crossTrackM <= NAV_OFF_ROUTE_M) return windowed
+        // Clearly off the expected stretch — maybe a shortcut that rejoined further along, or a
+        // genuine wander. Only accept a global match that is AHEAD of current progress (never
+        // rewind the runner onto an earlier lap) and genuinely on the line.
+        val global = search(0, pts.size - 1)
+        return if (global.crossTrackM <= NAV_REJOIN_M && global.routeMeters >= navProgressMeters - NAV_SKIP_DISTANCE_BEHIND_M) global else windowed
+    }
+
+    private fun currentSpeedMpsForNav(): Double {
+        val s = routePoints.lastOrNull()?.speed
+        if (s != null && s > 0.5f) return s.toDouble()
+        val paceSec = parsePaceToSeconds(_currentRunSession.value?.averagePace ?: "")
+        return if (paceSec > 0) 1000.0 / paceSec else 2.8 // ~6:00/km default
+    }
+
+    /**
+     * Core navigation check — called on every location update (including ones rejected for
+     * distance tracking). Runs at most every NAV_CHECK_INTERVAL_MS.
+     */
+    private fun checkNavigationProgress(currentLat: Double, currentLng: Double, accuracyM: Float) {
         if (!coachingFeaturePrefs.routeNavigationEnabled) return
         if (navTurnInstructions.isEmpty()) return
-        if (navCurrentInstructionIndex >= navTurnInstructions.size) return
 
         val now = System.currentTimeMillis()
         if (now - navLastCheckTime < NAV_CHECK_INTERVAL_MS) return
         navLastCheckTime = now
 
+        // A pending cue that was blocked by the post-coaching gap last time — say it now if we can.
+        navPendingCue?.let { cue ->
+            if (!isMuted && canFireCoaching(isNavigation = true)) {
+                navPendingCue = null
+                announceNavigationNow(cue)
+            }
+        }
+
+        // Noisy fix: don't let a 40 m jump fake a turn or an off-route. Skip, don't stop.
+        if (accuracyM > NAV_MAX_ACCURACY_M) {
+            Log.d("Navigation", "Skipping nav check — accuracy ${accuracyM.toInt()}m")
+            return
+        }
+
         val currentPos = com.google.android.gms.maps.model.LatLng(currentLat, currentLng)
+        val projection = projectOntoRoute(currentPos)
+
+        if (projection != null) {
+            handleOffRouteState(projection)
+            if (!navOffRoute) {
+                navProgressIndex = projection.segmentIndex
+                navProgressMeters = maxOf(navProgressMeters, projection.routeMeters)
+            }
+        }
+
+        if (navCurrentInstructionIndex >= navTurnInstructions.size) {
+            checkRouteCompletion()
+            publishNavUiState()
+            return
+        }
+        if (navOffRoute) { publishNavUiState(); return }
+
+        // ── Advance past anything the runner is already beyond (along the route) ──
+        var skipped = 0
+        while (navCurrentInstructionIndex < navTurnInstructions.size &&
+               navInstructionRouteMeters[navCurrentInstructionIndex] < navProgressMeters - NAV_SKIP_DISTANCE_BEHIND_M) {
+            if (navLastAnnouncedIndex != navCurrentInstructionIndex) { navMissedWaypointCount++; skipped++ }
+            advanceToNextInstruction(if (navLastAnnouncedIndex == navCurrentInstructionIndex) "passed" else "missed")
+        }
+        if (navCurrentInstructionIndex >= navTurnInstructions.size) { publishNavUiState(); return }
         val nextInstruction = navTurnInstructions[navCurrentInstructionIndex]
+        if (skipped > 0) {
+            // Re-orient the runner on the instruction that now applies.
+            val ahead = (navInstructionRouteMeters[navCurrentInstructionIndex] - navProgressMeters).toInt().coerceAtLeast(0)
+            announceNavigationNow("Next: in about $ahead metres, ${nextInstruction.instruction}")
+            navLastWarningIndex = navCurrentInstructionIndex
+            publishNavUiState()
+            return
+        }
+
+        val alongToTurn = navInstructionRouteMeters[navCurrentInstructionIndex] - navProgressMeters
         val waypointPos = com.google.android.gms.maps.model.LatLng(nextInstruction.latitude, nextInstruction.longitude)
-        val distanceToWaypoint = SphericalUtil.computeDistanceBetween(currentPos, waypointPos)
+        val radialToTurn = SphericalUtil.computeDistanceBetween(currentPos, waypointPos)
+        val distanceToTurn = if (projection != null) alongToTurn else radialToTurn
+        val speed = currentSpeedMpsForNav()
+        val warnDistance = (speed * NAV_WARNING_LEAD_SECONDS).coerceIn(NAV_WARNING_MIN_M, NAV_WARNING_MAX_M)
 
-        Log.d("Navigation", "Check: idx=$navCurrentInstructionIndex, dist=${distanceToWaypoint.toInt()}m to '${nextInstruction.instruction}'")
+        Log.d("Navigation", "Check: idx=$navCurrentInstructionIndex along=${alongToTurn.toInt()}m radial=${radialToTurn.toInt()}m xtrack=${projection?.crossTrackM?.toInt()}m warnAt=${warnDistance.toInt()}m '${nextInstruction.instruction}'")
 
-        when {
-            // CASE 1: Reached the waypoint
-            distanceToWaypoint <= NAV_WAYPOINT_REACHED_RADIUS_M -> {
-                if (navLastAnnouncedIndex != navCurrentInstructionIndex) {
-                    announceNavigation(nextInstruction, isReached = true)
-                    navLastAnnouncedIndex = navCurrentInstructionIndex
+        // ── "Now" cue: at the turn. Two consecutive in-radius fixes so one jump can't trigger it. ──
+        val atTurn = distanceToTurn <= NAV_TURN_NOW_M || radialToTurn <= NAV_WAYPOINT_REACHED_RADIUS_M
+        if (atTurn) navReachedFixes++ else navReachedFixes = 0
+        if (navReachedFixes >= 2 || (atTurn && projection != null && alongToTurn <= 0.0)) {
+            if (navLastAnnouncedIndex != navCurrentInstructionIndex) {
+                navLastAnnouncedIndex = navCurrentInstructionIndex
+                announceNavigationNow(nextInstruction.instruction)
+            }
+            navReachedFixes = 0
+            advanceToNextInstruction("reached")
+            publishNavUiState()
+            return
+        }
+
+        // ── Advance warning: pace-scaled lead, coach-voiced via the LLM (it has time here). ──
+        if (distanceToTurn <= warnDistance && navLastWarningIndex != navCurrentInstructionIndex) {
+            navLastWarningIndex = navCurrentInstructionIndex
+            val rounded = ((distanceToTurn / 10.0).toInt() * 10).coerceAtLeast(10)
+            val warningText = "In $rounded metres, ${nextInstruction.instruction}"
+            Log.d("Navigation", "WARNING: $warningText")
+            announceNavigationText(warningText)
+        }
+        publishNavUiState()
+    }
+
+    /** Cross-track → off-route state machine. 3 consecutive bad fixes to trip, hysteresis to clear. */
+    private fun handleOffRouteState(projection: NavProjection) {
+        if (!navOffRoute) {
+            if (projection.crossTrackM > NAV_OFF_ROUTE_M) {
+                navOffRouteStrikes++
+                if (navOffRouteStrikes >= NAV_OFF_ROUTE_STRIKES) {
+                    navOffRoute = true
+                    navOffRouteStrikes = 0
+                    Log.d("Navigation", "OFF ROUTE (${projection.crossTrackM.toInt()}m from route)")
+                    announceNavigationNow("You're off the route. Head back towards it and I'll pick up the directions.")
                 }
-                advanceToNextInstruction("reached")
+            } else {
+                navOffRouteStrikes = 0
             }
-
-            // CASE 2: Approaching the waypoint — give advance warning
-            distanceToWaypoint <= NAV_WARNING_RADIUS_M -> {
-                if (navLastWarningIndex != navCurrentInstructionIndex) {
-                    navLastWarningIndex = navCurrentInstructionIndex
-                    val distInt = distanceToWaypoint.toInt()
-                    val warningText = "In ${distInt} metres, ${nextInstruction.instruction}"
-                    Log.d("Navigation", "WARNING: $warningText")
-                    announceNavigationText(warningText)
-                }
+        } else if (projection.crossTrackM <= NAV_REJOIN_M) {
+            navOffRoute = false
+            navOffRouteStrikes = 0
+            navProgressIndex = projection.segmentIndex
+            navProgressMeters = maxOf(navProgressMeters, projection.routeMeters)
+            // Skip anything the detour bypassed, then re-orient.
+            while (navCurrentInstructionIndex < navTurnInstructions.size &&
+                   navInstructionRouteMeters[navCurrentInstructionIndex] < navProgressMeters - NAV_SKIP_DISTANCE_BEHIND_M) {
+                advanceToNextInstruction("bypassed while off route")
             }
-
-            // CASE 3: Missed the waypoint — user has gone past it
-            else -> {
-                checkForMissedWaypoint(currentPos, waypointPos, distanceToWaypoint)
-            }
+            val next = navTurnInstructions.getOrNull(navCurrentInstructionIndex)
+            val text = if (next != null) {
+                val ahead = (navInstructionRouteMeters[navCurrentInstructionIndex] - navProgressMeters).toInt().coerceAtLeast(0)
+                navLastWarningIndex = navCurrentInstructionIndex
+                "Back on route. Next: in about $ahead metres, ${next.instruction}"
+            } else "Back on route."
+            Log.d("Navigation", "REJOINED route at ${navProgressMeters.toInt()}m")
+            announceNavigationNow(text)
         }
     }
 
-    /**
-     * Detect if the runner has passed a waypoint without reaching it.
-     * Uses two heuristics:
-     *  A) Runner is past the waypoint along the polyline direction
-     *  B) Runner is getting farther from the waypoint after having been closer
-     */
-    private var navPreviousDistanceToWaypoint: Double = Double.MAX_VALUE
-
-    @Suppress("UNUSED_PARAMETER")
-    private fun checkForMissedWaypoint(
-        currentPos: com.google.android.gms.maps.model.LatLng,
-        waypointPos: com.google.android.gms.maps.model.LatLng,
-        distanceToWaypoint: Double
-    ) {
-        // Heuristic: if we had a closer reading previously and now we're moving away AND beyond skip distance
-        val wasCloser = navPreviousDistanceToWaypoint < distanceToWaypoint
-        val isMovingAway = wasCloser && (distanceToWaypoint - navPreviousDistanceToWaypoint) > 5.0 // 5m hysteresis
-        val isBeyondSkipDistance = distanceToWaypoint > NAV_MISSED_WAYPOINT_RADIUS_M
-
-        // Also check: if there's a NEXT instruction, are we closer to that one?
-        // BUT only skip if we're already well past the current waypoint (beyond warning radius)
-        // to prevent cascade-skipping closely spaced waypoints
-        val closerToNextInstruction = if (navCurrentInstructionIndex + 1 < navTurnInstructions.size
-            && distanceToWaypoint > NAV_WARNING_RADIUS_M) { // Only consider skip if we're beyond the 80m warning zone
-            val nextNext = navTurnInstructions[navCurrentInstructionIndex + 1]
-            val nextNextPos = com.google.android.gms.maps.model.LatLng(nextNext.latitude, nextNext.longitude)
-            val distToNext = SphericalUtil.computeDistanceBetween(currentPos, nextNextPos)
-            distToNext < distanceToWaypoint * 0.5 // Must be significantly closer (50%), not just marginally
-        } else false
-
-        navPreviousDistanceToWaypoint = distanceToWaypoint
-
-        if ((isMovingAway && isBeyondSkipDistance) || closerToNextInstruction) {
-            Log.d("Navigation", "MISSED waypoint $navCurrentInstructionIndex (dist=${distanceToWaypoint.toInt()}m, " +
-                    "movingAway=$isMovingAway, closerToNext=$closerToNextInstruction)")
-            navMissedWaypointCount++
-            
-            // Skip to next instruction
-            advanceToNextInstruction("missed")
-            
-            // Tell the runner about the next instruction instead
-            if (navCurrentInstructionIndex < navTurnInstructions.size) {
-                val nextInst = navTurnInstructions[navCurrentInstructionIndex]
-                val skipText = "Recalculating. Next: ${nextInst.instruction}"
-                Log.d("Navigation", "SKIP ANNOUNCE: $skipText")
-                announceNavigationText(skipText)
-            } else {
-                announceNavigationText("Route complete. Keep going to the finish!")
-            }
+    private fun checkRouteCompletion() {
+        if (navCompletionAnnounced) return
+        if (navRouteTotalMeters > 0 && navProgressMeters >= navRouteTotalMeters - NAV_COMPLETION_M) {
+            navCompletionAnnounced = true
+            announceNavigationNow("That's the whole route. Keep going to the finish!")
         }
     }
 
@@ -2217,49 +2463,64 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun advanceToNextInstruction(reason: String) {
         val prev = navCurrentInstructionIndex
         navCurrentInstructionIndex++
-        navPreviousDistanceToWaypoint = Double.MAX_VALUE // Reset for new waypoint
-        
+        navReachedFixes = 0
         if (navCurrentInstructionIndex < navTurnInstructions.size) {
             Log.d("Navigation", "Advanced: $prev -> $navCurrentInstructionIndex ($reason). " +
                     "Next: '${navTurnInstructions[navCurrentInstructionIndex].instruction}'")
         } else {
             Log.d("Navigation", "All ${navTurnInstructions.size} instructions completed ($reason)")
-            announceNavigationText("You've completed all the turns. Head to the finish!")
+            if (!navCompletionAnnounced) {
+                navCompletionAnnounced = true
+                announceNavigationNow("You've completed all the turns. Head to the finish!")
+            }
         }
     }
 
     /**
-     * Announce a navigation instruction via the AI coach (LLM-generated voice).
-     * Falls back to device TTS if the LLM request fails or times out.
+     * Time-critical cue (at the turn, off-route, rejoin): device TTS through the PRIORITY queue,
+     * no LLM round-trip. Deferred — not dropped — if the post-coaching gap blocks it.
      */
-    @Suppress("SameParameterValue")
-    private fun announceNavigation(instruction: TurnInstruction, isReached: Boolean) {
-        val text = if (isReached) {
-            instruction.instruction
-        } else {
-            "Upcoming: ${instruction.instruction}"
+    private fun announceNavigationNow(text: String) {
+        if (isMuted) { Log.d("Navigation", "Muted — skipping: $text"); return }
+        if (!canFireCoaching(isNavigation = true)) {
+            Log.d("Navigation", "Deferred (too soon after other coaching): $text")
+            navPendingCue = text
+            return
         }
-        Log.d("Navigation", "ANNOUNCE via LLM: $text")
-        
-        // Calculate distance to turn for context
-        val distanceToTurn = if (!isReached) {
-            val currentPos = com.google.android.gms.maps.model.LatLng(
-                routePoints.lastOrNull()?.latitude ?: 0.0,
-                routePoints.lastOrNull()?.longitude ?: 0.0
-            )
-            val turnPos = com.google.android.gms.maps.model.LatLng(instruction.latitude, instruction.longitude)
-            SphericalUtil.computeDistanceBetween(currentPos, turnPos).toInt()
-        } else null
-        
-        requestNavigationCoachingFromLLM(text, distanceToTurn)
+        recordCoachingFired()
+        _latestCoachingText.value = text
+        coachingHistory.add(AiCoachingNote(time = getActiveRunDuration(), message = "Nav: $text"))
+        CoachingAudioQueue.enqueueNavigation(
+            context = this@RunTrackingService,
+            base64Audio = null,
+            format = null,
+            fallbackText = text,
+            accent = currentUser?.coachAccent,
+            gender = currentUser?.coachGender,
+            onComplete = { _latestCoachingText.value = null }
+        )
     }
 
     /**
-     * Announce navigation text (for skips, recalculations, completions) via LLM coach voice.
+     * Announce navigation text (advance warnings) via LLM coach voice. Deferred if gated.
      */
     private fun announceNavigationText(text: String) {
         Log.d("Navigation", "ANNOUNCE text via LLM: $text")
         requestNavigationCoachingFromLLM(text, null)
+    }
+
+    private fun publishNavUiState() {
+        val idx = navCurrentInstructionIndex
+        val next = navTurnInstructions.getOrNull(idx)
+        _navUiState.value = NavUiState(
+            hasRoute = navTurnInstructions.isNotEmpty(),
+            nextInstructionIndex = idx,
+            nextInstruction = next?.instruction,
+            distanceToNextTurnM = next?.let { (navInstructionRouteMeters.getOrElse(idx) { 0.0 } - navProgressMeters).coerceAtLeast(0.0) },
+            routeProgressIndex = navProgressIndex,
+            routeProgressMeters = navProgressMeters,
+            isOffRoute = navOffRoute
+        )
     }
 
     /**
@@ -2273,11 +2534,14 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
         if (!canFireCoaching(isNavigation = true)) {
-            Log.d("Navigation", "Suppressed (too soon after other coaching): $navigationText")
+            // Deferred, not dropped — a km split a few seconds before a turn used to silently
+            // kill the turn call. The next nav check replays it (device TTS, no LLM).
+            Log.d("Navigation", "Deferred (too soon after other coaching): $navigationText")
+            navPendingCue = navigationText
             return
         }
         recordCoachingFired()
-        
+
         // Show text in UI immediately while we wait for audio
         _latestCoachingText.value = navigationText
         
@@ -2531,7 +2795,32 @@ class RunTrackingService : Service(), SensorEventListener {
             // On pace in mid-run: only trigger every 1.5km to be encouraging without nagging
             if (distanceSinceLastCoaching < 1500.0 && lastPaceCoachingDistance > 0) return
         }
-        
+
+        // ── DIVERSIFY: swap this routine pace-status update for elite coaching ──
+        // Generic "you're X seconds ahead/behind target pace, projected finish Y" updates are the
+        // most repetitive content in a free run (confirmed on a real session: 8 of 17 messages
+        // followed this exact template, zero technique/breathing/mental variety like "smile for
+        // the next 2 minutes"). Only substitute when on pace — the least urgent, most repetitive
+        // case; genuine "too fast/slow" pace feedback still fires as normal. This consumes the
+        // SAME slot as a routine pace update (same total message count) instead of adding a new one.
+        if (paceZone == "on_pace" && (now - lastEliteCoachingTime) >= ELITE_COACHING_SUBSTITUTION_INTERVAL_MS) {
+            val avgSpeedKmh = if (elapsedSeconds > 0) (distKm / (elapsedSeconds / 3600.0)).toFloat() else 0f
+            val swapped = maybeFireEliteCoaching(
+                totalDistance,
+                elapsedMs,
+                avgSpeedKmh,
+                determinePhase(distKm, tDist / 1000.0),
+                forceBypassCooldown = true
+            )
+            // Only give up this pace-update slot if the swap actually fired; otherwise (elite
+            // coaching disabled, final stretch, etc.) fall through to the normal pace update.
+            if (swapped) {
+                lastPaceCoachingDistance = totalDistance
+                lastPaceCoachingTime = now
+                return
+            }
+        }
+
         // Trigger the pace coaching API call
         triggerPaceCoaching(
             paceDeviation = paceDeviation,
@@ -3602,7 +3891,7 @@ class RunTrackingService : Service(), SensorEventListener {
             // distance accuracy. Previously this was inside the acceptance block, so rejected points
             // caused navigation to silently stop mid-run.
             if (hasRoute) {
-                checkNavigationProgress(location.latitude, location.longitude)
+                checkNavigationProgress(location.latitude, location.longitude, location.accuracy)
             }
         } else {
             routePoints.add(newPoint)
@@ -3725,6 +4014,8 @@ class RunTrackingService : Service(), SensorEventListener {
         }
 
         // ── Retry the oldest pending split from a previous tick where cooldown blocked it ──
+        maybeFireMidKmEliteCoaching()
+
         val pending = pendingKmSplitCoachingQueue.firstOrNull()
         if (pending != null && !hasCoachingFiredThisTick && canFireCoaching() && !isInFinalStretch()) {
             Log.d("RunTrackingService", "Retrying pending km split coaching at ${pending.km}km (${pendingKmSplitCoachingQueue.size - 1} more queued)")
@@ -3792,6 +4083,19 @@ class RunTrackingService : Service(), SensorEventListener {
             val hasReachedTarget = targetDistance != null && totalDistance >= (targetDistance!! * 0.99) // 1% tolerance for GPS precision
             if (currentKm % interval == 0 && !isInFinalStretch() && !hasReachedTarget) {
                 if (!hasCoachingFiredThisTick && canFireCoaching()) {
+                    // ── DIVERSIFY (distance-only free runs) ──
+                    // checkPaceCoaching()'s on-pace substitution only runs once a target TIME is
+                    // set (paceCoachingEnabled) — a free run with only a distance goal never
+                    // reaches that path, so it would otherwise never get elite coaching (technique/
+                    // milestone/positive-reinforcement/elevation — target ETA still correctly
+                    // excludes itself when there's no target time). Swap this km split's spoken
+                    // coaching for an elite-coaching moment instead once starved, so distance-only
+                    // free runs get the same variety guarantee as time-goal runs. The split itself
+                    // is still recorded above (kmSplits.add) — only the verbal callout is swapped.
+                    // Km splits are non-negotiable: they are ALWAYS announced on the user's
+                    // configured interval. The elite-coaching "DIVERSIFY" swap that used to
+                    // replace this callout on distance-only runs now lives in
+                    // maybeFireMidKmEliteCoaching() (a mid-km slot) so it never costs a split.
                     Log.d("RunTrackingService", "Triggering split coaching at ${currentKm}km (interval: every ${interval}km)")
                     hasCoachingFiredThisTick = true
                     recordCoachingFired()
@@ -3973,7 +4277,13 @@ class RunTrackingService : Service(), SensorEventListener {
         // In the last 500m, ONLY elite coaching fires (handles final_500m / final_100m motivation).
         // All analysis, summaries, HR, cadence, pace coaching, km splits are suppressed.
         val inFinalStretch = isInFinalStretch()
-        
+
+        // Elite coaching (technique/milestone/pace-trend/positive-reinforcement/ETA/elevation) is
+        // eligible on any session that isn't a structured interval session — see checkPaceCoaching()
+        // for where routine pace-status updates get periodically swapped for elite content instead
+        // of adding extra messages on top.
+        val eliteCoachingEligible = !isCoachingPlanActive || !isIntervalTypeSession
+
         if (!inFinalStretch) {
             // ── GENERIC PROMPTS GATE ──
             // Interval sessions (Tier 1): suppress all generic free-run prompts. The AI session
@@ -4024,7 +4334,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // are non-conflicting with the session's milestone triggers.
         //
         // Free runs: Fully active — all elite coaching categories fire.
-        if (!hasCoachingFiredThisTick && canFireCoaching() && (!isCoachingPlanActive || !isIntervalTypeSession)) {
+        if (!hasCoachingFiredThisTick && canFireCoaching() && eliteCoachingEligible) {
             maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
         }
         
@@ -4537,6 +4847,42 @@ class RunTrackingService : Service(), SensorEventListener {
         updateNotification()
         Log.d("RunTrackingService", "Paused at ${pauseStartTime}ms, totalPausedMs so far: ${totalPausedMs}")
         announcePauseResumeAudio(paused = true)
+        syncLivePausedState(paused = true)
+    }
+
+    /** Tells observers the runner paused/resumed. The periodic live sync is gated on
+     *  isTracking, so during a pause nothing else is sent — without this flag the observer
+     *  screen just froze, indistinguishable from lost signal. */
+    private fun syncLivePausedState(paused: Boolean) {
+        val liveId = activeLiveSessionId?.takeIf { it.isNotBlank() } ?: return
+        serviceScope.launch {
+            try {
+                apiService.syncLiveSession(
+                    live.airuncoach.airuncoach.network.SyncLiveSessionRequest(sessionId = liveId, isPaused = paused)
+                )
+                Log.d("RunTrackingService", "Live session $liveId paused=$paused synced for observers")
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Live session pause-state sync failed (non-fatal): ${e.message}")
+            }
+        }
+    }
+
+    /** Links the finished live session to the `runs` row it became, so a signed-in observer
+     *  can open the full run summary from the finished screen. Called via the uploadComplete
+     *  collector in onCreate so every upload path (phone, watch-merged, companion) is covered. */
+    private fun linkLiveSessionToResultRun(runId: String) {
+        val liveId = endedLiveSessionId?.takeIf { it.isNotBlank() } ?: return
+        endedLiveSessionId = null
+        serviceScope.launch {
+            try {
+                apiService.syncLiveSession(
+                    live.airuncoach.airuncoach.network.SyncLiveSessionRequest(sessionId = liveId, resultRunId = runId)
+                )
+                Log.d("RunTrackingService", "Live session $liveId linked to run $runId for observers")
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Live session result-run link failed (non-fatal): ${e.message}")
+            }
+        }
     }
 
     private fun resumeTracking() {
@@ -4578,6 +4924,7 @@ class RunTrackingService : Service(), SensorEventListener {
             startSensorTracking()
         }
         announcePauseResumeAudio(paused = false)
+        syncLivePausedState(paused = false)
     }
 
     /**
@@ -4609,6 +4956,42 @@ class RunTrackingService : Service(), SensorEventListener {
         isFinalizingStop = true
         isTracking = false
         isSimulating = false
+        // Tell observers the run is over BEFORE clearing the ID. Without this the live session
+        // stays isActive=true forever and every observer's screen just freezes on the last
+        // synced numbers instead of reaching its "Run finished" state (iOS's stopRun already
+        // does the equivalent). Final metrics are sent alongside so the observer's last frame
+        // is the real finishing distance/time, not the last 5 s-throttled sync.
+        val endingLiveSessionId = activeLiveSessionId
+        if (!endingLiveSessionId.isNullOrBlank()) {
+            // Kept past the ID clear below so the upload-complete collector (onCreate) can link
+            // the session to the resulting run once the upload succeeds.
+            endedLiveSessionId = endingLiveSessionId
+            val finalLastPoint = routePoints.lastOrNull()
+            val finalDistKm = totalDistance / 1000.0
+            val finalElapsedSecs = (getActiveRunDuration() / 1000L).toInt()
+            val finalPace = currentPace
+            val finalHr = currentHeartRate.takeIf { it > 0 }
+            serviceScope.launch {
+                try {
+                    apiService.syncLiveSession(
+                        live.airuncoach.airuncoach.network.SyncLiveSessionRequest(
+                            sessionId = endingLiveSessionId,
+                            isActive = false,
+                            isPaused = false,
+                            currentLat = finalLastPoint?.latitude,
+                            currentLng = finalLastPoint?.longitude,
+                            distanceCovered = finalDistKm,
+                            elapsedTime = finalElapsedSecs,
+                            currentPace = finalPace,
+                            currentHeartRate = finalHr
+                        )
+                    )
+                    Log.d("RunTrackingService", "Live session $endingLiveSessionId marked ended for observers")
+                } catch (e: Exception) {
+                    Log.w("RunTrackingService", "Failed to end live session for observers (non-fatal): ${e.message}")
+                }
+            }
+        }
         // Clear live session ID so no more syncs fire after the run ends
         activeLiveSessionId = null
         lastLiveSessionSyncMs = 0L
@@ -7985,7 +8368,19 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Server returns skipped=true with no message when the shared cooldown (or the
                 // user's configured km-interval setting) rejects this split — don't log/play
                 // "Km X: null" in that case.
-                if (!response.skipped && response.message.isNotBlank()) {
+                if ((response.skipped || response.message.isBlank()) && !isWalkCheckpoint && response.reason != "split_interval") {
+                    // A real km split with nothing usable back from the server (AI failure, or
+                    // an unexpected cooldown skip). Km splits are non-negotiable, so announce
+                    // the facts locally — distance + split time — rather than staying silent.
+                    // This is a data readout, not a canned coaching line.
+                    val splitSecs = (split.time / 1000L).toInt()
+                    val splitClock = if (splitSecs >= 3600) String.format("%d:%02d:%02d", splitSecs / 3600, (splitSecs % 3600) / 60, splitSecs % 60)
+                                     else String.format("%d:%02d", splitSecs / 60, splitSecs % 60)
+                    val readout = "${split.km} ${if (split.km == 1) "kilometre" else "kilometres"} done. That kilometre took $splitClock."
+                    Log.w("RunTrackingService", "Km ${split.km} split: no server message (skipped=${response.skipped}, reason=${response.reason}) — announcing locally")
+                    coachingHistory.add(AiCoachingNote(time = getActiveRunDuration(), message = "Km ${split.km}: $readout"))
+                    if (!isMuted) playCoachingAudio(null, null, readout)
+                } else if (!response.skipped && response.message.isNotBlank()) {
                     // "Km ${split.km}" only means something for a real km split — split.km on a
                     // walk checkpoint is a 500m-block count, not a kilometre number (see this
                     // function's doc comment). Label those by actual distance instead so the
@@ -8517,9 +8912,23 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
-    private fun maybeFireEliteCoaching(displayDistance: Double, duration: Long, avgSpeed: Float, phase: CoachingPhase) {
-        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
-        if (totalDistance < 1000) return // Need at least 1km of data
+    /**
+     * Returns true only when an elite/final cue was actually dispatched. The checkPaceCoaching()
+     * and km-split "DIVERSIFY" substitution call sites depend on this: they give up their own
+     * pace/split slot ONLY if the swap really happened. Before this returned Unit, a silent early
+     * return here (motivational coaching disabled, <1 km, final stretch) still cost the caller its
+     * slot — and since lastEliteCoachingTime never advanced, the substitution condition stayed
+     * true and swallowed EVERY subsequent on-pace update and km split for the rest of the run.
+     */
+    private fun maybeFireEliteCoaching(
+        displayDistance: Double,
+        duration: Long,
+        avgSpeed: Float,
+        phase: CoachingPhase,
+        forceBypassCooldown: Boolean = false
+    ): Boolean {
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return false
+        if (totalDistance < 1000) return false // Need at least 1km of data
         val now = System.currentTimeMillis()
 
         val distKm = displayDistance / 1000.0
@@ -8531,31 +8940,33 @@ class RunTrackingService : Service(), SensorEventListener {
         if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
             hasFinal100mFired = true
             fireFinalCoaching("final_100m", distKm, duration, avgSpeed, remainingMeters)
-            return
+            return true
         }
 
         // FINAL 250m — fires between 500m and 100m remaining (fires once)
         if (!hasFinal250mFired && remainingMeters != null && remainingMeters in 0.0..275.0) {
-            if ((now - lastCoachingTime) < 10_000L) return // minimal 10s gap only
+            if ((now - lastCoachingTime) < 10_000L) return false // minimal 10s gap only
             hasFinal250mFired = true
             fireFinalCoaching("final_250m", distKm, duration, avgSpeed, remainingMeters)
-            return
+            return true
         }
 
         // FINAL 500m — very high priority, bypasses elite cooldown (fires once)
         if (!hasFinal500mFired && remainingMeters != null && remainingMeters in 0.0..550.0) {
-            if ((now - lastCoachingTime) < 10_000L) return // minimal 10s gap only
+            if ((now - lastCoachingTime) < 10_000L) return false // minimal 10s gap only
             hasFinal500mFired = true
             fireFinalCoaching("final_500m", distKm, duration, avgSpeed, remainingMeters)
-            return
+            return true
         }
 
         // In the final 500m, don't fire any analysis/summary coaching — only final motivation above
-        if (isInFinalStretch()) return
-        
-        // Standard elite coaching — respect cooldowns
-        if ((now - lastEliteCoachingTime) < ELITE_COACHING_COOLDOWN_MS) return
-        if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return
+        if (isInFinalStretch()) return false
+
+        // Standard elite coaching — respect cooldowns, unless a checkPaceCoaching() substitution is forcing this fire
+        if (!forceBypassCooldown) {
+            if ((now - lastEliteCoachingTime) < ELITE_COACHING_COOLDOWN_MS) return false
+            if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return false
+        }
 
         // Priority order: milestone > target ETA > pace trend > positive reinforcement > technique > elevation
         when {
@@ -8565,7 +8976,15 @@ class RunTrackingService : Service(), SensorEventListener {
             shouldTriggerPositiveReinforcement(currentKm) -> firePositiveReinforcementCoaching(distKm, duration, avgSpeed)
             shouldTriggerTechnique(now) -> fireTechniqueCoaching(distKm, duration, avgSpeed, phase)
             shouldTriggerElevationInsight(now) -> fireElevationInsightCoaching(distKm, duration, avgSpeed)
+            // Forced substitution and none of the specific conditions lined up (e.g. no km-boundary
+            // window, not enough splits yet) — fall back to technique coaching so the swap always
+            // resolves to SOMETHING rather than silently doing nothing. Still respects the technique
+            // spacing floor so a forced swap can't land seconds after a scheduled technique cue.
+            forceBypassCooldown && shouldTriggerTechnique(now) -> fireTechniqueCoaching(distKm, duration, avgSpeed, phase)
+            forceBypassCooldown -> firePositiveReinforcementCoaching(distKm, duration, avgSpeed)
+            else -> return false
         }
+        return true
     }
 
     // --- Condition checks ---
@@ -9126,6 +9545,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun fireEliteCoaching(request: EliteCoachingRequest, label: String) {
         val now = System.currentTimeMillis()
+        val previousEliteTime = lastEliteCoachingTime
         lastEliteCoachingTime = now
         lastCoachingTime = now
         hasCoachingFiredThisTick = true
@@ -9157,9 +9577,17 @@ class RunTrackingService : Service(), SensorEventListener {
                     if (!isMuted) {
                         playCoachingAudio(response.audio, response.format, response.message)
                     }
+                } else {
+                    // Server-side cooldown rejected it (or empty). Nothing was spoken, so don't
+                    // charge the elite timer for it — otherwise a DIVERSIFY substitution that
+                    // got rejected went silent AND blocked the next swap for another 6 minutes,
+                    // and the pace/split slot it replaced was already gone.
+                    Log.d("RunTrackingService", "Elite coaching ($label) skipped by server — restoring elite timer for an earlier retry")
+                    lastEliteCoachingTime = previousEliteTime
                 }
             } catch (e: Exception) {
                 Log.e("RunTrackingService", "Failed to get elite coaching ($label)", e)
+                lastEliteCoachingTime = previousEliteTime
             }
         }
     }
@@ -9344,7 +9772,29 @@ class RunTrackingService : Service(), SensorEventListener {
      * 3. If early in run → pick a fundamental technique (posture, breathing)
      * 4. Otherwise → rotate through unused categories
      */
+    // Running-only technique areas. The server's walk coaching policy says never coach cadence
+    // or strike/knee-lift to a walker, but the category prompt says "Coach ONLY the <area>" —
+    // so a walk assigned one of these produced a running cue for a walker. Filtered out of every
+    // selection path below when the session is a walk.
+    private val runOnlyTechniqueCategories = setOf(
+        "feet_cadence", "feet_strike_pattern", "knees_lift", "hill_uphill_technique",
+        "stride_length_control", "arms_drive_power"
+    )
+
     private fun selectTechniqueCategory(phase: CoachingPhase, isUphill: Boolean, isDownhill: Boolean, fatigueLevel: String): String {
+        if (currentActivityType != "walk") return selectTechniqueCategoryUnfiltered(phase, isUphill, isDownhill, fatigueLevel)
+        // Walk: keep re-drawing until we get a walk-appropriate area (the unfiltered selector
+        // marks nothing as used, so this is side-effect free). Bounded so a pathological
+        // usedTechniqueCategories state can't loop forever.
+        repeat(8) {
+            val candidate = selectTechniqueCategoryUnfiltered(phase, isUphill, isDownhill, fatigueLevel)
+            if (candidate !in runOnlyTechniqueCategories) return candidate
+            usedTechniqueCategories.add(candidate) // skip it for this walk without ever speaking it
+        }
+        return "breathing_rhythm"
+    }
+
+    private fun selectTechniqueCategoryUnfiltered(phase: CoachingPhase, isUphill: Boolean, isDownhill: Boolean, fatigueLevel: String): String {
         // Priority 1: Hill-specific technique when on a hill
         if (isUphill) {
             val hillCategories = listOf("hill_uphill_technique", "arms_drive_power", "hips_forward_drive", "breathing_exhale_power")

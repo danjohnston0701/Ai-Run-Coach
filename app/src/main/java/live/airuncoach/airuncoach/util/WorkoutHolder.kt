@@ -24,10 +24,16 @@ object WorkoutHolder {
     /** Set to true before navigating to run_session via "Prepare for Watch" so the
      *  run screen waits in standby instead of auto-starting GPS tracking. */
     var isWatchMode: Boolean = false
+    /** Live Tracking observer invite selections made on WorkoutDetailScreen, carried
+     *  through to the RunSetupConfig built when the workout is actually started. */
+    var liveTrackingEnabled: Boolean = false
+    var liveTrackingObservers: List<String> = emptyList()
 
     fun clear() {
         currentWorkout = null
         planContext = null
         isWatchMode = false
+        liveTrackingEnabled = false
+        liveTrackingObservers = emptyList()
     }
 }

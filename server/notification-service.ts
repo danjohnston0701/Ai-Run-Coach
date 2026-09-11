@@ -153,6 +153,16 @@ export async function sendFirebasePush(
           token: user.fcmToken,
           data: { title, body, ...data },
           android: { priority: "high" },
+          // Required for iOS to wake the app for a data-only push at all — without
+          // content-available:1 + the background push-type, APNs has no reason to deliver
+          // it to a backgrounded/terminated app (see sendWatchSessionStartedPush below,
+          // which documents the same requirement). Without this, data-only pushes sent
+          // through this branch — e.g. type: "live_run_invite" — silently never reach an
+          // iOS observer whose app isn't already in the foreground.
+          apns: {
+            headers: { "apns-priority": "5", "apns-push-type": "background" },
+            payload: { aps: { "content-available": 1 } },
+          },
         }
       : {
           token: user.fcmToken,

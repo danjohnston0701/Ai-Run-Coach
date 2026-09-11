@@ -23,6 +23,10 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import live.airuncoach.airuncoach.BuildConfig
+import live.airuncoach.airuncoach.network.RetrofitClient
+import live.airuncoach.airuncoach.network.SupportRequest
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 
@@ -33,43 +37,113 @@ fun GetSupportScreen(
 ) {
     val context = LocalContext.current
     val isKeyboardVisible = WindowInsets.isImeVisible
-    
+    val scope = rememberCoroutineScope()
+
     var subject by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
+    var sentOk by remember { mutableStateOf(false) }
+    var sendError by remember { mutableStateOf<String?>(null) }
 
-    fun sendSupportEmail() {
-        if (subject.isBlank() || message.isBlank()) {
-            return
-        }
+    val deviceInfo = "Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
 
+    // Last resort only: hand the message to the phone's mail client. This used to be the ONLY
+    // path — no ticket was ever logged, and on a phone with no mail app configured (common)
+    // the request silently went nowhere.
+    fun openMailClientFallback() {
         val emailBody = buildString {
             appendLine(message)
             appendLine()
             appendLine("---")
-            appendLine("Device Info:")
-            appendLine("Android Version: ${android.os.Build.VERSION.RELEASE}")
-            appendLine("Device Model: ${android.os.Build.MODEL}")
-            appendLine("App Version: 1.0") // You can get this from BuildConfig if available
+            appendLine("App Version: ${BuildConfig.VERSION_NAME}")
+            appendLine("Device: $deviceInfo")
         }
-
         val intent = Intent(Intent.ACTION_SENDTO).apply {
             data = Uri.parse("mailto:support@airuncoach.live")
             putExtra(Intent.EXTRA_SUBJECT, subject)
             putExtra(Intent.EXTRA_TEXT, emailBody)
         }
-
         try {
             context.startActivity(intent)
         } catch (_: Exception) {
-            // Fallback: open email client selector
             val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "message/rfc822"
                 putExtra(Intent.EXTRA_EMAIL, arrayOf("support@airuncoach.live"))
                 putExtra(Intent.EXTRA_SUBJECT, subject)
                 putExtra(Intent.EXTRA_TEXT, emailBody)
             }
-            context.startActivity(Intent.createChooser(fallbackIntent, "Send Email"))
+            try {
+                context.startActivity(Intent.createChooser(fallbackIntent, "Send Email"))
+            } catch (_: Exception) {
+                sendError = "Couldn't send. Please email support@airuncoach.live directly."
+            }
         }
+    }
+
+    // Primary path: log a ticket via POST /api/support/contact — the server emails
+    // support@airuncoach.live with the user's account details attached and auto-replies to them.
+    fun sendSupportEmail() {
+        if (subject.isBlank() || message.isBlank() || isSending) return
+        isSending = true
+        sendError = null
+        scope.launch {
+            try {
+                val response = RetrofitClient.apiService.submitSupportRequest(
+                    SupportRequest(
+                        subject = subject.trim(),
+                        message = message.trim(),
+                        appVersion = BuildConfig.VERSION_NAME,
+                        deviceInfo = deviceInfo,
+                    )
+                )
+                if (response.ok) {
+                    sentOk = true
+                } else {
+                    sendError = response.error ?: "Couldn't log your request. Opening your email app instead…"
+                    openMailClientFallback()
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("GetSupportScreen", "Support ticket POST failed, falling back to mail client: ${e.message}")
+                sendError = "Couldn't reach our servers. Opening your email app instead…"
+                openMailClientFallback()
+            } finally {
+                isSending = false
+            }
+        }
+    }
+
+    if (sentOk) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Colors.backgroundRoot)
+                .padding(Spacing.xl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("✅", fontSize = 56.sp)
+            Spacer(modifier = Modifier.height(Spacing.lg))
+            Text(
+                "Request sent",
+                fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Colors.textPrimary,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(Spacing.sm))
+            Text(
+                "Your ticket has been logged with our support team. We've emailed you a copy and will reply to your account email within 24 hours on business days.",
+                fontSize = 15.sp, color = Colors.textSecondary, textAlign = TextAlign.Center, lineHeight = 22.sp
+            )
+            Spacer(modifier = Modifier.height(Spacing.xl))
+            Button(
+                onClick = onNavigateBack,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Done", color = Colors.buttonText, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        return
     }
 
     Column(
@@ -236,6 +310,15 @@ fun GetSupportScreen(
 
             // Send Button
             item {
+                sendError?.let { err ->
+                    Text(
+                        text = err,
+                        fontSize = 13.sp,
+                        color = Colors.warning,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.sm)
+                    )
+                }
                 Button(
                     onClick = { sendSupportEmail() },
                     modifier = Modifier
@@ -245,21 +328,29 @@ fun GetSupportScreen(
                         containerColor = Colors.primary,
                         disabledContainerColor = Colors.primary.copy(alpha = 0.5f)
                     ),
-                    enabled = subject.isNotEmpty() && message.isNotEmpty(),
+                    enabled = subject.isNotEmpty() && message.isNotEmpty() && !isSending,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(Spacing.md),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = Colors.buttonText
-                        )
+                        if (isSending) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Colors.buttonText
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = Colors.buttonText
+                            )
+                        }
                         Text(
-                            text = "Send Support Request",
+                            text = if (isSending) "Sending…" else "Send Support Request",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Colors.buttonText

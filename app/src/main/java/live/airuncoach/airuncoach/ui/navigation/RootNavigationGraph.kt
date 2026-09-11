@@ -21,6 +21,7 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import live.airuncoach.airuncoach.AppRoutes
+import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.data.AiConsentManager
 import live.airuncoach.airuncoach.data.SessionManager
 import androidx.navigation.NavType
@@ -34,6 +35,8 @@ import live.airuncoach.airuncoach.ui.screens.GarminWatchUpdateScreen
 import live.airuncoach.airuncoach.ui.screens.InSessionCoachingSettingsScreen
 import live.airuncoach.airuncoach.ui.screens.InjuryOnboardingScreen
 import live.airuncoach.airuncoach.ui.screens.LoginScreen
+import live.airuncoach.airuncoach.ui.screens.ObserverLoginScreen
+import live.airuncoach.airuncoach.ui.screens.ObserverRunSessionScreen
 import live.airuncoach.airuncoach.ui.screens.OnboardingIntroScreen
 import live.airuncoach.airuncoach.ui.screens.SignUpScreen
 import live.airuncoach.airuncoach.ui.screens.LocationPermissionScreen
@@ -57,6 +60,21 @@ fun RootNavigationGraph(navController: NavHostController) {
     // Check before login navigation so stale installs cannot enter the app.
     LaunchedEffect(Unit) {
         versionCheckViewModel.checkVersions()
+    }
+
+    // Observer email-invite / non-registered-observer deep links ("observer_login/{token}",
+    // "observer_session_standalone/{sessionId}") must be reachable WITHOUT logging in — the
+    // whole point of these routes is a person who doesn't have an account tapping a link.
+    // MainActivity.pendingDeepLink is otherwise only consumed by MainScreen's inner NavHost
+    // (which requires AppRoutes.MAIN, i.e. an authenticated session) — for these two route
+    // prefixes specifically, consume it here on the pre-login root graph instead.
+    val pendingDeepLink = MainActivity.pendingDeepLink.value
+    LaunchedEffect(pendingDeepLink) {
+        val route = pendingDeepLink ?: return@LaunchedEffect
+        if (route.startsWith("observer_login/") || route.startsWith("observer_session_standalone/")) {
+            navController.navigate(route)
+            MainActivity.pendingDeepLink.value = null // consume so MainScreen doesn't also try
+        }
     }
 
     NavHost(
@@ -160,6 +178,31 @@ private fun NavGraphBuilder.rootNavigationDestinations(
                 onNavigateToEmailVerification = { email ->
                     navController.navigate("email_verification/${java.net.URLEncoder.encode(email, "UTF-8")}")
                 }
+            )
+        }
+
+        // Standalone observer session (accessed from login screen with a resolved token —
+        // no account required to watch).
+        composable("observer_session_standalone/{sessionId}") { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
+            ObserverRunSessionScreen(
+                sessionId = sessionId,
+                onNavigateBack = { navController.popBackStack() },
+                isStandaloneObserver = true
+            )
+        }
+
+        // Observer login for non-registered users (via email invite token / deep link).
+        composable("observer_login/{token}") { backStackEntry ->
+            val token = backStackEntry.arguments?.getString("token") ?: ""
+            ObserverLoginScreen(
+                initialToken = token,
+                onObserverSessionStarted = { sessionId ->
+                    navController.navigate("observer_session_standalone/$sessionId") {
+                        popUpTo("observer_login/$token") { inclusive = true }
+                    }
+                },
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 

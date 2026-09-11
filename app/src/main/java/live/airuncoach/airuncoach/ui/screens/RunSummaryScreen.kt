@@ -374,7 +374,7 @@ fun RunSummaryScreenFlagship(
 
                         selectedTab == 3 + groupRunTabOffset + dynamicsTabOffset -> DataTabFlagship(
                             run = session!!,
-                            viewModel = viewModel,
+                            onDownloadGpx = { viewModel.downloadRunAsFit(session!!.id) },
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
@@ -564,7 +564,7 @@ fun RunSummaryScreenFlagship(
 /* -------------------------------- TOP BAR -------------------------------- */
 
 @Composable
-private fun RunSummaryTopBarFlagship(
+internal fun RunSummaryTopBarFlagship(
     title: String,
     subtitle: String,
     onBack: () -> Unit,
@@ -941,7 +941,7 @@ private fun GroupRunLeaderboardTab(
 // ── Group Run Results Tables ────────────────────────────────────────────────
 
 @Composable
-private fun GroupRunSummaryTable(participants: List<GroupRunParticipantResult>) {
+internal fun GroupRunSummaryTable(participants: List<GroupRunParticipantResult>) {
     // Sort by fastest time (shortest duration)
     val sortedParticipants = participants.sortedBy { it.runSession?.duration ?: Long.MAX_VALUE }
     GroupRunResultsTable(
@@ -957,7 +957,7 @@ private fun GroupRunSummaryTable(participants: List<GroupRunParticipantResult>) 
 }
 
 @Composable
-private fun GroupRunPaceTable(participants: List<GroupRunParticipantResult>) {
+internal fun GroupRunPaceTable(participants: List<GroupRunParticipantResult>) {
     val sortedParticipants = participants.sortedBy { it.runSession?.averagePace }
     GroupRunResultsTable(
         participants = sortedParticipants,
@@ -971,7 +971,7 @@ private fun GroupRunPaceTable(participants: List<GroupRunParticipantResult>) {
 }
 
 @Composable
-private fun GroupRunSpmTable(participants: List<GroupRunParticipantResult>) {
+internal fun GroupRunSpmTable(participants: List<GroupRunParticipantResult>) {
     val sortedParticipants = participants.sortedByDescending { it.runSession?.cadence }
     GroupRunResultsTable(
         participants = sortedParticipants,
@@ -985,7 +985,7 @@ private fun GroupRunSpmTable(participants: List<GroupRunParticipantResult>) {
 }
 
 @Composable
-private fun GroupRunElevationTable(participants: List<GroupRunParticipantResult>) {
+internal fun GroupRunElevationTable(participants: List<GroupRunParticipantResult>) {
     val sortedParticipants = participants.sortedByDescending { it.runSession?.totalElevationGain }
     GroupRunResultsTable(
         participants = sortedParticipants,
@@ -999,7 +999,7 @@ private fun GroupRunElevationTable(participants: List<GroupRunParticipantResult>
 }
 
 @Composable
-private fun GroupRunHrTable(participants: List<GroupRunParticipantResult>) {
+internal fun GroupRunHrTable(participants: List<GroupRunParticipantResult>) {
     val sortedParticipants = participants.sortedBy { it.runSession?.heartRate?.takeIf { hr -> hr > 0 } ?: Int.MAX_VALUE }
     GroupRunResultsTable(
         participants = sortedParticipants,
@@ -1128,7 +1128,7 @@ private fun TextCell(value: String) {
 /* ------------------------------- TAB: AI INSIGHTS ------------------------------ */
 
 @Composable
-private fun AiInsightsTabContent(
+internal fun AiInsightsTabContent(
     run: RunSession,
     lastRunForDelta: RunSession?,
     analysisState: AiAnalysisState,
@@ -1439,7 +1439,7 @@ private fun AiInsightsTabContent(
 /* ------------------------------- TAB: SUMMARY (MAP + STATS) ------------------------------ */
 
 @Composable
-private fun SummaryTabContent(
+internal fun SummaryTabContent(
     run: RunSession,
     lastRunForDelta: RunSession?,
     strugglePoints: List<StrugglePoint> = emptyList(),
@@ -1535,7 +1535,7 @@ private fun SummaryTabContent(
 /* ------------------------------- TAB: GRAPHS ------------------------------ */
 
 @Composable
-private fun GraphsTabContent(
+internal fun GraphsTabContent(
     run: RunSession,
     onDelete: () -> Unit,
     selectedTab: Int = 0,
@@ -8281,14 +8281,20 @@ private fun DynamicsTabContent(
 /* -------------------------------- TAB: DATA -------------------------------- */
 
 @Composable
-private fun DataTabFlagship(
+internal fun DataTabFlagship(
     run: RunSession,
-    viewModel: RunSummaryViewModel,
+    onDownloadGpx: () -> Unit,
     onDelete: () -> Unit = {},
     selectedTab: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     hasGroupRun: Boolean = false,
     hasDynamicsTab: Boolean = false,
+    // null → the real behaviour (open Strava's web uploader). The onboarding tour overrides
+    // it so the demo can advance instead of leaving the app. The two modifiers exist for the
+    // same reason: the tour wraps these buttons in its pulsing "tap here" highlight.
+    onUploadToStrava: (() -> Unit)? = null,
+    downloadButtonModifier: Modifier = Modifier,
+    stravaButtonModifier: Modifier = Modifier,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -8539,8 +8545,8 @@ private fun DataTabFlagship(
             ) {
                 // Download .FIT file button
                 OutlinedButton(
-                    onClick = { viewModel.downloadRunAsFit(run.id) },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onDownloadGpx,
+                    modifier = downloadButtonModifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = Colors.primary
                     ),
@@ -8559,14 +8565,14 @@ private fun DataTabFlagship(
                 
                 // Upload to Strava button
                 OutlinedButton(
-                    onClick = {
+                    onClick = onUploadToStrava ?: {
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,
                             android.net.Uri.parse("https://www.strava.com/upload/select")
                         )
                         context.startActivity(intent)
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = stravaButtonModifier.fillMaxWidth(),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = Color(0xFFFD5300)
                     ),
@@ -8909,7 +8915,7 @@ private fun WeatherCardFlagship(weather: WeatherData) {
 /* ---------------------------- TAB: ACHIEVEMENTS ---------------------------- */
 
 @Composable
-private fun AchievementsTabFlagship(
+internal fun AchievementsTabFlagship(
     run: RunSession,
     analysisState: AiAnalysisState,
     onDelete: () -> Unit = {},

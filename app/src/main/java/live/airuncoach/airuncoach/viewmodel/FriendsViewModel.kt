@@ -231,6 +231,25 @@ class FriendsViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    /** Unfriend. Optimistically drops the row, then reloads from the server. */
+    fun removeFriend(friendId: String) {
+        viewModelScope.launch {
+            val userId = _user.value?.id ?: return@launch
+            val before = _friendsState.value
+            if (before is FriendsUiState.Success) {
+                _friendsState.value = FriendsUiState.Success(before.friends.filter { it.id != friendId })
+            }
+            try {
+                apiService.removeFriend(userId, friendId)
+                Log.d("FriendsViewModel", "Removed friend $friendId")
+            } catch (e: Exception) {
+                Log.e("FriendsViewModel", "Failed to remove friend $friendId", e)
+                _friendsState.value = before
+            }
+            loadFriends()
+        }
+    }
+
     fun cancelSentRequest(requestId: String) {
         viewModelScope.launch {
             try {

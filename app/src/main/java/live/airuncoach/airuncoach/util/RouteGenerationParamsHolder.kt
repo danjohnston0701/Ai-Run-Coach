@@ -17,7 +17,11 @@ object RouteGenerationParamsHolder {
         seconds: Int,
         latitude: Double,
         longitude: Double,
-        aiCoachEnabled: Boolean = false
+        aiCoachEnabled: Boolean = false,
+        liveTrackingEnabled: Boolean = false,
+        liveTrackingObservers: List<String> = emptyList(),
+        isGroupRun: Boolean = false,
+        groupRunParticipants: List<String> = emptyList()
     ) {
         params = RouteGenerationParams(
             distance = distance,
@@ -27,7 +31,11 @@ object RouteGenerationParamsHolder {
             seconds = seconds,
             latitude = latitude,
             longitude = longitude,
-            aiCoachEnabled = aiCoachEnabled
+            aiCoachEnabled = aiCoachEnabled,
+            liveTrackingEnabled = liveTrackingEnabled,
+            liveTrackingObservers = liveTrackingObservers,
+            isGroupRun = isGroupRun,
+            groupRunParticipants = groupRunParticipants
         )
     }
 
@@ -52,5 +60,9 @@ data class RouteGenerationParams(
     val seconds: Int,
     val latitude: Double,
     val longitude: Double,
-    val aiCoachEnabled: Boolean = false
+    val aiCoachEnabled: Boolean = false,
+    val liveTrackingEnabled: Boolean = false,
+    val liveTrackingObservers: List<String> = emptyList(),
+    val isGroupRun: Boolean = false,
+    val groupRunParticipants: List<String> = emptyList()
 )

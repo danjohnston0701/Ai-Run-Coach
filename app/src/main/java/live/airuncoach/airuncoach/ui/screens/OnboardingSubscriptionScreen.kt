@@ -134,6 +134,41 @@ fun OnboardingSubscriptionScreen(
                 TrialSummaryCard()
             }
 
+            // ━━ Quick-access CTAs — ABOVE the primary "Continue to Dashboard" CTA and styled
+            // as bold as it, not a secondary/muted option below it. Surfaced here (rather than
+            // left for the user to discover once already on the dashboard) so a user with a
+            // watch on hand can pair it immediately, and a new user can see what the app
+            // actually does before landing cold on an empty dashboard. Both reuse
+            // MainActivity.pendingDeepLink, the same mechanism notification deep-links use, to
+            // jump straight to the destination once the remaining onboarding/permission/consent
+            // steps resolve — see MainScreen.kt.
+            item {
+                OnboardingBoldCta(
+                    icon = Icons.Filled.Watch,
+                    text = "Connect a Garmin or Samsung watch",
+                    filled = true,
+                    onClick = {
+                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_CONNECT_WATCH_TAPPED)
+                        sessionManager.clearOnboardingFlags()
+                        MainActivity.pendingDeepLink.value = "connected_devices"
+                        onNavigateToPermissions()
+                    }
+                )
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                OnboardingBoldCta(
+                    icon = Icons.Filled.Explore,
+                    text = "Take a quick tour of Ai Run Coach",
+                    filled = false,
+                    onClick = {
+                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TAKE_TOUR_TAPPED)
+                        sessionManager.clearOnboardingFlags()
+                        MainActivity.pendingDeepLink.value = "onboarding_tour"
+                        onNavigateToPermissions()
+                    }
+                )
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+
             // ━━ PRIMARY CTA — always visible, never depends on billing connecting ━━━━━━━━━━
             item {
                 Button(
@@ -167,36 +202,6 @@ fun OnboardingSubscriptionScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
-                )
-            }
-
-            // Quick-access options — surfaced here (rather than left for the user to discover
-            // once already on the dashboard) so a user with a watch on hand can pair it
-            // immediately, and a new user can see what the app actually does before landing
-            // cold on an empty dashboard. Both reuse MainActivity.pendingDeepLink, the same
-            // mechanism notification deep-links use, to jump straight to the destination once
-            // the remaining onboarding/permission/consent steps resolve — see MainScreen.kt.
-            item {
-                OnboardingQuickActionCard(
-                    icon = Icons.Filled.Watch,
-                    text = "Have an Apple Watch or Garmin watch? Tap here to connect it now",
-                    onClick = {
-                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_CONNECT_WATCH_TAPPED)
-                        sessionManager.clearOnboardingFlags()
-                        MainActivity.pendingDeepLink.value = "connected_devices"
-                        onNavigateToPermissions()
-                    }
-                )
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                OnboardingQuickActionCard(
-                    icon = Icons.Filled.Explore,
-                    text = "New here? Take a quick tour of Ai Run Coach",
-                    onClick = {
-                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TAKE_TOUR_TAPPED)
-                        sessionManager.clearOnboardingFlags()
-                        MainActivity.pendingDeepLink.value = "onboarding_tour"
-                        onNavigateToPermissions()
-                    }
                 )
             }
 
@@ -354,44 +359,48 @@ fun OnboardingSubscriptionScreen(
 }
 
 /**
- * Secondary quick-action row used for the "connect a watch" / "take a tour" onboarding
- * shortcuts — a tappable outlined card, less prominent than the primary CTA but not buried
- * behind a toggle the way the pricing section is.
+ * Bold CTA button used for the "connect a watch" / "take a tour" onboarding shortcuts — styled
+ * as prominently as a real call-to-action (filled or bold-outlined, same height family as the
+ * primary "Continue to Dashboard" button below it), not a muted secondary row.
  */
 @Composable
-private fun OnboardingQuickActionCard(
+private fun OnboardingBoldCta(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     text: String,
+    filled: Boolean,
     onClick: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Spacing.lg)
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-        shape = RoundedCornerShape(BorderRadius.md),
-    ) {
-        Row(
+    if (filled) {
+        Button(
+            onClick = onClick,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = Spacing.md, vertical = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
+                .height(52.dp)
+                .padding(horizontal = Spacing.lg),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Colors.primary,
+                contentColor = Colors.buttonText,
+            ),
+            shape = RoundedCornerShape(BorderRadius.lg),
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Colors.primary,
-                modifier = Modifier.size(22.dp),
-            )
+            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(Spacing.sm))
-            Text(
-                text = text,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = Colors.textPrimary,
-                modifier = Modifier.weight(1f),
-            )
+            Text(text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .padding(horizontal = Spacing.lg),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary),
+            border = androidx.compose.foundation.BorderStroke(2.dp, Colors.primary),
+            shape = RoundedCornerShape(BorderRadius.lg),
+        ) {
+            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Text(text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         }
     }
 }

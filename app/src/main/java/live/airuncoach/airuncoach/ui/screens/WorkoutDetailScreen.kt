@@ -56,6 +56,9 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.util.WorkoutHolder
 import live.airuncoach.airuncoach.viewmodel.DashboardViewModel
+import live.airuncoach.airuncoach.viewmodel.FriendsUiState
+import live.airuncoach.airuncoach.viewmodel.FriendsViewModel
+import live.airuncoach.airuncoach.viewmodel.FriendsViewModelFactory
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,6 +82,25 @@ fun WorkoutDetailScreen(
         ?: 190  // Tanaka fallback for unknown age
     // Drive watch send state from ViewModel (supports async prepare-coaching flow)
     val watchSendState by runSessionViewModel.watchSendState.collectAsState()
+
+    // ── Live Tracking observer invites (same picker as the free-run setup screen) ──
+    val friendsViewModel: FriendsViewModel = remember {
+        FriendsViewModelFactory(context).create(FriendsViewModel::class.java)
+    }
+    val friendsState by friendsViewModel.friendsState.collectAsState()
+    var isLiveTrackingEnabled by remember { mutableStateOf(false) }
+    var liveTrackingObservers by remember { mutableStateOf<List<String>>(emptyList()) }
+    var liveTrackingPendingEmail by remember { mutableStateOf("") }
+    // Flushes any typed-but-not-confirmed email into the observer list — called right
+    // before starting the workout so a forgotten "✓" tap doesn't drop the invite.
+    fun flushPendingObserverEmail(): List<String> {
+        val trimmed = liveTrackingPendingEmail.trim()
+        return if (trimmed.contains("@") && !liveTrackingObservers.contains(trimmed)) {
+            liveTrackingObservers + trimmed
+        } else {
+            liveTrackingObservers
+        }
+    }
 
     // ── AI Coaching generation state ──────────────────────────────────────
     val coachingState by runSessionViewModel.coachingGenerationState.collectAsState()
@@ -624,12 +646,38 @@ fun WorkoutDetailScreen(
                     onRegenerate = { runSessionViewModel.regenerateCoachingForWorkout(workout.id) }
                 )
 
+                // ── Invite Observers (Live Tracking) ────────────────────────
+                val friendsList = when (friendsState) {
+                    is FriendsUiState.Success -> (friendsState as FriendsUiState.Success).friends
+                    else -> emptyList()
+                }
+                WorkoutLiveTrackingSection(
+                    enabled = isLiveTrackingEnabled,
+                    onToggle = { isLiveTrackingEnabled = it },
+                    observers = liveTrackingObservers,
+                    onObserversChanged = { liveTrackingObservers = it },
+                    pendingEmail = liveTrackingPendingEmail,
+                    onPendingEmailChange = { liveTrackingPendingEmail = it },
+                    friends = friendsList
+                )
+
+                Spacer(modifier = Modifier.height(Spacing.md))
+
+                // Commits the current live-tracking selection (flushing any unconfirmed
+                // pending email) into WorkoutHolder so MainScreen can fold it into the
+                // RunSetupConfig built when the workout is actually started.
+                val commitLiveTrackingSelection = {
+                    WorkoutHolder.liveTrackingEnabled = isLiveTrackingEnabled
+                    WorkoutHolder.liveTrackingObservers = flushPendingObserverEmail()
+                }
+
                 // ── Watch vs Phone primary action ─────────────────────────────────
                 // When a watch is connected: "Prepare for Watch" = primary filled teal,
                 //   "Start on Phone" = secondary outlined button below.
                 // When no watch connected: "Start on Phone" = primary filled teal (original).
                 val watchReady = companionInstalled && isCoachingReady && !isAudioPreloading
                 val onPrepareWatch = {
+                    commitLiveTrackingSelection()
                     runSessionViewModel.prepareRunOnWatchWithCoaching(
                         workoutId        = workout.id,
                         distanceKm       = workout.distance?.toFloat() ?: 0f,
@@ -643,6 +691,10 @@ fun WorkoutDetailScreen(
                     // Signal to the run screen that it should NOT auto-start —
                     // it must wait for the watch to send the "start" command.
                     WorkoutHolder.isWatchMode = true
+                    onStartWorkout(workout)
+                }
+                val onStartPhone = {
+                    commitLiveTrackingSelection()
                     onStartWorkout(workout)
                 }
 
@@ -666,13 +718,13 @@ fun WorkoutDetailScreen(
                                 text = "Start on Phone",
                                 leadingIconRes = R.drawable.icon_play_vector,
                                 enabled = canStart,
-                                onClick = { onStartWorkout(workout) }
+                                onClick = onStartPhone
                             )
                         }
                     }
                 } else {
                     Button(
-                        onClick = { onStartWorkout(workout) },
+                        onClick = onStartPhone,
                         enabled = canStart,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -801,6 +853,62 @@ private fun GeneratingSessionView(workoutTypeLabel: String, modifier: Modifier =
  *
  * @param onRegenerate Called when the user requests a fresh coaching plan (bypasses server cache).
  */
+// ── Invite Observers (Live Tracking) ──────────────────────────────────────────
+// Same picker used on the free-run setup screen (MapMyRunSetupScreen.kt's
+// LiveTrackingObserverSection), so planned-workout starts get the same invite
+// capability as free runs.
+
+@Composable
+private fun WorkoutLiveTrackingSection(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    observers: List<String>,
+    onObserversChanged: (List<String>) -> Unit,
+    pendingEmail: String,
+    onPendingEmailChange: (String) -> Unit,
+    friends: List<live.airuncoach.airuncoach.domain.model.Friend>
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(BorderRadius.md),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary.copy(alpha = 0.65f))
+    ) {
+        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Live Tracking",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.textPrimary
+                    )
+                    Text(
+                        text = "Invite friends to watch this session",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = onToggle)
+            }
+
+            if (enabled) {
+                HorizontalDivider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
+                LiveTrackingObserverSection(
+                    observers = observers,
+                    onObserversChanged = onObserversChanged,
+                    pendingEmail = pendingEmail,
+                    onPendingEmailChange = onPendingEmailChange,
+                    friends = friends
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AiCoachingGenerationBanner(

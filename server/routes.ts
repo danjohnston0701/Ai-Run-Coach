@@ -681,9 +681,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // POST /api/support/contact — public, no auth required
-  app.post("/api/support/contact", async (req: Request, res: Response) => {
+  // Public (web contact form) AND the mobile apps' in-app "Get Support" form. optionalAuth so a
+  // signed-in app user can omit name/email — filled from their account — and the ticket carries
+  // their user ID for support. Previously both apps just opened a mailto: link, so no ticket
+  // was ever logged unless the phone had a configured mail client and the user tapped send.
+  app.post("/api/support/contact", optionalAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { name, email, subject, message, screenshots } = req.body;
+      const { subject, message, screenshots, platform, appVersion, deviceInfo } = req.body;
+      let { name, email } = req.body;
+      const userId = req.user?.userId ?? null;
+      if (userId && (!name?.trim() || !email?.trim())) {
+        const user = await storage.getUser(userId);
+        if (user) {
+          name = name?.trim() || user.name || "App user";
+          email = email?.trim() || user.email;
+        }
+      }
       if (!name?.trim() || !email?.trim() || !message?.trim()) {
         return res.status(400).json({ error: "Name, email, and message are required" });
       }
@@ -711,7 +724,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         subject: subject?.trim() || "",
         message: message.trim(),
         screenshots: screenshots ?? [],
+        userId,
+        platform: typeof platform === "string" ? platform : null,
+        appVersion: typeof appVersion === "string" ? appVersion : null,
+        deviceInfo: typeof deviceInfo === "string" ? deviceInfo : null,
       });
+      console.log(`[Support] Ticket from ${email.trim()} (user ${userId ?? "anon"}, ${platform ?? "web"}) delivered`);
       res.json({ ok: true });
     } catch (error: any) {
       console.error("Support contact error:", error);
@@ -1404,6 +1422,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
+   * POST /api/user/onboarding-tour-event
+   * Records the first time a user reaches (event: "started") or completes (event: "completed")
+   * the onboarding feature tour — see OnboardingTourScreen.kt/.swift. Write-once per field: a
+   * user retaking the tour later from their profile doesn't overwrite their original adoption
+   * timestamp, so `onboardingTourStartedAt`/`onboardingTourCompletedAt` on the users table
+   * answer "who is and isn't using it" directly from a user lookup.
+   */
+  app.post("/api/user/onboarding-tour-event", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const { event } = req.body as { event?: string };
+      if (event !== "started" && event !== "completed") {
+        return res.status(400).json({ error: "event must be 'started' or 'completed'" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const field = event === "started" ? "onboardingTourStartedAt" : "onboardingTourCompletedAt";
+      if (!(user as any)[field]) {
+        await storage.updateUser(userId, { [field]: new Date() } as any);
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[POST /api/user/onboarding-tour-event] Error:", error);
+      res.status(500).json({ error: "Failed to record onboarding tour event" });
+    }
+  });
+
+  /**
    * PUT /api/user/injuries/:injuryId
    * Update an existing injury (status, notes, recovery date, etc.)
    */
@@ -1503,9 +1552,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // DELETE /api/friends/:userId/:friendId — Android app remove friend
+  // Unfriend. Only the authenticated user may remove their own friendships — this used to be
+  // registered twice, and the earlier copy (no ownership check) shadowed the safer one.
   app.delete("/api/friends/:userId/:friendId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { userId, friendId } = req.params;
+      if (req.user?.userId !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       await storage.removeFriend(userId, friendId);
       res.json({ success: true });
     } catch (error: any) {
@@ -1513,7 +1567,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Failed to remove friend" });
     }
   });
-  
+
   app.get("/api/friends", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = String(req.query.userId || req.user?.userId);
@@ -1943,6 +1997,8 @@ function transformRunForAndroid(run: any) {
       // Training plan context — required for auto-completing the linked workout on the summary screen
       linkedWorkoutId: run.linkedWorkoutId || null,
       linkedPlanId: run.linkedPlanId || null,
+      // Both clients gate the Run Summary "Group" tab on this; it was never emitted before.
+      groupRunId: run.groupRunId || null,
       planProgressWeek: run.planProgressWeek || null,
       planProgressWeeks: run.planProgressWeeks || null,
       workoutType: run.workoutType || null,
@@ -2812,6 +2868,8 @@ function transformRunForAndroid(run: any) {
               steepestDecline,
             }, mergeFields);
 
+            if (groupRunId) await linkRunToGroupRun(groupRunId, userId, existingByExternalId.id);
+
             if (Object.keys(mergeFields).length > 0) {
               console.log(`[POST /api/runs] Merging ${Object.keys(mergeFields).join(', ')} into run ${existingByExternalId.id}`);
               const [merged] = await db.update(runs)
@@ -2903,6 +2961,7 @@ function transformRunForAndroid(run: any) {
             c1Merge.groupRunId = groupRunId;
             console.log(`[POST /api/runs] Case 1: merging groupRunId=${groupRunId} into run ${rapidDup.id}`);
           }
+          if (groupRunId) await linkRunToGroupRun(groupRunId, userId, rapidDup.id);
 
           if (Object.keys(c1Merge).length > 0) {
             await db.update(runs).set(c1Merge).where(eq(runs.id, rapidDup.id));
@@ -3126,6 +3185,8 @@ function transformRunForAndroid(run: any) {
             }
           }
 
+          if (groupRunId) await linkRunToGroupRun(groupRunId, userId, garminDup.id);
+
           const [updated2] = await db.select().from(runs).where(eq(runs.id, garminDup.id)).limit(1);
           return res.status(200).json(transformRunForAndroid(updated2 ?? garminDup));
         }
@@ -3327,6 +3388,9 @@ function transformRunForAndroid(run: any) {
       autoCompleteLinkedWorkout(run.id).catch(err =>
         console.error("[Run] Server-side workout auto-complete failed (non-fatal):", err)
       );
+
+      // ── Server-side group-run link — same rationale as the workout auto-complete above.
+      if (groupRunId) await linkRunToGroupRun(groupRunId, userId, run.id);
 
       // Reassess training plans asynchronously (don't block response)
       setImmediate(() => {
@@ -4659,21 +4723,53 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.get("/api/live-sessions/:sessionId", async (req: Request, res: Response) => {
+  // A live session only ever gets isActive=false from the runner's phone at stop/cancel. If that
+  // phone dies mid-run (battery, force-kill) the session stays "live" forever and observers
+  // poll frozen numbers indefinitely. Both observer read paths call this: a session that has
+  // started but hasn't synced in 10 min, or was created but never started within 2 h, is
+  // marked ended on read. Paused runs keep syncing nothing, but the runner sends isPaused=true
+  // first, so a paused session is exempt from the 10-min rule until it resumes.
+  const STALE_RUNNING_MS = 10 * 60 * 1000;
+  const STALE_NEVER_STARTED_MS = 2 * 60 * 60 * 1000;
+  async function resolveStaleLiveSession<T extends { id: string; isActive: boolean | null; hasStarted: boolean | null; isPaused?: boolean | null; lastSyncedAt: Date | null }>(session: T): Promise<T> {
+    if (!session.isActive || !session.lastSyncedAt) return session;
+    const idleMs = Date.now() - new Date(session.lastSyncedAt).getTime();
+    const stale = session.hasStarted
+      ? (!session.isPaused && idleMs > STALE_RUNNING_MS)
+      : idleMs > STALE_NEVER_STARTED_MS;
+    if (!stale) return session;
+    console.log(`[Live Sessions] Session ${session.id} idle ${Math.round(idleMs / 60000)} min (hasStarted=${session.hasStarted}) — marking ended`);
+    const updated = await storage.updateLiveSession(session.id, { isActive: false, isPaused: false });
+    // updateLiveSession bumps lastSyncedAt; keep the original so clients can still show
+    // "last update X min ago" for the abandoned run.
+    return updated ? { ...session, ...updated, lastSyncedAt: session.lastSyncedAt } : { ...session, isActive: false };
+  }
+
+  // optionalAuthMiddleware (not authMiddleware): non-registered email/token observers poll this
+  // with no token and must still be served. It's needed so that req.user is actually populated
+  // for signed-in callers — without it the "user ID for authenticated observers" branch below
+  // never fired, everyone was keyed by IP, and the RUNNER's own 10 s observer-count poll
+  // counted them as a watcher of their own run.
+  app.get("/api/live-sessions/:sessionId", optionalAuthMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { recordObserverActivity, getObserverCount } = await import("./observer-tracking");
-      
+
       const sessionId = req.params.sessionId;
-      const session = await storage.getLiveSession(sessionId);
-      if (!session) {
+      const rawSession = await storage.getLiveSession(sessionId);
+      if (!rawSession) {
         return res.status(404).json({ error: "Session not found" });
       }
+      const session = await resolveStaleLiveSession(rawSession);
 
       // Track observer activity (passive counting based on polling)
       // Use client IP as unique identifier for non-authenticated observers,
-      // or user ID for authenticated observers (if available)
+      // or user ID for authenticated observers (if available). The runner polling their
+      // own session (for the "N watching" pill) is not an observer.
       const clientId = req.user?.userId || req.ip || "unknown";
-      const observerCount = recordObserverActivity(sessionId, clientId);
+      const isRunnerSelfPoll = !!req.user?.userId && req.user.userId === session.userId;
+      const observerCount = isRunnerSelfPoll
+        ? getObserverCount(sessionId)
+        : recordObserverActivity(sessionId, clientId);
 
       // Enrich response with route polyline if this is a routed run
       let responseSession: any = session;
@@ -4955,7 +5051,14 @@ function transformRunForAndroid(run: any) {
   });
 
   // Validate observer invitation token and get session status
-  // Used by non-registered observers to check if they can watch a live run
+  // Used by non-registered observers to check if they can watch a live run.
+  // Accepts the same identifiers as GET /api/observe/:code below (Android calls this one, iOS
+  // calls that one): the 8-character invite code the emails tell the recipient to type — which
+  // may be session-level (registered-friend emails use session.inviteCode) or invitation-level
+  // (non-registered emails use invitation.inviteCode) — or the legacy 64-char token. Previously
+  // this only matched the 64-char token column, so every emailed 8-char code, and the
+  // airuncoach://observe/{code} deep link carrying it, failed on Android with "Invalid
+  // invitation token".
   app.post("/api/observer-invitations/validate", async (req: Request, res: Response) => {
     try {
       const { token } = req.body;
@@ -4964,22 +5067,43 @@ function transformRunForAndroid(run: any) {
         return res.status(400).json({ error: "Token is required" });
       }
 
-      // Get the invitation record
-      const invitation = await storage.getObserverInvitation(token);
-      if (!invitation) {
+      const { isValidInviteCodeFormat, normalizeInviteCode } = await import("./invite-code-generator");
+      const { checkRateLimit } = await import("./rate-limit");
+
+      let session: Awaited<ReturnType<typeof storage.getLiveSession>> = undefined;
+      let invitation: Awaited<ReturnType<typeof storage.getObserverInvitation>> = undefined;
+
+      if (isValidInviteCodeFormat(token)) {
+        const normalized = normalizeInviteCode(token);
+        const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+        if (checkRateLimit(clientIp, normalized)) {
+          return res.status(429).json({ error: "Too many attempts. Please try again later." });
+        }
+        session = await storage.getLiveSessionByInviteCode(normalized);
+        if (!session) {
+          invitation = await storage.getObserverInvitationByCode(normalized);
+        }
+      } else {
+        invitation = await storage.getObserverInvitation(token);
+      }
+
+      if (!session && !invitation) {
         return res.status(404).json({ error: "Invalid invitation token" });
       }
 
-      // Check if token has expired
-      if (invitation.expiresAt && new Date(invitation.expiresAt) < new Date()) {
+      // Check if token has expired (invitation-based codes only)
+      if (invitation?.expiresAt && new Date(invitation.expiresAt) < new Date()) {
         return res.status(410).json({ error: "Invitation token has expired" });
       }
 
       // Get the live session
-      const session = await storage.getLiveSession(invitation.sessionId);
+      if (!session && invitation) {
+        session = await storage.getLiveSession(invitation.sessionId);
+      }
       if (!session) {
         return res.status(404).json({ error: "Session not found" });
       }
+      session = await resolveStaleLiveSession(session);
 
       // Check session status
       // isActive = false means the run has finished
@@ -4994,8 +5118,8 @@ function transformRunForAndroid(run: any) {
       // Get runner info for display
       const runner = await storage.getUser(session.userId);
 
-      // Mark invitation as viewed if not already
-      if (!invitation.viewedAt) {
+      // Mark invitation as viewed if not already (session-level codes have no invitation row)
+      if (invitation && !invitation.viewedAt) {
         await storage.updateObserverInvitation(invitation.id, {
           viewedAt: new Date(),
         });
@@ -5124,6 +5248,7 @@ function transformRunForAndroid(run: any) {
       if (!session) {
         return res.status(404).json({ error: "Invalid or expired link" });
       }
+      session = await resolveStaleLiveSession(session);
 
       // Check if token/invitation is expired (only for invitation-based codes)
       if (invitation && invitation.expiresAt && invitation.expiresAt < new Date()) {
@@ -5254,7 +5379,11 @@ function transformRunForAndroid(run: any) {
         maxParticipants: maxParticipants ? parseInt(maxParticipants) : 10,
         isPublic: isPublic !== false,
         inviteToken,
-        status: 'pending',
+        // 'upcoming' is the column default and the value iOS filters its Upcoming tab / edit
+        // gate on; this used to insert 'pending', which hid every new run from iOS. Android
+        // only compares run status against 'active'/'completed', so it's unaffected.
+        // State machine: upcoming → active (POST /start) → completed (all participants linked).
+        status: 'upcoming',
         mode: 'route'
       });
       // Auto-join creator as organiser
@@ -11868,6 +11997,14 @@ function transformRunForAndroid(run: any) {
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generatePaceUpdate({ ...req.body, runnerProfile });
+      // Generation failed or came back empty (ai-service no longer returns canned fallback
+      // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same
+      // skip shape the cooldown path uses, which both clients already treat as "nothing to
+      // say". Placed BEFORE recordFired() so a failed generation doesn't burn the cooldown.
+      if (!message || !message.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed' });
+      }
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
@@ -12057,6 +12194,14 @@ function transformRunForAndroid(run: any) {
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateStruggleCoaching({ ...req.body, runnerProfile });
+      // Generation failed or came back empty (ai-service no longer returns canned fallback
+      // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same
+      // skip shape the cooldown path uses, which both clients already treat as "nothing to
+      // say". Placed BEFORE recordFired() so a failed generation doesn't burn the cooldown.
+      if (!message || !message.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed' });
+      }
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
@@ -12097,6 +12242,14 @@ function transformRunForAndroid(run: any) {
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateCadenceCoaching({ ...req.body, runnerProfile });
+      // Generation failed or came back empty (ai-service no longer returns canned fallback
+      // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same
+      // skip shape the cooldown path uses, which both clients already treat as "nothing to
+      // say". Placed BEFORE recordFired() so a failed generation doesn't burn the cooldown.
+      if (!message || !message.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed' });
+      }
       
       // Generate TTS audio with user's voice settings (resilient - falls back to text-only)
       let base64Audio: string | null = null;
@@ -12138,6 +12291,14 @@ function transformRunForAndroid(run: any) {
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.getElevationCoaching({ ...req.body, runnerProfile });
+      // Generation failed or came back empty (ai-service no longer returns canned fallback
+      // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same
+      // skip shape the cooldown path uses, which both clients already treat as "nothing to
+      // say". Placed BEFORE recordFired() so a failed generation doesn't burn the cooldown.
+      if (!message || !message.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed' });
+      }
       
       // Generate TTS audio with user's voice settings
       let base64Audio: string | null = null;
@@ -12213,11 +12374,17 @@ function transformRunForAndroid(run: any) {
 
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
+      // Watch running dynamics (GCT / vertical oscillation / stride / power / respiration) —
+      // every other live coaching route already gets these; elite/technique coaching is the
+      // one trigger explicitly about form, and was the only one coaching without form data.
+      await enrichReqBodyWithWatchDynamics(req.body);
+
       const message = await aiService.generateEliteCoaching({ ...req.body, runnerProfile });
 
       // Skip TTS if AI returned empty (e.g. no terrain coaching for route-less runs)
-      if (!message) {
-        return res.json({ message: "", audio: null, format: "mp3" });
+      if (!message || !message.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed', message: "", audio: null, format: "mp3" });
       }
 
       // Generate TTS audio with user's voice settings
@@ -12309,6 +12476,14 @@ function transformRunForAndroid(run: any) {
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generatePhaseCoaching({ ...req.body, runnerProfile });
+      // Generation failed or came back empty (ai-service no longer returns canned fallback
+      // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same
+      // skip shape the cooldown path uses, which both clients already treat as "nothing to
+      // say". Placed BEFORE recordFired() so a failed generation doesn't burn the cooldown.
+      if (!message || !message.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed' });
+      }
       
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
@@ -12353,6 +12528,14 @@ function transformRunForAndroid(run: any) {
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
       const message = await aiService.generateIntervalCoaching({ ...req.body, runnerProfile });
+      // Generation failed or came back empty (ai-service no longer returns canned fallback
+      // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same
+      // skip shape the cooldown path uses, which both clients already treat as "nothing to
+      // say". Placed BEFORE recordFired() so a failed generation doesn't burn the cooldown.
+      if (!message || !message.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed' });
+      }
       
       // Generate TTS audio
       let base64Audio: string | null = null;
@@ -12545,6 +12728,14 @@ function transformRunForAndroid(run: any) {
         aerobicTrainingEffect: req.body.aerobicTrainingEffect,
         anaerobicTrainingEffect: req.body.anaerobicTrainingEffect,
       });
+      // Generation failed or came back empty (ai-service no longer returns canned fallback
+      // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same
+      // skip shape the cooldown path uses, which both clients already treat as "nothing to
+      // say". Placed BEFORE recordFired() so a failed generation doesn't burn the cooldown.
+      if (!response || !response.trim()) {
+        console.warn(`[coaching] ${req.path} produced no message — skipping (no fallback line)`);
+        return res.json({ skipped: true, reason: 'generation_failed' });
+      }
 
       // Generate TTS audio - use BASE tone for voice consistency (same voice throughout run)
       let base64Audio: string | null = null;
@@ -14727,25 +14918,6 @@ function transformRunForAndroid(run: any) {
   });
 
   // Remove a friend
-  app.delete("/api/friends/:userId/:friendId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { userId, friendId } = req.params;
-      
-      if (req.user?.userId !== userId) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      
-      await storage.removeFriend(userId, friendId);
-      
-      res.status(204).send();
-    } catch (error: any) {
-      console.error("Remove friend error:", error);
-      res.status(500).json({ error: "Failed to remove friend" });
-    }
-  });
-
-
-
   // Mark ready to start
   app.post("/api/group-runs/:groupRunId/ready", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -14822,35 +14994,72 @@ function transformRunForAndroid(run: any) {
   });
 
   // Link individual run session to group run after completion
+  /**
+   * Links a finished run to its group-run participant row and, if that was the last accepted
+   * participant, marks the group run completed. Called from POST /api/runs whenever an upload
+   * carries groupRunId (every dedupe outcome + fresh insert) and from POST /complete below.
+   *
+   * Server-side because client-driven linking was the single biggest reason participants
+   * vanished from results: Android only called /complete from the Run Summary screen (never
+   * opened → never linked), iOS sent the wrong key (`run_id`) so its /complete linked nothing,
+   * and watch/companion-created runs never went through either client path. Any of those left
+   * `participants.runId` null → "Still running…" forever and the group never completing.
+   *
+   * Idempotent: a participant already linked to this run is left alone; a participant linked
+   * to a different run (a re-upload/dup) is not overwritten.
+   */
+  async function linkRunToGroupRun(groupRunId: string, userId: string, runId: string): Promise<void> {
+    try {
+      const [participant] = await db.select().from(groupRunParticipants)
+        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)))
+        .limit(1);
+      if (!participant) {
+        console.warn(`[GroupRun] ${userId} uploaded run ${runId} with groupRunId=${groupRunId} but isn't a participant — not linking`);
+        return;
+      }
+      if (participant.runId && participant.runId !== runId) {
+        console.log(`[GroupRun] participant ${userId} already linked to run ${participant.runId} — keeping it`);
+        return;
+      }
+
+      // completedAt is what every client uses to distinguish a finished participant from one
+      // still running (confirmed: Android's GroupRunDetailScreenEnhanced.kt checks it).
+      if (!participant.runId) {
+        await db.update(groupRunParticipants)
+          .set({ runId, completedAt: new Date() })
+          .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
+      }
+      // Stamp the run so GET /api/group-runs/by-run/:runId can find it.
+      await db.update(runs).set({ groupRunId }).where(eq(runs.id, runId));
+
+      const allAccepted = await db.select().from(groupRunParticipants)
+        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.invitationStatus, 'accepted')));
+      if (allAccepted.length > 0 && allAccepted.every(p => !!p.runId)) {
+        await db.update(groupRuns).set({ status: 'completed', completedAt: new Date() })
+          .where(eq(groupRuns.id, groupRunId));
+        console.log(`[GroupRun] ${groupRunId} — all ${allAccepted.length} accepted participants finished; marked completed`);
+      }
+    } catch (err) {
+      console.error(`[GroupRun] Failed to link run ${runId} to group ${groupRunId} (non-fatal):`, err);
+    }
+  }
+
   app.post("/api/group-runs/:groupRunId/complete", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { groupRunId } = req.params;
-      const { runId } = req.body as { runId: string };
+      // Accept both spellings — iOS historically posted `run_id`, which silently linked nothing.
+      const body = req.body as { runId?: string; run_id?: string };
+      const runId = body.runId ?? body.run_id;
       const userId = req.user!.userId;
 
-      // Link run to participant record. completedAt is what every client (confirmed:
-      // Android's GroupRunDetailScreenEnhanced.kt checks participant.completedAt != null
-      // to render "✓ Completed") uses to distinguish a finished participant from one still
-      // running — this was previously never set here, so every participant who actually
-      // finished their run still showed as running indefinitely in the group summary.
-      await db.update(groupRunParticipants)
-        .set({ runId, completedAt: new Date() })
-        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
-
-      // Stamp the run itself so GET /api/group-runs/by-run/:runId can look it up — that
-      // endpoint reads runs.groupRunId, which was never being set anywhere until now.
       if (runId) {
-        await db.update(runs).set({ groupRunId }).where(eq(runs.id, runId));
-      }
-
-      // Check if all accepted participants have completed
-      const allAccepted = await db.select().from(groupRunParticipants)
-        .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.invitationStatus, 'accepted')));
-      const allDone = allAccepted.every(p => !!p.runId);
-
-      if (allDone) {
-        await db.update(groupRuns).set({ status: 'completed', completedAt: new Date() })
-          .where(eq(groupRuns.id, groupRunId));
+        await linkRunToGroupRun(groupRunId, userId, runId);
+      } else {
+        // No run to link (e.g. a manual "mark done") — still record completion so the
+        // participant stops showing as running.
+        await db.update(groupRunParticipants)
+          .set({ completedAt: new Date() })
+          .where(and(eq(groupRunParticipants.groupRunId, groupRunId), eq(groupRunParticipants.userId, userId)));
       }
 
       const gr = await storage.getGroupRun(groupRunId);
@@ -17984,19 +18193,23 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       if (!gr) return res.status(404).json({ error: "Group run not found" });
       if (gr.hostUserId !== userId) return res.status(403).json({ error: "Only the organiser can edit this run" });
 
-      // Build update object with only provided fields
-      const updateData: any = {};
-      if (name !== undefined) updateData.name = name;
+      // Build update object with only provided fields — mapped to the REAL column names
+      // (title / targetDistance / plannedStartAt). This previously wrote `name`/`distance`/
+      // `dateTime`, which aren't columns, so edits to those three silently never persisted.
+      const updateData: Partial<typeof groupRuns.$inferInsert> = {};
+      if (name !== undefined) updateData.title = name;
       if (description !== undefined) updateData.description = description;
       if (meetingPoint !== undefined) updateData.meetingPoint = meetingPoint;
       if (meetingLat !== undefined) updateData.meetingLat = meetingLat;
       if (meetingLng !== undefined) updateData.meetingLng = meetingLng;
-      if (distance !== undefined) updateData.distance = Number(distance);
-      if (dateTime !== undefined) updateData.dateTime = new Date(dateTime);
-      if (maxParticipants !== undefined) updateData.maxParticipants = maxParticipants;
+      if (distance !== undefined) updateData.targetDistance = Number(distance);
+      if (dateTime !== undefined) updateData.plannedStartAt = new Date(dateTime);
+      if (maxParticipants !== undefined) updateData.maxParticipants = Number(maxParticipants);
       if (isPublic !== undefined) updateData.isPublic = isPublic;
 
-      await db.update(groupRuns).set(updateData).where(eq(groupRuns.id, id));
+      if (Object.keys(updateData).length > 0) {
+        await db.update(groupRuns).set(updateData).where(eq(groupRuns.id, id));
+      }
 
       const updated = await buildGroupRunResponse(id, userId);
       if (!updated) return res.status(404).json({ error: "Group run not found" });

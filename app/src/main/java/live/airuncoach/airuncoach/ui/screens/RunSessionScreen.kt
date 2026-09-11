@@ -2753,8 +2753,25 @@ fun EliteRouteMap(
         LatLng(it.latitude, it.longitude)
     }
 
-    val navState = remember(runnerLatLng, plannedRoute, turnCues) {
-        if (runnerLatLng != null && plannedRoute.isNotEmpty())
+    // The service's navigation engine projects the runner onto the route and owns the voice
+    // cues; the HUD used to compute its own "next turn" from a nearest-vertex guess, so the
+    // on-screen arrow and the spoken instruction could disagree. Prefer the service's real
+    // instruction + along-route distance whenever it has a route loaded.
+    val serviceNav by live.airuncoach.airuncoach.service.RunTrackingService.navUiState.collectAsState()
+    val navState = remember(runnerLatLng, plannedRoute, turnCues, serviceNav) {
+        if (serviceNav.hasRoute && serviceNav.nextInstruction != null) {
+            val cueForIndex = turnCues.firstOrNull { it.routeIndex > serviceNav.routeProgressIndex }
+            NavState(
+                nextTurn = TurnCue(
+                    routeIndex = cueForIndex?.routeIndex ?: serviceNav.routeProgressIndex,
+                    position = cueForIndex?.position ?: (runnerLatLng ?: LatLng(0.0, 0.0)),
+                    deltaDegrees = cueForIndex?.deltaDegrees ?: 0.0,
+                    instruction = serviceNav.nextInstruction!!
+                ),
+                distanceToNextTurnM = serviceNav.distanceToNextTurnM ?: Double.POSITIVE_INFINITY,
+                isOffRoute = serviceNav.isOffRoute
+            )
+        } else if (runnerLatLng != null && plannedRoute.isNotEmpty())
             computeNavState(runnerLatLng, plannedRoute, turnCues)
         else
             NavState()
@@ -2995,7 +3012,8 @@ private data class TurnCue(
 
 private data class NavState(
     val nextTurn: TurnCue? = null,
-    val distanceToNextTurnM: Double = Double.POSITIVE_INFINITY
+    val distanceToNextTurnM: Double = Double.POSITIVE_INFINITY,
+    val isOffRoute: Boolean = false
 )
 
 private fun normalize180(deg: Double): Double {
@@ -3120,6 +3138,24 @@ private fun NextTurnOverlay(
     nav: NavState,
     modifier: Modifier = Modifier
 ) {
+    if (nav.isOffRoute) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Colors.warning.copy(alpha = 0.92f))
+                .padding(12.dp)
+        ) {
+            Text(
+                text = "Off route — head back towards the line",
+                style = AppTextStyles.body,
+                color = Colors.buttonText,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        return
+    }
     val turn = nav.nextTurn ?: return
     val dist = nav.distanceToNextTurnM
 

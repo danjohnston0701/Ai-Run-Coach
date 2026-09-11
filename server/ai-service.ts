@@ -1044,7 +1044,8 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     temperature: 0.75,
   });
 
-  return completion.choices[0].message.content || (isSplit ? `Kilometer ${splitKm} done at ${spokenSplitPace}. Keep it up!` : "Looking good, keep this pace!");
+  // Empty → the route returns a skip; the client stays silent rather than reciting a canned line.
+  return completion.choices[0].message.content || "";
 }
 
 export async function generateRunSummary(runData: any, runnerProfile?: string | null, userId?: string | null): Promise<any> {
@@ -1798,7 +1799,7 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
     temperature: 0.78,
   });
 
-  return completion.choices[0].message.content || "You're doing great, keep it up!";
+  return completion.choices[0].message.content || "";
 }
 
 // Helper: calculate age-adjusted max heart rate (Tanaka formula is more accurate than 220-age)
@@ -1875,17 +1876,16 @@ export async function generateIntervalCoaching(params: {
     : 'This is your recovery interval — bring your heart rate down and get ready for the next effort.';
 
   // Build HR info if in work phase
+  // Raw data only — no pre-written verdict sentences ("Pick up the effort." / "Keep it
+  // steady!"). Those were fed as context and echoed back near-verbatim, which is the
+  // hardcoded-sounding pattern 8d31094 removed from the other triggers. Let the model decide
+  // what the gap means and phrase it itself.
   let hrContext = '';
   if (isWorkPhase && targetHeartRateMin && targetHeartRateMax) {
-    hrContext = `Your target heart rate for this work interval is ${targetHeartRateMin}–${targetHeartRateMax} bpm.`;
+    hrContext = `Target heart rate for this work interval: ${targetHeartRateMin}–${targetHeartRateMax} bpm.`;
     if (currentHeartRate) {
-      if (currentHeartRate < targetHeartRateMin) {
-        hrContext += ` You're currently ${currentHeartRate} bpm — below target. Pick up the effort.`;
-      } else if (currentHeartRate > targetHeartRateMax) {
-        hrContext += ` You're currently ${currentHeartRate} bpm — above target. Dial it back slightly to stay in zone.`;
-      } else {
-        hrContext += ` You're currently ${currentHeartRate} bpm — right in zone. Keep it steady!`;
-      }
+      const relation = currentHeartRate < targetHeartRateMin ? 'below' : currentHeartRate > targetHeartRateMax ? 'above' : 'within';
+      hrContext += ` Current heart rate: ${currentHeartRate} bpm (${relation} the target range).`;
     }
   }
 
@@ -1921,16 +1921,18 @@ export async function generateIntervalCoaching(params: {
         { role: "system", content: systemMsg },
         { role: "user", content: prompt }
       ],
-      max_tokens: 80,
+      // Was 80 — the prompt asks for 1–2 punchy sentences plus, on recovery, a training-goal
+      // reminder; that routinely ran past 80 tokens and truncated mid-sentence (same class of
+      // bug f4556f8 fixed for struggle coaching).
+      max_tokens: 120,
       temperature: 0.7,
     });
 
-    return completion.choices[0].message.content || `${isWorkPhase ? 'Nail this interval!' : 'Recover and breathe.'}`;
+    // Empty → the route returns a skip; the client stays silent rather than reciting a canned line.
+    return completion.choices[0].message.content || "";
   } catch (error) {
     console.error("Error generating interval coaching:", error);
-    return isWorkPhase 
-      ? `You're on rep ${intervalNumber} — push steady!`
-      : `You're in recovery — bring your HR down.`;
+    return "";
   }
 }
 
@@ -2063,7 +2065,7 @@ CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do 
     temperature: 0.7,
   });
 
-  return completion.choices[0].message.content || struggleModule.STRUGGLE_FALLBACK_MESSAGE;
+  return completion.choices[0].message.content || "";
 }
 
 // Cadence/Stride Coaching - analyzes overstriding/understriding
@@ -2617,7 +2619,7 @@ Give concise terrain-specific coaching based on their current metrics and split 
     temperature: 0.8,
   });
 
-  return completion.choices[0].message.content || "Adjust your effort for the terrain!";
+  return completion.choices[0].message.content || "";
 }
 
 /**
@@ -2776,11 +2778,12 @@ ${VARIETY_INSTRUCTION}`;
       },
       { role: "user", content: prompt }
     ],
-    max_tokens: 100,
+    // Was 100 for a "2-3 sentences" ask — same truncation class f4556f8 fixed for struggle.
+    max_tokens: 150,
     temperature: 0.8
   });
 
-  return completion.choices[0].message.content || "You're doing great. Keep going!";
+  return completion.choices[0].message.content || "";
 }
 
 /**
@@ -3993,13 +3996,16 @@ export async function generateHeartRateCoaching(params: {
         { role: "system", content: hrSystemMsg },
         { role: "user", content: prompt }
       ],
-      max_tokens: 80,
+      // Was 80 for a 2-sentence ask with zone guidance — truncated mid-sentence.
+      max_tokens: 120,
       temperature: 0.7,
     });
 
-    return completion.choices[0].message.content || `Heart rate at ${currentHR}, Zone ${currentZone}. Keep it steady!`;
-  } catch {
-    return `Heart rate at ${currentHR} bpm, Zone ${currentZone}. ${currentZone > 3 ? 'Consider easing up.' : 'Looking good!'}`;
+    // Empty → the route returns a skip; the client stays silent rather than reciting a canned line.
+    return completion.choices[0].message.content || "";
+  } catch (error) {
+    console.error("Error generating heart rate coaching:", error);
+    return "";
   }
 }
 
@@ -5473,6 +5479,17 @@ export interface EliteCoachingParams {
   gpsConfidence?: string;       // "high" | "medium" | "low"
   cadenceConfidence?: string;   // "high" | "medium" | "low" | undefined if no sensor
 
+  // ── Live watch running dynamics (routes.ts enrichReqBodyWithWatchDynamics) ─────
+  groundContactTimeMs?: number;
+  groundContactBalancePercent?: number;
+  verticalOscillationMm?: number;
+  verticalRatioPercent?: number;
+  strideLengthM?: number;
+  runningPowerWatts?: number;
+  respirationRateBpm?: number;
+  aerobicTrainingEffect?: number;
+  anaerobicTrainingEffect?: number;
+
   // ── Physiological response to last cue ────────────────────────────────────
   lastCueHrDelta?: number;                  // bpm change since last cue (negative = fell)
   lastCuePaceDelta?: number;               // sec/km change (positive = slower)
@@ -5543,6 +5560,8 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
   if (cadence && cadence > 0) status += isWalkSession
     ? `\n- Step rate (context only, do NOT coach): ~${cadence} spm`
     : `\n- Cadence: ${cadence} spm`;
+  const eliteWatchDynamics = buildWatchDynamicsText(params);
+  if (eliteWatchDynamics) status += `\n- Watch running dynamics: ${eliteWatchDynamics}`;
   if (hasRoute && totalElevationGain && totalElevationGain > 0) status += `\n- Elevation climbed: ${Math.round(totalElevationGain)}m`;
   if (hasRoute && typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 2) status += `\n- Current gradient: ${currentGrade.toFixed(1)}%`;
   if (kmSplits && kmSplits.length > 0) status += `\n- Splits: ${kmSplits.map(s => `km${s.km}=${s.pace}`).join(', ')}`;
@@ -5728,6 +5747,7 @@ Rules:
 6. Invent your own phrasing, imagery, and metaphor — do not reuse a stock or clichéd cue phrase. The same technique area will come up again on future runs and for other runners; make this instance sound freshly generated, not recited.
 ${cadence ? `\nCurrent cadence: ${cadence} spm` : ''}
 ${heartRate ? `\nCurrent heart rate: ${heartRate} bpm` : ''}
+${eliteWatchDynamics ? `\nLive watch running dynamics: ${eliteWatchDynamics} — use these where they're relevant to the technique area (e.g. ground contact / vertical oscillation for landing and posture cues), but only cite a number if it genuinely supports the cue.` : ''}
 ${isUphill || (currentGrade && Math.abs(currentGrade) > 3) ? `\nCurrently ${currentGrade && currentGrade > 0 ? 'climbing' : 'descending'} (grade: ${currentGrade?.toFixed(1)}%)` : ''}
 ${fatigueLevel ? `\nFatigue level: ${fatigueLevel}` : ''}
 ${runPhase ? `\nRun phase: ${runPhase}` : ''}`;
@@ -6079,7 +6099,7 @@ Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add
       temperature: 0.75,
     });
 
-    return completion.choices[0].message.content || "Keep pushing, you're running strong!";
+    return completion.choices[0].message.content || "";
   } catch (error) {
     console.error(`Elite coaching (${coachingType}) error:`, error);
     return "";

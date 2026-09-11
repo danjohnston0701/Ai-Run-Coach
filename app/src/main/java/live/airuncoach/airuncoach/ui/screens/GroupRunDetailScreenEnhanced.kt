@@ -133,6 +133,12 @@ fun GroupRunDetailScreenEnhanced(
                         viewModel.markReady(groupRunId)
                         onMarkReadyAndNavigate(groupRunId)
                     },
+                    // Organiser's "Start Group Run": POST /start first (flips status to active and
+                    // pushes group_run_started so participants get their own Start button), THEN
+                    // navigate — via startedGroupRunId → the LaunchedEffect above → onStartRun.
+                    // This used to navigate straight to setup without ever calling the server, so
+                    // the run never became active and nobody else could start.
+                    onStartGroupRun = { viewModel.startRun(groupRunId) },
                     onStartRun = { onStartRun(groupRunId) },
                     onViewResults = { onViewResults(groupRunId) },
                     onInviteMore = { showInviteDialog = true },
@@ -220,6 +226,7 @@ fun GroupRunDetailContentEnhanced(
     onAccept: () -> Unit,
     onDecline: () -> Unit,
     onMarkReady: () -> Unit,
+    onStartGroupRun: () -> Unit,
     onStartRun: () -> Unit,
     onViewResults: () -> Unit,
     onInviteMore: () -> Unit,
@@ -272,6 +279,7 @@ fun GroupRunDetailContentEnhanced(
                 onAccept = onAccept,
                 onDecline = onDecline,
                 onMarkReady = onMarkReady,
+                onStartGroupRun = onStartGroupRun,
                 onStartRun = onStartRun,
                 onViewResults = onViewResults
             )
@@ -633,7 +641,8 @@ fun GroupRunActionButtonsEnhanced(
     onAccept: () -> Unit,
     onDecline: () -> Unit,
     onMarkReady: () -> Unit,
-    onStartRun: () -> Unit,
+    onStartGroupRun: () -> Unit,   // organiser: POST /start (then navigates via startedGroupRunId)
+    onStartRun: () -> Unit,        // navigate to the group run setup screen
     onViewResults: () -> Unit
 ) {
     if (actionLoading) {
@@ -693,14 +702,33 @@ fun GroupRunActionButtonsEnhanced(
                     )
                 }
                 Button(
-                    onClick = onStartRun,
+                    onClick = onStartGroupRun,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
                 ) {
-                    Icon(Icons.Default.Settings, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(Spacing.sm))
-                    Text("Prepare Group Run", color = Colors.buttonText)
+                    Text("Start Group Run", color = Colors.buttonText)
                 }
+                Text(
+                    "Starts the group run for everyone — participants get a notification and their own Start button.",
+                    style = AppTextStyles.small,
+                    color = Colors.textMuted
+                )
+            }
+        }
+
+        // Organiser coming back to an already-started group run (e.g. they backed out of the
+        // setup screen, or reopened the app): no need to hit /start again, just go and run.
+        groupRun.isOrganiser && groupRun.status == "active" -> {
+            Button(
+                onClick = onStartRun,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+            ) {
+                Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(Spacing.sm))
+                Text("Start My Run", color = Colors.buttonText)
             }
         }
 

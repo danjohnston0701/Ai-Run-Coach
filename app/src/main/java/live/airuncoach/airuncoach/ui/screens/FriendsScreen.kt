@@ -487,8 +487,8 @@ fun FriendsScreen(onNavigateBack: () -> Unit) {
                             )
                         }
                     } else {
-                        items(state.friends) { friend ->
-                            FriendCard(friend = friend)
+                        items(state.friends, key = { it.id }) { friend ->
+                            FriendCard(friend = friend, onRemove = { viewModel.removeFriend(friend.id) })
                         }
                     }
                 }
@@ -752,7 +752,31 @@ fun PendingRequestCard(
 }
 
 @Composable
-fun FriendCard(friend: Friend) {
+fun FriendCard(friend: Friend, onRemove: () -> Unit = {}) {
+    var showRemoveConfirm by remember { mutableStateOf(false) }
+    if (showRemoveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRemoveConfirm = false },
+            containerColor = Colors.backgroundSecondary,
+            title = { Text("Remove ${friend.name}?", color = Colors.textPrimary) },
+            text = {
+                Text(
+                    "You'll no longer see each other in your friends lists or be able to invite each other to group runs or live tracking. You can send a new friend request later.",
+                    color = Colors.textSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showRemoveConfirm = false; onRemove() }) {
+                    Text("Remove", color = Colors.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveConfirm = false }) {
+                    Text("Cancel", color = Colors.textSecondary)
+                }
+            }
+        )
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary)
@@ -805,16 +829,16 @@ fun FriendCard(friend: Friend) {
                 )
             }
 
-            // View Activity Button
+            // Remove friend (replaces a "View Activity" eye icon that was a no-op TODO)
             IconButton(
-                onClick = { /* TODO: Navigate to friend's activity */ },
+                onClick = { showRemoveConfirm = true },
                 modifier = Modifier.size(36.dp)
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.icon_eye),
-                    contentDescription = "View Activity",
-                    tint = Colors.primary,
-                    modifier = Modifier.size(20.dp)
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Remove friend",
+                    tint = Colors.textMuted,
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
