@@ -2375,6 +2375,34 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // ── Onboarding-tour demo run ──────────────────────────────────────────────────────────
+  // The feature tour's Run Summary step (Android OnboardingTourScreen.kt / iOS
+  // OnboardingTourScreen.swift) renders the REAL run-summary screen over a genuine run so a
+  // new user sees actual data rather than a mock. Any signed-in user may read this one run
+  // (and only this one) regardless of ownership, in the same transformed shape as
+  // GET /api/runs/:id, plus its saved analysis (same object GET /api/runs/:id/analysis
+  // returns under `analysis`). Owner-identifying fields are stripped. Swap the ID here to
+  // change the demo run everywhere — no client release needed.
+  const ONBOARDING_TOUR_DEMO_RUN_ID = "09b2fa5f-1b16-4de3-a89a-85129644a9c8";
+  app.get("/api/onboarding-tour/demo-run", authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+      const run = await storage.getRun(ONBOARDING_TOUR_DEMO_RUN_ID);
+      if (!run) {
+        console.error(`[GET /api/onboarding-tour/demo-run] Demo run ${ONBOARDING_TOUR_DEMO_RUN_ID} not found`);
+        return res.status(404).json({ error: "Demo run not available" });
+      }
+      const transformed: any = transformRunForAndroid(run);
+      for (const key of ["userId", "user_id", "groupRunId", "group_run_id", "linkedWorkoutId", "linked_workout_id", "linkedPlanId", "linked_plan_id", "eventId", "event_id"]) {
+        delete transformed[key];
+      }
+      const analysisRecord = await storage.getRunAnalysis(ONBOARDING_TOUR_DEMO_RUN_ID).catch(() => null);
+      res.json({ run: transformed, analysis: (analysisRecord as any)?.analysis ?? null });
+    } catch (error: any) {
+      console.error("[GET /api/onboarding-tour/demo-run] error:", error);
+      res.status(500).json({ error: "Failed to load demo run" });
+    }
+  });
+
   // GET /api/runs/:id/download-fit — Download run as FIT file for Garmin/Strava
   app.get("/api/runs/:id/download-fit", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

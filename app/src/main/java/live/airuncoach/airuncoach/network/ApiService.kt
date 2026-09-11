@@ -129,6 +129,9 @@ interface ApiService {
     @POST("/api/user/onboarding-tour-event")
     suspend fun recordOnboardingTourEvent(@Body request: live.airuncoach.airuncoach.network.model.OnboardingTourEventRequest)
 
+    @GET("/api/onboarding-tour/demo-run")
+    suspend fun getOnboardingTourDemoRun(): live.airuncoach.airuncoach.network.model.OnboardingTourDemoRunResponse
+
     // ==================== INJURY MANAGEMENT ====================
 
     @GET("/api/user/injuries")

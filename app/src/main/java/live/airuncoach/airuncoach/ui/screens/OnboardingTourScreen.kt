@@ -968,8 +968,19 @@ private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onPro
 @Composable
 private fun MockRunSummaryScreen(onFinished: () -> Unit) {
     val location = rememberTourLocation()
-    val run = remember(location) { buildTourRun(centerLat = location.first, centerLng = location.second) }
-    val analysis = remember { AiAnalysisState.Freeform(markdown = TOUR_RUN_DEBRIEF, title = "Coach's Debrief") }
+    // Genuine run from the backend (see loadTourDemoRun); null while loading, during which the
+    // real screen's own centred spinner is shown — exactly what a real open looks like.
+    var demo by remember { mutableStateOf<TourDemoRun?>(null) }
+    LaunchedEffect(Unit) { demo = loadTourDemoRun(fallbackCenter = location) }
+    val loaded = demo
+    if (loaded == null) {
+        Box(modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = Colors.primary)
+        }
+        return
+    }
+    val run = loaded.run
+    val analysis = loaded.analysis
     var selectedTab by remember { mutableIntStateOf(0) }
     var comments by remember { mutableStateOf("") }
     var gpxDownloaded by remember { mutableStateOf(false) }
@@ -1139,7 +1150,69 @@ private fun MockRouteGenerationStep(watchChoice: TourWatchChoice, onAdvance: () 
     }
 }
 
-// ── Fabricated demo data ─────────────────────────────────────────────────────────────────────
+// ── Demo run: genuine record from the backend, fabricated fallback ──────────────────────────
+
+private data class TourDemoRun(val run: RunSession, val analysis: AiAnalysisState)
+
+/**
+ * The run the summary step shows. Preferred source is the genuine run the backend designates
+ * for the tour (GET /api/onboarding-tour/demo-run — a real Garmin-recorded 5 km with GPS, HR,
+ * splits and a saved AI analysis). Until that endpoint is deployed, the same run is fetched
+ * directly by ID (GET /api/runs/{id} currently doesn't enforce ownership). Only when both fail
+ * (offline) does the tour fall back to the locally fabricated run, so the step never dead-ends.
+ */
+private const val TOUR_DEMO_RUN_ID = "09b2fa5f-1b16-4de3-a89a-85129644a9c8"
+
+private suspend fun loadTourDemoRun(fallbackCenter: Pair<Double, Double>): TourDemoRun {
+    val api = live.airuncoach.airuncoach.network.RetrofitClient.apiService
+    try {
+        val response = api.getOnboardingTourDemoRun()
+        return TourDemoRun(response.run, parseTourAnalysis(response.analysis))
+    } catch (e: Exception) {
+        android.util.Log.w("OnboardingTourScreen", "Demo-run endpoint unavailable, trying direct fetch: ${e.message}")
+    }
+    try {
+        val run = api.getRunById(TOUR_DEMO_RUN_ID)
+        val analysis = try { api.getRunAnalysisRecord(TOUR_DEMO_RUN_ID)?.analysis } catch (e: Exception) { null }
+        return TourDemoRun(run, parseTourAnalysis(analysis))
+    } catch (e: Exception) {
+        android.util.Log.w("OnboardingTourScreen", "Demo run fetch failed, using fabricated run: ${e.message}")
+    }
+    return TourDemoRun(
+        run = buildTourRun(centerLat = fallbackCenter.first, centerLng = fallbackCenter.second),
+        analysis = AiAnalysisState.Freeform(markdown = TOUR_RUN_DEBRIEF, title = "Coach's Debrief"),
+    )
+}
+
+/** Same freeform / comprehensive / basic detection RunSummaryViewModel.loadSavedAnalysis applies. */
+private fun parseTourAnalysis(json: com.google.gson.JsonElement?): AiAnalysisState {
+    if (json == null || !json.isJsonObject) return AiAnalysisState.Idle
+    return try {
+        var obj = json.asJsonObject
+        if (obj.has("freeform") && obj.get("freeform").asBoolean) {
+            val markdown = obj.get("markdown")?.asString ?: return AiAnalysisState.Idle
+            return AiAnalysisState.Freeform(markdown, obj.get("title")?.asString)
+        }
+        if (!obj.has("performanceScore") && !obj.has("overallScore") && obj.has("analysis") && obj.get("analysis").isJsonObject) {
+            obj = obj.getAsJsonObject("analysis")
+        }
+        val gson = com.google.gson.Gson()
+        when {
+            obj.has("performanceScore") -> AiAnalysisState.Comprehensive(
+                gson.fromJson(obj, live.airuncoach.airuncoach.network.model.ComprehensiveRunAnalysis::class.java)
+            )
+            obj.has("overallScore") -> AiAnalysisState.Basic(
+                gson.fromJson(obj, live.airuncoach.airuncoach.network.model.BasicRunInsights::class.java)
+            )
+            else -> AiAnalysisState.Idle
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("OnboardingTourScreen", "Could not parse demo-run analysis: ${e.message}")
+        AiAnalysisState.Idle
+    }
+}
+
+// ── Fabricated demo data (offline fallback only) ─────────────────────────────────────────────
 
 /**
  * Best-effort centre for the demo map content: the device's last known location when we
@@ -1199,7 +1272,7 @@ private fun tourLoop(
     return open + open.first() // close the loop so start and finish markers coincide
 }
 
-/** 6.42 km / 32:10 easy-tempo loop — the run the summary demo shows. */
+/** 6.42 km / 32:10 easy-tempo loop — offline fallback for the summary demo (see loadTourDemoRun). */
 private fun buildTourRun(centerLat: Double, centerLng: Double): RunSession {
     val distanceM = 6420.0
     val durationMs = 32L * 60_000 + 10_000
