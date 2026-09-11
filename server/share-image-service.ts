@@ -270,6 +270,73 @@ function percentileOf(sorted: number[], p: number): number {
   return sorted[idx];
 }
 
+function haversineMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const R = 6_371_000;
+  const toRad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * toRad;
+  const dLng = (b.lng - a.lng) * toRad;
+  const lat1 = a.lat * toRad;
+  const lat2 = b.lat * toRad;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Match Android RunSummaryScreen's primary pace-colouring algorithm:
+ * accumulate consecutive GPS samples into ~50m buckets and derive each
+ * bucket's sec/km pace from its distance and elapsed timestamp.
+ */
+function computeTimestampBucketPaces(
+  track: Array<{ lat: number; lng: number; timestamp?: number }>
+): Array<number | null> | null {
+  const timestamps = track
+    .map(p => p.timestamp)
+    .filter((t): t is number => typeof t === "number" && Number.isFinite(t));
+  if (timestamps.length < track.length * 0.9) return null;
+
+  const minTs = Math.min(...timestamps);
+  const maxTs = Math.max(...timestamps);
+  // Android stores/validates GPS timestamps in milliseconds.
+  if (maxTs - minTs < 1000) return null;
+
+  const result: Array<number | null> = new Array(track.length).fill(null);
+  let bucketStart = 0;
+  let bucketDist = 0;
+  let bucketTime = 0;
+
+  const finishBucket = (endIndex: number) => {
+    if (bucketDist <= 0 || bucketTime <= 0) return;
+    const speed = bucketDist / bucketTime;
+    const pace = speed > 0.3 ? 1000 / speed : 1200;
+    for (let j = bucketStart; j <= endIndex; j++) result[j] = pace;
+    bucketStart = endIndex;
+    bucketDist = 0;
+    bucketTime = 0;
+  };
+
+  for (let i = 1; i < track.length; i++) {
+    const prevTs = track[i - 1].timestamp;
+    const curTs = track[i].timestamp;
+    if (typeof prevTs !== "number" || typeof curTs !== "number") continue;
+    const dtSec = (curTs - prevTs) / 1000;
+    if (dtSec <= 0) continue;
+
+    const distance = haversineMeters(track[i - 1], track[i]);
+    if (distance < 0.5) continue;
+    bucketDist += distance;
+    bucketTime += dtSec;
+
+    if (bucketDist >= 50) finishBucket(i);
+  }
+
+  if (bucketDist > 5 && bucketTime > 0) finishBucket(track.length - 1);
+  return result.some(v => v != null) ? result : null;
+}
+
 /**
  * Compute a smoothed per-GPS-point pace series (sec/km) for route colouring.
  * Priority: per-point speed (m/s) embedded in the GPS track → raw pace samples
@@ -300,7 +367,13 @@ function computePointPaces(
     });
   }
 
-  // 2. Raw pace samples ({time, value} in sec/km)
+  // 2. GPS timestamp + distance buckets. This is the primary algorithm used
+  // by Android's RunSummaryScreen when direct speed/pace is unavailable.
+  if (!paces) {
+    paces = computeTimestampBucketPaces(track);
+  }
+
+  // 3. Raw pace samples ({time, value} in sec/km)
   if (!paces && paceSamples && paceSamples.length > 1) {
     const valid = paceSamples
       .filter(s => typeof s.value === "number" && s.value > 30 && s.value < 1800 && typeof s.time === "number")
@@ -328,7 +401,7 @@ function computePointPaces(
     }
   }
 
-  // 3. Km splits spread proportionally along the track
+  // 4. Km splits spread proportionally along the track
   if (!paces && paceData && paceData.length > 0) {
     const splits = paceData.filter(p => typeof p.paceSeconds === "number" && p.paceSeconds > 0);
     if (splits.length > 0) {
