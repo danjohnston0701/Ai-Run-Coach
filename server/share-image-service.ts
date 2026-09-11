@@ -1427,9 +1427,10 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
         ? rawGps.map((p: any) => p.elevation ?? p.alt ?? p.altitude ?? null).filter((v: any) => v !== null)
         : [];
       if (gpsElevData.length >= 2) {
+        const elevSampled = sampleData(gpsElevData, 60);
         // Smart axis: elevation uses 5% margin on actual data range
-        const elevAxis = calculateSmartAxis(gpsElevData, 0, 500, 0.02, 0.05);
-        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, gpsElevData, C.green, "Elevation (m)", elevAxis.visMin, elevAxis.visMax)}</g>`;
+        const elevAxis = calculateSmartAxis(elevSampled, 0, 500, 0.02, 0.05);
+        return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, elevSampled, C.green, "Elevation (m)", elevAxis.visMin, elevAxis.visMax)}</g>`;
       }
       // Fallback: simulate from pace splits if available (uphill = slower pace)
       if (run.paceData && run.paceData.length >= 2) {
@@ -1452,8 +1453,15 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
       const transBg = sticker.transparentBackground === true;
       const bgRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="${C.bgCard}" filter="url(#softShadow)"/>`;
       const borderRect = transBg ? "" : `<rect x="${px}" y="${py}" width="${chartW}" height="${chartH}" rx="${cRx}" fill="none" stroke="${C.border}" stroke-width="1"/>`;
-      if (run.paceData && run.paceData.length >= 2) {
-        const paceValues = run.paceData.map((p) => p.paceSeconds);
+      const detailedPaces = run.gpsTrack && run.gpsTrack.length >= 2
+        ? computePointPaces(run.gpsTrack, run.paceSamples, run.paceData)
+        : null;
+      const paceValues = detailedPaces && detailedPaces.length >= 2
+        ? sampleData(detailedPaces, 60)
+        : (run.paceData && run.paceData.length >= 2
+            ? run.paceData.map((p) => p.paceSeconds)
+            : []);
+      if (paceValues.length >= 2) {
         // Smart axis: typical pace 4–7 min/km = 240–420 sec, 10% spread threshold = 18 sec
         const paceAxis = calculateSmartAxis(paceValues, 240, 420, 0.10, 0.05);
         return `${bgRect}${borderRect}<g transform="translate(${px},${py})">${buildMiniChart(0, 0, chartW, chartH, paceValues, C.orange, "Pace /km", paceAxis.visMin, paceAxis.visMax)}</g>`;

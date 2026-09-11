@@ -17849,7 +17849,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     const durationSec = normalizeDurationSeconds(run);
     
     // Normalize GPS track: DB may store {latitude, longitude} or {lat, lng}
-    const rawGps = Array.isArray(run.gpsTrack) ? run.gpsTrack as any[] : [];
+    const rawGpsSource = run.gpsTrack ?? run.gps_track;
+    const rawGps = Array.isArray(rawGpsSource) ? rawGpsSource as any[] : [];
     const gpsTrack = rawGps.length > 1 ? rawGps.map((p: any) => ({
       lat: p.lat ?? p.latitude ?? 0,
       lng: p.lng ?? p.longitude ?? 0,
@@ -17870,8 +17871,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     // Raw pace samples ({time, value}) must NOT be used as km splits (they would draw
     // hundreds of km-marker circles) — instead they are passed separately as paceSamples
     // for fine-grained route colouring.
-    const rawKmSplits = Array.isArray(run.kmSplits) ? run.kmSplits as any[] : [];
-    let paceDataRaw = run.paceData as any;
+    const kmSplitsSource = run.kmSplits ?? run.km_splits;
+    const rawKmSplits = Array.isArray(kmSplitsSource) ? kmSplitsSource as any[] : [];
+    let paceDataRaw = (run.paceData ?? run.pace_data) as any;
 
     // Detect raw sample format vs km-split format
     let paceData: any = null;
@@ -17934,7 +17936,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     // share-image charts: [{ timestamp, value }].
     // Phone/watch runs commonly store a flat number[] at one sample per second;
     // Garmin records may use { samples: [{ timestamp, hr }] }.
-    const heartRateRaw = run.heartRateData as any;
+    const heartRateRaw = (run.heartRateData ?? run.heart_rate_data) as any;
     const heartRateSource = Array.isArray(heartRateRaw)
       ? heartRateRaw
       : (heartRateRaw && Array.isArray(heartRateRaw.samples) ? heartRateRaw.samples : []);
@@ -17957,27 +17959,34 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       })
       .filter((sample: any): sample is { timestamp: number; value: number } => sample != null);
 
+    const completedAtRaw = run.completedAt ?? run.completed_at;
+    const completedAt = completedAtRaw instanceof Date
+      ? completedAtRaw.toISOString()
+      : (typeof completedAtRaw === 'string'
+          ? new Date(completedAtRaw.replace(' ', 'T') + (completedAtRaw.includes('Z') ? '' : 'Z')).toISOString()
+          : undefined);
+
     return {
       distance: distanceKm,
       duration: durationSec,
-      avgPace: run.avgPace || undefined,
-      avgHeartRate: run.avgHeartRate || undefined,
-      maxHeartRate: run.maxHeartRate || undefined,
+      avgPace: run.avgPace ?? run.avg_pace ?? undefined,
+      avgHeartRate: run.avgHeartRate ?? run.avg_heart_rate ?? undefined,
+      maxHeartRate: run.maxHeartRate ?? run.max_heart_rate ?? undefined,
       calories: run.calories || undefined,
       cadence: run.cadence || undefined,
-      totalSteps: run.totalSteps || undefined,
+      totalSteps: run.totalSteps ?? run.total_steps ?? undefined,
       elevation: run.elevation || undefined,
-      elevationGain: run.elevationGain || undefined,
-      elevationLoss: run.elevationLoss || undefined,
+      elevationGain: run.elevationGain ?? run.elevation_gain ?? undefined,
+      elevationLoss: run.elevationLoss ?? run.elevation_loss ?? undefined,
       difficulty: run.difficulty || undefined,
       gpsTrack,
       heartRateData: heartRateData.length > 0 ? heartRateData : undefined,
-      cadenceData: (run.cadenceData as any) || undefined,
+      cadenceData: (run.cadenceData ?? run.cadence_data) || undefined,
       paceData,
       paceSamples,
-      completedAt: run.completedAt?.toISOString() || undefined,
+      completedAt,
       name: run.name || undefined,
-      weatherData: (run.weatherData as any) || undefined,
+      weatherData: (run.weatherData ?? run.weather_data) || undefined,
       timezone: timezone || undefined,
     };
   }
