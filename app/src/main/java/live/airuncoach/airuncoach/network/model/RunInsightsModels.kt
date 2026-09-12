@@ -225,5 +225,13 @@ data class RenameRunRequest(
  * (e.g. via the Garmin companion session/end path) without this device's own coaching context.
  */
 data class PatchCoachingNotesRequest(
-    @SerializedName("aiCoachingNotes") val aiCoachingNotes: List<live.airuncoach.airuncoach.domain.model.AiCoachingNote>
+    @SerializedName("aiCoachingNotes") val aiCoachingNotes: List<live.airuncoach.airuncoach.domain.model.AiCoachingNote>,
+    // Phone-side context for a run the watch saved on its own (see
+    // RunTrackingService.attachCoachingNotesToCompanionRun). Server only fills gaps.
+    @SerializedName("weatherData") val weatherData: live.airuncoach.airuncoach.domain.model.WeatherData? = null,
+    @SerializedName("targetDistance") val targetDistance: Double? = null, // km
+    @SerializedName("targetTime") val targetTime: Long? = null,           // ms
+    @SerializedName("wasTargetAchieved") val wasTargetAchieved: Boolean? = null,
+    @SerializedName("totalSteps") val totalSteps: Int? = null,
+    @SerializedName("aiCoachEnabled") val aiCoachEnabled: Boolean? = null,
 )

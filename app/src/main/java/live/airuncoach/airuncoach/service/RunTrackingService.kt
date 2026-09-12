@@ -242,7 +242,10 @@ class RunTrackingService : Service(), SensorEventListener {
     // Smart target inference — when no explicit targetDistance is set (e.g. watch-initiated free
     // runs), we detect the most likely target from common race distances so final-stretch coaching
     // (500m / 250m / 100m to go) can still fire.
-    private val COMMON_RACE_DISTANCES_M = listOf(1000.0, 2000.0, 3000.0, 5000.0, 10000.0, 15000.0, 21097.5, 42195.0)
+    // 1/2/3 km deliberately excluded: with them, every target-less run "inferred" 1000 m at
+    // 850 m and locked there for good (see maybeInferTargetDistance), and re-inferring 2000 /
+    // 3000 on the way past would fire false "final 500m!" cues at 1.5 km and 2.5 km of a 5K.
+    private val COMMON_RACE_DISTANCES_M = listOf(5000.0, 10000.0, 15000.0, 21097.5, 42195.0)
     private var inferredTargetDistance: Double? = null
     private var hasRoute: Boolean = false
     private val routePoints = mutableListOf<LocationPoint>()
@@ -1568,12 +1571,17 @@ class RunTrackingService : Service(), SensorEventListener {
             // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
             // Normalize to METRES here so all internal calculations use metres consistently.
             val rawTargetDist = intent?.getDoubleExtra(EXTRA_TARGET_DISTANCE, 0.0)?.takeIf { it > 0 }
+            // Same rule as the plan-context block below: a follow-up start-type intent that
+            // carries no target (ACTION_START_TRACKING_FROM_WATCH, a bare ACTION_START_TRACKING
+            // after ACTION_PREPARE_FOR_WATCH already delivered the config) must not wipe a target
+            // the session already has. Losing the target silently disables the final-500/250/100m
+            // cues, the "target reached" cue AND the final-stretch gate that mutes everything else.
             targetDistance = rawTargetDist?.let {
                 // If value <= 100, it's in km (e.g., 5.0, 10.0, 42.195). Convert to metres.
                 // If value > 100, it's already in metres (e.g., 5000, 10000). Keep as-is.
                 if (it <= 100.0) it * 1000.0 else it
-            }
-            targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 }
+            } ?: targetDistance
+            targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 } ?: targetTime
             hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
             intent?.getStringExtra(EXTRA_SESSION_TYPE)?.let { requestedType ->
                 currentActivityType = if (requestedType.equals("walk", ignoreCase = true)) "walk" else "run"
@@ -1772,6 +1780,33 @@ class RunTrackingService : Service(), SensorEventListener {
         if (isTracking || pauseStartTime > 0) {
             Log.w("RunTrackingService", "Already tracking or paused, ignoring stale start request")
             return
+        }
+
+        // Watch-started runs (and any other start with no explicit target) fall back to the
+        // target the user has configured on the Dashboard — the same "user_prefs" values
+        // DashboardViewModel/MapMyRunSetupScreen persist and would have used had this been
+        // prepared on the phone. Without a target there are no final-500/250/100m cues, no
+        // "target reached" cue and no final-stretch quiet zone, and the race-distance inference
+        // below is a poor substitute (see maybeInferTargetDistance).
+        if (targetDistance == null) {
+            try {
+                val prefs = getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                val dashKm = prefs.getFloat("target_distance_km", 0f)
+                if (dashKm > 0f) {
+                    targetDistance = dashKm.toDouble() * 1000.0
+                    if (targetTime == null && prefs.getBoolean("target_time_enabled", false)) {
+                        val h = prefs.getString("target_hours", "0")?.toIntOrNull() ?: 0
+                        val m = prefs.getString("target_minutes", "0")?.toIntOrNull() ?: 0
+                        val sec = prefs.getString("target_seconds", "0")?.toIntOrNull() ?: 0
+                        val ms = (h * 3600L + m * 60L + sec) * 1000L
+                        if (ms > 0) targetTime = ms
+                    }
+                    Log.d("RunTrackingService", "No target on this start — using Dashboard target ${dashKm}km" +
+                        (targetTime?.let { " / ${it / 1000}s" } ?: ""))
+                }
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "Could not read Dashboard target fallback: ${e.message}")
+            }
         }
 
         Log.d("RunTrackingService", "Starting tracking... targetDistance=$targetDistance, targetTime=$targetTime, hasRoute=$hasRoute")
@@ -5477,10 +5512,22 @@ class RunTrackingService : Service(), SensorEventListener {
      * failure here must never block navigation to the run summary.
      */
     private suspend fun attachCoachingNotesToCompanionRun(runId: String, notes: List<AiCoachingNote>) {
+        // Besides the notes, this is the phone's only chance to contribute what the watch's own
+        // record can never have: weather captured at the first fix, the session target, the
+        // phone's step count. Server fills these in only where the run is missing them.
         if (notes.isEmpty()) return
         try {
-            apiService.patchCoachingNotes(runId, PatchCoachingNotesRequest(notes))
-            Log.d("RunTrackingService", "✅ Patched ${notes.size} coaching note(s) onto companion run $runId")
+            val tdKm = targetDistance?.let { it / 1000.0 }
+            apiService.patchCoachingNotes(runId, PatchCoachingNotesRequest(
+                aiCoachingNotes = notes,
+                weatherData = weatherAtStart,
+                targetDistance = tdKm,
+                targetTime = targetTime,
+                wasTargetAchieved = if (tdKm != null) totalDistance >= (tdKm * 1000.0) else null,
+                totalSteps = totalStepsDuringRun.takeIf { it > 0 },
+                aiCoachEnabled = aiCoachEnabledForSession,
+            ))
+            Log.d("RunTrackingService", "✅ Patched ${notes.size} coaching note(s) + phone context onto companion run $runId")
         } catch (e: Exception) {
             Log.w("RunTrackingService", "Failed to patch coaching notes onto companion run $runId: ${e.message}")
         }
@@ -6362,7 +6409,21 @@ class RunTrackingService : Service(), SensorEventListener {
      * of every new run. It is never used if [targetDistance] is already set.
      */
     private fun maybeInferTargetDistance() {
-        if (targetDistance != null || inferredTargetDistance != null) return
+        if (targetDistance != null) return
+        // Previously the first inference was permanent. With 1000 m in the candidate list that
+        // meant every target-less run inferred "1 km" at 850 m, then — once past 1 km —
+        // remaining went negative forever: no final cues, no final-stretch quiet zone, and
+        // HR/cadence/technique kept firing to the line (2026-09-11 5 km park run). If the runner
+        // has run past the inferred distance it was wrong: drop it (and the once-only final
+        // flags with it) so the next candidate can be picked up.
+        inferredTargetDistance?.let { current ->
+            if (totalDistance <= current + 50.0) return
+            Log.d("RunTrackingService", "⚡ Runner passed inferred target ${current.toInt()}m — releasing inference")
+            inferredTargetDistance = null
+            hasFinal500mFired = false
+            hasFinal250mFired = false
+            hasFinal100mFired = false
+        }
         val inferred = COMMON_RACE_DISTANCES_M.firstOrNull { commonDist ->
             totalDistance >= commonDist * 0.85 && totalDistance <= commonDist
         } ?: return
@@ -8648,12 +8709,26 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Derive target zone number from plan intensity label (z1=1, z2=2, etc.)
                 val derivedTargetZone = planWorkoutIntensity
                     ?.removePrefix("z")?.toIntOrNull() ?: 0
+                // Pace context for the server's effort philosophy (see HeartRateCoachingRequest).
+                // Average pace is what's compared against target — instantaneous pace is too noisy
+                // to justify a "you're ahead of target" observation on its own.
+                val hrActiveMs = getActiveRunDuration()
+                val hrAvgPaceSec = if (totalDistance > 0 && hrActiveMs > 0) (hrActiveMs / 1000.0) / (totalDistance / 1000.0) else 0.0
+                val hrTargetPaceSec = targetTime?.let { tt ->
+                    (targetDistance ?: inferredTargetDistance)?.takeIf { it > 0 }?.let { td -> (tt / 1000.0) / (td / 1000.0) }
+                }
+                val hrPaceVsTargetPercent = if (hrTargetPaceSec != null && hrTargetPaceSec > 0 && hrAvgPaceSec > 0)
+                    (hrTargetPaceSec - hrAvgPaceSec) / hrTargetPaceSec * 100.0 else null
                 val request = HeartRateCoachingRequest(
                     currentHR = currentHeartRate,
                     avgHR = avgHr,
                     maxHR = maxHrValue,
                     targetZone = derivedTargetZone,
                     elapsedMinutes = elapsedMinutes,
+                    currentPace = currentPace.takeIf { it != "0:00" },
+                    avgPace = if (hrAvgPaceSec > 0) formatPace(hrAvgPaceSec) else null,
+                    targetPace = hrTargetPaceSec?.let { formatPace(it) },
+                    paceVsTargetPercent = hrPaceVsTargetPercent,
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,

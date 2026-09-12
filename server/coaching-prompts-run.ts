@@ -483,7 +483,7 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
 → If topics have already been covered, choose a fresh angle — vary your coaching focus rather than repeating what was just said.
 → If the athlete is already responding (see response block), acknowledge that first.`;
 
-  const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. Unless a target zone is set and they are above it, never tell the runner to slow down, ease off or save energy — coach consistency and rhythm instead. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }

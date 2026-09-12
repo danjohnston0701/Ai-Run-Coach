@@ -23,6 +23,15 @@ data class HeartRateCoachingRequest(
     @SerializedName("session_coaching_tone") val sessionCoachingTone: String? = null,
     @SerializedName("linked_workout_id") val linkedWorkoutId: String? = null,
 
+    // ── Pace context ─────────────────────────────────────────────────────────
+    // Lets the HR coach tell "ahead of target pace, could settle" apart from "behind target /
+    // free run — never suggest slowing down". Server-side effort philosophy in
+    // ai-service.generateHeartRateCoaching depends on these being present when a target exists.
+    @SerializedName("currentPace") val currentPace: String? = null,          // "M:SS" per km, instantaneous
+    @SerializedName("avgPace") val avgPace: String? = null,                  // "M:SS" per km, whole run so far
+    @SerializedName("targetPace") val targetPace: String? = null,            // "M:SS" per km from target time ÷ distance
+    @SerializedName("paceVsTargetPercent") val paceVsTargetPercent: Double? = null, // + = faster than target, − = slower
+
     // ── Session memory — coaching continuity ──────────────────────────────────
     @SerializedName("topicsDiscussed") val topicsDiscussed: List<String>? = null,
     @SerializedName("topicsNotCovered") val topicsNotCovered: List<String>? = null,

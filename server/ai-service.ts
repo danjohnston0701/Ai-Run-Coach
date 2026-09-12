@@ -3874,6 +3874,11 @@ export async function generateHeartRateCoaching(params: {
   // Values: flat | rolling | gradual_climb | steep_climb | gradual_descent | steep_descent
   terrain_context?: string;
   activityType?: string;
+  // Pace context (all optional) — see effortPhilosophyBlock below
+  currentPace?: string;          // "M:SS" per km, instantaneous
+  avgPace?: string;              // "M:SS" per km, whole run so far
+  targetPace?: string;           // "M:SS" per km derived from target time ÷ target distance
+  paceVsTargetPercent?: number;  // positive = running FASTER than target pace, negative = slower
 } & WatchDynamicsParams): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
   // currentHR/avgHR/maxHR are required by the type signature but unvalidated — a missing
@@ -3974,11 +3979,40 @@ export async function generateHeartRateCoaching(params: {
     return `\nTerrain context: The ${hrPersonLabel} is ${label}. Factor this into your HR assessment — don't penalise a high HR that's appropriate for the current gradient.\n`;
   })();
 
+  // Effort philosophy. A plan session with a target zone is the ONLY case where "ease off"
+  // is legitimate coaching (a Z2 easy day genuinely should stay in Z2). On a free run —
+  // no target zone — the runner has chosen their own effort, and the product stance is:
+  // encourage consistency, never tell them to slow down or "save energy" because they're in
+  // Zone 3/4. Confirmed in the field (2026-09-11 5 km park run, HR in Zone 3 the whole way,
+  // already well under the runner's usual pace): the model volunteered "slow it down a tad
+  // and save some energy for the finish" five separate times. The one exception is being
+  // clearly AHEAD of a target pace, which is a pacing observation, not an effort warning.
+  const paceLine = (() => {
+    const { currentPace, avgPace, targetPace, paceVsTargetPercent } = params;
+    const paceFacts = [
+      currentPace ? `current pace ${currentPace}/km` : null,
+      avgPace ? `average pace ${avgPace}/km` : null,
+      targetPace ? `target pace ${targetPace}/km` : null,
+    ].filter(Boolean).join(', ');
+    if (typeof paceVsTargetPercent === 'number' && targetPace) {
+      if (paceVsTargetPercent >= 5) {
+        return `\nPace: ${paceFacts}. They are running about ${Math.round(paceVsTargetPercent)}% FASTER than their target pace. You MAY point out they're ahead of target and could settle back to target pace to finish strong — frame it as pacing, not as being tired.`;
+      }
+      if (paceVsTargetPercent <= -3) {
+        return `\nPace: ${paceFacts}. They are BEHIND their target pace — under no circumstances suggest slowing down or easing off. Encourage rhythm, relaxation and consistency.`;
+      }
+      return `\nPace: ${paceFacts}. They are on target pace — reinforce holding this effort.`;
+    }
+    return paceFacts ? `\nPace: ${paceFacts}.` : '';
+  })();
+
   const targetZoneGuidance = targetZone && currentZone !== targetZone
     ? currentZone > targetZone
       ? 'They need to slow down to hit their target zone.'
       : 'They can pick up the pace if feeling good.'
-    : '';
+    : targetZone
+      ? 'They are in their target zone — reinforce it.'
+      : `Effort philosophy (no target zone — this is a free ${hrPersonLabel === 'walker' ? 'walk' : 'run'}): Zones 1–4 are ALL legitimate. Do NOT tell them to slow down, ease off, hold back, "save energy", "conserve" or "keep something for the finish" — that is the wrong message; steady, consistent effort is the goal, so encourage them to hold what they're doing and stay relaxed. The only effort warning you may give is a gentle one if HR is in Zone 5 (90%+ of max) and has been for a while.${paceLine}`;
 
   const { system: hrSystemMsg, user: prompt } = (isWalkHR ? walkPrompts : runPrompts).heartRateCoachingPrompt({
     coachName, coachTone, coachAccent, runnerProfileContext, elapsedMinutes,

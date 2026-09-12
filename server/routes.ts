@@ -3542,8 +3542,23 @@ function transformRunForAndroid(run: any) {
       if (!Array.isArray(aiCoachingNotes)) {
         return res.status(400).json({ error: "aiCoachingNotes must be an array" });
       }
-      const updated = await storage.updateRun(req.params.id, { aiCoachingNotes });
-      console.log(`[PATCH /api/runs/:id/coaching-notes] Patched ${aiCoachingNotes.length} note(s) onto run ${req.params.id}`);
+      // This is the phone's only write onto a run the watch already saved on its own (the
+      // watch's "stop" never reached the phone, so no full POST /api/runs upload happened —
+      // see RunTrackingService.handOffToAlreadySavedRun). Besides the notes, the phone also
+      // holds context the watch record can never have: weather at start, the session's
+      // target distance/time, the phone's own step count. Fill those in when missing so a
+      // dropped BT stop no longer costs the run its weather/target/steps.
+      const patch: Record<string, any> = { aiCoachingNotes };
+      const r: any = run;
+      if (req.body.weatherData != null && r.weatherData == null) patch.weatherData = req.body.weatherData;
+      if (typeof req.body.targetDistance === 'number' && req.body.targetDistance > 0 && r.targetDistance == null) patch.targetDistance = req.body.targetDistance;
+      if (typeof req.body.targetTime === 'number' && req.body.targetTime > 0 && r.targetTime == null) patch.targetTime = req.body.targetTime;
+      if (typeof req.body.wasTargetAchieved === 'boolean' && r.wasTargetAchieved == null) patch.wasTargetAchieved = req.body.wasTargetAchieved;
+      if (typeof req.body.totalSteps === 'number' && req.body.totalSteps > 0 && r.totalSteps == null) patch.totalSteps = req.body.totalSteps;
+      if (typeof req.body.calories === 'number' && req.body.calories > 0 && r.calories == null) patch.calories = req.body.calories;
+      if (typeof req.body.aiCoachEnabled === 'boolean' && r.aiCoachEnabled == null) patch.aiCoachEnabled = req.body.aiCoachEnabled;
+      const updated = await storage.updateRun(req.params.id, patch);
+      console.log(`[PATCH /api/runs/:id/coaching-notes] Patched ${aiCoachingNotes.length} note(s) + [${Object.keys(patch).filter(k => k !== 'aiCoachingNotes').join(', ') || 'no extra context'}] onto run ${req.params.id}`);
       res.json(updated);
     } catch (error: any) {
       console.error("[PATCH /api/runs/:id/coaching-notes]", error);
@@ -12736,6 +12751,27 @@ function transformRunForAndroid(run: any) {
         maxHR: maxHR || 190,
         targetZone,
         elapsedMinutes: elapsedMinutes || 0,
+        // Pace context — lets the HR coach distinguish "ahead of target, could settle" from
+        // "behind target, absolutely do not tell them to slow down" (see ai-service).
+        currentPace: req.body.currentPace,
+        avgPace: req.body.avgPace,
+        targetPace: req.body.targetPace,
+        paceVsTargetPercent: typeof req.body.paceVsTargetPercent === 'number' ? req.body.paceVsTargetPercent : undefined,
+        // Session memory / physiological response / terrain — the client has sent these for
+        // a long time but they were never forwarded here, so the HR coach couldn't see its own
+        // last three messages (hence the same "save some energy" line five times in one run).
+        topicsDiscussed: req.body.topicsDiscussed,
+        topicsNotCovered: req.body.topicsNotCovered,
+        sessionCueCount: req.body.sessionCueCount,
+        lastCueTriggerType: req.body.lastCueTriggerType,
+        minutesSinceLastCue: req.body.minutesSinceLastCue,
+        recentCoachingMessages: req.body.recentCoachingMessages,
+        hrConfidence: req.body.hrConfidence,
+        gpsConfidence: req.body.gpsConfidence,
+        lastCueHrDelta: req.body.lastCueHrDelta,
+        lastCuePaceDelta: req.body.lastCuePaceDelta,
+        athleteRespondedToLastCue: req.body.athleteRespondedToLastCue,
+        terrain_context: req.body.terrain_context ?? req.body.terrainContext,
         coachName,
         coachTone: effectiveTone,
         coachAccent: user?.coachAccent || 'british',
@@ -13645,7 +13681,7 @@ function transformRunForAndroid(run: any) {
           // db.update(garminCompanionSessions) above — use that exact run rather
           // than guessing from distance, which fails whenever one side's track
           // is corrupted/incomplete (e.g. a paused/frozen phone track).
-          let phoneMatchedRun: { id: string; distance: number | null } | undefined;
+          let phoneMatchedRun: { id: string; distance: number | null; totalSteps?: number | null } | undefined;
           if (updated?.runId) {
             const [linkedRun] = await db
               .select({ id: runs.id, distance: runs.distance })
@@ -13705,8 +13741,30 @@ function transformRunForAndroid(run: any) {
             .orderBy(garminRealtimeData.timestamp);
 
           let gpsTrackFromData: any[] | null = null;
+          // Total steps integrated from the watch's cadence stream (steps/min × elapsed
+          // minutes between consecutive samples). Connect IQ exposes in-activity cadence but
+          // not an in-activity step count, so watch-recorded runs previously landed with
+          // total_steps = null even though the data to derive it was already here.
+          let derivedTotalSteps: number | null = null;
 
           if (allDataPoints.length >= 10) {
+            let stepAccumulator = 0;
+            for (let i = 1; i < allDataPoints.length; i++) {
+              const prev = allDataPoints[i - 1];
+              const cur = allDataPoints[i];
+              const cadence = cur.cadence ?? prev.cadence;
+              if (cadence == null || cadence <= 0) continue;
+              const dtSec = (cur.elapsedTime != null && prev.elapsedTime != null)
+                ? cur.elapsedTime - prev.elapsedTime
+                : (cur.timestamp && prev.timestamp
+                    ? (new Date(cur.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 1000
+                    : 0);
+              // Ignore pauses / BT gaps — a 5-minute gap at 160 spm is not 800 steps.
+              if (dtSec <= 0 || dtSec > 30) continue;
+              stepAccumulator += cadence * (dtSec / 60);
+            }
+            if (stepAccumulator > 0) derivedTotalSteps = Math.round(stepAccumulator);
+
             // Build a flat number[] heartRateData from per-second rows (already ordered)
             const hrSamples = allDataPoints
               .filter(d => d.heartRate != null && d.heartRate > 20)
@@ -13827,6 +13885,7 @@ function transformRunForAndroid(run: any) {
             if (altitudeData && altitudeData.length > 0) mergeFields.altitudeData = altitudeData;
             if (storedKmSplits && storedKmSplits.length > 0) mergeFields.kmSplits = storedKmSplits;
             if (gpsTrackFromData && gpsTrackFromData.length > 0) mergeFields.gpsTrack = gpsTrackFromData;
+            if (derivedTotalSteps != null && (phoneMatchedRun as any).totalSteps == null) mergeFields.totalSteps = derivedTotalSteps;
 
             if (Object.keys(mergeFields).length > 0) {
               await db.update(runs).set(mergeFields).where(eq(runs.id, phoneMatchedRun.id));
@@ -13861,6 +13920,7 @@ function transformRunForAndroid(run: any) {
             hasGarminData: true,
             difficulty: 'moderate',
             isPublic: false,
+            totalSteps: derivedTotalSteps,
             // Running dynamics
             avgStrideLength: stats.avgStrideLength ?? null,
             // Advanced Garmin metrics (stored in existing columns)
