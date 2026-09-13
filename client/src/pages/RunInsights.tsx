@@ -295,12 +295,18 @@ export default function RunInsights() {
     const fetchSavedAnalysis = async () => {
       try {
         const profile = localStorage.getItem("userProfile");
-        const userId = profile ? JSON.parse(profile).id : null;
-        const url = userId 
-          ? `/api/runs/${params.id}/analysis?userId=${userId}` 
+        const parsedProfile = profile ? JSON.parse(profile) : null;
+        const userId = parsedProfile?.id ?? null;
+        const token = parsedProfile?.token ?? null;
+        const url = userId
+          ? `/api/runs/${params.id}/analysis?userId=${userId}`
           : `/api/runs/${params.id}/analysis`;
-        
-        const response = await fetch(url);
+
+        // This endpoint now requires auth (it used to be public) — send the same bearer
+        // token the run fetch above uses, or the saved analysis silently never loads.
+        const response = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (response.ok) {
           const savedAnalysis = await response.json();
           if (savedAnalysis && savedAnalysis.highlights) {
@@ -860,8 +866,10 @@ export default function RunInsights() {
     
     try {
       const profile = localStorage.getItem("userProfile");
-      const userId = profile ? JSON.parse(profile).id : null;
-      
+      const parsedProfile = profile ? JSON.parse(profile) : null;
+      const userId = parsedProfile?.id ?? null;
+      const token = parsedProfile?.token ?? null;
+
       if (!userId) {
         setAiAnalysisError("Please log in to generate AI analysis");
         return;
@@ -880,7 +888,12 @@ export default function RunInsights() {
       
       const response = await fetch(`/api/runs/${params.id}/analysis`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // This route has always required auth but the header was never sent, so this call
+        // has been failing with 401; it now also requires run ownership.
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ 
           userId,
           reviewedStruggles: reviewedStruggles.length > 0 ? reviewedStruggles : undefined,

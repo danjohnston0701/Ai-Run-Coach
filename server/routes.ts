@@ -4,6 +4,7 @@ import { eq, and, or, gte, gt, lt, desc, asc, lte, count, isNull, isNotNull, inA
 import { storage } from "./storage";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
+import { getRunForReader, getRunForOwner, ONBOARDING_TOUR_DEMO_RUN_ID } from "./run-access";
 import { getRunnerProfile, runnerProfileBlock, persistCoachingObservation, refreshRunnerProfile } from "./runner-profile-service";
 import { 
   garminWellnessMetrics, connectedDevices, garminActivities, garminBodyComposition, 
@@ -2361,12 +2362,17 @@ function transformRunForAndroid(run: any) {
   app.get("/api/runs/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       console.log(`[GET /api/runs/${req.params.id}] Fetching run for user: ${req.user?.userId}`);
-      const run = await storage.getRun(req.params.id);
-      if (!run) {
-        console.error(`[GET /api/runs/${req.params.id}] Run NOT FOUND in database`);
+      // Ownership was never checked here — any signed-in user could read any run's full GPS
+      // track by ID. Observers, group-run participants and the tour demo run stay allowed;
+      // see server/run-access.ts. A denied read answers 404, same as a missing run, so the
+      // response can't be used to confirm an ID exists.
+      const access = await getRunForReader(req.params.id, req.user!.userId);
+      if (!access) {
+        console.error(`[GET /api/runs/${req.params.id}] Run not found or not accessible to ${req.user?.userId}`);
         return res.status(404).json({ error: "Run not found" });
       }
-      console.log(`[GET /api/runs/${req.params.id}] Run found - userId: ${run.userId}, distance: ${run.distance}`);
+      const run = access.run;
+      console.log(`[GET /api/runs/${req.params.id}] Run found (${access.reason}) - userId: ${run.userId}, distance: ${run.distance}`);
       const transformedRun = transformRunForAndroid(run);
       res.json(transformedRun);
     } catch (error: any) {
@@ -2381,9 +2387,10 @@ function transformRunForAndroid(run: any) {
   // new user sees actual data rather than a mock. Any signed-in user may read this one run
   // (and only this one) regardless of ownership, in the same transformed shape as
   // GET /api/runs/:id, plus its saved analysis (same object GET /api/runs/:id/analysis
-  // returns under `analysis`). Owner-identifying fields are stripped. Swap the ID here to
-  // change the demo run everywhere — no client release needed.
-  const ONBOARDING_TOUR_DEMO_RUN_ID = "09b2fa5f-1b16-4de3-a89a-85129644a9c8";
+  // returns under `analysis`). Owner-identifying fields are stripped. The ID lives in
+  // server/run-access.ts, which also exempts it from the ownership check on GET /api/runs/:id
+  // so the tour's fallback path keeps working — change it there to swap the demo run
+  // everywhere, no client release needed.
   app.get("/api/onboarding-tour/demo-run", authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
     try {
       const run = await storage.getRun(ONBOARDING_TOUR_DEMO_RUN_ID);
@@ -3604,8 +3611,12 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.get("/api/runs/:id/analysis", async (req: Request, res: Response) => {
+  app.get("/api/runs/:id/analysis", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      // Was unauthenticated — anyone with a run ID could read its AI analysis. Same reader
+      // rules as GET /api/runs/:id (see server/run-access.ts).
+      const access = await getRunForReader(req.params.id, req.user!.userId);
+      if (!access) return res.status(404).json({ error: "Run not found" });
       const analysis = await storage.getRunAnalysis(req.params.id);
       res.json(analysis || null);
     } catch (error: any) {
@@ -3616,6 +3627,10 @@ function transformRunForAndroid(run: any) {
 
   app.post("/api/runs/:id/analysis", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      // Authenticated but unowned before — any signed-in user could write an analysis onto
+      // anyone's run. Writes are owner-only.
+      const run = await getRunForOwner(req.params.id, req.user!.userId);
+      if (!run) return res.status(404).json({ error: "Run not found" });
       const analysis = await storage.createRunAnalysis(req.params.id, req.body);
       res.status(201).json(analysis);
     } catch (error: any) {
@@ -5790,9 +5805,12 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/runs/:id/ai-insights", async (req: Request, res: Response) => {
+  app.post("/api/runs/:id/ai-insights", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const run = await storage.getRun(req.params.id);
+      // Was unauthenticated, spends OpenAI credits AND writes aiInsights back onto the run —
+      // so an unauthenticated caller could both bill us and overwrite a stranger's insights.
+      // Owner-only, like every other write to a run.
+      const run = await getRunForOwner(req.params.id, req.user!.userId);
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
       }
@@ -6389,8 +6407,11 @@ function transformRunForAndroid(run: any) {
   });
 
   // Get device data for a run
-  app.get("/api/runs/:id/device-data", async (req: Request, res: Response) => {
+  app.get("/api/runs/:id/device-data", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
+      // Was unauthenticated — a run ID was enough to read its device/heart-rate stream.
+      const access = await getRunForReader(req.params.id, req.user!.userId);
+      if (!access) return res.status(404).json({ error: "Run not found" });
       const deviceData = await storage.getDeviceDataByRun(req.params.id);
       res.json(deviceData);
     } catch (error: any) {
