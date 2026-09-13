@@ -15,6 +15,8 @@ import {
   PACE_FORMAT_RULE,
   VARIETY_INSTRUCTION,
   getPaceContextDirective,
+  effortPhilosophyRule,
+  freeSessionEffortRule,
 } from "./ai-service";
 import { runnerProfileBlock } from "./runner-profile-service";
 
@@ -58,6 +60,12 @@ export interface PaceUpdatePromptContext {
 }
 
 export function paceUpdatePrompt(ctx: PaceUpdatePromptContext): { system: string; user: string } {
+  // A target DISTANCE alone isn't a prescribed effort — only a target pace, a session split
+  // target or a plan workout counts, so a "just going out for 5k" run still gets the
+  // free-run rule.
+  const effortRule = freeSessionEffortRule(
+    !!(ctx.targetPaceParam || ctx.isTrainingSession || ctx.splitTargetVerdict || ctx.sessionSplitContext),
+  );
   const user = ctx.isSplit && ctx.splitKm && ctx.spokenSplitPace
     ? `You are ${ctx.coachName}, an AI running coach with a ${ctx.coachTone} style.
 ${ctx.runnerContext ? `\nRunner context: ${ctx.runnerContext}` : ''}
@@ -73,6 +81,7 @@ ${ctx.terrainContext}${ctx.paceTrend}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
+${effortRule}
 Give a brief (1-2 sentences) split update. ${ctx.routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last run or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${ctx.spokenSplitPace}) and${ctx.splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ctx.sessionSplitContext ? ' how their split compares to the session target pace.' : ctx.isTrainingSession ? ` how this split relates to the ${ctx.workoutType!.replace(/_/g, ' ')} session goal.` : ` ${ctx.topicInstruction}`} ${ctx.cadenceContext && (ctx.workoutType === 'tempo' || ctx.workoutType === 'threshold') ? 'If cadence is a concern, include a brief cadence cue. ' : ''}${ctx.hasRoute === true && ctx.isOnHill ? 'Acknowledge the hill effort. ' : ''}`
     : `You are ${ctx.coachName}, an AI running coach with a ${ctx.coachTone} style.
 ${ctx.runnerContext ? `\nRunner context: ${ctx.runnerContext}` : ''}
@@ -81,9 +90,10 @@ ${ctx.terrainContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
+${effortRule}
 Give a very brief (1-2 sentences) pace check-in. MUST cite their pace (${ctx.spokenCurrentPace}) and distance (${formatDistanceForCoaching(ctx.distance)}) — but if heart rate or cadence context above stands out, briefly reference that too instead of only pace. ${ctx.hasRoute === true && ctx.isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
 
-  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When running history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(ctx.hasRoute || (typeof ctx.currentGrade === 'number' && Math.abs(ctx.currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the runner's experience level and the tone directive below.
+  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Keep pace updates brief but ALWAYS cite the runner's actual numbers (pace, split time, distance). When running history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(ctx.hasRoute || (typeof ctx.currentGrade === 'number' && Math.abs(ctx.currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the runner's experience level and the tone directive below. ${effortPhilosophyRule('runner')}
 
 ${getPaceContextDirective(
   ctx.currentPaceSecPerKm,
@@ -115,9 +125,13 @@ export interface StruggleCoachingPromptContext {
   runnerContext: string;
   runnerProfile?: string | null;
   watchDynamicsContext?: string;
+  // True when the session prescribes an effort (plan workout or target HR zone). Struggle
+  // coaching never receives a target pace, so this is the only target signal it has.
+  hasTarget?: boolean;
 }
 
 export function struggleCoachingPrompt(ctx: StruggleCoachingPromptContext): { system: string; user: string } {
+  const effortRule = freeSessionEffortRule(!!ctx.hasTarget);
   const user = `You are ${ctx.coachName}, an AI running coach with a ${ctx.coachTone} style.
 ${ctx.runnerContext ? `\nRunner context: ${ctx.runnerContext}` : ''}
 The runner is struggling. Their pace has dropped ${Math.round(ctx.paceDropPercent)}% from their baseline.
@@ -130,9 +144,10 @@ ${ctx.trainingStruggleContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a brief (1-2 sentences) supportive message tailored to this runner's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
+${effortRule}
+Give a brief (1-2 sentences) supportive message tailored to this runner's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, ${ctx.hasTarget ? 'but encourage them to push through or adjust their strategy based on what you know about their recent form.' : 'then encourage them to settle into a rhythm and keep going — help them through it rather than talking them out of it.'}`;
 
-  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${effortPhilosophyRule('runner')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }
@@ -176,6 +191,7 @@ CRITICAL RULES:
 - Keep it to 2-3 sentences maximum — this is spoken while they're running
 - NEVER use the word "summit" or "crest" as a prediction
 - Descents SPEED UP pace — never say descending slows you down or is harder
+- ${effortPhilosophyRule('runner')} Steady effort on a climb (shorter stride, quick feet) is the technique cue — "save something for later" is not
 - ${ctx.futureBanRule}
 - ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? '\n- ' + accentDirective(ctx.coachAccent) : ''}` + runnerProfileBlock(ctx.runnerProfile);
 
@@ -329,6 +345,10 @@ export interface DuringPhasePromptContext {
 }
 
 export function duringPhasePrompt(ctx: DuringPhasePromptContext): { system: string; user: string } {
+  // planContext is only non-empty for a coaching-plan workout; targetPace/hasTargetTime come
+  // from the runner's own goal for this session. Any of the three means an effort is
+  // prescribed and the prompt's existing target guidance owns the pacing message.
+  const effortRule = freeSessionEffortRule(!!(ctx.targetPace || ctx.hasTargetTime || ctx.planContext));
   const user = `You are ${ctx.coachName}, an AI running coach with a ${ctx.coachTone} style.
 
 ${ctx.is500mCheckin ? `TRIGGER: First 500m check-in` : `Phase: ${ctx.phaseDescription}`}
@@ -346,12 +366,13 @@ ${ctx.cadenceInstruction}
 ${ctx.noTerrainRule}${ctx.runnerProfileContext}${ctx.planContext}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
+${effortRule}
 ${ctx.is500mCheckin ? `This is the runner's first check-in at 500m. Give a brief initial read on how the run is going (2-3 sentences), weaving in their actual pace and distance.` : `Give a brief (2-3 sentences) phase-appropriate coaching message.`}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${ctx.runnerFirstName ? ` You may address them as "${ctx.runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
 Weave in the runner's actual stats (pace, distance, time, cadence, heart rate) naturally — this should feel like a real coach watching their performance, not generic encouragement. CRITICAL: Pace values are already fully formatted — do NOT reformat them.${ctx.targetPace ? (ctx.hasNoBaseline ? ` Mention their current pace naturally. They have a target pace but no established baseline — treat the gap as context, not a verdict. Focus on the run itself, not the shortfall.` : ` Comment on their pace relative to target (${ctx.paceVerdict}).`) : ''}${ctx.hasTargetTime ? (ctx.hasNoBaseline ? ` Their goal is ${ctx.targetTimeFormatted} — reference it lightly if it fits, but don't make projected finish time the centrepiece.` : ` Address whether they are on track for their ${ctx.targetTimeFormatted} target time.`) : ''}${ctx.cadenceCoachingDirective ? ' Incorporate the cadence coaching directive above.' : ''}${ctx.elevationInstruction ? ' Acknowledge the elevation context.' : ''}${ctx.hasRoute === true && !ctx.elevationInstruction ? ' Consider terrain if relevant.' : ''}`;
 
-  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Keep messages concise (2-3 sentences) and always reference the runner's actual numbers. NEVER start with greetings — jump straight into coaching. ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Keep messages concise (2-3 sentences) and always reference the runner's actual numbers. NEVER start with greetings — jump straight into coaching. ${effortPhilosophyRule('runner')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }
@@ -437,7 +458,7 @@ ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
 Decide whether cadence coaching is needed right now. If yes, reference their actual number (they can't see the screen). Keep it 2-3 sentences, spoken aloud. If cadence isn't the priority, coach what matters more. No emojis. No markdown.`;
 
-  const system = `You are ${ctx.coachName}, an elite ${ctx.coachTone} running coach. You understand biomechanics, but you prioritize what matters most RIGHT NOW. Reference actual numbers. Keep it 2-3 sentences spoken aloud. No emojis. ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, an elite ${ctx.coachTone} running coach. You understand biomechanics, but you prioritize what matters most RIGHT NOW. Reference actual numbers. Keep it 2-3 sentences spoken aloud. No emojis. ${effortPhilosophyRule('runner')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }
@@ -483,7 +504,7 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
 → If topics have already been covered, choose a fresh angle — vary your coaching focus rather than repeating what was just said.
 → If the athlete is already responding (see response block), acknowledge that first.`;
 
-  const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. Unless a target zone is set and they are above it, never tell the runner to slow down, ease off or save energy — coach consistency and rhythm instead. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${effortPhilosophyRule('runner')} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }

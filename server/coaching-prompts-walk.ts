@@ -12,6 +12,8 @@ import {
   PACE_FORMAT_RULE,
   VARIETY_INSTRUCTION,
   getPaceContextDirective,
+  effortPhilosophyRule,
+  freeSessionEffortRule,
 } from "./ai-service";
 import { runnerProfileBlock } from "./runner-profile-service";
 import { activityVocab } from "./coaching-activity";
@@ -31,6 +33,11 @@ import type {
 const WALK_PROHIBITION = activityVocab('walk').prohibition;
 
 export function paceUpdatePrompt(ctx: PaceUpdatePromptContext): { system: string; user: string } {
+  // See the run counterpart: a target distance alone isn't a prescribed effort.
+  const effortRule = freeSessionEffortRule(
+    !!(ctx.targetPaceParam || ctx.isTrainingSession || ctx.splitTargetVerdict || ctx.sessionSplitContext),
+    'walk',
+  );
   const user = ctx.isSplit && ctx.splitKm && ctx.spokenSplitPace
     ? `You are ${ctx.coachName}, an AI walking coach with a ${ctx.coachTone} style.${WALK_PROHIBITION}
 ${ctx.runnerContext ? `\nWalker context: ${ctx.runnerContext}` : ''}
@@ -46,6 +53,7 @@ ${ctx.terrainContext}${ctx.paceTrend}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
+${effortRule}
 Give a brief (1-2 sentences) split update. ${ctx.routeCtxBlock ? 'PRIORITISE the route memory data — mention the split delta vs last walk or average (faster/slower by X seconds) as this is the most impactful insight. If a terrain alert is present, mention that first. ' : ''}You MUST mention their SPLIT pace (${ctx.spokenSplitPace}) and${ctx.splitTargetVerdict ? ' whether they are on track for their target pace (CRITICAL — do NOT praise a slow split if they are behind target).' : ctx.sessionSplitContext ? ' how their split compares to the session target pace.' : ctx.isTrainingSession ? ` how this split relates to the ${ctx.workoutType!.replace(/_/g, ' ')} session goal.` : ` ${ctx.topicInstruction}`} ${ctx.hasRoute === true && ctx.isOnHill ? 'Acknowledge the hill effort. ' : ''}`
     : `You are ${ctx.coachName}, an AI walking coach with a ${ctx.coachTone} style.${WALK_PROHIBITION}
 ${ctx.runnerContext ? `\nWalker context: ${ctx.runnerContext}` : ''}
@@ -54,9 +62,10 @@ ${ctx.terrainContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
+${effortRule}
 Give a very brief (1-2 sentences) walking check-in. MUST cite their pace (${ctx.spokenCurrentPace}) and distance (${formatDistanceForCoaching(ctx.distance)}) — but if heart rate context above stands out, briefly reference that too instead of only pace. ${ctx.hasRoute === true && ctx.isOnHill ? ' Acknowledge the hill they are on.' : ''}`;
 
-  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Keep walk updates brief but ALWAYS cite the walker's actual numbers (pace, split time, distance). When walking history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(ctx.hasRoute || (typeof ctx.currentGrade === 'number' && Math.abs(ctx.currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the walker's experience level and the tone directive below.${WALK_PROHIBITION}
+  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Keep walk updates brief but ALWAYS cite the walker's actual numbers (pace, split time, distance). When walking history is available, compare current performance to their recent averages to personalise the insight. ${PACE_FORMAT_RULE} ${(ctx.hasRoute || (typeof ctx.currentGrade === 'number' && Math.abs(ctx.currentGrade) > 0.5)) ? 'GPS elevation data available — be terrain-aware when hills are present. ' : 'No terrain data — do NOT mention hills, terrain, or elevation. '}Be honest about pace performance — calibrate how directly you address a pace gap to the walker's experience level and the tone directive below. ${effortPhilosophyRule('walker')}${WALK_PROHIBITION}
 
 ${getPaceContextDirective(
   ctx.currentPaceSecPerKm,
@@ -78,6 +87,7 @@ ${toneDirective(ctx.coachTone)}${ctx.accentRule ? ' ' + ctx.accentRule : ''}${ru
 const STRUGGLE_WALK_PROHIBITION = ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running-specific term. Say "walker", "walking", "walk pace" instead. Cadence coaching is suppressed.';
 
 export function struggleCoachingPrompt(ctx: StruggleCoachingPromptContext): { system: string; user: string } {
+  const effortRule = freeSessionEffortRule(!!ctx.hasTarget, 'walk');
   const user = `You are ${ctx.coachName}, an AI walking coach with a ${ctx.coachTone} style.${STRUGGLE_WALK_PROHIBITION}
 ${ctx.runnerContext ? `\nWalker context: ${ctx.runnerContext}` : ''}
 The walker is struggling. Their pace has dropped ${Math.round(ctx.paceDropPercent)}% from their baseline.
@@ -90,14 +100,17 @@ ${ctx.trainingStruggleContext}
 ${ctx.noTerrainRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
-Give a brief (1-2 sentences) supportive message tailored to this walker's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, but encourage them to push through or adjust their strategy based on what you know about their recent form.`;
+${effortRule}
+Give a brief (1-2 sentences) supportive message tailored to this walker's fitness level and history. You MUST cite at least one specific number. Acknowledge their struggle, ${ctx.hasTarget ? 'but encourage them to push through or adjust their strategy based on what you know about their recent form.' : 'then encourage them to settle into a rhythm and keep going — help them through it rather than talking them out of it.'}`;
 
-  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Be supportive during tough moments — always reference actual data. Keep it brief.${STRUGGLE_WALK_PROHIBITION} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Be supportive during tough moments — always reference actual data. Keep it brief.${STRUGGLE_WALK_PROHIBITION} ${effortPhilosophyRule('walker')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }
 
-export const STRUGGLE_FALLBACK_MESSAGE = "I can see you're working hard. Take a breath, ease back your walking pace, and keep going.";
+// Deterministic fallback when the model call fails. Previously "ease back your walking pace"
+// — the exact framing the effort philosophy bans, and worse for being unconditional.
+export const STRUGGLE_FALLBACK_MESSAGE = "I can see you're working hard. Take a breath, find your rhythm, and keep going.";
 
 // ── Phase coaching (generatePhaseCoaching in ai-service.ts) ────────────────────────────
 // Counterpart to the three prompt pairs in coaching-prompts-run.ts. The original function
@@ -178,6 +191,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "He
 }
 
 export function duringPhasePrompt(ctx: DuringPhasePromptContext): { system: string; user: string } {
+  const effortRule = freeSessionEffortRule(!!(ctx.targetPace || ctx.hasTargetTime || ctx.planContext), 'walk');
   const user = `You are ${ctx.coachName}, an AI walking coach with a ${ctx.coachTone} style.${DURING_PHASE_PROMPT_WALK_PROHIBITION}
 
 ${ctx.is500mCheckin ? `TRIGGER: First 500m check-in` : `Phase: ${ctx.phaseDescription}`}
@@ -193,12 +207,13 @@ ${ctx.elevationInstruction}
 ${ctx.noTerrainRule}${ctx.runnerProfileContext}${ctx.planContext}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
+${effortRule}
 ${ctx.is500mCheckin ? `This is the walker's first check-in at 500m. Give a brief initial read on how the walk is going (2-3 sentences), weaving in their actual pace and distance.` : `Give a brief (2-3 sentences) phase-appropriate coaching message.`}
 CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", "Hello", or "Hey superstar". Jump straight into the coaching content.${ctx.runnerFirstName ? ` You may address them as "${ctx.runnerFirstName}" naturally within the message but not as an opening greeting.` : ''}
 
 Weave in the walker's actual stats (pace, distance, time, heart rate) naturally — this should feel like a real coach watching their performance, not generic encouragement. CRITICAL: Pace values are already fully formatted — do NOT reformat them.${ctx.targetPace ? (ctx.hasNoBaseline ? ` Mention their current pace naturally. They have a target pace but no established baseline — treat the gap as context, not a verdict. Focus on the walk itself, not the shortfall.` : ` Comment on their pace relative to target (${ctx.paceVerdict}).`) : ''}${ctx.hasTargetTime ? (ctx.hasNoBaseline ? ` Their goal is ${ctx.targetTimeFormatted} — reference it lightly if it fits, but don't make projected finish time the centrepiece.` : ` Address whether they are on track for their ${ctx.targetTimeFormatted} target time.`) : ''}${ctx.elevationInstruction ? ' Acknowledge the elevation context.' : ''}${ctx.hasRoute === true && !ctx.elevationInstruction ? ' Consider terrain if relevant.' : ''}`;
 
-  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Keep messages concise (2-3 sentences) and always reference the walker's actual numbers. NEVER start with greetings — jump straight into coaching.${DURING_PHASE_SYSTEM_WALK_PROHIBITION} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Keep messages concise (2-3 sentences) and always reference the walker's actual numbers. NEVER start with greetings — jump straight into coaching.${DURING_PHASE_SYSTEM_WALK_PROHIBITION} ${effortPhilosophyRule('walker')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }
@@ -256,11 +271,11 @@ COACHING TOPIC — choose ONE of the following that fits the moment:
 2. Walking rhythm: Comment on their smooth, settled rhythm — use words like "comfortable", "flowing", "purposeful" — NOT "cadence" or "steps per minute"
 3. Walking arm drive: Bend the elbows slightly at ~90°, swing forward and back (not across the body) — generates forward momentum
 4. Walking efficiency: Push off through the toes at the back of each stride to keep the movement flowing rather than flat-footed
-5. Aerobic effort & HR: ${ctx.heartRate ? `At ${ctx.heartRate} bpm they are ${ctx.heartRate < 100 ? 'well below aerobic zone — they could push a little harder' : ctx.heartRate < 130 ? 'in a comfortable aerobic zone — ideal for this walk' : 'working hard — a comfortable conversational effort is the sweet spot for fitness walking'}` : 'encourage finding a pace that feels comfortably brisk — able to hold a conversation, but not strolling'}
+5. Aerobic effort & HR: ${ctx.heartRate ? `At ${ctx.heartRate} bpm they are ${ctx.heartRate < 100 ? 'well below aerobic zone — they could push a little harder' : ctx.heartRate < 130 ? 'in a comfortable aerobic zone — ideal for this walk' : 'working hard, and that is a good thing — acknowledge the effort and help them hold it with steady breathing and rhythm, do NOT suggest easing back to a conversational pace'}` : 'encourage finding a pace that feels comfortably brisk — able to hold a conversation, but not strolling'}
 
 Deliver ONE short coaching cue (1-2 sentences, spoken aloud). Sound encouraging and natural. Do NOT mention "cadence", "steps per minute", "spm", or any numerical step targets. No emojis. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}`;
 
-  const system = `You are ${ctx.coachName}, a warm, encouraging ${ctx.coachTone} walking coach. Walking is its own discipline — focus on movement quality, rhythm, posture, and effort rather than running metrics. Never say "cadence", "spm", or "steps per minute". Keep it 1-2 sentences, spoken aloud.`;
+  const system = `You are ${ctx.coachName}, a warm, encouraging ${ctx.coachTone} walking coach. Walking is its own discipline — focus on movement quality, rhythm, posture, and effort rather than running metrics. Never say "cadence", "spm", or "steps per minute". Keep it 1-2 sentences, spoken aloud. ${effortPhilosophyRule('walker')}`;
 
   return { system, user };
 }
@@ -289,6 +304,7 @@ CRITICAL RULES:
 - Keep it to 2-3 sentences maximum — this is spoken while they're walking
 - NEVER use the word "summit" or "crest" as a prediction
 - Descents SPEED UP pace — never say descending slows you down or is harder
+- ${effortPhilosophyRule('walker')} Steady effort on a climb (shorter stride, quick feet) is the technique cue — "save something for later" is not
 - ${ctx.futureBanRule}${ELEVATION_WALK_PROHIBITION}
 - ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? '\n- ' + accentDirective(ctx.coachAccent) : ''}` + runnerProfileBlock(ctx.runnerProfile);
 
@@ -312,7 +328,7 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
 → If topics have already been covered, choose a fresh angle — vary your coaching focus rather than repeating what was just said.
 → If the athlete is already responding (see response block), acknowledge that first.`;
 
-  const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the walker's actual heart rate and zone. Keep it to 1-2 short sentences.${HR_WALK_PROHIBITION} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
+  const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the walker's actual heart rate and zone. Keep it to 1-2 short sentences.${HR_WALK_PROHIBITION} ${effortPhilosophyRule('walker')} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
   return { system, user };
 }

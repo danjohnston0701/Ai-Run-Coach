@@ -292,6 +292,45 @@ export const formatElapsedForTTS = (totalSeconds: number): string => {
 // This preserves coaching personality while avoiding repetition across messages
 export const VARIETY_INSTRUCTION = "Avoid repeating wording or phrasing you've used earlier in this run. Maintain your coaching voice and personality while varying how you express similar ideas.";
 
+// ── Effort philosophy ─────────────────────────────────────────────────────────────────
+// The product stance on telling an athlete to back off, in two halves — mirroring how the
+// HR trigger already splits it: an always-on sentence in the system message, plus a fuller
+// block in the user message when we know the session has no prescribed target.
+//
+// Background: originally this lived only in generateHeartRateCoaching (fixed 2026-09-12
+// after a free 5 km where the coach volunteered "slow it down a tad and save some energy
+// for the finish" five separate times). Every other live trigger — split updates, 500m
+// check-ins, phase coaching, struggle, elevation, cadence — was still free to produce the
+// same message, so the fix only closed one door. These helpers are the shared version.
+//
+// Deliberately NOT applied to: interval coaching (prescribed recovery phases genuinely are
+// "ease off" by design), navigation turns ("slow down for this turn" is a safety cue), and
+// pace_coaching (its slow-down branches only fire at 10%+ FASTER than an explicit target
+// pace, which is the sanctioned exception — see the paceGuidance ladder in
+// generatePhaseCoaching).
+
+/**
+ * Always-on half: bans the energy-conservation *framing* outright, in every session type.
+ * "Ease off to stay in your target zone" is legitimate coaching and stays allowed; "save
+ * something for the finish" is not, because it second-guesses an effort the athlete has
+ * chosen (free session) or been prescribed (plan session).
+ */
+export function effortPhilosophyRule(person: 'runner' | 'walker' = 'runner'): string {
+  return `EFFORT PHILOSOPHY: never tell the ${person} to save energy, conserve, hold back or "keep something for the finish" — that framing is always wrong. If an effort adjustment is genuinely warranted it must be tied to an explicit prescribed target they are measurably outside (a target pace they are ahead of, or a target heart-rate zone they are above), never to a hunch that they are working too hard.`;
+}
+
+/**
+ * Free-session half: returns '' when the session has a prescribed target (plan workout,
+ * target pace/time or target HR zone), so the existing target-driven guidance in each
+ * prompt keeps working untouched. A target *distance* alone does not count — "I'm going to
+ * run 5k" prescribes nothing about effort.
+ */
+export function freeSessionEffortRule(hasTarget: boolean, activity: 'run' | 'walk' = 'run'): string {
+  if (hasTarget) return '';
+  const person = activity === 'walk' ? 'walker' : 'runner';
+  return `EFFORT PHILOSOPHY (free ${activity} — no target pace, target time or target heart-rate zone): the ${person} has chosen their own effort and it is legitimate, however hard it looks. Do NOT suggest they slow down, ease off, hold back, back off, dial it down or pace themselves. Coach consistency instead: encourage them to hold what they are doing, stay relaxed and keep the effort steady. Noting how pace naturally changes with terrain is fine (steady effort up a climb means a slower pace) as long as it is not framed as conserving energy or as a warning.`;
+}
+
 /**
  * Generate pace-context directives for the AI
  * Helps the AI understand how to coach differently based on runner's typical pace
@@ -2029,7 +2068,9 @@ CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do 
     if (runHistory.consistencyTrend === 'improving') {
       struggleRunnerContext += `Their recent ${isWalkStruggle ? 'walks' : 'runs'} show an improving trend — they have the fitness to push through. `;
     } else if (runHistory.consistencyTrend === 'declining') {
-      struggleRunnerContext += `They've been having tougher ${isWalkStruggle ? 'walks' : 'runs'} recently — be supportive and suggest adjusting effort. `;
+      // Was "suggest adjusting effort" — on a free session that reliably became "ease back",
+      // which is the message the effort philosophy exists to prevent.
+      struggleRunnerContext += `They've been having tougher ${isWalkStruggle ? 'walks' : 'runs'} recently — be supportive and meet them where they are today. `;
     }
   }
 
@@ -2045,6 +2086,9 @@ CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do 
     terrainContext, trainingStruggleContext, noTerrainRule,
     runnerContext: struggleRunnerContext, runnerProfile: params.runnerProfile,
     watchDynamicsContext: buildWatchDynamicsText(params),
+    // Struggle coaching never receives a target pace — a plan workout or an explicit target
+    // HR zone are the only prescribed-effort signals available here.
+    hasTarget: !!(workoutTypeStruggle || targetHeartRateZone),
   };
   const struggleModule = isWalkStruggle ? walkPrompts : runPrompts;
   const { system, user } = struggleModule.struggleCoachingPrompt(struggleCtx);
