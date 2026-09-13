@@ -2536,12 +2536,17 @@ function transformRunForAndroid(run: any) {
         console.log(`[POST /api/runs] Converted iOS distance_meters=${runData.distance_meters} to distance=${distance}km`);
       }
       
-      if (!distance || distance <= 0) {
-        console.error(`[POST /api/runs] Run validation failed: distance must be > 0, got ${distance}`);
-        return res.status(400).json({ 
-          error: "Run must have a distance greater than 0. Please check your GPS data and try again.",
-          details: "No distance recorded during run session"
-        });
+      // NO minimum-distance gate. This used to 400 on distance <= 0, which meant a
+      // stationary or GPS-less session was refused outright: the phone's stopTracking()
+      // fell into uploadRunToBackend()'s 4xx branch with no companion run to fall back
+      // to, so the run was lost and the run screen was left with nothing valid to
+      // navigate to. Garmin saves a 0.00 km activity if you start and stop one; so do we.
+      // Coerce to a non-negative number so a malformed/absent field can't poison the
+      // arithmetic below (NaN would propagate into pace/TSS and the stats cache).
+      distance = Number(distance);
+      if (!Number.isFinite(distance) || distance < 0) {
+        console.warn(`[POST /api/runs] Non-numeric distance (${runData.distance}) — saving run with distance 0`);
+        distance = 0;
       }
       
       // Normalize duration to seconds for database storage.
@@ -2641,11 +2646,27 @@ function transformRunForAndroid(run: any) {
         return undefined;
       };
 
+      // Now that a zero-distance run is savable, make sure it doesn't fabricate a pace.
+      // Android sends avgPace "0:00" when it has no distance to derive one from. Stored
+      // as-is that string LOOKS like a real pace to every aggregate that parses "M:SS"
+      // (my-data-service's period/trend averages, the user_stats cache) and drags the
+      // user's average pace toward zero. Those aggregates already skip NULL, so store
+      // NULL whenever there's no genuine pace to record.
+      const normalizedAvgPace = (() => {
+        const raw = runData.avgPace;
+        if (typeof raw !== "string") return raw ?? null;
+        const m = raw.match(/^(\d+):(\d{1,2})$/);
+        if (!m) return null;
+        const secs = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        return secs > 0 && distance > 0 ? raw : null;
+      })();
+
       // Convert timestamp fields from numbers to Date objects for database compatibility
       const processedRunData = {
         ...runData,
         sessionType,
         distance, // Use the validated/converted distance
+        avgPace: normalizedAvgPace,
         duration: durationInSeconds,
         totalSteps, // Use calculated or provided value
         completedAt: parseDate(runData.completedAt),
@@ -13687,8 +13708,16 @@ function transformRunForAndroid(run: any) {
         const distanceKm = stats.totalDistance ? stats.totalDistance / 1000 : 0;
         const durationSecs = stats.totalDuration || 0;
 
-        // Only save if there's meaningful data (at least 100m and 30s)
-        if (distanceKm >= 0.1 && durationSecs >= 30) {
+        // Save EVERY completed session — no minimum distance or duration.
+        // The old gate (>=100 m AND >=30 s) silently dropped any short or
+        // stationary session: the watch's session/end returned success with
+        // runId=null, so the phone's FCM watchSessionEnded fallback carried no
+        // run to fall back to and the phone's own upload had nothing to link to.
+        // Garmin itself saves a 0.00 km activity if you start and stop one, and a
+        // session the user deliberately started and finished is theirs to keep —
+        // including the stationary tests used to debug this very path.
+        // Bare block (no condition) so the body below keeps its indentation/scoping.
+        {
           // ── Dedup guard ─────────────────────────────────────────────────────
           // The phone may have also tracked this run (it received the watch's
           // "start" command early via BT) and already uploaded a record via
@@ -13971,8 +14000,6 @@ function transformRunForAndroid(run: any) {
 
           console.log(`[Companion] Created run record ${newRunId} from standalone Garmin session ${sessionId} (${distanceKm.toFixed(2)}km)`);
           } // end else (no phone run found)
-        } else {
-          console.log(`[Companion] Session ${sessionId} too short to save as run (${distanceKm.toFixed(3)}km, ${durationSecs}s)`);
         }
       } catch (runCreateError: any) {
         // Don't fail the whole request if run creation fails — session is still marked complete
@@ -14044,8 +14071,11 @@ function transformRunForAndroid(run: any) {
         // run successfully, a run record already exists (externalId = null, no match
         // above). Check for it here and link the batch as GPS enrichment instead of
         // creating a duplicate.
+        // Run the dedup unconditionally. It used to be skipped below 100 m, which — now
+        // that short sessions actually get saved — would let a zero-distance batch create
+        // a duplicate run alongside the phone's own upload of the same session.
         const distKmCheck = distanceM ? distanceM / 1000 : 0;
-        if (distKmCheck >= 0.1) {
+        {
           const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
           const phoneRuns = await db
             .select({ id: runs.id, distance: runs.distance, externalId: runs.externalId })
@@ -14113,10 +14143,10 @@ function transformRunForAndroid(run: any) {
         const distKm   = distanceM  ? distanceM  / 1000 : 0;
         const durSec   = durationSec || 0;
 
-        if (distKm < 0.1 || durSec < 30) {
-          console.warn(`[Offline Batch] Batch too small to create run (${distKm.toFixed(3)}km, ${durSec}s) — discarding`);
-          return res.status(400).json({ error: "Batch data too small to create a run" });
-        }
+        // No minimum distance/duration — same rule as session/end above. This used to
+        // 400 on anything under 100 m / 30 s, which threw away the watch's own buffered
+        // record of a short or stationary session after session/end had already declined
+        // to create one, leaving the session with no run at all on either path.
 
         // Average pace, HR, cadence from raw points
         const hrPts  = (points as number[][]).filter((p: number[]) => p[4] > 0);
