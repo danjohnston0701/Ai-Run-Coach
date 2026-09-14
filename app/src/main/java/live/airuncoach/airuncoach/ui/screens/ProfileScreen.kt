@@ -54,6 +54,7 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.ProfileViewModel
 import java.io.File
+import live.airuncoach.airuncoach.data.SessionManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,9 +74,11 @@ fun ProfileScreen(
     onNavigateToCoachingProgramme: () -> Unit = {},
     onNavigateToInjuries: () -> Unit = {},
     onNavigateToUsefulTips: () -> Unit = {},
+    onNavigateToTour: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val viewModel: ProfileViewModel = hiltViewModel()
+    val sessionManager = remember { SessionManager(context) }
     val user by viewModel.user.collectAsState()
     val friendCount by viewModel.friendCount.collectAsState()
     val profilePicCacheBuster by viewModel.profilePicCacheBuster.collectAsState()
@@ -283,6 +286,13 @@ fun ProfileScreen(
                 SettingsItem(icon = R.drawable.icon_info_vector, text = "Push Notifications", onClick = onNavigateToNotifications)
                 SettingsItem(icon = R.drawable.icon_crown_vector, text = "My Account", value = user?.subscriptionTier ?: "Free", onClick = onNavigateToSubscription)
                 SettingsItem(icon = R.drawable.icon_info_vector, text = "Helpful Tips and Info", onClick = onNavigateToUsefulTips)
+                // The tour's only other entry point is the last onboarding screen, which a user
+                // never sees again once onboarding is done — and tapping "Take a tour" there
+                // clears the onboarding flags, so anyone who quit midway through the tour could
+                // never reach it again. Hidden once genuinely completed.
+                if (!sessionManager.hasCompletedOnboardingTour()) {
+                    SettingsItem(icon = R.drawable.icon_info_vector, text = "Take a Tour", onClick = onNavigateToTour)
+                }
                 // Whole kilometres can't express a real race distance — a half marathon is
                 // 21.0975 km and a marathon 42.195. With this on, the target-distance control
                 // becomes a numeric field accepting up to 3 dp instead of a whole-km slider.

@@ -407,6 +407,7 @@ fun MainScreen(
                     onNavigateToMyData = { navController.navigate("my_data") },
                     onNavigateToGoals = { navController.navigate("goals") },
                     onNavigateToDistanceScale = { navController.navigate("distance_scale") },
+                    onNavigateToTour = { navController.navigate("onboarding_tour") },
                     onNavigateToNotifications = { navController.navigate("notification_settings") },
                     onNavigateToConnectedDevices = { navController.navigate("connected_devices") },
                     onNavigateToSubscription = { navController.navigate("subscription") },
