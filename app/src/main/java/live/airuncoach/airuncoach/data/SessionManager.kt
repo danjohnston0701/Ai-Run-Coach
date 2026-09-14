@@ -200,6 +200,26 @@ class SessionManager(context: Context) {
     }
 
     /**
+     * Whether this device has finished the feature tour.
+     *
+     * The server already records `onboardingTourCompletedAt` on the user, but it's written
+     * fire-and-forget and isn't mirrored on the local user model, so it can't gate UI the
+     * instant the tour ends. This can: it's set the moment the tour reaches its natural end and
+     * read by OnboardingSubscriptionScreen to hide the "take a tour" card. Per-device by design
+     * — onboarding is a per-install experience — and deliberately NOT set when the tour is
+     * skipped, since skipping isn't doing it.
+     *
+     * Deliberately NOT cleared by clearOnboardingFlags(): that runs every time the user passes
+     * back through onboarding, which is exactly the path that re-shows the card.
+     */
+    fun hasCompletedOnboardingTour(): Boolean =
+        sharedPreferences.getBoolean("onboarding_tour_completed", false)
+
+    fun setOnboardingTourCompleted() {
+        sharedPreferences.edit { putBoolean("onboarding_tour_completed", true) }
+    }
+
+    /**
      * Clears onboarding flags (called after user completes all setup)
      */
     fun clearOnboardingFlags() {

@@ -1145,7 +1145,13 @@ internal fun GroupRunSection(
     groupRunParticipants: List<String>,
     onParticipantsChanged: (List<String>) -> Unit,
     friends: List<Friend>,
-    isLoadingFriends: Boolean = false
+    isLoadingFriends: Boolean = false,
+    // Onboarding tour only: lets the tour pulse ONE of the two rows at a time. The rows live
+    // inside this shared card, so the tour can't wrap them from outside the way it wraps the
+    // sections it composes itself. A Modifier rather than a wrapper composable so the caller
+    // owns the animation — see OnboardingTourScreen's Modifier.tourHighlight. Default no-op.
+    liveTrackingRowModifier: Modifier = Modifier,
+    groupRunRowModifier: Modifier = Modifier
 ) {
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Text(
@@ -1162,7 +1168,7 @@ internal fun GroupRunSection(
         ) {
             Column(modifier = Modifier.padding(vertical = 6.dp)) {
                 // Live Tracking toggle + expandable observer picker
-                Column {
+                Column(modifier = liveTrackingRowModifier) {
                     SocialRowToggle(
                         title = "Live Tracking",
                         subtitle = "Share your live location",
@@ -1186,7 +1192,7 @@ internal fun GroupRunSection(
                 HorizontalDivider(color = Colors.backgroundTertiary.copy(alpha = 0.6f))
 
                 // Group Run toggle + expandable participant picker
-                Column {
+                Column(modifier = groupRunRowModifier) {
                     SocialRowToggle(
                         title = "Group Session",
                         subtitle = "Invite friends to join",

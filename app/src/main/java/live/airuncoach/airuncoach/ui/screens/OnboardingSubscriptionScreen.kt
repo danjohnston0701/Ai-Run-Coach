@@ -154,18 +154,24 @@ fun OnboardingSubscriptionScreen(
                         onNavigateToPermissions()
                     }
                 )
-                Spacer(modifier = Modifier.height(Spacing.sm))
-                OnboardingBoldCta(
-                    icon = Icons.Filled.Explore,
-                    text = "Take a quick tour of Ai Run Coach",
-                    filled = false,
-                    onClick = {
-                        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TAKE_TOUR_TAPPED)
-                        sessionManager.clearOnboardingFlags()
-                        MainActivity.pendingDeepLink.value = "onboarding_tour"
-                        onNavigateToPermissions()
-                    }
-                )
+                // Hidden once the tour has actually been finished — this screen is shown again
+                // when the tour ends (see MainScreen's onboarding_tour route), and offering
+                // "take a tour" to someone who just took it reads like it didn't register.
+                // Skipping deliberately does NOT hide it, so a skipper can still come back.
+                if (!sessionManager.hasCompletedOnboardingTour()) {
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    OnboardingBoldCta(
+                        icon = Icons.Filled.Explore,
+                        text = "Take a quick tour of Ai Run Coach",
+                        filled = false,
+                        onClick = {
+                            AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TAKE_TOUR_TAPPED)
+                            sessionManager.clearOnboardingFlags()
+                            MainActivity.pendingDeepLink.value = "onboarding_tour"
+                            onNavigateToPermissions()
+                        }
+                    )
+                }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
 

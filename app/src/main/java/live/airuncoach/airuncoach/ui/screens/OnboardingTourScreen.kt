@@ -14,7 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,11 +60,9 @@ import java.util.Locale
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.AiCoachingNote
-import live.airuncoach.airuncoach.domain.model.GeneratedRoute
 import live.airuncoach.airuncoach.domain.model.KmSplit
 import live.airuncoach.airuncoach.domain.model.LatLng
 import live.airuncoach.airuncoach.domain.model.LocationPoint
-import live.airuncoach.airuncoach.domain.model.RouteDifficulty
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.TerrainType
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
@@ -103,13 +101,19 @@ import kotlin.math.absoluteValue
  * built to be recognizable as "yep that's my dashboard" rather than a generic mockup.
  *
  * Second pass (2026-09-12, after the developer flagged the Run Without Route and Run Summary
- * mocks as nothing like the real screens): those two, plus the new Run With Route sequence,
- * now compose the REAL screens' own building blocks — MapMyRunSetupScreen's section
- * composables, RunSummaryScreen's top bar + tab contents, RouteGeneratingLoadingScreen and
- * RouteSelectionScreen's RouteCard — fed fabricated-but-realistic data (a full GPS loop near
- * the user, splits, HR, coaching notes, three generated routes). See MockRunSetupScreen,
- * MockRunSummaryScreen and MockRouteGenerationStep. The tour ends on a "Finish Tour" page
- * after the route-selection step.
+ * mocks as nothing like the real screens): both now compose the REAL screens' own building
+ * blocks — MapMyRunSetupScreen's section composables, RunSummaryScreen's top bar + tab
+ * contents — fed fabricated-but-realistic data (a full GPS loop near the user, splits, HR,
+ * coaching notes). See MockRunSetupScreen and MockRunSummaryScreen. The tour ends on a
+ * "Finish Tour" page.
+ *
+ * Third pass (2026-09-14): the Run With Route sequence (Dashboard → setup → generating →
+ * route selection) was REMOVED. It drew three fabricated loops — a parametric ellipse with a
+ * sine wobble — over genuine map tiles, and read as exactly what it was. The step is better
+ * spent slowing down on Run Without a Route and actually showing what the setup screen can
+ * do: MockRunSetupScreen now walks target time, in-run AI coaching, group runs and live
+ * tracking, pulsing each control and scrolling it into view. Route generation is still
+ * mentioned in the closing page's copy. Kept 1:1 with iOS's OnboardingTourScreen.swift.
  *
  * Interactive steps use a self-contained mock screen driven by tapping the highlighted element
  * exactly as a real user would, matching a scripted guided-tour convention (Duolingo-style)
@@ -242,7 +246,7 @@ private fun tailPages(): List<InfoPage> = listOf(
 )
 
 /** Total interactive steps between the lead and tail info pages — see the `when` in TourStepController. */
-private const val INTERACTIVE_STEP_COUNT = 12
+private const val INTERACTIVE_STEP_COUNT = 9
 
 @Composable
 private fun TourStepController(
@@ -261,6 +265,7 @@ private fun TourStepController(
             AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TOUR_COMPLETED)
             // Only fires on reaching the natural end (this branch) — never on Skip — so
             // the completed timestamp genuinely means "finished the tour," not "opened it."
+            SessionManager(context).setOnboardingTourCompleted()
             coroutineScope.launch {
                 try {
                     live.airuncoach.airuncoach.network.RetrofitClient.apiService.recordOnboardingTourEvent(
@@ -372,12 +377,9 @@ private fun InteractiveStep(index: Int, watchChoice: TourWatchChoice, onAdvance:
         3 -> MockProfileScreen(highlight = ProfileHighlight.INJURIES, onHighlightTapped = onAdvance)
         4 -> MockInjuryManagementScreen(onBack = onAdvance)
         5 -> MockDashboardScreen(highlight = DashboardHighlight.RUN_WITHOUT_ROUTE, onHighlightTapped = onAdvance)
-        6 -> MockRunSetupScreen(mode = "no_route", watchChoice = watchChoice, onProceed = onAdvance)
+        6 -> MockRunSetupScreen(watchChoice = watchChoice, onProceed = onAdvance)
         7 -> MockRunSummaryScreen(onFinished = onAdvance)
         8 -> MockAiPlansScreen(onAdvance = onAdvance)
-        9 -> MockDashboardScreen(highlight = DashboardHighlight.RUN_WITH_ROUTE, onHighlightTapped = onAdvance)
-        10 -> MockRunSetupScreen(mode = "route", watchChoice = watchChoice, onProceed = onAdvance)
-        11 -> MockRouteGenerationStep(watchChoice = watchChoice, onAdvance = onAdvance)
     }
 }
 
@@ -423,6 +425,50 @@ private fun TourHighlight(
     }
 }
 
+/** [TourHighlight] when [active], otherwise the content untouched — keeps call sites flat. */
+@Composable
+private fun TourHighlightIf(active: Boolean, content: @Composable () -> Unit) {
+    if (active) TourHighlight { content() } else content()
+}
+
+/**
+ * Prompt banner that also advances a multi-beat step (the Run Without a Route walkthrough).
+ * Separate from [TourPromptBanner] so the plain banner stays exactly as it is everywhere else.
+ */
+@Composable
+private fun TourPromptBannerWithNext(text: String, nextLabel: String, onNext: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Colors.primary,
+        shape = RoundedCornerShape(topStart = BorderRadius.lg, topEnd = BorderRadius.lg),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Text(
+                text = text,
+                style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                color = Colors.buttonText,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = onNext,
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.buttonText),
+                shape = RoundedCornerShape(percent = 50),
+                contentPadding = PaddingValues(horizontal = Spacing.md, vertical = 6.dp),
+            ) {
+                Text(
+                    text = nextLabel,
+                    style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary,
+                )
+            }
+        }
+    }
+}
+
 // Mock bottom nav bar shared by the Dashboard/Profile mock screens.
 private enum class MockTab { HOME, PROFILE }
 
@@ -458,7 +504,7 @@ private fun MockBottomNav(selected: MockTab, highlightProfile: Boolean, onProfil
     }
 }
 
-private enum class DashboardHighlight { PROFILE_TAB, RUN_WITHOUT_ROUTE, RUN_WITH_ROUTE }
+private enum class DashboardHighlight { PROFILE_TAB, RUN_WITHOUT_ROUTE }
 
 @Composable
 private fun MockDashboardScreen(highlight: DashboardHighlight, onHighlightTapped: () -> Unit) {
@@ -516,12 +562,12 @@ private fun MockDashboardScreen(highlight: DashboardHighlight, onHighlightTapped
                 val actionButtons: @Composable () -> Unit = {
                     ActionButtons(
                         sessionType = "RUN",
-                        onMapMyRun = { if (highlight == DashboardHighlight.RUN_WITH_ROUTE) onHighlightTapped() },
+                        onMapMyRun = {},
                         onRunWithoutRoute = { if (highlight == DashboardHighlight.RUN_WITHOUT_ROUTE) onHighlightTapped() },
                         isEnabled = true,
                     )
                 }
-                if (highlight == DashboardHighlight.RUN_WITHOUT_ROUTE || highlight == DashboardHighlight.RUN_WITH_ROUTE) {
+                if (highlight == DashboardHighlight.RUN_WITHOUT_ROUTE) {
                     TourHighlight(highlightColor = Colors.buttonText) { actionButtons() }
                 } else {
                     actionButtons()
@@ -537,7 +583,6 @@ private fun MockDashboardScreen(highlight: DashboardHighlight, onHighlightTapped
                 when (highlight) {
                     DashboardHighlight.PROFILE_TAB -> "This is your Dashboard. Tap the Profile tab below to keep going."
                     DashboardHighlight.RUN_WITHOUT_ROUTE -> "Tap \"RUN WITHOUT ROUTE\" to see how a free run starts."
-                    DashboardHighlight.RUN_WITH_ROUTE -> "Back on your Dashboard. Tap \"RUN WITH ROUTE\" to have a route generated for you."
                 }
             )
         }
@@ -804,9 +849,60 @@ private fun MockInjuryManagementScreen(onBack: () -> Unit) {
  * The real screen spends its first moments on "ACQUIRING GPS…" before the "GPS Locked" pill
  * appears and the CTA enables; a short fake acquisition reproduces that beat.
  */
+/**
+ * Walks the four things this screen can do — target time, in-run AI coaching, group runs,
+ * live tracking — pulsing each control and scrolling it into view, with a line of copy
+ * explaining it. Previously this rendered once with a banner reading "Everything here is
+ * live — try it", which told a new user nothing about what was on the screen. The user can
+ * still touch anything at any point; Next just moves the spotlight on. The final beat drops
+ * the highlight and points at the CTA.
+ *
+ * No "invite a friend" beat: the tour has no friends list (a brand-new user has none), so the
+ * copy describes what the toggles do rather than asking the user to pick someone.
+ */
+private enum class SetupHighlight { TARGET_TIME, AI_COACH, GROUP_RUN, LIVE_TRACKING }
+
+/**
+ * Beat copy + which control it points at, in the order the tour walks them.
+ *
+ * Order follows the screen top-to-bottom (target time → AI coach → GroupRunSection's Live
+ * Tracking row then its Group Session row) so the spotlight only ever moves downward. iOS's
+ * setup screen orders its sections differently and its beats follow ITS layout — the two
+ * lists deliberately don't match, since no one sees both and a jumping spotlight is worse
+ * than cross-platform beat parity nobody can observe.
+ */
+private val setupBeats: List<Pair<SetupHighlight, String>> = listOf(
+    SetupHighlight.TARGET_TIME to
+        "Set a target time and your coach paces you to it — you'll hear how far ahead or behind you are as you run.",
+    SetupHighlight.AI_COACH to
+        "In-run AI coaching, on or off. Leave it on for live cues on pace, heart rate and form; switch it off for a quiet run.",
+    SetupHighlight.LIVE_TRACKING to
+        "Live Tracking shares your run as it happens. Invite friends by email and they can follow you on a map, no account needed.",
+    SetupHighlight.GROUP_RUN to
+        "Turn any run into a group session — everyone runs their own route, and you all see each other's progress in real time.",
+)
+
 @Composable
-private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onProceed: () -> Unit) {
+private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Unit) {
     val hasWatch = watchChoice != TourWatchChoice.PHONE_ONLY
+    var beat by remember { mutableIntStateOf(0) }
+    val isLastBeat = beat >= setupBeats.size
+    val highlight = if (isLastBeat) null else setupBeats[beat].first
+    val listState = rememberLazyListState()
+
+    // Scroll the control being called out into view. These indices are the LazyColumn item
+    // positions below — the four controls sit well below the fold on a phone, so a pulse the
+    // user can't see would be useless. Live Tracking and Group Run share one item (they're
+    // both rows of GroupRunSection's card), hence the same index for both.
+    LaunchedEffect(beat) {
+        val index = when (highlight) {
+            SetupHighlight.TARGET_TIME -> 7
+            SetupHighlight.AI_COACH -> 9
+            SetupHighlight.GROUP_RUN, SetupHighlight.LIVE_TRACKING -> 11
+            null -> return@LaunchedEffect
+        }
+        listState.animateScrollToItem(index)
+    }
     var activityMode by remember { mutableStateOf(ActivityMode.RUN) }
     var targetDistance by remember { mutableFloatStateOf(5f) }
     var isTargetTimeEnabled by remember { mutableStateOf(false) }
@@ -823,12 +919,13 @@ private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onPro
     LaunchedEffect(Unit) { delay(1400); gpsLocked = true }
 
     val activityTypeLabel = if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
-    val title = if (mode == "route") "MAP MY $activityTypeLabel SETUP" else "CONFIGURE YOUR $activityTypeLabel"
-    val subtitle = if (mode == "route") "Configure your route preferences" else "Set your ${activityTypeLabel.lowercase()} details"
+    val title = "CONFIGURE YOUR $activityTypeLabel"
+    val subtitle = "Set your ${activityTypeLabel.lowercase()} details"
 
     Column(modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 // Same clearance the real screen reserves above its fixed CTA bar.
                 contentPadding = PaddingValues(bottom = 140.dp),
@@ -846,6 +943,7 @@ private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onPro
                 }
                 item { Spacer(modifier = Modifier.height(Spacing.lg)) }
                 item {
+                    TourHighlightIf(highlight == SetupHighlight.TARGET_TIME) {
                     CompactTargetTimeSection(
                         isEnabled = isTargetTimeEnabled,
                         onEnabledChange = { isTargetTimeEnabled = it },
@@ -854,9 +952,14 @@ private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onPro
                         onMinutesChange = { if (it.length <= 2) targetMinutes = it },
                         onSecondsChange = { if (it.length <= 2) targetSeconds = it },
                     )
+                    }
                 }
                 item { Spacer(modifier = Modifier.height(Spacing.lg)) }
-                item { AiCoachToggleSection(enabled = isAiCoachEnabled, onToggle = { isAiCoachEnabled = it }, mode = mode) }
+                item {
+                    TourHighlightIf(highlight == SetupHighlight.AI_COACH) {
+                        AiCoachToggleSection(enabled = isAiCoachEnabled, onToggle = { isAiCoachEnabled = it }, mode = "no_route")
+                    }
+                }
                 item { Spacer(modifier = Modifier.height(Spacing.lg)) }
                 item {
                     GroupRunSection(
@@ -872,6 +975,12 @@ private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onPro
                         onParticipantsChanged = { groupRunParticipants = it },
                         friends = emptyList(),
                         isLoadingFriends = false,
+                        // The two rows live inside GroupRunSection's shared card, so they take
+                        // the pulse as a Modifier rather than being wrapped from out here.
+                        liveTrackingRowModifier = if (highlight == SetupHighlight.LIVE_TRACKING)
+                            Modifier.tourHighlight() else Modifier,
+                        groupRunRowModifier = if (highlight == SetupHighlight.GROUP_RUN)
+                            Modifier.tourHighlight() else Modifier,
                     )
                 }
             }
@@ -887,17 +996,6 @@ private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onPro
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     val verb = if (activityMode == ActivityMode.WALK) "Walk" else "Run"
                     when {
-                        mode == "route" -> {
-                            val cta: @Composable () -> Unit = {
-                                PrimaryCtaButton(
-                                    text = if (gpsLocked) "GENERATE ROUTES" else "ACQUIRING GPS…",
-                                    leadingIconRes = if (gpsLocked) R.drawable.icon_location_vector else null,
-                                    enabled = gpsLocked,
-                                    onClick = onProceed,
-                                )
-                            }
-                            if (gpsLocked) TourHighlight(highlightColor = Colors.buttonText) { cta() } else cta()
-                        }
                         hasWatch -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                             Box(modifier = Modifier.weight(1f)) {
                                 TourHighlight(highlightColor = Colors.buttonText) {
@@ -939,14 +1037,21 @@ private fun MockRunSetupScreen(mode: String, watchChoice: TourWatchChoice, onPro
                 }
             }
         }
-        TourPromptBanner(
-            when {
-                !gpsLocked -> "Locking on to GPS, just like the real thing…"
-                mode == "route" -> "Set your distance and preferences, then tap \"GENERATE ROUTES\"."
-                hasWatch -> "Everything here is live — try it. Then tap \"Prepare for Watch\" (or \"Prepare Run\") to see what a finished run looks like."
-                else -> "Everything here is live — try it. Then tap \"PREPARE RUN\" to see what a finished run looks like."
-            }
-        )
+        if (isLastBeat) {
+            TourPromptBanner(
+                when {
+                    !gpsLocked -> "Locking on to GPS, just like the real thing…"
+                    hasWatch -> "That's the setup screen. Tap \"Prepare for Watch\" (or \"Prepare Run\") to see what a finished run looks like."
+                    else -> "That's the setup screen. Tap \"PREPARE RUN\" to see what a finished run looks like."
+                }
+            )
+        } else {
+            TourPromptBannerWithNext(
+                text = setupBeats[beat].second,
+                nextLabel = if (beat == setupBeats.size - 1) "Got it" else "Next",
+                onNext = { beat += 1 },
+            )
+        }
     }
 }
 
@@ -1046,108 +1151,6 @@ private fun Modifier.tourHighlight(highlightColor: Color = Colors.primary): Modi
         label = "tourHighlightModifierAlpha",
     )
     return this.border(BorderStroke(2.dp, highlightColor.copy(alpha = alpha)), RoundedCornerShape(BorderRadius.md))
-}
-
-// ── Route generation → route selection (real loading screen + real RouteCards) ─────────────
-
-private enum class RouteGenState { GENERATING, SELECTING }
-
-/**
- * What follows "GENERATE ROUTES" on the real app: RouteGeneratingLoadingScreen (the real
- * composable — it's ViewModel-free) for a few seconds, then RouteSelectionScreen's layout with
- * its real [RouteCard]s — live Google Maps tiles, gradient polyline, start/finish markers,
- * difficulty badge, distance/time/elevation stats — over three fabricated loops near the
- * user's location from [buildTourRoutes]. Selecting a card highlights it exactly as the real
- * screen does; the CTA row (Prepare for Watch / START RUN, or a single START RUN) advances.
- */
-@Composable
-private fun MockRouteGenerationStep(watchChoice: TourWatchChoice, onAdvance: () -> Unit) {
-    val hasWatch = watchChoice != TourWatchChoice.PHONE_ONLY
-    val location = rememberTourLocation()
-    val routes = remember(location) { buildTourRoutes(centerLat = location.first, centerLng = location.second) }
-    var state by remember { mutableStateOf(RouteGenState.GENERATING) }
-    var selectedRouteId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { delay(3200); state = RouteGenState.SELECTING }
-
-    when (state) {
-        RouteGenState.GENERATING -> RouteGeneratingLoadingScreen(distanceKm = 5.0)
-        RouteGenState.SELECTING -> Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0A1628))) {
-            // Header — RouteSelectionScreen's TopAppBar, without its system-bar inset (the
-            // outer MainScreen Scaffold already applies it).
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = {}) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-                Column {
-                    Text("SELECT YOUR ROUTE", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Choose from ${routes.size} routes", style = MaterialTheme.typography.bodySmall, color = Color(0xFF8B9AA8))
-                }
-            }
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 132.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    for (difficulty in listOf(RouteDifficulty.EASY, RouteDifficulty.MODERATE, RouteDifficulty.HARD)) {
-                        val group = routes.filter { it.difficulty == difficulty }
-                        if (group.isEmpty()) continue
-                        item { DifficultyHeader("${difficulty.name} ROUTES", Color(0xFFFFD700)) }
-                        items(group) { route ->
-                            RouteCard(route = route, isSelected = route.id == selectedRouteId, onSelect = { selectedRouteId = route.id })
-                        }
-                    }
-                }
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xFF0A1628))))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    if (hasWatch && selectedRouteId != null) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                TourHighlight(highlightColor = Colors.buttonText) {
-                                    PrepareRunOnWatchButton(
-                                        companionInstalled = true, sendState = WatchSendState.IDLE,
-                                        isPrimary = true, onPrepare = onAdvance,
-                                    )
-                                }
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                OutlinedCtaButton(text = "START RUN", leadingIconRes = null, enabled = true, onClick = onAdvance)
-                            }
-                        }
-                    } else {
-                        val startButton: @Composable () -> Unit = {
-                            Button(
-                                onClick = onAdvance,
-                                enabled = selectedRouteId != null,
-                                modifier = Modifier.fillMaxWidth().height(56.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF), disabledContainerColor = Color(0xFF1A2634)),
-                                shape = RoundedCornerShape(12.dp),
-                            ) {
-                                Text("START RUN", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = if (selectedRouteId != null) Color.Black else Color.Gray)
-                            }
-                        }
-                        if (selectedRouteId != null) TourHighlight(highlightColor = Color.Black) { startButton() } else startButton()
-                    }
-                }
-            }
-            TourPromptBanner(
-                when {
-                    selectedRouteId == null -> "Three routes, three difficulties — tap one to select it."
-                    hasWatch -> "Tap \"Prepare for Watch\" or \"START RUN\" and you'd be off. That's the last stop."
-                    else -> "Tap \"START RUN\" and you'd be off. That's the last stop."
-                }
-            )
-        }
-    }
 }
 
 // ── Demo run: genuine record from the backend, fabricated fallback ──────────────────────────
@@ -1348,43 +1351,6 @@ Both short climbs cost you ~10 s/km more than they needed to. Next time, ease of
 **Next up**
 Recover tomorrow, then we'll build on this with a slightly longer easy run.
 """
-
-/** Three 5 km-ish loops of increasing difficulty near the centre — feeds the real [RouteCard]s. */
-private fun buildTourRoutes(centerLat: Double, centerLng: Double): List<GeneratedRoute> {
-    fun route(
-        id: String, name: String, distanceKm: Double, difficulty: RouteDifficulty,
-        gain: Double, loss: Double, incline: Double, decline: Double, template: String,
-        aspect: Double, lobes: Int, wobble: Double, rotation: Double, offsetLatKm: Double, offsetLngKm: Double,
-    ): GeneratedRoute {
-        val kmPerDegLat = 111.32
-        val kmPerDegLng = 111.32 * cos(Math.toRadians(centerLat))
-        val loop = tourLoop(
-            centerLat + offsetLatKm / kmPerDegLat, centerLng + offsetLngKm / kmPerDegLng,
-            distanceKm, aspect, lobes, wobble, rotation, count = 120,
-        )
-        val gms = loop.map { (lat, lng) -> com.google.android.gms.maps.model.LatLng(lat, lng) }
-        val minutes = distanceKm * 5.3
-        return GeneratedRoute(
-            id = id, name = name, distance = distanceKm, duration = minutes,
-            polyline = PolyUtil.encode(gms),
-            waypoints = listOf(LatLng(loop.first().first, loop.first().second)),
-            difficulty = difficulty,
-            elevationGain = gain, elevationLoss = loss,
-            maxInclineDegrees = incline, maxDeclineDegrees = decline,
-            instructions = emptyList(), turnInstructions = emptyList(),
-            backtrackRatio = 0.05, angularSpread = 340.0,
-            templateName = template,
-        )
-    }
-    return listOf(
-        route("tour-route-easy", "Park Loop", 5.1, RouteDifficulty.EASY, 22.0, 21.0, 1.8, 2.1, "Park Loop",
-            aspect = 1.4, lobes = 2, wobble = 0.08, rotation = 0.2, offsetLatKm = 0.0, offsetLngKm = 0.0),
-        route("tour-route-moderate", "Riverside Circuit", 5.3, RouteDifficulty.MODERATE, 64.0, 62.0, 4.9, 5.4, "Riverside Circuit",
-            aspect = 2.1, lobes = 3, wobble = 0.12, rotation = 1.1, offsetLatKm = 0.35, offsetLngKm = -0.4),
-        route("tour-route-hard", "Hill Climb Loop", 5.6, RouteDifficulty.HARD, 148.0, 146.0, 9.7, 11.2, "Hill Climb Loop",
-            aspect = 1.2, lobes = 4, wobble = 0.15, rotation = 2.3, offsetLatKm = -0.5, offsetLngKm = 0.3),
-    )
-}
 
 private enum class AiPlansStepState { EMPTY, GENERATING, READY }
 

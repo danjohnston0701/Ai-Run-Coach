@@ -209,7 +209,7 @@ fun MainScreen(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val isRunSession = currentRoute?.startsWith("run_session") == true
-    val isOnboardingTour = currentRoute == "onboarding_tour"
+    val isOnboardingTour = currentRoute == "onboarding_tour" || currentRoute == "onboarding_wrap_up"
 
     Scaffold(
         containerColor = Colors.backgroundRoot,
@@ -1455,7 +1455,33 @@ fun MainScreen(
             // consumption LaunchedEffect above). Bottom nav is hidden for it below, same as
             // run_session, so it reads as a distraction-free full-screen flow.
             composable("onboarding_tour") {
-                OnboardingTourScreen(onFinish = { navController.popBackStack() })
+                // Leaving the tour returns to the last onboarding screen rather than dropping
+                // the user onto the dashboard — see the onboarding_wrap_up route below.
+                OnboardingTourScreen(onFinish = {
+                    navController.navigate("onboarding_wrap_up") {
+                        popUpTo("onboarding_tour") { inclusive = true }
+                    }
+                })
+            }
+            // The real OnboardingSubscriptionScreen again, shown once the tour ends. That screen
+            // is where the tour was launched from and still holds the two things a new user most
+            // likely wants next — pair a watch, look at plans & pricing — alongside the 14-day
+            // trial message; landing cold on an empty dashboard loses all of it. Its own "take a
+            // tour" card hides itself once the tour has been completed (SessionManager
+            // .hasCompletedOnboardingTour).
+            //
+            // It lives here, in MainScreen's NavHost, rather than being reached back through
+            // RootNavigationGraph's copy: the two are separate NavControllers, and routing back
+            // into the root graph would unwind the whole signed-in shell to re-enter onboarding.
+            // Its single callback means "done here", which post-tour means the dashboard.
+            composable("onboarding_wrap_up") {
+                OnboardingSubscriptionScreen(
+                    onNavigateToPermissions = {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo("onboarding_wrap_up") { inclusive = true }
+                        }
+                    }
+                )
             }
             composable("garmin_connect") {
                 GarminConnectScreen(onNavigateBack = { navController.popBackStack() })
