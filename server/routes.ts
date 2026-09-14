@@ -14215,7 +14215,7 @@ function transformRunForAndroid(run: any) {
         startedAtEpoch,      // wall-clock session start, epoch seconds
         phoneConnected,      // was the phone app BLE-connected at upload time
         deviceModel: batchDeviceModel, // the watch's own part number
-        // Added 2026-09-15 (companion app 3.4.6). The watch app's own manifest version, so we
+        // Added 2026-09-15 (companion app 3.4.7). The watch app's own manifest version, so we
         // can tell which watch build a run came from. Older watch builds omit it.
         watchAppVersion: batchWatchAppVersion,
       } = req.body;
