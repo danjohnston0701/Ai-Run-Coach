@@ -212,6 +212,21 @@ class SessionManager(context: Context) {
      * Deliberately NOT cleared by clearOnboardingFlags(): that runs every time the user passes
      * back through onboarding, which is exactly the path that re-shows the card.
      */
+    /**
+     * Local mirror of the user's distanceDecimalsEnabled preference.
+     *
+     * The run-setup screen needs this before its first frame to decide whether to render a
+     * slider or a numeric field, and it has no user object of its own — only SharedPreferences,
+     * which is already where it keeps the last target distance. Written whenever the profile
+     * toggle is saved; the server value remains the source of truth on next sign-in.
+     */
+    fun distanceDecimalsEnabled(): Boolean =
+        sharedPreferences.getBoolean("distance_decimals_enabled", false)
+
+    fun setDistanceDecimalsEnabled(enabled: Boolean) {
+        sharedPreferences.edit { putBoolean("distance_decimals_enabled", enabled) }
+    }
+
     fun hasCompletedOnboardingTour(): Boolean =
         sharedPreferences.getBoolean("onboarding_tour_completed", false)
 

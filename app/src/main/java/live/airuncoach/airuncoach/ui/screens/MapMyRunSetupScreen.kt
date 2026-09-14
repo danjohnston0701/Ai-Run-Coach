@@ -48,6 +48,12 @@ import live.airuncoach.airuncoach.viewmodel.FriendsUiState
 import live.airuncoach.airuncoach.viewmodel.FriendsViewModelFactory
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.BasicTextField
+import live.airuncoach.airuncoach.data.SessionManager
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -119,6 +125,7 @@ fun MapMyRunSetupScreen(
     var activityMode by remember { mutableStateOf(defaultActivityMode) }
 
     // Core inputs
+    val distanceDecimalsEnabled = remember { SessionManager(context).distanceDecimalsEnabled() }
     var targetDistance by remember { mutableStateOf(initialDistance) }
 
     var isTargetTimeEnabled by remember { mutableStateOf(initialTargetTimeEnabled) }
@@ -286,10 +293,13 @@ fun MapMyRunSetupScreen(
                 item {
                     TargetDistanceCard(
                         distance = targetDistance,
+                        decimalsEnabled = distanceDecimalsEnabled,
                         onDistanceChanged = {
-                            val snapped = it.roundToInt().toFloat()
-                            targetDistance = snapped
-                            targetPrefs.edit().putFloat("target_distance_km", snapped).apply()
+                            // Only snap to whole km when decimals are off — snapping regardless
+                            // is what made the setting inert.
+                            val value = if (distanceDecimalsEnabled) it else it.roundToInt().toFloat()
+                            targetDistance = value
+                            targetPrefs.edit().putFloat("target_distance_km", value).apply()
                         }
                     )
                 }
@@ -884,8 +894,35 @@ private fun ModePillToggle(
    TARGET DISTANCE — unchanged (your original)
 ===================================================================================== */
 
+/** Whole km by default; up to 3 dp when the user has enabled decimal target distances. */
+fun formatTargetDistance(distance: Float, decimalsEnabled: Boolean): String =
+    if (decimalsEnabled) {
+        // Trim trailing zeros so 21.100 reads as 21.1 and 21.000 as 21.
+        "%.3f".format(distance).trimEnd('0').trimEnd('.')
+    } else {
+        "%.0f".format(distance)
+    }
+
+/**
+ * @param decimalsEnabled when true the value becomes a numeric field accepting up to 3 decimal
+ *   places, because a slider cannot express a real race distance — a half marathon is 21.0975 km
+ *   and a marathon 42.195, and a 1-50 km range at 0.001 resolution is 49,000 slider steps. The
+ *   slider stays for coarse selection; typing is how an exact distance gets set.
+ */
 @Composable
-fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
+fun TargetDistanceCard(
+    distance: Float,
+    onDistanceChanged: (Float) -> Unit,
+    decimalsEnabled: Boolean = false,
+) {
+    // Held as text while editing so partial input ("21." on the way to "21.098") survives
+    // keystrokes instead of being round-tripped through Float and snapping back.
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    // Re-sync whenever the slider moves the value out from under a non-editing field.
+    LaunchedEffect(distance, decimalsEnabled) {
+        if (!editing) draft = formatTargetDistance(distance, decimalsEnabled)
+    }
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -911,11 +948,44 @@ fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(Spacing.xs))
-                Text(
-                    text = "%.0f km goal".format(distance),
-                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.primary
-                )
+                if (decimalsEnabled) {
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { raw ->
+                            editing = true
+                            // Digits and a single dot, at most 3 places after it.
+                            val cleaned = raw.filter { it.isDigit() || it == '.' }
+                            val dot = cleaned.indexOf('.')
+                            draft = if (dot >= 0) {
+                                cleaned.substring(0, dot + 1) +
+                                    cleaned.substring(dot + 1).filter { it.isDigit() }.take(3)
+                            } else cleaned
+                            draft.toFloatOrNull()
+                                ?.takeIf { it in 0.1f..100f }
+                                ?.let(onDistanceChanged)
+                        },
+                        textStyle = AppTextStyles.body.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Colors.primary,
+                        ),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        keyboardActions = KeyboardActions(onDone = { editing = false }),
+                        cursorBrush = SolidColor(Colors.primary),
+                        modifier = Modifier.width(72.dp),
+                    )
+                    Text(
+                        text = " km goal",
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.primary
+                    )
+                } else {
+                    Text(
+                        text = "%.0f km goal".format(distance),
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.primary
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(Spacing.md))
@@ -923,9 +993,10 @@ fun TargetDistanceCard(distance: Float, onDistanceChanged: (Float) -> Unit) {
             value = distance,
             onValueChange = onDistanceChanged,
             valueRange = 1f..50f,
-            // Snap to whole kilometers (1-50 range = 49 steps of 1km each)
-            // This ensures 0 decimal places setting actually works
-            steps = 48,
+            // Snap to whole kilometers (1-50 range = 49 steps of 1km each) so the default
+            // 0-decimal-places setting actually works. With decimals on the slider runs
+            // continuously for coarse selection and the field above carries the precision.
+            steps = if (decimalsEnabled) 0 else 48,
             modifier = Modifier.fillMaxWidth(),
             colors = SliderDefaults.colors(
                 thumbColor = Colors.primary,

@@ -11,5 +11,7 @@ data class UpdateUserRequest(
     val distanceScale: String? = null,
     val subscriptionTier: String? = null,
     val subscriptionStatus: String? = null,
-    val defaultSessionType: String? = null
+    val defaultSessionType: String? = null,
+    /** When true the target-distance control accepts decimals (up to 3 dp); otherwise whole km. */
+    val distanceDecimalsEnabled: Boolean? = null
 )
