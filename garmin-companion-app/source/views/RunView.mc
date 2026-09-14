@@ -44,6 +44,16 @@ class RunView extends Ui.View {
     private var _connectWaitTicks = 0;
     private const CONNECT_WAIT_MAX = 32; // 32 x 250ms = 8 seconds
 
+    // Wall-clock start of the current session, epoch seconds. The offline batch's GPS points
+    // carry ELAPSED seconds only, so without this the backend has no absolute time for a
+    // phone-less run and stamps it with the moment the batch arrived — a run done at 7am and
+    // synced at 6pm was filed at 6pm, wrong date and wrong slot in trends.
+    private var _sessionStartEpoch = 0;
+    // True once the phone has sent a prepared run for this session. Drives the status hint so
+    // a connected-but-unprepared user is told to prepare on the phone rather than just
+    // "PRESS START", which gives away nothing about the better experience available.
+    private var _isPrepared        = false;
+
     // Prepared-run data
     private var _prepRunType      = "";
     private var _prepRunDist      = 0.0;
@@ -419,6 +429,7 @@ class RunView extends Ui.View {
         App.Storage.deleteValue("offlineBatchDistance");
         App.Storage.deleteValue("offlineBatchDuration");
         App.Storage.deleteValue("offlineBatchAscent");
+        App.Storage.deleteValue("offlineBatchStartedAt");
     }
 
     function startRun() {
@@ -486,6 +497,7 @@ class RunView extends Ui.View {
 
         // Always start local Garmin session AND notify phone (phone must activate its run session for coaching)
         Sys.println(">>> startRun() — about to _startSession()");
+        _sessionStartEpoch = Time.now().value();
         _startSession();
         Sys.println(">>> startRun() — about to sendCommand start");
         _phoneLink.sendCommand("start");
@@ -566,6 +578,7 @@ class RunView extends Ui.View {
         _pauseResumeRetryCount    = 0;   // Cancel any pending pause/resume-command retry
         _pendingPauseResumeAction = null;
         _sessionReadySent = false;  // Reset so next session notifies phone again
+        _isPrepared       = false;  // Next session is unprepared until the phone says otherwise
         _overlayState = OVERLAY_READY;
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
         _gpsListening = false;
@@ -602,6 +615,7 @@ class RunView extends Ui.View {
                 _safeStorageSet("offlineBatchDistance",  _distance);
                 _safeStorageSet("offlineBatchDuration",  _elapsedTime);
                 _safeStorageSet("offlineBatchAscent",    _totalAscent);
+                _safeStorageSet("offlineBatchStartedAt",  _sessionStartEpoch);
 
                 // Tier 1: try the full GPS point array.
                 var ptsSaved = _safeStorageSet("offlineBatchPoints", _offlineBuffer);
@@ -829,6 +843,7 @@ class RunView extends Ui.View {
                 _phoneLink.sendCommand("sessionTypeAck");
             }
 
+            _isPrepared = true;
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
             }
@@ -940,6 +955,7 @@ class RunView extends Ui.View {
             // on a stopped session — which is a Connect IQ runtime crash.
             _isFinishing      = true;   // Block in-flight runUpdates during cleanup
             _sessionReadySent = false;  // Allow next session to send sessionReady again
+            _isPrepared       = false;  // Next session is unprepared until the phone says otherwise
             _overlayState     = OVERLAY_READY;
             if (_gpsListening) {
                 Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
@@ -1006,7 +1022,9 @@ class RunView extends Ui.View {
             var pendingDist = App.Storage.getValue("offlineBatchDistance");
             var pendingDur  = App.Storage.getValue("offlineBatchDuration");
             var pendingAsc  = App.Storage.getValue("offlineBatchAscent");
-            _dataStreamer.uploadOfflineBatch(pendingSid, pendingPts, pendingDist, pendingDur, pendingAsc);
+            var pendingStart = App.Storage.getValue("offlineBatchStartedAt");
+            _dataStreamer.uploadOfflineBatch(pendingSid, pendingPts, pendingDist, pendingDur, pendingAsc,
+                                             pendingStart, _isConnected);
         } else if (pendingSid != null) {
             Sys.println("Discarded corrupt offline batch (wrong type) — keys cleared");
             _clearOfflineBatchStorage();
@@ -1026,7 +1044,9 @@ class RunView extends Ui.View {
                 var memDist = App.Storage.getValue("offlineBatchDistance");
                 var memDur  = App.Storage.getValue("offlineBatchDuration");
                 var memAsc  = App.Storage.getValue("offlineBatchAscent");
-                _dataStreamer.uploadOfflineBatch(memSid, _offlineBuffer, memDist, memDur, memAsc);
+                var memStart = App.Storage.getValue("offlineBatchStartedAt");
+                _dataStreamer.uploadOfflineBatch(memSid, _offlineBuffer, memDist, memDur, memAsc,
+                                                 memStart, _isConnected);
                 _storageWriteFailed = false;
             }
         }
@@ -1820,6 +1840,12 @@ class RunView extends Ui.View {
             // Guard with grace period so the label does not flash before auth arrives
             dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "OFFLINE", Gfx.TEXT_JUSTIFY_CENTER);
+        } else if (!_isRunning && _isConnected && _isAuthenticated && !_isPrepared) {
+            // Connected to the phone but nothing prepared. "PRESS START" here is a dead end:
+            // it works, but it silently gives up coaching, the session target and the richer
+            // charts the phone adds. Point at the better path instead.
+            dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "PREPARE ON PHONE", Gfx.TEXT_JUSTIFY_CENTER);
         } else if (!_isRunning) {
             dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "PRESS START", Gfx.TEXT_JUSTIFY_CENTER);

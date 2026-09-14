@@ -14154,7 +14154,20 @@ function transformRunForAndroid(run: any) {
     try {
       const { userId } = (req as any).companionUser;
       const { sessionId } = req.params;
-      const { points, distanceM, durationSec, totalAscent, sessionType: batchRawSessionType } = req.body;
+      const {
+        points, distanceM, durationSec, totalAscent, sessionType: batchRawSessionType,
+        // Added 2026-09-14 (companion app). Older watch builds omit all three.
+        startedAtEpoch,      // wall-clock session start, epoch seconds
+        phoneConnected,      // was the phone app BLE-connected at upload time
+        deviceModel: batchDeviceModel, // the watch's own part number
+      } = req.body;
+      if (phoneConnected !== undefined) {
+        // A run reaching this path can be genuinely standalone OR have had the phone present
+        // but the session never prepared, and nothing recorded which. Logged rather than
+        // stored: persisting it wants a column, which is a schema change worth making
+        // deliberately.
+        console.log(`[Offline Batch] Session ${req.params.sessionId}: phone ${phoneConnected ? 'WAS' : 'was NOT'} connected at upload`);
+      }
       // sessionType may be provided by the watch (if watch app sends it), or we fall back
       // to the companion session's activityType ("walking"|"running") stored at session/start.
       let batchSessionType: string | null = null;
@@ -14274,10 +14287,26 @@ function transformRunForAndroid(run: any) {
           avgPaceStr = `${mins}:${secs.toString().padStart(2, '0')}`;
         }
 
-        const now = new Date();
+        // The GPS points carry ELAPSED seconds only, so before the watch started reporting
+        // startedAtEpoch this insert had nothing but `now` — which dates a phone-less run to
+        // when it SYNCED, not when it was run. A morning run uploaded that evening was filed
+        // under the evening: wrong calendar day, wrong slot in every trend. Prefer the watch's
+        // own start time plus the session duration, and fall back to the old behaviour only
+        // for watch builds that don't send it.
+        const uploadedAt = new Date();
+        const startedAt = typeof startedAtEpoch === 'number' && startedAtEpoch > 1_500_000_000
+          ? new Date(startedAtEpoch * 1000)
+          : null;
+        const now = startedAt
+          ? new Date(startedAt.getTime() + (durSec > 0 ? durSec * 1000 : 0))
+          : uploadedAt;
+        if (startedAt) {
+          console.log(`[Offline Batch] Dating run from the watch's own clock: started ${startedAt.toISOString()}, finished ${now.toISOString()} (uploaded ${uploadedAt.toISOString()})`);
+        }
         try {
           const [created] = await db.insert(runs).values({
             userId,
+            startedAt,
             distance:       distKm,
             duration:       durSec,
             avgPace:        avgPaceStr,
@@ -14286,19 +14315,19 @@ function transformRunForAndroid(run: any) {
             cadence:        avgCad,
             elevationGain:  totalAscent ?? null,
             elevation:      totalAscent ?? null,
-            name:           `${watchDeviceLabel(batchSession?.deviceModel)} ${resolvedBatchSessionType === "walk" ? "Walk" : "Run"}`,
+            name:           `${watchDeviceLabel(batchDeviceModel ?? batchSession?.deviceModel)} ${resolvedBatchSessionType === "walk" ? "Walk" : "Run"}`,
             sessionType:    resolvedBatchSessionType,
             runDate:        now.toISOString().split('T')[0],
             runTime:        now.toTimeString().split(' ')[0].slice(0, 5),
             completedAt:    now,
             externalId:     sessionId,
-            externalSource: watchExternalSource(batchSession?.deviceModel),
+            externalSource: watchExternalSource(batchDeviceModel ?? batchSession?.deviceModel),
             hasGarminData:  true,
             difficulty:     'moderate',
             isPublic:       false,
             totalSteps:     estimateWatchSteps(avgCad, durSec),
             calories:       estimateWatchCalories(distKm),
-            garminDeviceName: await resolveRunDeviceName(userId, batchSession?.deviceModel),
+            garminDeviceName: await resolveRunDeviceName(userId, batchDeviceModel ?? batchSession?.deviceModel),
           }).returning();
           existingRun = created;
           console.log(`[Offline Batch] Created new run record ${existingRun.id} for phone-less session ${sessionId} (${distKm.toFixed(2)}km)`);

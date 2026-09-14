@@ -397,7 +397,17 @@ class DataStreamer {
     // distanceM    : total distance in metres
     // durationSec  : total elapsed time in seconds
     // totalAscent  : total ascent in metres
-    function uploadOfflineBatch(sessionId, points, distanceM, durationSec, totalAscent) {
+    /**
+     * @param startedAtEpoch  wall-clock session start, epoch seconds (0/null when unknown).
+     *   The GPS points carry ELAPSED seconds only, so without this the backend has no absolute
+     *   time for a phone-less run and stamps it with the moment the batch arrived — a run done
+     *   in the morning and synced that evening was filed under the evening.
+     * @param phoneConnected  whether the phone app was BLE-connected at upload time. A run can
+     *   reach this path either genuinely standalone or with the phone present but the session
+     *   never prepared, and nothing recorded which — leaving the two indistinguishable after
+     *   the fact.
+     */
+    function uploadOfflineBatch(sessionId, points, distanceM, durationSec, totalAscent, startedAtEpoch, phoneConnected) {
         if (_batchUploadInFlight) {
             Sys.println("DataStreamer.uploadOfflineBatch: request already in flight for " + _pendingBatchSessionId + " — skipping duplicate call for " + sessionId);
             return;
@@ -417,8 +427,19 @@ class DataStreamer {
             "points"      => points,
             "distanceM"   => (distanceM   != null) ? distanceM   : 0.0,
             "durationSec" => (durationSec != null) ? durationSec : 0,
-            "totalAscent" => (totalAscent != null) ? totalAscent : 0.0
+            "totalAscent" => (totalAscent != null) ? totalAscent : 0.0,
+            "phoneConnected" => (phoneConnected != null) ? phoneConnected : false
         };
+        if (startedAtEpoch != null && startedAtEpoch > 0) {
+            payload.put("startedAtEpoch", startedAtEpoch);
+        }
+        // The watch's own part number, so a phone-less run still records which model it came
+        // from. Backfilling this from the user's other sessions only works when they own one
+        // watch; reporting it directly always works.
+        var ds = Sys.getDeviceSettings();
+        if (ds != null && ds has :partNumber && ds.partNumber != null) {
+            payload.put("deviceModel", ds.partNumber);
+        }
         // Include plannedWorkoutId so the backend can link this run to a coaching plan
         // even when uploaded via the offline batch path (watch ran without phone).
         var plannedWorkoutId = App.Storage.getValue("plannedWorkoutId");
