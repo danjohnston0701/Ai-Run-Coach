@@ -53,6 +53,7 @@ import live.airuncoach.airuncoach.domain.model.TurnInstruction
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
 import live.airuncoach.airuncoach.util.NavigationRouteHolder
+import live.airuncoach.airuncoach.util.RunConfigHolder
 import live.airuncoach.airuncoach.di.GarminWatchManagerEntryPoint
 import live.airuncoach.airuncoach.di.SamsungWatchManagerEntryPoint
 import com.google.maps.android.PolyUtil
@@ -258,8 +259,21 @@ class RunTrackingService : Service(), SensorEventListener {
     // or another trigger repeatedly re-arming the shared cooldown — an earlier deferred split
     // is retried in turn rather than being silently overwritten and permanently lost. Capped
     // defensively; see MAX_PENDING_KM_SPLITS.
-    private val pendingKmSplitCoachingQueue = mutableListOf<KmSplit>()
+    private val pendingKmSplitCoachingQueue = mutableListOf<PendingKmSplit>()
     private val MAX_PENDING_KM_SPLITS = 5
+    /**
+     * A km split waiting for a free coaching slot, with when and where it was deferred so it
+     * can be expired. Recording the queue position rather than deriving it from [KmSplit.km]
+     * keeps this correct for the walk 500 m checkpoints, which reuse `km` as a block index.
+     */
+    private data class PendingKmSplit(val split: KmSplit, val queuedAtMs: Long, val queuedAtDistanceM: Double)
+    // A deferred split describes a boundary the runner has already crossed. Announced late
+    // enough, it is worse than silence — during a race it is actively misleading. A real
+    // session (2026-09-14) announced "Km 3" 2m28s after the 3 km mark, by which point the
+    // runner was 570 m into km 4; the same run's "Km 4" was 2m04s late and "Km 5" never fired
+    // at all. Past either of these, drop it and let the next boundary speak for itself.
+    private val PENDING_SPLIT_MAX_AGE_MS = 60_000L
+    private val PENDING_SPLIT_MAX_DISTANCE_M = 250.0
     private var startTime: Long = 0
     private var lastSplitTime: Long = 0
     // Watch timer at the last km boundary. For companion-initiated sessions,
@@ -329,6 +343,22 @@ class RunTrackingService : Service(), SensorEventListener {
     private val startIdleDistances = mutableListOf<Double>()   // metres, parallel arrays —
     private val startIdleTimes = mutableListOf<Double>()       // seconds since previous point —
     private val startIdleTimestamps = mutableListOf<Long>()    // point.timestamp (ms) — for anchoring
+    // Stationary-drift gate — see the `looksStationary` check in onNewLocation().
+    // A phone standing still with 10-30 m accuracy produces 2-8 m positional hops every
+    // second. Every one of them clears the old filter (>= 2 m, <= 100 m, under 35 km/h), and
+    // because distance accumulates as an absolute value, directionless drift only ever ADDS.
+    // A beta tester standing still on a balcony for ~1 minute recorded 0.08 km at 12:06/km
+    // while Garmin Connect, same moment, recorded 0.00 km — Garmin gates on real movement and
+    // we did not. 0.5 m/s (1.8 km/h) is well under any walking pace and is the same threshold
+    // this file already uses for speed-reading collection further down onNewLocation().
+    private val MOVEMENT_MIN_SPEED_MS = 0.5f
+    /** Diagnostic only — how many drift points this session's gate has discarded. */
+    private var stationaryPointsRejected = 0
+    // Only treat a near-zero speed reading as "stationary" for hops small enough to actually
+    // BE drift. A genuine 15 m displacement alongside a ~0 m/s reading is self-contradictory —
+    // more likely a stale speed field than a stationary phone — so that still accumulates.
+    private val STATIONARY_MAX_DRIFT_M = 10.0
+
     private val START_IDLE_CONFIRM_SAMPLES = 3
     private val START_IDLE_MAX_PACE_SEC_PER_KM = 18.0 * 60.0   // 18 min/km — clearly moving, not drift
     private val START_IDLE_MIN_DISTANCE_M = 5.0                // defensive floor only; the sustained-
@@ -370,8 +400,23 @@ class RunTrackingService : Service(), SensorEventListener {
     // The last PACE_TREND_WINDOW pace readings (sec/km) from GPS updates.
     // Used to detect whether the athlete is already slowing when HR zone high fires.
     private val recentPaceSecPerKm: ArrayDeque<Double> = ArrayDeque()   // sec/km (max PACE_TREND_WINDOW)
-    private var initialStepCount: Int = -1
+    // TYPE_STEP_COUNTER reports steps since device boot, so both of these are baselines
+    // subtracted from it — they are NOT step counts themselves.
+    //
+    // There used to be only one, re-anchored every cadence window, and the run total was read
+    // off it: `totalStepsDuringRun = steps - initialStepCount` immediately before
+    // `initialStepCount = steps`. That made the saved "total steps" the count from the LAST
+    // ~2-second window — single digits — rather than the run's steps. Two baselines now: the
+    // window one moves (cadence is a rate, it needs a short window), the run one never does.
+    private var runStartStepCount: Int = -1
+    private var windowStartStepCount: Int = -1
     private var lastStepTimestamp: Long = 0
+    // Below any real walking cadence (a slow walk is ~90 spm, running 150-180). A phone
+    // standing still still registers the occasional step from sway or a hand movement, and
+    // one step in a 2-second window computes to 30 spm — which is what a beta tester saw
+    // reported while standing completely still. Readings under this are shown as 0 and kept
+    // out of the run's average/max entirely.
+    private val MIN_VALID_CADENCE_SPM = 50
     // Step detector cadence tracking (fallback)
     private var stepDetectorSteps: Int = 0
     private var stepDetectorWindowStart: Long = 0
@@ -1582,6 +1627,45 @@ class RunTrackingService : Service(), SensorEventListener {
                 if (it <= 100.0) it * 1000.0 else it
             } ?: targetDistance
             targetTime = intent?.getLongExtra(EXTRA_TARGET_TIME, 0)?.takeIf { it > 0 } ?: targetTime
+
+            // ── Last-resort target recovery from the process-level config holder ──────────
+            // The target reaches this service ONLY as an intent extra, which means it exists
+            // nowhere but this instance's memory. Every re-entry path that isn't the original
+            // configured intent therefore arrives with no target at all:
+            //   • GarminWatchManager's no-listener bootstrap sends a bare
+            //     ACTION_START_TRACKING_FROM_WATCH with no extras whatsoever (same
+            //     onWatchCommand == null condition that used to swallow pause/resume);
+            //   • a service restart between "Prepare" and the watch's "start" resets these
+            //     fields, and the watch's start carries nothing to restore them from.
+            // Losing it is silent and expensive: no target-pace coaching, no final
+            // 500/250/100 m cues, no "target reached", and targetDistance/targetTime land NULL
+            // on the saved run. Confirmed on two real runs (2026-09-14) — one configured for
+            // 10 km / 50 min, one for 5 km / 25 min — both saved with both fields null.
+            //
+            // RunConfigHolder already holds the RunSetupConfig the user actually configured and
+            // is what RunSessionScreen reads, so it is the same source of truth, just one that
+            // outlives a single intent. Only consulted when we'd otherwise have nothing, so it
+            // can never override a target the intent or an earlier Prepare already supplied.
+            if (targetDistance == null || targetTime == null) {
+                RunConfigHolder.getConfig()?.let { cfg ->
+                    if (targetDistance == null) {
+                        cfg.targetDistance?.toDouble()?.takeIf { it > 0 }?.let { km ->
+                            targetDistance = km * 1000.0
+                            Log.d("RunTrackingService", "🎯 targetDistance recovered from RunConfigHolder: ${km}km (intent carried none)")
+                        }
+                    }
+                    if (targetTime == null && cfg.hasTargetTime) {
+                        val ms = (cfg.targetHours * 3600000L) + (cfg.targetMinutes * 60000L) + (cfg.targetSeconds * 1000L)
+                        if (ms > 0) {
+                            targetTime = ms
+                            Log.d("RunTrackingService", "🎯 targetTime recovered from RunConfigHolder: ${ms / 1000}s (intent carried none)")
+                        }
+                    }
+                }
+            }
+            Log.d("RunTrackingService", "🎯 Session target after ${intent?.action}: " +
+                "distance=${targetDistance?.let { "${it / 1000.0}km" } ?: "none"}, " +
+                "time=${targetTime?.let { "${it / 1000}s" } ?: "none"}")
             hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
             intent?.getStringExtra(EXTRA_SESSION_TYPE)?.let { requestedType ->
                 currentActivityType = if (requestedType.equals("walk", ignoreCase = true)) "walk" else "run"
@@ -1887,6 +1971,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastPhase = null        // Reset for new run - allow first phase change to trigger
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
+        stationaryPointsRejected = 0
         // Only reset the watch-GPS suppression window for phone-only runs.
         // For watch-initiated runs, wasRunStartedByWatch is set TRUE before startTracking() is called,
         // and lastWatchGpsMs was stamped at that moment.  Resetting it here would reopen the phone-GPS
@@ -1946,7 +2031,8 @@ class RunTrackingService : Service(), SensorEventListener {
         watchBearingSeries.clear(); watchStepsSeries.clear()
         watchGpsAccuracySum = 0f; watchGpsAccuracyCount = 0; watchGpsAccuracyWorst = 0f
         watchMinPace = 0.0; watchMaxPace = 0.0
-        initialStepCount = -1
+        runStartStepCount = -1
+        windowStartStepCount = -1
         lastStepTimestamp = 0
         stepDetectorSteps = 0
         stepCountFromDetector = 0
@@ -3692,13 +3778,36 @@ class RunTrackingService : Service(), SensorEventListener {
 
             if (location.accuracy <= maxAcceptableAccuracy && isDistanceReasonable && isSpeedReasonable) {
                 lastGpsAccuracyM = location.accuracy  // Track latest accepted GPS accuracy for sensor confidence reporting
+
+                // ── Stationary-drift gate ────────────────────────────────────────────
+                // The distance/speed filters above reject implausible JUMPS; nothing until
+                // now asked the prior question of whether the user is moving at all.
+                // location.speed is Doppler-derived on the fused provider rather than
+                // computed from position deltas, so it stays near zero while a stationary
+                // phone's reported POSITION wanders — which is exactly what separates drift
+                // from movement, and what the summed-increment approach cannot see.
+                //
+                // Deliberately conservative: this only fires when the fix carries positive
+                // evidence of standing still. If hasSpeed() is false (some devices/fixes omit
+                // it) behaviour is unchanged rather than guessing, so this can never make the
+                // app under-count a real run — the cost is that the drift hole stays open on
+                // fixes with no speed field.
+                val looksStationary = location.hasSpeed() &&
+                    location.speed < MOVEMENT_MIN_SPEED_MS &&
+                    distanceIncrement < STATIONARY_MAX_DRIFT_M
+                if (looksStationary) {
+                    stationaryPointsRejected++
+                    Log.d("RunTrackingService", "Stationary drift ignored: ${String.format("%.1f", distanceIncrement)}m " +
+                        "at ${String.format("%.2f", location.speed)}m/s (accuracy ${location.accuracy}m) — " +
+                        "$stationaryPointsRejected rejected so far this session")
+                }
                 // Calculate instantaneous pace from consecutive GPS points (for UI display)
                 val currentPaceSeconds = if (timeSinceLastPoint > 0 && distanceIncrement > 0) {
                     (1000.0 * timeSinceLastPoint / distanceIncrement).toFloat() // seconds per km
                 } else 0f
                 
                 // Feed rolling window for smoothed pace (used by struggle detection & coaching)
-                if (timeSinceLastPoint > 0 && distanceIncrement > 0) {
+                if (!looksStationary && timeSinceLastPoint > 0 && distanceIncrement > 0) {
                     recentPaceDistances.add(distanceIncrement)
                     recentPaceTimes.add(timeSinceLastPoint)
                     while (recentPaceDistances.size > PACE_WINDOW_SIZE) {
@@ -3719,7 +3828,11 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Update current real-time pace display (use smoothed for better UX)
                 // Cap at 900 sec/km (15 min/km) — below this speed, GPS drift from a
                 // stationary phone produces absurd values. A real runner is never slower.
-                currentPace = if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
+                // The 900 s/km cap below was meant to catch stationary drift, but drift is
+                // bursty rather than slow: 2-5 m hops read as 700-800 s/km and sail under it.
+                // That is how a phone standing still reported a plausible 12:06/km. The
+                // stationary gate is the real answer; the cap stays as a backstop.
+                currentPace = if (!looksStationary && smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
                     val minutes = (smoothedPaceSeconds / 60).toInt()
                     val seconds = (smoothedPaceSeconds % 60).toInt()
                     String.format("%d:%02d", minutes, seconds)
@@ -3727,7 +3840,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     "0:00"
                 }
                 // Feed the pace trend buffer whenever we have a valid smoothed pace
-                if (smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
+                if (!looksStationary && smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
                     updatePaceTrendBuffer(smoothedPaceSeconds.toDouble())
                 }
                 // Product decision (2026-09 — Daniel): on a watch-driven run, the watch's own
@@ -3745,7 +3858,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 // against Nino's specific reported numbers, which remain unconfirmed pending
                 // his raw session data/logs.
                 val isAuthoritativeWatchDistance = location.provider == "garmin" && wasRunStartedByWatch
-                if (!isAuthoritativeWatchDistance) {
+                if (!isAuthoritativeWatchDistance && !looksStationary) {
                     totalDistance += distanceIncrement
                 }
 
@@ -4049,17 +4162,36 @@ class RunTrackingService : Service(), SensorEventListener {
         }
 
         // ── Retry the oldest pending split from a previous tick where cooldown blocked it ──
-        maybeFireMidKmEliteCoaching()
+        // Drop anything that has gone stale first, so a slot is never spent announcing a
+        // boundary the runner left behind minutes ago.
+        val nowForPending = System.currentTimeMillis()
+        pendingKmSplitCoachingQueue.removeAll { queued ->
+            val ageMs = nowForPending - queued.queuedAtMs
+            val movedM = totalDistance - queued.queuedAtDistanceM
+            val stale = ageMs > PENDING_SPLIT_MAX_AGE_MS || movedM > PENDING_SPLIT_MAX_DISTANCE_M
+            if (stale) {
+                Log.w("RunTrackingService", "Dropping stale pending km split ${queued.split.km}km — " +
+                    "${ageMs / 1000}s and ${movedM.toInt()}m past the boundary, too late to be useful")
+            }
+            stale
+        }
 
+        // Pending splits are retried BEFORE elite coaching gets a look at the slot. The other
+        // way round, maybeFireMidKmEliteCoaching() took the slot first on every tick and
+        // re-armed the shared cooldown, starving the split that was already waiting — which
+        // contradicts the "km splits are non-negotiable" rule stated at the defer site below,
+        // and is how a real session ended up hearing km 3 announced while approaching km 4.
         val pending = pendingKmSplitCoachingQueue.firstOrNull()
         if (pending != null && !hasCoachingFiredThisTick && canFireCoaching() && !isInFinalStretch()) {
-            Log.d("RunTrackingService", "Retrying pending km split coaching at ${pending.km}km (${pendingKmSplitCoachingQueue.size - 1} more queued)")
+            Log.d("RunTrackingService", "Retrying pending km split coaching at ${pending.split.km}km (${pendingKmSplitCoachingQueue.size - 1} more queued)")
             pendingKmSplitCoachingQueue.removeAt(0)
             hasCoachingFiredThisTick = true
             recordCoachingFired()
-            triggerKmSplitCoaching(pending)
+            triggerKmSplitCoaching(pending.split)
             return
         }
+
+        maybeFireMidKmEliteCoaching()
 
         if (currentKm > lastKmSplit) {
             val now = System.currentTimeMillis()
@@ -4141,10 +4273,12 @@ class RunTrackingService : Service(), SensorEventListener {
                     // km crossing isn't silently dropped by this newer one.
                     if (pendingKmSplitCoachingQueue.size >= MAX_PENDING_KM_SPLITS) {
                         val dropped = pendingKmSplitCoachingQueue.removeAt(0)
-                        Log.w("RunTrackingService", "Km split coaching queue full — dropping oldest pending split at ${dropped.km}km to queue ${currentKm}km")
+                        Log.w("RunTrackingService", "Km split coaching queue full — dropping oldest pending split at ${dropped.split.km}km to queue ${currentKm}km")
                     }
                     Log.d("RunTrackingService", "Km split at ${currentKm}km deferred (cooldown active) — will retry (${pendingKmSplitCoachingQueue.size + 1} now queued)")
-                    pendingKmSplitCoachingQueue.add(split)
+                    pendingKmSplitCoachingQueue.add(
+                        PendingKmSplit(split, System.currentTimeMillis(), totalDistance)
+                    )
                 }
             } else if (hasReachedTarget) {
                 Log.d("RunTrackingService", "Target distance reached at ${currentKm}km (target was ${(targetDistance!! / 1000.0).toInt()}km) — suppressing km split coaching")
@@ -6360,9 +6494,30 @@ class RunTrackingService : Service(), SensorEventListener {
         val timeSinceLastCoaching = now - lastGlobalCoachingTime
         val distSinceLastCoaching = totalDistance - lastGlobalCoachingDistance
 
-        // Navigation only checks time gap (turns are position-critical, not distance-dependent)
+        // Navigation only checks time gap (turns are position-critical, not distance-dependent).
+        // Deliberately ahead of the busy check below: navigation is allowed to interrupt
+        // coaching that is mid-sentence — CoachingAudioQueue.enqueueNavigation() stops the
+        // current item and jumps the queue — so "something is speaking" must not block a turn.
         if (isNavigation) {
             return timeSinceLastCoaching >= minGapMs
+        }
+
+        // ── Don't start generating the next cue while the last one is still being heard ──
+        // lastGlobalCoachingTime is stamped by recordCoachingFired() immediately BEFORE the
+        // coaching coroutine launches — so it marks when we started ASKING for a cue, not when
+        // the runner finished hearing it. Between those two points sits an OpenAI generation, a
+        // Polly TTS fetch and the playback itself, which together run far longer than this
+        // 15 s gap. The gate therefore reopened while the previous cue was still talking, cues
+        // stacked nose-to-tail, and every announcement drifted further behind the runner's real
+        // position: a real 5 km session (2026-09-14) produced 24 cues in 25:44 and was
+        // announcing km 3 while the runner was at 5 km, never reaching km 5 at all.
+        //
+        // Consulting the queue makes the 15 s mean what it was always meant to mean — a gap
+        // between the runner HEARING things, not between us requesting them. A stuck queue
+        // can't wedge this permanently: CoachingAudioQueue has its own watchdog that force-
+        // completes a hung item, and checkStuckState() runs on every enqueue.
+        if (live.airuncoach.airuncoach.utils.CoachingAudioQueue.isBusy()) {
+            return false
         }
 
         // Structured interval phase transitions bypass the 150m distance gate.
@@ -10248,14 +10403,28 @@ class RunTrackingService : Service(), SensorEventListener {
         when (event?.sensor?.type) {
             Sensor.TYPE_STEP_COUNTER -> {
                 val steps = event.values[0].toInt()
-                if (initialStepCount == -1) initialStepCount = steps
-                val sD = steps-initialStepCount; val tD = System.currentTimeMillis()-lastStepTimestamp
-                // Track total steps taken during this run
-                if (sD > 0) totalStepsDuringRun = sD
-                if (tD > 2000) {
-                    currentCadence = (sD*60000/tD).toInt()
-                    initialStepCount = steps
-                    lastStepTimestamp = System.currentTimeMillis()
+                val now = System.currentTimeMillis()
+                if (runStartStepCount == -1) {
+                    runStartStepCount = steps
+                    windowStartStepCount = steps
+                    lastStepTimestamp = now
+                }
+
+                // Run total: measured from the run-start baseline, which never moves.
+                val stepsThisRun = steps - runStartStepCount
+                if (stepsThisRun > 0) totalStepsDuringRun = stepsThisRun
+
+                // Cadence: a rate, so measured over a short rolling window instead.
+                val windowSteps = steps - windowStartStepCount
+                val windowMs = now - lastStepTimestamp
+                if (windowMs > 2000) {
+                    val spm = (windowSteps * 60000 / windowMs).toInt()
+                    // Report 0 rather than a drift-level figure, and keep it out of the
+                    // average — but do not hold the previous reading, which would show a
+                    // stale cadence for someone who has genuinely stopped.
+                    currentCadence = if (spm >= MIN_VALID_CADENCE_SPM) spm else 0
+                    windowStartStepCount = steps
+                    lastStepTimestamp = now
                     // Accumulate for average/max (only valid readings)
                     if (currentCadence > 0) {
                         cadenceSum += currentCadence
