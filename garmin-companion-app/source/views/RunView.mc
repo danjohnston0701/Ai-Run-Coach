@@ -1244,15 +1244,40 @@ class RunView extends Ui.View {
             // Noise thresholds:
             //   - Baro: 1.5 m  -- filters sensor noise while capturing real hills.
             //   - GPS fallback: 5.0 m -- filters GPS altitude noise.
+            //
+            // _lastAlt is an ANCHOR, not "the previous sample". It moves only when the
+            // threshold is actually cleared. That distinction is the whole fix: this block
+            // used to reassign _lastAlt on EVERY sample, which turned the threshold into a
+            // per-sample FILTER instead of a quantiser. A runner climbs roughly 0.1 m per
+            // second on a normal gradient, so a 5.0 m per-sample gate demanded a ~5 m jump
+            // between two consecutive 1 Hz readings -- physically impossible on foot -- and
+            // every genuine climb was therefore discarded, one sub-threshold delta at a time.
+            // Real case (2026-09-14): a 13 km run on a watch with no barometer (so the 5.0 m
+            // GPS gate applied) saved 9.18 m of total ascent, when its own altitude series
+            // spans 16.2 m and its per-km splits sum to far more. Same bug the phone side
+            // already documents: "a 2.0m threshold requires a ~66% gradient -- impossible
+            // running incline -- so ALL climbing was discarded."
+            //
+            // Holding the anchor lets a slow, real climb accumulate against it until it clears
+            // the gate, bank the whole delta at once, and re-anchor there. Noise still cannot
+            // accumulate: it oscillates around the anchor without ever clearing it. Thresholds
+            // are unchanged -- they were never the problem, the anchor handling was.
             var altSrc       = (_baroAlt != null) ? _baroAlt : _lastGpsAlt;
             var altThreshold = (_baroAlt != null) ? 1.5 : 5.0;
             if (altSrc != null) {
-                if (_lastAlt != null) {
+                if (_lastAlt == null) {
+                    _lastAlt = altSrc;
+                } else {
                     var altDelta = altSrc - _lastAlt;
-                    if (altDelta >  altThreshold) { _totalAscent  += altDelta; }
-                    if (altDelta < -altThreshold) { _totalDescent -= altDelta; }
+                    if (altDelta > altThreshold) {
+                        _totalAscent += altDelta;
+                        _lastAlt = altSrc;          // re-anchor only on a confirmed climb
+                    } else if (altDelta < -altThreshold) {
+                        _totalDescent -= altDelta;
+                        _lastAlt = altSrc;          // re-anchor only on a confirmed descent
+                    }
+                    // Otherwise hold the anchor so a gradual change keeps building against it.
                 }
-                _lastAlt = altSrc;
             }
 
             // ── Offline buffer capture (every 15 s, ALL non-phone-controlled runs) ──
@@ -1477,7 +1502,21 @@ class RunView extends Ui.View {
         // Activity.getActivityInfo() is the primary source for HR and cadence
         // in standalone mode.  onSensor provides a fallback for older devices
         // or when Activity.Info fields are null.
-        if (!_phoneControlled) {
+        //
+        // The pause/finish guards matter: onSensor keeps firing whatever the session is
+        // doing, and this block used to be gated on !_phoneControlled alone. onTick's
+        // Activity.Info read, by contrast, is gated on (!_phoneControlled && _isRunning). So
+        // once a run was paused or finished, every metric on the ring screen froze EXCEPT
+        // heart rate and cadence, which carried on updating live off the sensor — reported by
+        // a beta tester as "the data (HR, pace) started moving on its own, without
+        // corresponding to any real movement". Paused means paused: freeze them with
+        // everything else.
+        //
+        // Deliberately NOT gated on _isRunning: before a run starts there is no session to
+        // read Activity.Info from, and a live heart rate on the idle screen is genuinely
+        // useful (Garmin's own native run app shows one too). The bug was never the idle
+        // case — it was metrics moving after the user had stopped them.
+        if (!_phoneControlled && !_isPaused && !_isFinished && !_isFinishing) {
             // Values will be overwritten by Activity.Info in onTick if available
             if (info.heartRate != null && info.heartRate > 0) {
                 _heartRate     = info.heartRate;
