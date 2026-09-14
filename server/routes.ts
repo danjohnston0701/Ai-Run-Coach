@@ -14215,7 +14215,12 @@ function transformRunForAndroid(run: any) {
         startedAtEpoch,      // wall-clock session start, epoch seconds
         phoneConnected,      // was the phone app BLE-connected at upload time
         deviceModel: batchDeviceModel, // the watch's own part number
+        // Added 2026-09-15 (companion app 3.4.6). The watch app's own manifest version, so we
+        // can tell which watch build a run came from. Older watch builds omit it.
+        watchAppVersion: batchWatchAppVersion,
       } = req.body;
+      const watchAppVersion: string | null =
+        typeof batchWatchAppVersion === "string" && batchWatchAppVersion.trim() ? batchWatchAppVersion.trim().slice(0, 32) : null;
       if (phoneConnected !== undefined) {
         // A run reaching this path can be genuinely standalone OR have had the phone present
         // but the session never prepared, and nothing recorded which. Logged rather than
@@ -14383,6 +14388,7 @@ function transformRunForAndroid(run: any) {
             totalSteps:     estimateWatchSteps(avgCad, durSec),
             calories:       estimateWatchCalories(distKm),
             garminDeviceName: await resolveRunDeviceName(userId, batchDeviceModel ?? batchSession?.deviceModel),
+            watchAppVersion,
           }).returning();
           existingRun = created;
           console.log(`[Offline Batch] Created new run record ${existingRun.id} for phone-less session ${sessionId} (${distKm.toFixed(2)}km)`);
@@ -14533,6 +14539,12 @@ function transformRunForAndroid(run: any) {
       if (finalAscent != null) {
         updatePayload.elevationGain = finalAscent;
         updatePayload.elevation     = finalAscent;
+      }
+
+      // The run row may predate this batch (created by session/end, or by the phone), in which
+      // case nothing has recorded the watch build yet.
+      if (watchAppVersion && !existingRun.watchAppVersion) {
+        updatePayload.watchAppVersion = watchAppVersion;
       }
 
       // Filter out undefined values so we only update fields where batch data should be used

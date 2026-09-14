@@ -312,6 +312,11 @@ export const runs = pgTable("runs", {
   avgAmbientPressure: real("avg_ambient_pressure"),         // Pa – used for altitude verification & weather
   avgBearing: real("avg_bearing"),                          // degrees – overall direction of run
   garminDeviceName: text("garmin_device_name"),             // e.g. "Fenix 7X", "VivoActive 4"
+  // The watch companion app's own version (its manifest.xml version, e.g. "3.4.7"), reported in
+  // the offline-batch upload. Tells us which watch build a run came from — i.e. whether the user
+  // has a given watch-side fix — which the device model alone cannot. Null for phone-tracked
+  // runs and for watch builds predating the field.
+  watchAppVersion: text("watch_app_version"),
 
   // ── Time-series data from watch ───────────────────────────────────────────
   // Stored as JSONB arrays — one value per 2-second sample during the run.

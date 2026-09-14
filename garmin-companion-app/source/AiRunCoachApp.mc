@@ -6,6 +6,12 @@ using Toybox.Application as App;
 using Toybox.WatchUi as Ui;
 using Toybox.System as Sys;
 
+// The app's own version, reported to the backend (pairing start, offline-batch upload) so we can
+// tell which watch build a user is on. Connect IQ has no runtime API for reading the manifest
+// version, so this MUST be kept in step with `version="..."` in manifest.xml on every bump —
+// a hardcoded copy in PairingCodeManager previously drifted a release behind.
+const APP_VERSION = "3.4.6";
+
 class AiRunCoachApp extends App.AppBase {
 
     private var _runView = null;

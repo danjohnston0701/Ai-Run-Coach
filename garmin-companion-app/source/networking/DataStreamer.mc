@@ -440,6 +440,9 @@ class DataStreamer {
         if (ds != null && ds has :partNumber && ds.partNumber != null) {
             payload.put("deviceModel", ds.partNumber);
         }
+        // And which build of this app produced it — the model alone can't say whether the
+        // user has a given watch-side fix.
+        payload.put("watchAppVersion", APP_VERSION);
         // Include plannedWorkoutId so the backend can link this run to a coaching plan
         // even when uploaded via the offline batch path (watch ran without phone).
         var plannedWorkoutId = App.Storage.getValue("plannedWorkoutId");
