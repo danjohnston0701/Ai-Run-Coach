@@ -60,6 +60,12 @@ export const users = pgTable("users", {
   // user reached the natural end (tapped "Get Started"), not Skip at any point.
   onboardingTourStartedAt: timestamp("onboarding_tour_started_at"),
   onboardingTourCompletedAt: timestamp("onboarding_tour_completed_at"),
+  // When the user finished the onboarding SCREENS (distinct from the optional feature tour
+  // above). Completion was previously inferred only from local SharedPreferences/UserDefaults
+  // flags that live on the device and are cleared by unrelated actions, so "who never finished
+  // onboarding" was not a question the backend could answer — which is exactly why a cohort of
+  // users with no fitness level went unnoticed. Server-stamped and write-once.
+  onboardingCompletedAt: timestamp("onboarding_completed_at"),
   // In-Run AI Coaching feature preferences (all default to enabled)
   coachPaceEnabled: boolean("coach_pace_enabled").default(true),
   coachNavigationEnabled: boolean("coach_navigation_enabled").default(true),

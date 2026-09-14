@@ -1484,6 +1484,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   /**
+   * POST /api/user/onboarding-complete
+   * Records the first time a user finishes the onboarding SCREENS (profile → fitness level →
+   * coach setup → subscription → permissions) — distinct from the optional feature tour above.
+   * Before this, completion was only ever inferred from local device flags, which are cleared
+   * by unrelated actions, so the backend could not answer "who never finished onboarding" — the
+   * exact question that would have surfaced the users with no fitness level much sooner.
+   * Server-stamped, write-once: a retaken onboarding never overwrites the original timestamp.
+   */
+  app.post("/api/user/onboarding-complete", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (!user.onboardingCompletedAt) {
+        await storage.updateUser(userId, { onboardingCompletedAt: new Date() });
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[POST /api/user/onboarding-complete] Error:", error);
+      res.status(500).json({ error: "Failed to record onboarding completion" });
+    }
+  });
+
+  /**
    * PUT /api/user/injuries/:injuryId
    * Update an existing injury (status, notes, recovery date, etc.)
    */

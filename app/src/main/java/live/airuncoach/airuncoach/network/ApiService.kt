@@ -129,6 +129,10 @@ interface ApiService {
     @POST("/api/user/onboarding-tour-event")
     suspend fun recordOnboardingTourEvent(@Body request: live.airuncoach.airuncoach.network.model.OnboardingTourEventRequest)
 
+    /** Stamps users.onboarding_completed_at (server-side, write-once) — see RootNavigationGraph. */
+    @POST("/api/user/onboarding-complete")
+    suspend fun recordOnboardingComplete()
+
     @GET("/api/onboarding-tour/demo-run")
     suspend fun getOnboardingTourDemoRun(): live.airuncoach.airuncoach.network.model.OnboardingTourDemoRunResponse
 

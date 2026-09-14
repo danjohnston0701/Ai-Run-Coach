@@ -29,6 +29,7 @@ import androidx.navigation.navArgument
 import live.airuncoach.airuncoach.ui.screens.AiCoachingOnboardingScreen
 import live.airuncoach.airuncoach.ui.screens.AiConsentScreen
 import live.airuncoach.airuncoach.ui.screens.EmailVerificationScreen
+import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.ui.screens.FitnessLevelScreen
 import live.airuncoach.airuncoach.ui.screens.ForgotPasswordScreen
 import live.airuncoach.airuncoach.ui.screens.GarminWatchUpdateScreen
@@ -465,6 +466,19 @@ private fun NavGraphBuilder.rootNavigationDestinations(
         composable("onboarding_subscription") {
             OnboardingSubscriptionScreen(
                 onNavigateToPermissions = {
+                    // Last of the onboarding screens proper (permissions/consent also run for
+                    // returning users), so this is where completion is recorded. Until now it was
+                    // only inferable from local flags that unrelated actions clear, so the backend
+                    // couldn't answer "who never finished onboarding". Application-scoped rather
+                    // than rememberCoroutineScope: the pop below would cancel a composition scope
+                    // mid-request, the very race that lost fitness levels. Non-fatal by design.
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        try {
+                            RetrofitClient.apiService.recordOnboardingComplete()
+                        } catch (e: Exception) {
+                            android.util.Log.w("RootNavigationGraph", "Failed to record onboarding completion (non-fatal): ${e.message}")
+                        }
+                    }
                     navController.navigate(AppRoutes.LOCATION_PERMISSION) {
                         popUpTo("onboarding_subscription") { inclusive = true }
                     }
