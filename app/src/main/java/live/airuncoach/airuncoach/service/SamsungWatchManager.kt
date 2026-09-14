@@ -587,6 +587,29 @@ class SamsungWatchManager(
                         Log.w(TAG, "⌚ Could not forward stop to RunTrackingService: ${e.message}")
                     }
                 }
+                // Same gap GarminWatchManager had: pause/resume fell through to the null
+                // onWatchCommand below and were silently dropped while start/stop had a
+                // fallback — and sendPauseAck()/sendResumeAck() above have already told the
+                // watch the phone got it, so the watch cancels its retry and the phone keeps
+                // recording. Fixed on both managers together on 2026-09-14; the Wear path was
+                // never reported broken only because it has had far less on-device use.
+                "pause", "resume" -> {
+                    val serviceAction = if (action == "pause") {
+                        RunTrackingService.ACTION_PAUSE_TRACKING
+                    } else {
+                        RunTrackingService.ACTION_RESUME_TRACKING
+                    }
+                    try {
+                        context.startService(
+                            Intent(context, RunTrackingService::class.java).apply {
+                                this.action = serviceAction
+                            }
+                        )
+                        Log.d(TAG, "⌚ Watch ${action.uppercase()} (no listener) — forwarded $serviceAction to RunTrackingService")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⌚ Could not forward $action to RunTrackingService: ${e.message}")
+                    }
+                }
             }
         } else {
             onWatchCommand?.invoke(action)

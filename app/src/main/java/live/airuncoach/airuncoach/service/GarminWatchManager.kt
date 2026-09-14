@@ -1006,6 +1006,35 @@ class GarminWatchManager(
                                     Log.w(TAG, "⌚ Could not forward stop to RunTrackingService: ${e.message}")
                                 }
                             }
+                            // Pause/resume had NO no-listener path at all until 2026-09-14: they
+                            // fell straight through to the null onWatchCommand below and were
+                            // silently dropped, while start and stop both had a fallback. The
+                            // watch can't tell — sendPauseAck()/sendResumeAck() fire further up
+                            // this same handler, before any of this, so the watch cancels its
+                            // retry and believes the phone paused. The phone kept recording.
+                            // Reported by a beta tester on an Oppo device ("pausing from the
+                            // watch didn't pause the phone, which kept recording"), where
+                            // aggressive process management is exactly what leaves this listener
+                            // unregistered mid-session. Both are safe no-ops on the service side
+                            // if no run is active, and pauseTracking()/resumeTracking() each
+                            // guard against redundant delivery.
+                            "pause", "resume" -> {
+                                val serviceAction = if (action == "pause") {
+                                    RunTrackingService.ACTION_PAUSE_TRACKING
+                                } else {
+                                    RunTrackingService.ACTION_RESUME_TRACKING
+                                }
+                                try {
+                                    context.startService(
+                                        Intent(context, RunTrackingService::class.java).apply {
+                                            this.action = serviceAction
+                                        }
+                                    )
+                                    Log.d(TAG, "⌚ Watch ${action.uppercase()} (no listener) — forwarded $serviceAction to RunTrackingService")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "⌚ Could not forward $action to RunTrackingService: ${e.message}")
+                                }
+                            }
                         }
                     } else {
                         onWatchCommand?.invoke(action)
