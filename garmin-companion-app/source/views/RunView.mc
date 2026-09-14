@@ -1844,8 +1844,22 @@ class RunView extends Ui.View {
             // Connected to the phone but nothing prepared. "PRESS START" here is a dead end:
             // it works, but it silently gives up coaching, the session target and the richer
             // charts the phone adds. Point at the better path instead.
+            //
+            // Measured rather than assumed: this string is far too long for FONT_XTINY on a
+            // single line on most of the supported fleet (an FR55 is 208 px wide), and the app
+            // ships to 163 devices from 208 px up. Draw it on one line where it genuinely fits
+            // and wrap to two where it doesn't, growing UPWARD into empty space — a second line
+            // below y would run off the narrow bottom of a round face.
             dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y, Gfx.FONT_XTINY, "PREPARE ON PHONE", Gfx.TEXT_JUSTIFY_CENTER);
+            var hint  = "Prepare on Phone for AI coaching";
+            var maxW  = (w * 0.88).toNumber();
+            if (dc.getTextWidthInPixels(hint, Gfx.FONT_XTINY) <= maxW) {
+                dc.drawText(cx, y, Gfx.FONT_XTINY, hint, Gfx.TEXT_JUSTIFY_CENTER);
+            } else {
+                var lh = Gfx.getFontHeight(Gfx.FONT_XTINY);
+                dc.drawText(cx, y - lh, Gfx.FONT_XTINY, "Prepare on Phone", Gfx.TEXT_JUSTIFY_CENTER);
+                dc.drawText(cx, y,      Gfx.FONT_XTINY, "for AI coaching",  Gfx.TEXT_JUSTIFY_CENTER);
+            }
         } else if (!_isRunning) {
             dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "PRESS START", Gfx.TEXT_JUSTIFY_CENTER);
