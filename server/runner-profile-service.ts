@@ -95,6 +95,21 @@ export interface CoachingObservation {
  * When profile is empty/null this returns an empty string so callers can
  * safely do: `systemPrompt + runnerProfileBlock(profile)` without guards.
  */
+/**
+ * Marker emitted into the runner-profile block on race day.
+ *
+ * The coaching generators receive the PRE-RENDERED profile string, not a userId, so this is
+ * how they detect race day without a new parameter threaded through every call site. Exported
+ * (rather than duplicated as a literal) so the string that is written and the string that is
+ * matched can never drift apart.
+ */
+export const RACE_DAY_MARKER = "RACE DAY";
+
+/** True when the given rendered runner profile says today is the runner's goal event. */
+export function profileIndicatesRaceDay(runnerProfile: string | null | undefined): boolean {
+  return !!runnerProfile && runnerProfile.includes(`${RACE_DAY_MARKER}:`);
+}
+
 export function runnerProfileBlock(profile: string | null | undefined): string {
   if (!profile || profile.trim() === '') return '';
   return `
@@ -342,6 +357,14 @@ interface RunnerContext {
   // Active goals
   activeGoals: string[];
 
+  /**
+   * The goal whose target date is today or imminent, if any. Separate from activeGoals
+   * because a goal listed as background context ("Half Marathon (target: 2026-09-20)") tells
+   * the coach the event EXISTS but never that today is the day — the model has no reliable
+   * anchor for today's date and will not infer it.
+   */
+  imminentGoal: { title: string; daysUntil: number } | null;
+
   // Recent runs (last 10) — lightweight summary
   recentRuns: {
     date: string;
@@ -485,6 +508,21 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
       : g.title,
   );
 
+  // Nearest goal that is today or still ahead, within a fortnight. Compared on calendar days
+  // in UTC rather than elapsed milliseconds, so a goal dated today reads as 0 regardless of
+  // what time the run happens.
+  const startOfDayUTC = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const todayUTC = startOfDayUTC(new Date());
+  let imminentGoal: { title: string; daysUntil: number } | null = null;
+  for (const g of activeGoalRows) {
+    if (!g.targetDate) continue;
+    const daysUntil = Math.round((startOfDayUTC(g.targetDate) - todayUTC) / 86_400_000);
+    if (daysUntil < 0 || daysUntil > 14) continue;
+    if (!imminentGoal || daysUntil < imminentGoal.daysUntil) {
+      imminentGoal = { title: g.title, daysUntil };
+    }
+  }
+
   // ── 6. Age ────────────────────────────────────────────────────────────────
   let age: number | null = null;
   if (user.dob) {
@@ -546,6 +584,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
 
     activePlan,
     activeGoals,
+    imminentGoal,
     recentRuns,
     lastRun,
 
@@ -599,6 +638,18 @@ async function generateProfile(ctx: RunnerContext): Promise<string> {
   const goalsNote = ctx.activeGoals.length > 0
     ? `Active goals: ${ctx.activeGoals.join('; ')}.`
     : 'No active goals set.';
+
+  // Race day has to be stated, not implied. The goals list above carries the event and its
+  // date, but the model is never given a reliable "today" to compare against, so it cannot
+  // work out that the date has arrived — and on the day that matters most it coached a goal
+  // event as if it were any other run.
+  const raceNote = ctx.imminentGoal == null
+    ? ''
+    : ctx.imminentGoal.daysUntil === 0
+      ? `\n\n${RACE_DAY_MARKER}: today IS "${ctx.imminentGoal.title}" — the event this runner has been training for. This run is the goal itself, not a training session. Acknowledge it early, coach them through the race, and treat their target pace as the race target rather than a long-term aspiration. Do not describe today as training or as building towards anything.`
+      : ctx.imminentGoal.daysUntil === 1
+        ? `\n\nRACE TOMORROW: "${ctx.imminentGoal.title}" is tomorrow. Anything today is a shakeout or taper — keep it easy, and never encourage pushing.`
+        : `\n\nUPCOMING EVENT: "${ctx.imminentGoal.title}" is in ${ctx.imminentGoal.daysUntil} days. Factor the taper into pacing advice — this close, freshness beats fitness gains.`;
 
   const pbLines = [
     ctx.pb5k      && `5K: ${ctx.pb5k}`,
@@ -675,7 +726,7 @@ ${pbLines || 'None recorded yet'}
 
 PLAN & GOALS:
 ${planNote}
-${goalsNote}
+${goalsNote}${raceNote}
 
 RECENT RUNS (newest first):
 ${recentRunLines || 'None'}

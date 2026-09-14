@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { COACHING_PHASE_PROMPT, determinePhase, type CoachingPhase } from "../shared/coaching-statements";
-import { runnerProfileBlock } from "./runner-profile-service";
+import { runnerProfileBlock, profileIndicatesRaceDay } from "./runner-profile-service";
 import { resolveActivityType, activityVocab } from "./coaching-activity";
 import * as runPrompts from "./coaching-prompts-run";
 import * as walkPrompts from "./coaching-prompts-walk";
@@ -977,7 +977,11 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     cadenceContext += `\n- Watch running dynamics: ${watchDynamicsText}`;
   }
 
-  const trainingSessionContext = isTrainingSession
+  // Never tell the runner this "is NOT a race" on the day their goal event actually is.
+  // A race scheduled INTO the plan still arrives here as a training session, so without this
+  // the prompt would actively contradict the race-day block in their profile.
+  const isRaceDaySplit = profileIndicatesRaceDay(params.runnerProfile);
+  const trainingSessionContext = isTrainingSession && !isRaceDaySplit
     ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the ${personLabel}'s coaching plan — NOT a race or goal attempt. Do NOT compare their pace to their long-term race goal. Instead, frame the coaching around what this session is building.${sessionSplitContext}`
     : '';
 
@@ -2076,7 +2080,8 @@ CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do 
 
   // Training session reframe — when this is a coaching plan workout, give context-aware
   // messaging that references the training goal rather than implying race-day failure
-  const trainingStruggleContext = workoutTypeStruggle
+  // Same race-day exemption as generatePaceUpdate's split context — see the comment there.
+  const trainingStruggleContext = workoutTypeStruggle && !profileIndicatesRaceDay(params.runnerProfile)
     ? `\nTraining Session Context: This is a SCHEDULED TRAINING SESSION (${workoutTypeStruggle.replace(/_/g, ' ')} workout) — NOT a race. A pace drop here may be normal training fatigue. Frame your message around the training purpose: acknowledge the effort but remind them what this session is building. Do NOT imply they are failing a race or time goal.`
     : '';
 
