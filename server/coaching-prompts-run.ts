@@ -13,6 +13,7 @@ import {
   toneDirective,
   accentDirective,
   PACE_FORMAT_RULE,
+  NO_EMOJI_RULE,
   VARIETY_INSTRUCTION,
   getPaceContextDirective,
   effortPhilosophyRule,
@@ -107,7 +108,7 @@ ${getPaceContextDirective(
 
 ${toneDirective(ctx.coachTone)}${ctx.accentRule ? ' ' + ctx.accentRule : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export interface StruggleCoachingPromptContext {
@@ -149,7 +150,7 @@ Give a brief (1-2 sentences) supportive message tailored to this runner's fitnes
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Be supportive during tough moments — always reference actual data. Keep it brief. ${effortPhilosophyRule('runner')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export const STRUGGLE_FALLBACK_MESSAGE = "I can see you're working hard. Take a breath and find your rhythm again.";
@@ -195,7 +196,7 @@ CRITICAL RULES:
 - ${ctx.futureBanRule}
 - ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? '\n- ' + accentDirective(ctx.coachAccent) : ''}` + runnerProfileBlock(ctx.runnerProfile);
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // ── Phase coaching (generatePhaseCoaching in ai-service.ts) ────────────────────────────
@@ -230,7 +231,7 @@ Examples of good output: "Quick right turn onto May Street, looking good!", "Lef
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export interface PaceCoachingPromptContext {
@@ -280,7 +281,7 @@ CRITICAL TERRAIN RULE: If the runner is descending (downhill gradient), their pa
 
 ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export function paceCoachingFallback(avgPaceFormatted: string, targetPaceFormatted: string): string {
@@ -310,7 +311,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "He
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Give a brief, energetic send-off to start the run. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export interface DuringPhasePromptContext {
@@ -374,7 +375,7 @@ Weave in the runner's actual stats (pace, distance, time, cadence, heart rate) n
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach. Keep messages concise (2-3 sentences) and always reference the runner's actual numbers. NEVER start with greetings — jump straight into coaching. ${effortPhilosophyRule('runner')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // ── Interval coaching (generateIntervalCoaching in ai-service.ts) ──────────────────────
@@ -412,7 +413,7 @@ Give 1–2 punchy, direct sentences. ${ctx.isWorkPhase ? 'Push them hard but saf
 
   const system = `You are ${ctx.coachName}, an AI running coach with a ${ctx.coachTone} style, delivering live interval coaching mid-session. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // ── Cadence coaching (generateCadenceCoaching in ai-service.ts) ────────────────────────
@@ -460,7 +461,7 @@ Decide whether cadence coaching is needed right now. If yes, reference their act
 
   const system = `You are ${ctx.coachName}, an elite ${ctx.coachTone} running coach. You understand biomechanics, but you prioritize what matters most RIGHT NOW. Reference actual numbers. Keep it 2-3 sentences spoken aloud. No emojis. ${effortPhilosophyRule('runner')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // ── Heart rate coaching (generateHeartRateCoaching in ai-service.ts) ───────────────────
@@ -506,7 +507,7 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
 
   const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the runner's actual heart rate and zone. Keep it to 1-2 short sentences. ${effortPhilosophyRule('runner')} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // ── Post-run summary (generateRunSummary in ai-service.ts) ─────────────────────────────
@@ -530,7 +531,7 @@ Provide response as JSON with fields: highlights (array), struggles (array), tip
 
   const system = `You are an expert running coach providing post-run analysis. Respond only with valid JSON.${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export const RUN_SUMMARY_FALLBACK = {

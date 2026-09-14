@@ -2838,6 +2838,27 @@ ${VARIETY_INSTRUCTION}`;
  * 
  * Falls back to OpenAI gpt-4o-mini-tts if Polly is not configured or fails.
  */
+/**
+ * Every coaching message is spoken aloud by Polly, which reads an emoji as the literal name of
+ * its code points — "🏃‍♂️💨" becomes "runner male sign dash symbol" mid-sentence. Appended to
+ * every coaching system prompt (see coaching-prompts-run.ts / -walk.ts), and enforced
+ * deterministically by stripEmoji() below, since a model instruction is advisory.
+ */
+export const NO_EMOJI_RULE = " Never use emojis, emoticons or symbols of any kind — every word you write is read aloud by a text-to-speech voice.";
+
+/**
+ * Removes emoji and pictographic symbols, plus the zero-width joiners and variation selectors
+ * that bind them into sequences. Leaves ordinary punctuation and accented letters alone.
+ */
+export function stripEmoji(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}\u{1F1E6}-\u{1F1FF}]/gu, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .trim();
+}
+
 export async function generateTTS(
   text: string, 
   voice: string = "alloy",
@@ -2845,6 +2866,11 @@ export async function generateTTS(
   coachAccent?: string,
   coachGender?: string
 ): Promise<Buffer> {
+  // Belt and braces with the prompt rule: a model that ignores "no emojis" must still never
+  // reach a TTS engine with one. Applied here rather than in polly-service so the OpenAI
+  // fallback below is covered by the same guarantee.
+  text = stripEmoji(text);
+
   // Try Polly first if configured
   const { isPollyConfigured, synthesizeSpeech, mapAccentToPollyVoice } = await import('./polly-service');
   

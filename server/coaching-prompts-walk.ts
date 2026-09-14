@@ -10,6 +10,7 @@ import {
   toneDirective,
   accentDirective,
   PACE_FORMAT_RULE,
+  NO_EMOJI_RULE,
   VARIETY_INSTRUCTION,
   getPaceContextDirective,
   effortPhilosophyRule,
@@ -79,7 +80,7 @@ ${getPaceContextDirective(
 
 ${toneDirective(ctx.coachTone)}${ctx.accentRule ? ' ' + ctx.accentRule : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // Struggle coaching's prohibition has always been phrased slightly shorter than the shared
@@ -105,7 +106,7 @@ Give a brief (1-2 sentences) supportive message tailored to this walker's fitnes
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Be supportive during tough moments — always reference actual data. Keep it brief.${STRUGGLE_WALK_PROHIBITION} ${effortPhilosophyRule('walker')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // Deterministic fallback when the model call fails. Previously "ease back your walking pace"
@@ -139,7 +140,7 @@ Examples of good output: "Quick right turn onto May Street, looking good!", "Lef
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach delivering a navigation cue. Be extremely brief and clear — max 1 sentence, max 15 words. The direction must be unmistakable.${PHASE_WALK_PROHIBITION} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export function paceCoachingPrompt(ctx: PaceCoachingPromptContext): { system: string; user: string } {
@@ -169,7 +170,7 @@ CRITICAL TERRAIN RULE: If the walker is descending (downhill gradient), their pa
 
 ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export function paceCoachingFallback(avgPaceFormatted: string, targetPaceFormatted: string): string {
@@ -187,7 +188,7 @@ CRITICAL: Do NOT start with any greeting like "Hey there", "Hey!", "Hi!", or "He
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Give a brief, energetic send-off to start the walk. No stats or metrics — just motivation. NEVER start with "Hey there", "Hey!", "Hi!" or any greeting — jump straight into the coaching. ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export function duringPhasePrompt(ctx: DuringPhasePromptContext): { system: string; user: string } {
@@ -215,7 +216,7 @@ Weave in the walker's actual stats (pace, distance, time, heart rate) naturally 
 
   const system = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach. Keep messages concise (2-3 sentences) and always reference the walker's actual numbers. NEVER start with greetings — jump straight into coaching.${DURING_PHASE_SYSTEM_WALK_PROHIBITION} ${effortPhilosophyRule('walker')} ${PACE_FORMAT_RULE} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 const INTERVAL_WALK_PROHIBITION = ' WALK SESSION — CRITICAL: NEVER say "run", "running", "runner", "sprint", or any running-specific term. Say "walker", "walking", "walk pace" instead.';
@@ -237,7 +238,7 @@ Give 1–2 punchy, direct sentences. ${ctx.isWorkPhase ? 'Push them hard but saf
 
   const system = `You are ${ctx.coachName}, an AI walking coach with a ${ctx.coachTone} style, delivering live interval coaching mid-session.${INTERVAL_WALK_PROHIBITION} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 // ── Walk cadence coaching (generateCadenceCoaching in ai-service.ts) ───────────────────
@@ -277,7 +278,7 @@ Deliver ONE short coaching cue (1-2 sentences, spoken aloud). Sound encouraging 
 
   const system = `You are ${ctx.coachName}, a warm, encouraging ${ctx.coachTone} walking coach. Walking is its own discipline — focus on movement quality, rhythm, posture, and effort rather than running metrics. Never say "cadence", "spm", or "steps per minute". Keep it 1-2 sentences, spoken aloud. ${effortPhilosophyRule('walker')}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export const WALK_CADENCE_FALLBACK = "You're moving with a great rhythm — keep those arms swinging and stay tall through your stride.";
@@ -308,7 +309,7 @@ CRITICAL RULES:
 - ${ctx.futureBanRule}${ELEVATION_WALK_PROHIBITION}
 - ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? '\n- ' + accentDirective(ctx.coachAccent) : ''}` + runnerProfileBlock(ctx.runnerProfile);
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 const HR_WALK_PROHIBITION = ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running-specific term. Say "walker", "walking", "walk pace" instead.';
@@ -330,7 +331,7 @@ Give a brief (1-2 sentences) heart rate coaching tip. You MUST mention their act
 
   const system = `You are ${ctx.coachName}, giving brief real-time HR coaching. Always cite the walker's actual heart rate and zone. Keep it to 1-2 short sentences.${HR_WALK_PROHIBITION} ${effortPhilosophyRule('walker')} ${toneDirective(ctx.coachTone)}${ctx.coachAccent ? ' ' + accentDirective(ctx.coachAccent) : ''}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 const SUMMARY_WALK_PROHIBITION = ' WALK SESSION — NEVER say "run", "running", "runner", "sprint", or any running term in your response. Use "walk", "walking", "walker", "walking pace" throughout.';
@@ -350,7 +351,7 @@ Provide response as JSON with fields: highlights (array), struggles (array), tip
 
   const system = `You are an expert walking coach providing post-walk analysis. Respond only with valid JSON.${SUMMARY_WALK_PROHIBITION}${runnerProfileBlock(ctx.runnerProfile)}`;
 
-  return { system, user };
+  return { system: system + NO_EMOJI_RULE, user };
 }
 
 export const RUN_SUMMARY_FALLBACK = {
