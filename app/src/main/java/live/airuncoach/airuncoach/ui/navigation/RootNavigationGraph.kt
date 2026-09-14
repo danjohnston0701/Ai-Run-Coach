@@ -48,6 +48,7 @@ import live.airuncoach.airuncoach.ui.screens.OnboardingSubscriptionScreen
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.viewmodel.VersionCheckViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun RootNavigationGraph(navController: NavHostController) {
@@ -238,6 +239,11 @@ private fun NavGraphBuilder.rootNavigationDestinations(
                         popUpTo("sign_up") { inclusive = true }
                     }
                 },
+                onNavigateToFitnessLevel = {
+                    navController.navigate("fitness_level_onboarding") {
+                        popUpTo("sign_up") { inclusive = true }
+                    }
+                },
                 onNavigateToEmailVerification = { email ->
                     navController.navigate("email_verification/${java.net.URLEncoder.encode(email, "UTF-8")}")
                 }
@@ -286,6 +292,13 @@ private fun NavGraphBuilder.rootNavigationDestinations(
                         sessionManager.needsProfileSetup() -> {
                             // New user: show intro screen first
                             navController.navigate("onboarding_intro") {
+                                popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
+                            }
+                        }
+                        // Fitness level before coach setup — it has no flag of its own, so this
+                        // branch used to sail past it whenever only needsCoachSetup() was set.
+                        sessionManager.needsFitnessLevel() -> {
+                            navController.navigate("fitness_level_onboarding") {
                                 popUpTo(AppRoutes.LOCATION_PERMISSION) { inclusive = true }
                             }
                         }
@@ -342,6 +355,12 @@ private fun NavGraphBuilder.rootNavigationDestinations(
                 navController.navigate("personal_details") {
                     popUpTo(AppRoutes.MAIN) { inclusive = true }
                 }
+            } else if (sessionManager.needsFitnessLevel()) {
+                // Fitness level has no flag of its own, so this landing check used to skip it
+                // entirely — see SessionManager.needsFitnessLevel().
+                navController.navigate("fitness_level_onboarding") {
+                    popUpTo(AppRoutes.MAIN) { inclusive = true }
+                }
             } else if (sessionManager.needsCoachSetup()) {
                 // Navigate to coach settings
                 navController.navigate("coach_settings") {
@@ -386,10 +405,16 @@ private fun NavGraphBuilder.rootNavigationDestinations(
         }
 
         composable("fitness_level_onboarding") {
+            val sessionManager = remember { SessionManager(appContext) }
             FitnessLevelScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateNext = {
-                    navController.navigate("ai_coaching_onboarding") {
+                    // Existing users can arrive here from the MAIN landing check purely because
+                    // their account has no fitness level. They have already finished coach
+                    // setup, so send them straight back rather than through the rest of
+                    // onboarding again. needsCoachSetup() is only true mid-onboarding.
+                    val next = if (sessionManager.needsCoachSetup()) "ai_coaching_onboarding" else AppRoutes.MAIN
+                    navController.navigate(next) {
                         popUpTo("fitness_level_onboarding") { inclusive = true }
                     }
                 },

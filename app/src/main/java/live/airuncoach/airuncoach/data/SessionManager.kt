@@ -200,6 +200,29 @@ class SessionManager(context: Context) {
     }
 
     /**
+     * Whether the user still has no fitness level recorded.
+     *
+     * Fitness level had no completion signal of its own — it merely sat inside the
+     * "profile setup" segment, so the three routes that jump straight to coach setup when
+     * only needsCoachSetup() is true (sign-up, location permission, and landing on MAIN)
+     * skipped straight past it. Derived from the cached user rather than a separate flag so
+     * it cannot drift out of sync with what the account actually holds, and so a user whose
+     * save failed is asked again rather than being silently marked done.
+     */
+    fun needsFitnessLevel(): Boolean {
+        val userJson = sharedPreferences.getString("user", null) ?: return false
+        return try {
+            val level = com.google.gson.Gson()
+                .fromJson(userJson, live.airuncoach.airuncoach.domain.model.User::class.java)
+                ?.fitnessLevel
+            level.isNullOrBlank()
+        } catch (e: Exception) {
+            // A malformed cache must never block a signed-in user out of the app.
+            false
+        }
+    }
+
+    /**
      * Whether this device has finished the feature tour.
      *
      * The server already records `onboardingTourCompletedAt` on the user, but it's written

@@ -46,6 +46,7 @@ fun SignUpScreen(
     onNavigateToSignIn: () -> Unit = {},
     onNavigateToProfile: () -> Unit = {},
     onNavigateToCoachSettings: () -> Unit = {},
+    onNavigateToFitnessLevel: () -> Unit = {},
     onNavigateToEmailVerification: (email: String) -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
@@ -84,6 +85,12 @@ fun SignUpScreen(
                 sessionMgr.needsProfileSetup() -> {
                     // New user: first go to profile setup
                     onNavigateToProfile()
+                }
+                // Fitness level before coach setup. It has no flag of its own, so this branch
+                // used to jump past it whenever only needsCoachSetup() was set — see
+                // SessionManager.needsFitnessLevel().
+                sessionMgr.needsFitnessLevel() -> {
+                    onNavigateToFitnessLevel()
                 }
                 sessionMgr.needsCoachSetup() -> {
                     // User completed profile: go to coach settings

@@ -65,29 +65,49 @@ class FitnessLevelViewModel(private val context: Context) : ViewModel() {
         _fitnessLevel.value = fitnessLevel
     }
 
-    fun saveFitnessLevel() {
-        viewModelScope.launch {
-            val userJson = sharedPrefs.getString("user", null)
-            if (userJson != null) {
-                val user = gson.fromJson(userJson, User::class.java)
-                val request = UpdateUserRequest(
+    /**
+     * Persists the chosen level and reports whether the server accepted it.
+     *
+     * This used to launch into viewModelScope and return immediately, while the screen navigated
+     * away in the same click handler. That navigation pops this screen's back-stack entry, which
+     * clears the ViewModel, which cancels viewModelScope — killing the in-flight PUT mid-request.
+     * The local SharedPreferences copy was only written AFTER the call returned, so a cancelled
+     * save lost the answer everywhere: server null, device null, and the empty `catch` swallowed
+     * both the cancellation and any genuine failure. The user picked a level, watched the app
+     * accept it, and nothing was stored. That is the likeliest source of the Android users
+     * carrying no fitness level at all.
+     *
+     * Now: write locally FIRST so the answer survives regardless, then await the network call so
+     * the caller can hold navigation until it lands (or surface a failure instead of pretending).
+     */
+    suspend fun saveFitnessLevel(): Boolean {
+        val level = _fitnessLevel.value
+        if (level.isBlank()) return false
+        val userJson = sharedPrefs.getString("user", null) ?: return false
+        val user = gson.fromJson(userJson, User::class.java)
+
+        // Local first — never lose the user's answer to a network failure.
+        sharedPrefs.edit().putString("user", gson.toJson(user.copy(fitnessLevel = level))).apply()
+
+        return try {
+            val updatedUser = apiService.updateUser(
+                user.id,
+                UpdateUserRequest(
                     name = null,
                     email = null,
                     dob = null,
                     gender = null,
                     weight = null,
                     height = null,
-                    fitnessLevel = _fitnessLevel.value,
+                    fitnessLevel = level,
                     distanceScale = null
                 )
-                try {
-                    val updatedUser = apiService.updateUser(user.id, request)
-                    val updatedUserJson = gson.toJson(updatedUser)
-                    sharedPrefs.edit().putString("user", updatedUserJson).apply()
-                } catch (e: Exception) {
-                    // Handle error
-                }
-            }
+            )
+            sharedPrefs.edit().putString("user", gson.toJson(updatedUser)).apply()
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("FitnessLevelViewModel", "Failed to save fitness level '$level': ${e.message}")
+            false
         }
     }
 }

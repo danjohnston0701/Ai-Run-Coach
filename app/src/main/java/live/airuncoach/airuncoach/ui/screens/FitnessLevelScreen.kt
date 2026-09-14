@@ -11,6 +11,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +49,9 @@ fun FitnessLevelScreen(
     val context = LocalContext.current
     val viewModel: FitnessLevelViewModel = viewModel(factory = FitnessLevelViewModelFactory(context))
     val fitnessLevel by viewModel.fitnessLevel.collectAsState()
+    val scope = rememberCoroutineScope()
+    var isSaving by remember { mutableStateOf(false) }
+    var saveFailed by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val isKeyboardVisible = WindowInsets.isImeVisible
     val bottomContentPadding = with(density) {
@@ -104,16 +112,33 @@ fun FitnessLevelScreen(
             }
             item {
                 Spacer(modifier = Modifier.height(Spacing.xl))
+                if (saveFailed) {
+                    Text(
+                        "Couldn't save your fitness level. Check your connection and try again.",
+                        style = AppTextStyles.caption,
+                        color = Colors.error
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                }
                 Button(
                     onClick = {
-                        viewModel.saveFitnessLevel()
-                        if (isOnboarding && onNavigateNext != null) {
-                            onNavigateNext()
-                        } else {
-                            onNavigateBack()
+                        // Awaited, not fire-and-forget: navigating pops this screen's back-stack
+                        // entry, which clears the ViewModel and cancels its scope — that race was
+                        // silently discarding the save. Own coroutine scope so the await survives
+                        // recomposition, and we only move on once it has actually landed.
+                        scope.launch {
+                            isSaving = true
+                            saveFailed = false
+                            val ok = viewModel.saveFitnessLevel()
+                            isSaving = false
+                            if (ok) {
+                                if (isOnboarding && onNavigateNext != null) onNavigateNext() else onNavigateBack()
+                            } else {
+                                saveFailed = true
+                            }
                         }
                     },
-                    enabled = fitnessLevel.isNotBlank(),
+                    enabled = fitnessLevel.isNotBlank() && !isSaving,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
@@ -121,7 +146,11 @@ fun FitnessLevelScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
                 ) {
                     Text(
-                        if (isOnboarding) "Continue" else "Save Changes",
+                        when {
+                            isSaving -> "Saving…"
+                            isOnboarding -> "Continue"
+                            else -> "Save Changes"
+                        },
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
                     )
                 }
