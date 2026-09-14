@@ -311,6 +311,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Android/iOS changes. (2026-08-27)
   const EMAIL_VERIFICATION_ENABLED = false;
 
+  /**
+   * Device make/model/OS reported by the client on register and login.
+   *
+   * Sent as a `device` object so the auth bodies don't sprout four more loose fields. Every
+   * part is optional and anything absent is simply not written — an older client build that
+   * sends nothing must keep signing in exactly as before.
+   */
+  function parseDeviceInfo(body: any): Record<string, any> {
+    const d = body?.device;
+    if (!d || typeof d !== "object") return {};
+    const str = (v: any) => (typeof v === "string" && v.trim().length > 0 && v.length <= 120 ? v.trim() : undefined);
+    const fields: Record<string, any> = {
+      deviceManufacturer: str(d.manufacturer),
+      deviceModel:        str(d.model),
+      deviceOsVersion:    str(d.osVersion),
+      deviceAppVersion:   str(d.appVersion),
+    };
+    for (const k of Object.keys(fields)) if (fields[k] === undefined) delete fields[k];
+    if (Object.keys(fields).length === 0) return {};
+    fields.deviceLastSeenAt = new Date();
+    return fields;
+  }
+
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
       const { email, password, name, timezone, country, platform } = req.body;
@@ -386,6 +409,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         emailVerificationToken: otpHash,
         emailVerificationExpiry: otpExpiry,
         deviceSource: normalizedPlatform,
+        ...parseDeviceInfo(req.body),
       });
 
       if (EMAIL_VERIFICATION_ENABLED) {
@@ -660,6 +684,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             country: resolvedCountry,
             currency: inferredCurrency,
             ...(normalizedPlatform ? { deviceSource: normalizedPlatform } : {}),
+            ...parseDeviceInfo(req.body),
           })
           .where(eq(users.id, user.id));
 
@@ -667,6 +692,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user.country = resolvedCountry;
         user.currency = inferredCurrency;
         if (normalizedPlatform) user.deviceSource = normalizedPlatform;
+        const deviceInfo = parseDeviceInfo(req.body);
+        if (deviceInfo.deviceModel) {
+          console.log(`[Login] Device for user ${user.id}: ${deviceInfo.deviceManufacturer ?? '?'} ${deviceInfo.deviceModel} (${normalizedPlatform ?? '?'} ${deviceInfo.deviceOsVersion ?? '?'}, app ${deviceInfo.deviceAppVersion ?? '?'})`);
+        }
         console.log(`[Login] Updated user ${user.id}: timezone=${resolved.timezone}, country=${resolvedCountry}, currency=${inferredCurrency}`);
       } catch (error: any) {
         console.warn(`[Login] Failed to update timezone/country/currency for user ${user.id}: ${error.message}`);

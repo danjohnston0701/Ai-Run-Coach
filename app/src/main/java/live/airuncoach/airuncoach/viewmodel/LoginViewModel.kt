@@ -15,7 +15,9 @@ import live.airuncoach.airuncoach.data.CoachingFeaturePreferences
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
+import live.airuncoach.airuncoach.network.model.DeviceInfo
 import live.airuncoach.airuncoach.network.model.LoginRequest
+import live.airuncoach.airuncoach.network.model.deviceInfo
 import live.airuncoach.airuncoach.network.model.RegisterRequest
 import live.airuncoach.airuncoach.service.GarminWatchManager
 import live.airuncoach.airuncoach.service.SamsungWatchManager
@@ -38,6 +40,21 @@ class LoginViewModel @Inject constructor(
 
     private val _loginState = MutableStateFlow(LoginState())
     val loginState = _loginState.asStateFlow()
+
+
+    /**
+     * Handset details sent with register/login so we can see which makes and OS versions our
+     * users are actually on — background-kill behaviour differs enormously between
+     * manufacturers, and without this there is no way to tell how many users a
+     * vendor-specific problem affects.
+     */
+    private fun currentDeviceInfo(): DeviceInfo? = try {
+        val pkg = context.packageManager.getPackageInfo(context.packageName, 0)
+        deviceInfo(appVersion = pkg.versionName ?: "unknown")
+    } catch (e: Exception) {
+        android.util.Log.w("LoginViewModel", "Could not read device info (non-fatal): ${e.message}")
+        null
+    }
 
     fun onNameChange(name: String) {
         _loginState.update { it.copy(name = name) }
@@ -79,7 +96,8 @@ class LoginViewModel @Inject constructor(
                         email,
                         password,
                         timezone = deviceTimezone,
-                        country = deviceCountry
+                        country = deviceCountry,
+                        device = currentDeviceInfo()
                     )
                 )
                 
@@ -276,7 +294,8 @@ class LoginViewModel @Inject constructor(
                         email = _loginState.value.email,
                         password = _loginState.value.password,
                         timezone = java.util.TimeZone.getDefault().id,
-                        country = java.util.Locale.getDefault().country.ifBlank { null }
+                        country = java.util.Locale.getDefault().country.ifBlank { null },
+                        device = currentDeviceInfo()
                     )
                 )
 

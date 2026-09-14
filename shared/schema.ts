@@ -22,6 +22,17 @@ export const users = pgTable("users", {
   // Set on both POST /api/auth/register and POST /api/auth/login; null for accounts that predate
   // this column or haven't logged in again since it was added.
   deviceSource: text("device_source"),
+  // Handset the account was last seen on. Captured on register and refreshed on every login,
+  // because OS-level behaviour varies enormously by manufacturer — an OPPO/ColorOS device
+  // killing the app in the background made watch-paired runs unreliable for a beta tester in a
+  // way that never reproduced on other hardware, and there was no way to see how many users
+  // were exposed to it. Latest device rather than a history: the question is "what are our
+  // users on", not "what have they ever used".
+  deviceManufacturer: text("device_manufacturer"), // "OPPO", "Samsung", "Apple"
+  deviceModel: text("device_model"),               // "CPH2695", "iPhone15,2"
+  deviceOsVersion: text("device_os_version"),      // "14", "17.5"
+  deviceAppVersion: text("device_app_version"),    // app version that last signed in
+  deviceLastSeenAt: timestamp("device_last_seen_at"),
   isAdmin: boolean("is_admin").default(false),
   coachGender: text("coach_gender").default("male"),
   coachAccent: text("coach_accent").default("british"),
