@@ -21,6 +21,7 @@ import {
 import { DateTime } from "luxon";
 import polylineCodec from "@mapbox/polyline";
 import { sql } from "drizzle-orm";
+import { resolveWatchModel } from "./garmin-device-models";
 import { 
   generateToken, 
   hashPassword, 
@@ -2901,6 +2902,28 @@ function transformRunForAndroid(run: any) {
             if (wasTargetAchieved != null && (existingByExternalId as any).wasTargetAchieved == null) {
               mergeFields.wasTargetAchieved = wasTargetAchieved;
             }
+            // Phone-only summary fields. The watch's session/end insert never writes these —
+            // it has no notion of the phone's AI-coach setting, and its own step/calorie
+            // figures are frequently absent — so when a phone upload merges into a
+            // watch-created run they were silently dropped and the run showed no calories and
+            // no steps at all. Confirmed on a real 2026-09-14 session: the phone-owned run had
+            // calories 263 / steps 2945 / aiCoachEnabled true, while the watch-created run from
+            // the same morning had all three NULL. Same "only fill a genuine gap" rule as the
+            // target fields directly above.
+            {
+              const inSteps = runData.totalSteps ?? runData.total_steps;
+              const inCals  = runData.calories;
+              const inAi    = runData.aiCoachEnabled ?? runData.ai_coach_enabled;
+              if (typeof inSteps === 'number' && inSteps > 0 && (existingByExternalId as any).totalSteps == null) {
+                mergeFields.totalSteps = inSteps;
+              }
+              if (typeof inCals === 'number' && inCals > 0 && (existingByExternalId as any).calories == null) {
+                mergeFields.calories = inCals;
+              }
+              if (typeof inAi === 'boolean' && (existingByExternalId as any).aiCoachEnabled == null) {
+                mergeFields.aiCoachEnabled = inAi;
+              }
+            }
 
             // Workout/plan linking — phone sends linkedWorkoutId and linkedPlanId when starting
             // from a coaching plan session; the Garmin run record won't have these.
@@ -3184,6 +3207,16 @@ function transformRunForAndroid(run: any) {
           if (targetDistance != null && (garminDup as any).targetDistance == null) c2Merge.targetDistance = targetDistance;
           if (targetTime    != null && (garminDup as any).targetTime    == null) c2Merge.targetTime    = targetTime;
           if (wasTargetAchieved != null && (garminDup as any).wasTargetAchieved == null) c2Merge.wasTargetAchieved = wasTargetAchieved;
+
+          // See the matching block in Case 0 for why these three are here.
+          {
+            const inSteps = runData.totalSteps ?? runData.total_steps;
+            const inCals  = runData.calories;
+            const inAi    = runData.aiCoachEnabled ?? runData.ai_coach_enabled;
+            if (typeof inSteps === 'number' && inSteps > 0 && (garminDup as any).totalSteps == null) c2Merge.totalSteps = inSteps;
+            if (typeof inCals  === 'number' && inCals  > 0 && (garminDup as any).calories   == null) c2Merge.calories   = inCals;
+            if (typeof inAi    === 'boolean'                && (garminDup as any).aiCoachEnabled == null) c2Merge.aiCoachEnabled = inAi;
+          }
 
           // Training plan linking — the garmin_companion run has no knowledge of the
           // coaching plan; only the phone knows which workout was being executed.
@@ -12883,11 +12916,86 @@ function transformRunForAndroid(run: any) {
   // Classifies a companion session's freeform deviceModel string into a display label and
   // externalSource discriminator. Defaults to Garmin naming when deviceModel is absent —
   // preserves exact existing behavior for pre-existing Garmin sessions/clients.
+  /**
+   * Display label for a watch run's title. The companion reports an opaque Garmin part number
+   * ("006-B3851-00"), which used to fall straight through to the generic "Garmin Watch" for
+   * every device ever used. resolveWatchModel maps it to the real model via the Connect IQ
+   * SDK's own device definitions (see server/garmin-device-models.ts), so a run now reads
+   * "Venu 2 Plus Run" rather than "Garmin Watch Run". Falls back to the generic label only
+   * when the part number is genuinely unrecognised.
+   */
   function watchDeviceLabel(deviceModel: string | null | undefined): string {
     const m = (deviceModel || '').toLowerCase();
-    if (m.includes('galaxy') || m.includes('wear os') || m.includes('samsung')) return 'Samsung Galaxy Watch';
-    return 'Garmin Watch';
+    if (m.includes('galaxy') || m.includes('wear os') || m.includes('samsung')) {
+      return resolveWatchModel(deviceModel) || 'Samsung Galaxy Watch';
+    }
+    return resolveWatchModel(deviceModel) || 'Garmin Watch';
   }
+
+  /**
+   * The device model this run was recorded on, for runs.garmin_device_name.
+   *
+   * A phone-less run often has no garmin_companion_sessions row at all (its session/start goes
+   * over the watch's own HTTP and can simply not land), so this run's own session carries no
+   * model. Rather than give up, fall back to the user's other recent sessions — but ONLY when
+   * they unanimously report one model, so a user with two watches is never mislabelled with
+   * the wrong one.
+   */
+  async function resolveRunDeviceName(
+    userId: string,
+    sessionDeviceModel: string | null | undefined,
+  ): Promise<string | null> {
+    const direct = resolveWatchModel(sessionDeviceModel);
+    if (direct) return direct;
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const recent = await db
+        .selectDistinct({ deviceModel: garminCompanionSessions.deviceModel })
+        .from(garminCompanionSessions)
+        .where(and(
+          eq(garminCompanionSessions.userId, userId),
+          isNotNull(garminCompanionSessions.deviceModel),
+          gte(garminCompanionSessions.startedAt, thirtyDaysAgo),
+        ))
+        .limit(3);
+      const models = recent.map(r => resolveWatchModel(r.deviceModel)).filter(Boolean);
+      const unique = [...new Set(models)];
+      if (unique.length === 1) {
+        console.log(`[Companion] Device model for this run inferred from the user's other recent sessions: ${unique[0]}`);
+        return unique[0] as string;
+      }
+    } catch (err: any) {
+      console.warn('[Companion] device-model fallback lookup failed (non-fatal):', err?.message);
+    }
+    return null;
+  }
+  /**
+   * Calories for a watch-recorded run. Deliberately the SAME crude 70 kcal/km the phone uses
+   * (RunTrackingService.calculateCalories) rather than something more sophisticated: a
+   * watch-only run and a phone-tracked run of the same route must not report different
+   * calorie burns. Until now neither watch path computed calories at all, so a phone-less run
+   * — the most likely first run a new Garmin user has — saved with the field null and showed
+   * nothing at all on the summary.
+   */
+  function estimateWatchCalories(distanceKm: number | null | undefined): number | null {
+    if (typeof distanceKm !== 'number' || !(distanceKm > 0)) return null;
+    return Math.round(70 * distanceKm);
+  }
+
+  /**
+   * Steps from average cadence × duration, mirroring the fallback the phone upload already
+   * applies when its own step counter produced nothing. Only used when the watch didn't
+   * report a real step count of its own.
+   */
+  function estimateWatchSteps(cadenceSpm: number | null | undefined, durationSec: number | null | undefined): number | null {
+    // 50 spm floor, matching RunTrackingService.MIN_VALID_CADENCE_SPM. Below any real walking
+    // cadence (~90 slow walk), so a stationary or aborted session whose average cadence is a
+    // handful of drift steps yields null rather than a confidently wrong figure like "27 steps".
+    if (typeof cadenceSpm !== 'number' || !(cadenceSpm >= 50)) return null;
+    if (typeof durationSec !== 'number' || !(durationSec > 0)) return null;
+    return Math.round(cadenceSpm * (durationSec / 60));
+  }
+
   function watchExternalSource(deviceModel: string | null | undefined): string {
     const m = (deviceModel || '').toLowerCase();
     if (m.includes('galaxy') || m.includes('wear os') || m.includes('samsung')) return 'wearos_companion';
@@ -13970,7 +14078,9 @@ function transformRunForAndroid(run: any) {
             hasGarminData: true,
             difficulty: 'moderate',
             isPublic: false,
-            totalSteps: derivedTotalSteps,
+            totalSteps: derivedTotalSteps ?? estimateWatchSteps(stats.avgCadence, durationSecs),
+            calories: estimateWatchCalories(distanceKm),
+            garminDeviceName: await resolveRunDeviceName(userId, updated?.deviceModel),
             // Running dynamics
             avgStrideLength: stats.avgStrideLength ?? null,
             // Advanced Garmin metrics (stored in existing columns)
@@ -14186,6 +14296,9 @@ function transformRunForAndroid(run: any) {
             hasGarminData:  true,
             difficulty:     'moderate',
             isPublic:       false,
+            totalSteps:     estimateWatchSteps(avgCad, durSec),
+            calories:       estimateWatchCalories(distKm),
+            garminDeviceName: await resolveRunDeviceName(userId, batchSession?.deviceModel),
           }).returning();
           existingRun = created;
           console.log(`[Offline Batch] Created new run record ${existingRun.id} for phone-less session ${sessionId} (${distKm.toFixed(2)}km)`);
