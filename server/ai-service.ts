@@ -3494,7 +3494,7 @@ function analyzePositiveWeatherConditions(
             const min = parseFloat(parts[0].trim());
             const max = parseFloat(parts[1].trim());
             if (currentTemp >= min && currentTemp <= max) {
-              tempMatch = `${bucket.label} (${bucket.paceVsAvg.toFixed(0)}% faster)`;
+              tempMatch = `${bucket.label} (${Math.abs(bucket.paceVsAvg).toFixed(0)}% faster)`;
               break;
             }
           }
@@ -3509,7 +3509,7 @@ function analyzePositiveWeatherConditions(
     const currentCondition = (weather?.condition || '').toLowerCase();
     for (const cond of weatherImpact.conditionAnalysis) {
       if (cond.paceVsAvg < -5 && cond.condition.toLowerCase().includes(currentCondition.split(' ')[0])) {
-        conditionMatch = `${cond.condition} (${cond.paceVsAvg.toFixed(0)}% faster)`;
+        conditionMatch = `${cond.condition} (${Math.abs(cond.paceVsAvg).toFixed(0)}% faster)`;
         break;
       }
     }
@@ -3521,7 +3521,7 @@ function analyzePositiveWeatherConditions(
     for (const bucket of weatherImpact.timeOfDayAnalysis) {
       if (bucket.paceVsAvg !== null && bucket.paceVsAvg < -5 && 
           bucket.label && bucket.label.toLowerCase().includes(currentTimeOfDay.toLowerCase())) {
-        timeMatch = `${bucket.label} (${bucket.paceVsAvg.toFixed(0)}% faster)`;
+        timeMatch = `${bucket.label} (${Math.abs(bucket.paceVsAvg).toFixed(0)}% faster)`;
         break;
       }
     }

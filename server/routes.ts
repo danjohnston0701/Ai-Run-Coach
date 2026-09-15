@@ -11149,11 +11149,15 @@ function transformRunForAndroid(run: any) {
       }
     });
 
-    // Calculate pace vs average for each bucket
+    // Calculate pace vs average for each bucket.
+    // Sign convention: NEGATIVE = faster than the runner's overall average, POSITIVE = slower.
+    // Every consumer (best/worst picker below, the pre-run briefing, post-run analysis, and
+    // the Android/web My Data charts) relies on this — the formula was previously inverted,
+    // which made the briefing praise the runner's slowest conditions as "-300% faster".
     const calculatePaceVsAvg = (bucket: { totalPace: number; count: number }): number | null => {
       if (bucket.count < 1) return null;
       const bucketAvg = bucket.totalPace / bucket.count;
-      return ((avgPaceSeconds - bucketAvg) / avgPaceSeconds) * 100;
+      return ((bucketAvg - avgPaceSeconds) / avgPaceSeconds) * 100;
     };
 
     // Build time of day analysis
@@ -11166,7 +11170,7 @@ function transformRunForAndroid(run: any) {
         runCount: bucket.count,
         paceVsAvg: calculatePaceVsAvg(bucket),
       }))
-      .sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
+      .sort((a, b) => (a.paceVsAvg || 0) - (b.paceVsAvg || 0)); // fastest first
 
     // Build condition analysis
     const conditionAnalysis = Object.entries(conditionBuckets)
@@ -11189,7 +11193,7 @@ function transformRunForAndroid(run: any) {
         runCount: bucket.count,
         paceVsAvg: calculatePaceVsAvg(bucket),
       }))
-      .sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
+      .sort((a, b) => (a.paceVsAvg || 0) - (b.paceVsAvg || 0)); // fastest first
     
     // Build humidity analysis
     const humidityAnalysis = Object.entries(humidityBuckets)
@@ -11201,7 +11205,7 @@ function transformRunForAndroid(run: any) {
         runCount: bucket.count,
         paceVsAvg: calculatePaceVsAvg(bucket),
       }))
-      .sort((a, b) => (b.paceVsAvg || 0) - (a.paceVsAvg || 0));
+      .sort((a, b) => (a.paceVsAvg || 0) - (b.paceVsAvg || 0)); // fastest first
 
     // Find best and worst conditions
     const validTimeAnalysis = timeOfDayAnalysis.filter(t => t.paceVsAvg !== null);
@@ -11209,15 +11213,21 @@ function transformRunForAndroid(run: any) {
     const validTemperatureAnalysis = temperatureAnalysis.filter(t => t.paceVsAvg !== null);
     const validHumidityAnalysis = humidityAnalysis.filter(h => h.paceVsAvg !== null);
     
-    // Find best (negative paceVsAvg = faster) and worst (positive paceVsAvg = slower)
-    const bestTime = validTimeAnalysis.find(t => t.paceVsAvg! < 0);
-    const worstTime = validTimeAnalysis.find(t => t.paceVsAvg! > 0);
-    const bestCondition = validConditionAnalysis.find(c => c.paceVsAvg < 0);
-    const worstCondition = validConditionAnalysis.find(c => c.paceVsAvg > 0);
-    const bestTemperature = validTemperatureAnalysis.find(t => t.paceVsAvg! < 0);
-    const worstTemperature = validTemperatureAnalysis.find(t => t.paceVsAvg! > 0);
-    const bestHumidity = validHumidityAnalysis.find(h => h.paceVsAvg! < 0);
-    const worstHumidity = validHumidityAnalysis.find(h => h.paceVsAvg! > 0);
+    // Find best (negative paceVsAvg = faster) and worst (positive paceVsAvg = slower).
+    // Lists are sorted fastest-first, so the fastest bucket is the first negative entry
+    // and the slowest is the last positive one.
+    const fastest = <T extends { paceVsAvg: number | null }>(list: T[]) =>
+      list.length > 0 && list[0].paceVsAvg! < 0 ? list[0] : undefined;
+    const slowest = <T extends { paceVsAvg: number | null }>(list: T[]) =>
+      list.length > 0 && list[list.length - 1].paceVsAvg! > 0 ? list[list.length - 1] : undefined;
+    const bestTime = fastest(validTimeAnalysis);
+    const worstTime = slowest(validTimeAnalysis);
+    const bestCondition = fastest(validConditionAnalysis);
+    const worstCondition = slowest(validConditionAnalysis);
+    const bestTemperature = fastest(validTemperatureAnalysis);
+    const worstTemperature = slowest(validTemperatureAnalysis);
+    const bestHumidity = fastest(validHumidityAnalysis);
+    const worstHumidity = slowest(validHumidityAnalysis);
 
     // Build strengths array (showing where the runner performs BEST)
     const strengths = [];
@@ -11677,7 +11687,8 @@ function transformRunForAndroid(run: any) {
           new Date(r.completedAt) >= ninetyDaysAgo &&
           (r.distance ?? 0) > 0.5 &&
           !!r.weatherData &&
-          (!r.externalSource || r.externalSource === 'airuncoach')
+          (!r.externalSource || r.externalSource === 'airuncoach') &&
+          r.sessionType !== 'walk' // walk paces would dwarf any real weather effect on runs
         );
         weatherImpact = await calculateWeatherImpact(req.user!.userId, runsWithWeather);
       } catch (e: any) {
@@ -11838,7 +11849,8 @@ function transformRunForAndroid(run: any) {
           new Date(r.completedAt) >= ninetyDaysAgo &&
           (r.distance ?? 0) > 0.5 &&
           !!r.weatherData &&
-          (!r.externalSource || r.externalSource === 'airuncoach')
+          (!r.externalSource || r.externalSource === 'airuncoach') &&
+          r.sessionType === 'walk' // compare walks against walks only
         );
         weatherImpact = await calculateWeatherImpact(req.user!.userId, runsWithWeather);
       } catch (e: any) {
@@ -16042,41 +16054,41 @@ function transformRunForAndroid(run: any) {
                     if (bucket.label.includes('Cold') && temp < 5) {
                       const improvement = bucket.paceVsAvg || 0;
                       if (improvement < 0) {
-                        impact += `Cold temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                        impact += `Cold temperature (${Math.abs(improvement).toFixed(1)}% faster for you). `;
                       } else if (improvement > 0) {
-                        impact += `Cold temperature (-${improvement.toFixed(1)}% slower for you). `;
+                        impact += `Cold temperature (${improvement.toFixed(1)}% slower for you). `;
                       }
                       break;
                     } else if (bucket.label.includes('Cool') && temp >= 5 && temp < 10) {
                       const improvement = bucket.paceVsAvg || 0;
                       if (improvement < 0) {
-                        impact += `Cool temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                        impact += `Cool temperature (${Math.abs(improvement).toFixed(1)}% faster for you). `;
                       } else if (improvement > 0) {
-                        impact += `Cool temperature (-${improvement.toFixed(1)}% slower for you). `;
+                        impact += `Cool temperature (${improvement.toFixed(1)}% slower for you). `;
                       }
                       break;
                     } else if (bucket.label.includes('Mild') && temp >= 10 && temp < 15) {
                       const improvement = bucket.paceVsAvg || 0;
                       if (improvement < 0) {
-                        impact += `Mild temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                        impact += `Mild temperature (${Math.abs(improvement).toFixed(1)}% faster for you). `;
                       } else if (improvement > 0) {
-                        impact += `Mild temperature (-${improvement.toFixed(1)}% slower for you). `;
+                        impact += `Mild temperature (${improvement.toFixed(1)}% slower for you). `;
                       }
                       break;
                     } else if (bucket.label.includes('Warm') && temp >= 15 && temp < 20) {
                       const improvement = bucket.paceVsAvg || 0;
                       if (improvement < 0) {
-                        impact += `Warm temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                        impact += `Warm temperature (${Math.abs(improvement).toFixed(1)}% faster for you). `;
                       } else if (improvement > 0) {
-                        impact += `Warm temperature (-${improvement.toFixed(1)}% slower for you). `;
+                        impact += `Warm temperature (${improvement.toFixed(1)}% slower for you). `;
                       }
                       break;
                     } else if (bucket.label.includes('Hot') && temp >= 20) {
                       const improvement = bucket.paceVsAvg || 0;
                       if (improvement < 0) {
-                        impact += `Hot temperature (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                        impact += `Hot temperature (${Math.abs(improvement).toFixed(1)}% faster for you). `;
                       } else if (improvement > 0) {
-                        impact += `Hot temperature (-${improvement.toFixed(1)}% slower for you). `;
+                        impact += `Hot temperature (${improvement.toFixed(1)}% slower for you). `;
                       }
                       break;
                     }
@@ -16096,9 +16108,9 @@ function transformRunForAndroid(run: any) {
                   if (isMatch) {
                     const improvement = bucket.paceVsAvg || 0;
                     if (improvement < 0) {
-                      impact += `${bucket.label} humidity (+${Math.abs(improvement).toFixed(1)}% improvement for you). `;
+                      impact += `${bucket.label} humidity (${Math.abs(improvement).toFixed(1)}% faster for you). `;
                     } else if (improvement > 0) {
-                      impact += `${bucket.label} humidity (-${improvement.toFixed(1)}% slower for you). `;
+                      impact += `${bucket.label} humidity (${improvement.toFixed(1)}% slower for you). `;
                     }
                     break;
                   }
@@ -16111,9 +16123,9 @@ function transformRunForAndroid(run: any) {
                   if (cond.condition.toLowerCase().includes(condition.toLowerCase())) {
                     const improvement = cond.paceVsAvg || 0;
                     if (improvement < 0) {
-                      impact += `${condition} conditions (+${Math.abs(improvement).toFixed(1)}% improvement). `;
+                      impact += `${condition} conditions (${Math.abs(improvement).toFixed(1)}% faster). `;
                     } else if (improvement > 0) {
-                      impact += `${condition} conditions (-${improvement.toFixed(1)}% slower). `;
+                      impact += `${condition} conditions (${improvement.toFixed(1)}% slower). `;
                     }
                     break;
                   }
