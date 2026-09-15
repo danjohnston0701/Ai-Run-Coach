@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import FormData from 'form-data';
 
 const GARMIN_CLIENT_ID = process.env.GARMIN_CLIENT_ID;
 const GARMIN_CLIENT_SECRET = process.env.GARMIN_CLIENT_SECRET;
@@ -1072,7 +1073,6 @@ export async function uploadActivityToGarmin(
     const uploadUrl = `${GARMIN_API_BASE}/upload-service/upload/.tcx`;
 
     // Upload TCX file as multipart/form-data
-    const FormData = require('form-data');
     const form = new FormData();
     form.append('file', Buffer.from(tcxData), {
       filename: `activity_${Date.now()}.tcx`,
@@ -1089,7 +1089,7 @@ export async function uploadActivityToGarmin(
         ...form.getHeaders(),
         'Authorization': `Bearer ${accessToken}`,
       },
-      body: form,
+      body: form as unknown as BodyInit, // Node form-data stream, not the WHATWG FormData fetch expects
     });
 
     const responseText = await response.text();

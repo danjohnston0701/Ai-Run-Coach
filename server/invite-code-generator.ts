@@ -8,6 +8,8 @@
  * Combinations: 34^8 ≈ 1.8 × 10^12
  */
 
+import { randomBytes } from "node:crypto";
+
 const VALID_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 34 chars: no O/0/I/1/L
 
 /**
@@ -15,8 +17,6 @@ const VALID_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 34 chars: no O/0/I/1/L
  * @returns 8-character uppercase alphanumeric code
  */
 export function generateInviteCode(): string {
-  const { randomBytes } = require("node:crypto");
-  
   let code = "";
   const randomData = randomBytes(8);
   

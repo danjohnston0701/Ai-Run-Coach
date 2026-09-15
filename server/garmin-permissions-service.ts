@@ -8,6 +8,7 @@ import { db } from './db';
 import { connectedDevices } from '../shared/schema';
 import { eq, and } from 'drizzle-orm';
 import axios from 'axios';
+import { createHmac } from 'node:crypto';
 
 // ============================================================================
 // GARMIN OAUTH SCOPES
@@ -469,8 +470,7 @@ function generateSignature(
   const signingKey = `${consumerSecret}&`;
 
   // Use crypto to generate HMAC-SHA1
-  const crypto = require('crypto');
-  return crypto.createHmac('sha1', signingKey).update(baseString).digest('base64');
+  return createHmac('sha1', signingKey).update(baseString).digest('base64');
 }
 
 async function triggerDataSync(userId: string, scopes: string[]): Promise<void> {
