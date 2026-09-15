@@ -145,6 +145,7 @@ fun RunSessionScreen(
     val wakeWordState by viewModel.wakeWordState.collectAsState()
     val liveSessionId by viewModel.liveSessionId.collectAsState()
     val liveObserverCount by viewModel.liveObserverCount.collectAsState()
+    val liveTrackingError by viewModel.liveTrackingError.collectAsState()
     val isPowerSaverWarningVisible by viewModel.isPowerSaverWarningVisible.collectAsState()
     val connectedWatchIsSamsung by viewModel.connectedWatchIsSamsung.collectAsState()
 
@@ -454,6 +455,16 @@ fun RunSessionScreen(
                 item {
                     LiveObserversPanel(
                         observerCount = liveObserverCount,
+                        modifier = Modifier.padding(horizontal = Spacing.md)
+                    )
+                }
+            }
+            // Live tracking setup or invite failure — shown in the same slot the LIVE
+            // badge would occupy, so a silent server failure is visible to the runner.
+            liveTrackingError?.let { message ->
+                item {
+                    LiveTrackingErrorPanel(
+                        message = message,
                         modifier = Modifier.padding(horizontal = Spacing.md)
                     )
                 }
@@ -3607,6 +3618,50 @@ fun ParticipantRowDuringRun(
                 style = AppTextStyles.small.copy(fontWeight = FontWeight.Medium),
                 color = statusColor,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+// ── Live Tracking Error Panel ─────────────────────────────────────────────────
+
+/**
+ * Shown on the run screen when the live session couldn't be created or observer
+ * invites failed to send. Styled like [SyncStatusIndicator] but in the error colour.
+ */
+@Composable
+fun LiveTrackingErrorPanel(
+    message: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = Spacing.sm),
+        colors = CardDefaults.cardColors(
+            containerColor = Colors.error.copy(alpha = 0.15f),
+            contentColor = Colors.error
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.icon_people_vector),
+                contentDescription = null,
+                tint = Colors.error,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = message,
+                style = AppTextStyles.body,
+                fontSize = 12.sp,
+                color = Colors.error
             )
         }
     }

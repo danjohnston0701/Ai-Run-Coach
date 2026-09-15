@@ -100,6 +100,9 @@ data class RunState(
     val intervalPhase: IntervalPhase? = null
 )
 
+private const val LIVE_TRACKING_SETUP_FAILED =
+    "Couldn't set up live tracking, so your observers weren't invited. You can still run — try again on your next run."
+
 @HiltViewModel
 @SuppressLint("StaticFieldLeak")
 class RunSessionViewModel @Inject constructor(
@@ -170,6 +173,15 @@ class RunSessionViewModel @Inject constructor(
     /** Session ID for the active live tracking session, set once after createLiveSession() succeeds */
     private val _liveSessionId = MutableStateFlow<String?>(null)
     val liveSessionId: StateFlow<String?> = _liveSessionId.asStateFlow()
+
+    /**
+     * User-facing message when live tracking couldn't be set up (session creation failed)
+     * or some observers couldn't be invited. Null when everything went through. Without
+     * this a server-side failure looked identical to success from the runner's side —
+     * a production 500 on POST /api/live-sessions went unnoticed for weeks.
+     */
+    private val _liveTrackingError = MutableStateFlow<String?>(null)
+    val liveTrackingError: StateFlow<String?> = _liveTrackingError.asStateFlow()
 
     /** Number of people currently watching the live run */
     private val _liveObserverCount = MutableStateFlow(0)
@@ -1050,6 +1062,7 @@ class RunSessionViewModel @Inject constructor(
         // Invites go out as soon as the user taps "Prepare Run", before the
         // briefing plays. This gives observers time to open the app and join
         // before the run actually starts.
+        _liveTrackingError.value = null
         runConfig?.let { config ->
             if (config.liveTrackingEnabled && config.liveTrackingObservers.isNotEmpty()) {
                 Log.d("RunSessionViewModel", "Live tracking enabled — sending invites to ${config.liveTrackingObservers.size} observer(s)")
@@ -1830,6 +1843,7 @@ class RunSessionViewModel @Inject constructor(
                 )
                 if (!createResponse.success || createResponse.id.isBlank()) {
                     Log.e("RunSessionViewModel", "Failed to create live session: ${createResponse.error}")
+                    _liveTrackingError.value = LIVE_TRACKING_SETUP_FAILED
                     return@launch
                 }
                 val sessionId = createResponse.id
@@ -1847,6 +1861,7 @@ class RunSessionViewModel @Inject constructor(
                 startObserverCountPolling()
 
                 // Step 2: Send invites to each observer using the new session ID.
+                var failedInvites = 0
                 observers.forEach { observer ->
                     try {
                         if (observer.contains("@")) {
@@ -1859,6 +1874,7 @@ class RunSessionViewModel @Inject constructor(
                                 Log.d("RunSessionViewModel", "✅ Observer email invite sent: $observer")
                             } else {
                                 Log.w("RunSessionViewModel", "Observer email invite failed: ${response.error}")
+                                failedInvites++
                             }
                         } else {
                             // User ID (registered friend)
@@ -1870,17 +1886,29 @@ class RunSessionViewModel @Inject constructor(
                                 Log.d("RunSessionViewModel", "✅ Observer friend invite sent: $observer (push: ${response.pushSent})")
                             } else {
                                 Log.w("RunSessionViewModel", "Observer friend invite failed: ${response.error}")
+                                failedInvites++
                             }
                         }
                     } catch (e: Exception) {
                         Log.e("RunSessionViewModel", "Failed to invite observer $observer: ${e.message}", e)
+                        failedInvites++
                         // Continue with other invites even if one fails
                     }
                 }
 
-                Log.d("RunSessionViewModel", "✅ All observer invites processed for session $sessionId")
+                if (failedInvites > 0) {
+                    _liveTrackingError.value = if (failedInvites == observers.size) {
+                        "Couldn't send your observer invites. Check your connection and try again."
+                    } else {
+                        "$failedInvites of ${observers.size} observer invites couldn't be sent."
+                    }
+                }
+                Log.d("RunSessionViewModel", "✅ All observer invites processed for session $sessionId ($failedInvites failed)")
             } catch (e: Exception) {
+                // Retrofit throws HttpException on a non-2xx from POST /api/live-sessions, so a
+                // server 500 lands here rather than in the !success branch above.
                 Log.e("RunSessionViewModel", "Error sending observer invites: ${e.message}", e)
+                if (_liveSessionId.value == null) _liveTrackingError.value = LIVE_TRACKING_SETUP_FAILED
             }
         }
     }
@@ -1963,6 +1991,7 @@ class RunSessionViewModel @Inject constructor(
         _runState.update { it.copy(isRunning = false, isPaused = false, isStopping = true) }
         stopObserverCountPolling()
         _liveSessionId.value = null // Clear so panel hides on summary screen
+        _liveTrackingError.value = null
     }
 
     // ── Wake word ─────────────────────────────────────────────────────────────
@@ -2271,6 +2300,7 @@ class RunSessionViewModel @Inject constructor(
             }
         }
         _liveSessionId.value = null
+        _liveTrackingError.value = null
         RunTrackingService.activeLiveSessionId = null
         // If the service was pre-started in standby (ACTION_PREPARE_FOR_WATCH) and the run has
         // not yet begun, tell it to stop.  The service will ignore this if tracking is already
