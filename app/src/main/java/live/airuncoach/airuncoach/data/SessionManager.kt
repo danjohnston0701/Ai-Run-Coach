@@ -7,6 +7,7 @@ import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.firebase.crashlytics.FirebaseCrashlytics
+import live.airuncoach.airuncoach.utils.TargetDistance
 
 class SessionManager(context: Context) {
 
@@ -16,6 +17,10 @@ class SessionManager(context: Context) {
         .build()
 
     // 2. Initialize EncryptedSharedPreferences with error handling for corrupted keys
+    // Plain prefs shared with the view models — holds the cached "user" JSON.
+    private val userPrefs: SharedPreferences =
+        context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+
     private val sharedPreferences: SharedPreferences = try {
         EncryptedSharedPreferences.create(
             context,
@@ -209,17 +214,25 @@ class SessionManager(context: Context) {
      * it cannot drift out of sync with what the account actually holds, and so a user whose
      * save failed is asked again rather than being silently marked done.
      */
-    fun needsFitnessLevel(): Boolean {
-        val userJson = sharedPreferences.getString("user", null) ?: return false
+    /**
+     * The cached user object, as written by login/profile flows. Lives in the plain
+     * "user_prefs" file (key "user"), NOT in the encrypted session store this class otherwise
+     * uses — the earlier needsFitnessLevel() read the wrong file and so never fired.
+     */
+    private fun cachedUser(): live.airuncoach.airuncoach.domain.model.User? {
+        val userJson = userPrefs.getString("user", null) ?: return null
         return try {
-            val level = com.google.gson.Gson()
+            com.google.gson.Gson()
                 .fromJson(userJson, live.airuncoach.airuncoach.domain.model.User::class.java)
-                ?.fitnessLevel
-            level.isNullOrBlank()
         } catch (e: Exception) {
-            // A malformed cache must never block a signed-in user out of the app.
-            false
+            null
         }
+    }
+
+    fun needsFitnessLevel(): Boolean {
+        // A malformed or missing cache must never block a signed-in user out of the app.
+        val user = cachedUser() ?: return false
+        return user.fitnessLevel.isNullOrBlank()
     }
 
     /**
@@ -236,18 +249,25 @@ class SessionManager(context: Context) {
      * back through onboarding, which is exactly the path that re-shows the card.
      */
     /**
-     * Local mirror of the user's distanceDecimalsEnabled preference.
-     *
-     * The run-setup screen needs this before its first frame to decide whether to render a
-     * slider or a numeric field, and it has no user object of its own — only SharedPreferences,
-     * which is already where it keeps the last target distance. Written whenever the profile
-     * toggle is saved; the server value remains the source of truth on next sign-in.
+     * Decimal places (0–3) for the target-distance control, from the cached user. The dashboard
+     * and run-setup screens need this before their first frame to decide whether to render a
+     * slider or a numeric field; reading the cached user (rather than a separate mirror) means
+     * it's correct straight after sign-in and after every profile save, with nothing to sync.
      */
-    fun distanceDecimalsEnabled(): Boolean =
-        sharedPreferences.getBoolean("distance_decimals_enabled", false)
+    fun targetDistanceDecimals(): Int =
+        (cachedUser()?.targetDistanceDecimals ?: 0).coerceIn(0, 3)
 
-    fun setDistanceDecimalsEnabled(enabled: Boolean) {
-        sharedPreferences.edit { putBoolean("distance_decimals_enabled", enabled) }
+    /**
+     * Slider window (min..max km) for the target distance, from the cached user. Legacy rows
+     * default to 0–50, so a min below 1 km is lifted to 1 and an inverted pair falls back to
+     * the 1–50 default rather than producing an empty slider.
+     */
+    fun targetDistanceRange(): ClosedFloatingPointRange<Float> {
+        val user = cachedUser()
+        val min = (user?.distanceMinKm ?: 0f).coerceAtLeast(TargetDistance.DEFAULT_MIN_KM.toFloat())
+        val max = user?.distanceMaxKm ?: TargetDistance.DEFAULT_MAX_KM.toFloat()
+        return if (max > min) min..max
+        else TargetDistance.DEFAULT_MIN_KM.toFloat()..TargetDistance.DEFAULT_MAX_KM.toFloat()
     }
 
     fun hasCompletedOnboardingTour(): Boolean =

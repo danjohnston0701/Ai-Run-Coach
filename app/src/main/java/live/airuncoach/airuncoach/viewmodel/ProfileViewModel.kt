@@ -255,27 +255,6 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Persists the target-distance decimals preference.
-     *
-     * Mirrored into SessionManager immediately so the run-setup screen reflects it on its very
-     * next open even if the network call is slow or fails — this is a display preference, and
-     * making the user wait on a round trip to see a toggle move would be worse than a brief
-     * divergence that the next profile load reconciles.
-     */
-    fun setDistanceDecimalsEnabled(enabled: Boolean) {
-        sessionManager.setDistanceDecimalsEnabled(enabled)
-        _user.value = _user.value?.copy(distanceDecimalsEnabled = enabled)
-        val userId = _user.value?.id ?: return
-        viewModelScope.launch {
-            try {
-                apiService.updateUser(userId, UpdateUserRequest(distanceDecimalsEnabled = enabled))
-            } catch (e: Exception) {
-                android.util.Log.w("ProfileViewModel", "Failed to save distance decimals preference: ${e.message}")
-            }
-        }
-    }
-
     // Public method to refresh user data from SharedPreferences
     fun refreshUser() {
         loadUser()

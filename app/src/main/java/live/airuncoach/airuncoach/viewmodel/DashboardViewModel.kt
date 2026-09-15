@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.utils.TargetDistance
 import live.airuncoach.airuncoach.data.repository.RunRepository  // ⚡ For shared run caching
 import live.airuncoach.airuncoach.di.GarminWatchManagerEntryPoint
 import live.airuncoach.airuncoach.domain.model.GarminConnection
@@ -498,8 +499,8 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun onDistanceChanged(distance: Float) {
-        // Snap to whole kilometres to avoid floating point drift (e.g. 9.9999 → 9)
-        val snapped = Math.round(distance).toFloat()
+        // Snap to the user's configured decimal places to avoid floating point drift (e.g. 9.9999 → 9)
+        val snapped = TargetDistance.round(distance, sessionManager.targetDistanceDecimals())
         _targetDistance.value = snapped
         sharedPrefs.edit().putFloat("target_distance_km", snapped).apply()
     }

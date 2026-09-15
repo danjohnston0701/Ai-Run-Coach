@@ -32,7 +32,8 @@ interface ProfileData {
   friends?: Friend[];
   distanceMinKm?: number;
   distanceMaxKm?: number;
-  distanceDecimalsEnabled?: boolean;
+  /** 0–3 decimal places for the target distance; 2+ replaces the slider with a typed field. */
+  targetDistanceDecimals?: number;
 }
 
 interface FriendRequest {
@@ -580,6 +581,20 @@ export default function Profile() {
       toast.error("Please fill in your name");
       return;
     }
+
+    // Slider window rules: ≤50 km span at 0 dp, ≤25 km at 1 dp; no slider (no cap) at 2–3 dp.
+    const decimals = profile.targetDistanceDecimals ?? 0;
+    const minKm = profile.distanceMinKm ?? 0;
+    const maxKm = profile.distanceMaxKm ?? 50;
+    const maxSpan = decimals >= 1 ? 25 : 50;
+    if (maxKm <= minKm) {
+      toast.error("Maximum distance must be greater than the minimum");
+      return;
+    }
+    if (decimals < 2 && maxKm - minKm > maxSpan) {
+      toast.error(`At ${decimals} decimal place${decimals === 1 ? "" : "s"} the slider can cover at most ${maxSpan} km — e.g. ${minKm}–${minKm + maxSpan} km`);
+      return;
+    }
     
     // Save to database if user has an ID
     if (profile.id) {
@@ -599,7 +614,7 @@ export default function Profile() {
             profilePic: profile.profilePic,
             distanceMinKm: profile.distanceMinKm,
             distanceMaxKm: profile.distanceMaxKm,
-            distanceDecimalsEnabled: profile.distanceDecimalsEnabled,
+            targetDistanceDecimals: profile.targetDistanceDecimals ?? 0,
           }),
         });
         if (res.ok) {
@@ -1069,78 +1084,28 @@ export default function Profile() {
 
             <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg mt-4">
               <div>
-                <p className="text-sm font-medium">Enable Decimals</p>
-                <p className="text-[10px] text-muted-foreground">Show 1 decimal place (e.g., 3.2km). Max range limited to 20km when enabled.</p>
+                <p className="text-sm font-medium">Target Distance Decimal Places</p>
+                <p className="text-[10px] text-muted-foreground">0 or 1 keeps the slider (max 50 km / 25 km span); 2 or 3 lets you type an exact distance like 21.098 km.</p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const newEnabled = !profile.distanceDecimalsEnabled;
-                  const minKm = profile.distanceMinKm ?? 0;
-                  const maxKm = profile.distanceMaxKm ?? 50;
-                  
-                  if (newEnabled && (maxKm - minKm) > 20) {
-                    toast.error("With decimals enabled, the Maximum range between the Min and Max distance must be within 20km. Please adjust your min/max. then enable.");
-                    return;
-                  }
-                  
-                  setProfile(prev => prev ? { ...prev, distanceDecimalsEnabled: newEnabled } : null);
+              <select
+                value={profile.targetDistanceDecimals ?? 0}
+                onChange={(e) => {
+                  const decimals = parseInt(e.target.value, 10);
+                  setProfile(prev => {
+                    if (!prev) return null;
+                    // Tightening precision shrinks the allowed slider span — pull the max in.
+                    const minKm = prev.distanceMinKm ?? 0;
+                    const maxKm = prev.distanceMaxKm ?? 50;
+                    const span = decimals >= 1 ? 25 : 50;
+                    const distanceMaxKm = decimals < 2 && maxKm - minKm > span ? minKm + span : maxKm;
+                    return { ...prev, targetDistanceDecimals: decimals, distanceMaxKm };
+                  });
                 }}
-                className={`relative w-12 h-6 rounded-full transition-colors ${
-                  profile.distanceDecimalsEnabled ? 'bg-primary' : 'bg-white/20'
-                }`}
-                data-testid="toggle-decimals"
+                className="px-3 py-2 bg-white/10 border border-white/10 rounded-lg text-foreground focus:outline-none focus:border-primary"
+                data-testid="select-decimals"
               >
-                <span 
-                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                    profile.distanceDecimalsEnabled ? 'left-7' : 'left-1'
-                  }`} 
-                />
-              </button>
-            </div>
-
-            {profile.distanceDecimalsEnabled && (profile.distanceMaxKm ?? 50) - (profile.distanceMinKm ?? 0) > 20 && (
-              <p className="text-xs text-amber-400 mt-2">
-                Warning: Range exceeds 20km. Please reduce to enable decimals.
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-4 bg-card/50 p-6 rounded-2xl border border-white/5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <Bell className="w-5 h-5 text-primary" />
-                <h2 className="text-lg font-display font-bold uppercase tracking-wide">Notifications</h2>
-              </div>
-              <Button
-                type="button"
-                onClick={() => setLocation("/notifications/manage")}
-                className="h-8 px-3 bg-primary/20 hover:bg-primary/30 text-primary text-xs font-bold uppercase"
-                data-testid="button-manage-notifications"
-              >
-                Manage
-              </Button>
-            </div>
-            
-            <div className="flex items-center justify-between p-3 bg-white/5 rounded-lg">
-              <div>
-                <p className="text-sm font-medium">Push Notifications</p>
-                <p className="text-[10px] text-muted-foreground">Get notified when friends add you</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleToggleNotifications}
-                className={`relative w-12 h-6 rounded-full transition-colors ${
-                  notificationsEnabled ? 'bg-green-500' : 'bg-white/20'
-                }`}
-                data-testid="toggle-notifications"
-              >
-                <span 
-                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                    notificationsEnabled ? 'left-7' : 'left-1'
-                  }`} 
-                />
-              </button>
+                {[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
             </div>
             
             {subscriptionNeedsSync && notificationsEnabled && (

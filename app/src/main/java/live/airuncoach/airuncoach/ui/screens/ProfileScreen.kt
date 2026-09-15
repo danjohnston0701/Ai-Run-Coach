@@ -293,16 +293,6 @@ fun ProfileScreen(
                 if (!sessionManager.hasCompletedOnboardingTour()) {
                     SettingsItem(icon = R.drawable.icon_info_vector, text = "Take a Tour", onClick = onNavigateToTour)
                 }
-                // Whole kilometres can't express a real race distance — a half marathon is
-                // 21.0975 km and a marathon 42.195. With this on, the target-distance control
-                // becomes a numeric field accepting up to 3 dp instead of a whole-km slider.
-                SettingsToggleItem(
-                    icon = R.drawable.icon_location_vector,
-                    text = "Decimal target distances",
-                    subtitle = "Enter exact distances like 21.098 km instead of whole kilometres",
-                    checked = user?.distanceDecimalsEnabled == true,
-                    onCheckedChange = { viewModel.setDistanceDecimalsEnabled(it) }
-                )
             }
         }
 

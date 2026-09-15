@@ -195,7 +195,7 @@ interface UserProfile {
   isAdmin?: boolean;
   distanceMinKm?: number;
   distanceMaxKm?: number;
-  distanceDecimalsEnabled?: boolean;
+  targetDistanceDecimals?: number;
 }
 
 // Feature flag: Set to true to disable run features and show mobile app coming soon
@@ -354,7 +354,7 @@ export default function Home() {
           isAdmin: user.isAdmin,
           distanceMinKm: user.distanceMinKm,
           distanceMaxKm: user.distanceMaxKm,
-          distanceDecimalsEnabled: user.distanceDecimalsEnabled,
+          targetDistanceDecimals: user.targetDistanceDecimals,
         };
         localStorage.setItem('userProfile', JSON.stringify(impersonatedProfile));
         toast.success(`Now viewing as ${user.name || user.email}`);
@@ -1838,20 +1838,39 @@ export default function Home() {
             <div className="flex justify-between items-end">
               <h2 className="text-xl font-display uppercase tracking-wide">Target Distance</h2>
               <span className="text-4xl font-bold font-display text-primary">
-                {profile?.distanceDecimalsEnabled ? distance[0].toFixed(1) : distance[0]} 
+                {(profile?.targetDistanceDecimals ?? 0) >= 2 ? (
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step={1 / Math.pow(10, profile?.targetDistanceDecimals ?? 2)}
+                    min={0.1}
+                    value={distance[0]}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      if (!isNaN(v)) setDistance([v]);
+                    }}
+                    className="w-32 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-right text-primary focus:outline-none focus:border-primary"
+                    data-testid="input-distance"
+                  />
+                ) : (
+                  distance[0].toFixed(profile?.targetDistanceDecimals ?? 0)
+                )}
                 <span className="text-lg text-muted-foreground"> km</span>
               </span>
             </div>
-            <Slider
-              defaultValue={[profile?.distanceMinKm ?? 0]}
-              min={profile?.distanceMinKm ?? 0}
-              max={profile?.distanceMaxKm ?? 50}
-              step={profile?.distanceDecimalsEnabled ? 0.1 : 1}
-              value={distance}
-              onValueChange={setDistance}
-              className="py-4"
-              data-testid="slider-distance"
-            />
+            {/* 2–3 dp: no slider — it can't express 21.0975 km, and showing both was messy. */}
+            {(profile?.targetDistanceDecimals ?? 0) < 2 && (
+              <Slider
+                defaultValue={[profile?.distanceMinKm ?? 0]}
+                min={profile?.distanceMinKm ?? 0}
+                max={profile?.distanceMaxKm ?? 50}
+                step={(profile?.targetDistanceDecimals ?? 0) === 1 ? 0.1 : 1}
+                value={distance}
+                onValueChange={setDistance}
+                className="py-4"
+                data-testid="slider-distance"
+              />
+            )}
           </div>
 
           <div className="space-y-4">
@@ -2348,7 +2367,7 @@ export default function Home() {
                       <Slider
                         min={profile?.distanceMinKm ?? 0}
                         max={profile?.distanceMaxKm ?? 50}
-                        step={profile?.distanceDecimalsEnabled ? 0.1 : 1}
+                        step={(profile?.targetDistanceDecimals ?? 0) >= 1 ? 0.1 : 1}
                         value={preRunDistance}
                         onValueChange={setPreRunDistance}
                         className="py-2"

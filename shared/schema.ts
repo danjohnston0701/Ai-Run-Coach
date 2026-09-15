@@ -49,7 +49,10 @@ export const users = pgTable("users", {
   aiPlansEnabled: boolean("ai_plans_enabled").default(true),
   distanceMinKm: real("distance_min_km").default(0),
   distanceMaxKm: real("distance_max_km").default(50),
-  distanceDecimalsEnabled: boolean("distance_decimals_enabled").default(false),
+  // How many decimal places the target-distance control accepts (0–3). 0 and 1 keep the
+  // slider; 2 and 3 replace it with a numeric field, since a slider can't express 21.0975 km.
+  // Superseded the boolean distance_decimals_enabled (see migrations/add_target_distance_decimals.sql).
+  targetDistanceDecimals: integer("target_distance_decimals").default(0),
   userCode: text("user_code").unique(),
   shortUserId: text("short_user_id").unique(), // 8-digit numeric ID for friend sharing (e.g., "12345678")
   // First-occurrence timestamps for the onboarding feature tour (OnboardingTourScreen) — null

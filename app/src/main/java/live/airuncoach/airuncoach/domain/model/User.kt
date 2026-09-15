@@ -21,7 +21,9 @@ data class User(
     val profilePic: String? = null,
     val distanceMinKm: Float = 0f,
     val distanceMaxKm: Float = 50f,
-    val distanceDecimalsEnabled: Boolean = false,
+    // 0–3 decimal places for the target-distance control. 0/1 keep the slider, 2/3 swap it for
+    // a numeric field. Nullable so Gson treats cached JSON from before this field as 0.
+    val targetDistanceDecimals: Int? = null,
     val subscriptionTier: String? = null,
     val subscriptionStatus: String? = null,
     // Orthogonal to subscriptionTier — false only for "no AI Plans" SKU subscribers.

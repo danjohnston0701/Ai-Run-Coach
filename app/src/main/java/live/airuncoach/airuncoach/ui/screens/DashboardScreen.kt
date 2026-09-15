@@ -39,6 +39,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.utils.TargetDistance
+import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -245,7 +257,16 @@ fun DashboardScreen(
             item { LocationPermissionWarning(onNavigateToLocationPermission) }
             item { Spacer(modifier = Modifier.height(Spacing.md)) }
         }
-        item { TargetDistanceSection(distance = targetDistance, onDistanceChanged = viewModel::onDistanceChanged) }
+        item {
+            // Read once per screen entry: the user changes these in Personal Details and comes back.
+            val sessionManager = remember { SessionManager(context) }
+            TargetDistanceSection(
+                distance = targetDistance,
+                decimals = sessionManager.targetDistanceDecimals(),
+                range = sessionManager.targetDistanceRange(),
+                onDistanceChanged = viewModel::onDistanceChanged
+            )
+        }
         item { Spacer(modifier = Modifier.height(Spacing.md)) }
         item { 
             TargetTimeCard(
@@ -784,8 +805,24 @@ fun NoWeatherDataBar(time: String) {
     }
 }
 
+/**
+ * Free-run target distance. At 0 or 1 dp the slider (over the user's configured min–max window)
+ * is the control; at 2 or 3 dp there is no slider and the big number becomes a numeric field,
+ * because a slider can't express 21.0975 km and showing both was messy.
+ */
 @Composable
-fun TargetDistanceSection(distance: Float, onDistanceChanged: (Float) -> Unit) {
+fun TargetDistanceSection(
+    distance: Float,
+    decimals: Int,
+    range: ClosedFloatingPointRange<Float>,
+    onDistanceChanged: (Float) -> Unit
+) {
+    val textEntry = TargetDistance.usesTextEntry(decimals)
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    LaunchedEffect(distance, decimals) {
+        if (!editing) draft = TargetDistance.format(distance, decimals)
+    }
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -798,11 +835,34 @@ fun TargetDistanceSection(distance: Float, onDistanceChanged: (Float) -> Unit) {
                 color = Colors.textSecondary
             )
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = "%.0f".format(distance),
-                    style = AppTextStyles.h2,
-                    color = Colors.primary
-                )
+                if (textEntry) {
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { raw ->
+                            editing = true
+                            draft = TargetDistance.sanitizeInput(raw, decimals)
+                            draft.toFloatOrNull()
+                                ?.takeIf { it in 0.1f..500f }
+                                ?.let(onDistanceChanged)
+                        },
+                        textStyle = AppTextStyles.h2.copy(color = Colors.primary, textAlign = TextAlign.End),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        keyboardActions = KeyboardActions(onDone = { editing = false }),
+                        cursorBrush = SolidColor(Colors.primary),
+                        modifier = Modifier
+                            .width(110.dp)
+                            .clip(RoundedCornerShape(BorderRadius.sm))
+                            .background(Colors.backgroundSecondary)
+                            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+                    )
+                } else {
+                    Text(
+                        text = TargetDistance.format(distance, decimals),
+                        style = AppTextStyles.h2,
+                        color = Colors.primary
+                    )
+                }
                 Spacer(modifier = Modifier.width(Spacing.xs))
                 Text(
                     text = "km",
@@ -813,17 +873,34 @@ fun TargetDistanceSection(distance: Float, onDistanceChanged: (Float) -> Unit) {
             }
         }
         Spacer(modifier = Modifier.height(Spacing.sm))
-        Slider(
-            value = distance,
-            onValueChange = onDistanceChanged,
-            valueRange = 1f..42f,
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = Colors.primary,
-                activeTrackColor = Colors.primary,
-                inactiveTrackColor = Colors.backgroundTertiary
+        if (textEntry) {
+            Text(
+                text = "Type your target distance (up to $decimals decimal places)",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted
             )
-        )
+        } else {
+            Slider(
+                value = distance.coerceIn(range),
+                onValueChange = onDistanceChanged,
+                valueRange = range,
+                // 0 dp snaps to whole km; 1 dp runs continuously and the view model rounds to tenths.
+                steps = if (decimals == 0) (range.endInclusive - range.start).roundToInt().coerceAtLeast(1) - 1 else 0,
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(
+                    thumbColor = Colors.primary,
+                    activeTrackColor = Colors.primary,
+                    inactiveTrackColor = Colors.backgroundTertiary
+                )
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("${range.start.roundToInt()} km", style = AppTextStyles.caption, color = Colors.textMuted)
+                Text("${range.endInclusive.roundToInt()} km", style = AppTextStyles.caption, color = Colors.textMuted)
+            }
+        }
     }
 }
 

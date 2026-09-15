@@ -83,8 +83,8 @@ data class AuthResponse(
     @SerializedName("distanceMaxKm")
     val distanceMaxKm: Float? = null,
     
-    @SerializedName("distanceDecimalsEnabled")
-    val distanceDecimalsEnabled: Boolean? = null,
+    @SerializedName("targetDistanceDecimals")
+    val targetDistanceDecimals: Int? = null,
     
     @SerializedName("subscriptionTier")
     val subscriptionTier: String? = null,
@@ -172,7 +172,7 @@ data class AuthResponse(
                 profilePic = profilePic,
                 distanceMinKm = distanceMinKm ?: 0f,
                 distanceMaxKm = distanceMaxKm ?: 50f,
-                distanceDecimalsEnabled = distanceDecimalsEnabled ?: false,
+                targetDistanceDecimals = targetDistanceDecimals ?: 0,
                 subscriptionTier = subscriptionTier,
                 subscriptionStatus = subscriptionStatus,
                 distanceScale = distanceScale,

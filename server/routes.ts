@@ -1198,6 +1198,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const updateData = { ...req.body };
+      // Older clients still send the retired boolean; the column is gone from the schema, so
+      // drop it rather than let Drizzle reject the whole update. Clamp the replacement to 0–3.
+      delete updateData.distanceDecimalsEnabled;
+      if (updateData.targetDistanceDecimals !== undefined) {
+        const n = Number(updateData.targetDistanceDecimals);
+        updateData.targetDistanceDecimals = Number.isInteger(n) ? Math.min(3, Math.max(0, n)) : 0;
+      }
       if (typeof updateData.dob === "string") {
         const match = updateData.dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
         if (match) {

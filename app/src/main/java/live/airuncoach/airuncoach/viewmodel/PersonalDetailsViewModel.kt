@@ -4,14 +4,20 @@ package live.airuncoach.airuncoach.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.UpdateUserRequest
+import live.airuncoach.airuncoach.utils.TargetDistance
+import kotlin.math.roundToInt
 
 class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
 
@@ -41,6 +47,22 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     private val _defaultSessionType = MutableStateFlow("Run")
     val defaultSessionType: StateFlow<String> = _defaultSessionType.asStateFlow()
 
+    /** 0–3; see [User.targetDistanceDecimals]. */
+    private val _targetDistanceDecimals = MutableStateFlow(0)
+    val targetDistanceDecimals: StateFlow<Int> = _targetDistanceDecimals.asStateFlow()
+
+    /** Slider window for the target distance, held as text while editing (whole km). */
+    private val _distanceMinKm = MutableStateFlow(TargetDistance.DEFAULT_MIN_KM.toString())
+    val distanceMinKm: StateFlow<String> = _distanceMinKm.asStateFlow()
+    private val _distanceMaxKm = MutableStateFlow(TargetDistance.DEFAULT_MAX_KM.toString())
+    val distanceMaxKm: StateFlow<String> = _distanceMaxKm.asStateFlow()
+
+    /** Null when the min/max/decimals combination is valid; otherwise the reason Save is blocked. */
+    val distanceRangeError: StateFlow<String?> = combine(
+        _distanceMinKm, _distanceMaxKm, _targetDistanceDecimals
+    ) { min, max, decimals ->
+        TargetDistance.rangeError(min.toIntOrNull(), max.toIntOrNull(), decimals)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     init {
         loadUserDetails()
@@ -64,6 +86,11 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 "walk" -> "Walk"
                 else -> "Run"
             }
+            _targetDistanceDecimals.value = (user.targetDistanceDecimals ?: 0).coerceIn(0, 3)
+            // Legacy rows carry the 0–50 schema default; show it as the 1–50 the slider uses.
+            _distanceMinKm.value = user.distanceMinKm.roundToInt()
+                .coerceAtLeast(TargetDistance.DEFAULT_MIN_KM).toString()
+            _distanceMaxKm.value = user.distanceMaxKm.roundToInt().toString()
         }
     }
 
@@ -97,6 +124,26 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
         _defaultSessionType.value = sessionType
     }
 
+    fun onTargetDistanceDecimalsChanged(decimals: Int) {
+        _targetDistanceDecimals.value = decimals.coerceIn(0, 3)
+        // Tightening precision shrinks the allowed slider span; pull the max in rather than
+        // leave the user with a Save button that's suddenly blocked.
+        val min = _distanceMinKm.value.toIntOrNull() ?: return
+        val max = _distanceMaxKm.value.toIntOrNull() ?: return
+        val span = TargetDistance.maxSliderSpanKm(decimals)
+        if (!TargetDistance.usesTextEntry(decimals) && max - min > span) {
+            _distanceMaxKm.value = (min + span).toString()
+        }
+    }
+
+    fun onDistanceMinKmChanged(text: String) {
+        if (text.length <= 4) _distanceMinKm.value = text.filter { it.isDigit() }
+    }
+
+    fun onDistanceMaxKmChanged(text: String) {
+        if (text.length <= 4) _distanceMaxKm.value = text.filter { it.isDigit() }
+    }
+
     suspend fun saveDetails() {
         val userJson = sharedPrefs.getString("user", null)
         if (userJson != null) {
@@ -110,7 +157,11 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 height = _height.value.toDoubleOrNull(),
                 fitnessLevel = null,
                 distanceScale = null,
-                defaultSessionType = _defaultSessionType.value
+                defaultSessionType = _defaultSessionType.value,
+                targetDistanceDecimals = _targetDistanceDecimals.value,
+                // Only send a range that passed validation; otherwise keep what's stored.
+                distanceMinKm = if (distanceRangeError.value == null) _distanceMinKm.value.toFloatOrNull() else null,
+                distanceMaxKm = if (distanceRangeError.value == null) _distanceMaxKm.value.toFloatOrNull() else null
             )
             try {
                 val updatedUser = apiService.updateUser(user.id, request)

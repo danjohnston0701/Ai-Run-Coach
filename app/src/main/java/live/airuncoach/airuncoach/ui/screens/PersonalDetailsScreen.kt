@@ -31,6 +31,9 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
+import live.airuncoach.airuncoach.utils.TargetDistance
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import live.airuncoach.airuncoach.viewmodel.PersonalDetailsViewModel
 import live.airuncoach.airuncoach.viewmodel.PersonalDetailsViewModelFactory
 
@@ -50,8 +53,13 @@ fun PersonalDetailsScreen(
     val weight by viewModel.weight.collectAsState()
     val height by viewModel.height.collectAsState()
     val defaultSessionType by viewModel.defaultSessionType.collectAsState()
+    val targetDistanceDecimals by viewModel.targetDistanceDecimals.collectAsState()
+    val distanceMinKm by viewModel.distanceMinKm.collectAsState()
+    val distanceMaxKm by viewModel.distanceMaxKm.collectAsState()
+    val distanceRangeError by viewModel.distanceRangeError.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     var showGenderMenu by remember { mutableStateOf(false) }
+    var showDecimalsMenu by remember { mutableStateOf(false) }
     var showDayMenu by remember { mutableStateOf(false) }
     var showMonthMenu by remember { mutableStateOf(false) }
     var yearOnly by remember { mutableStateOf(false) }
@@ -391,6 +399,133 @@ fun PersonalDetailsScreen(
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
             item {
+                // Whole kilometres can't express a real race distance — a half marathon is
+                // 21.0975 km. At 0 or 1 dp the dashboard/run-setup slider stays; at 2 or 3 dp
+                // it's replaced by a numeric field, since a slider at that resolution is unusable.
+                SectionTitle(title = "Target Distance Decimal Places")
+                Text(
+                    "0 or 1 keeps the distance slider; 2 or 3 lets you type an exact distance like 21.098 km",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = targetDistanceDecimals.toString(),
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Decimal places") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Colors.textPrimary,
+                            unfocusedTextColor = Colors.textPrimary,
+                            focusedBorderColor = Colors.primary,
+                            unfocusedBorderColor = Colors.textMuted,
+                            focusedLabelColor = Colors.primary,
+                            unfocusedLabelColor = Colors.textSecondary
+                        ),
+                        trailingIcon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.icon_chevron_down_vector),
+                                contentDescription = "Dropdown",
+                                tint = Colors.textMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                    // Invisible clickable overlay to handle clicks
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable { showDecimalsMenu = true }
+                    )
+                    DropdownMenu(
+                        expanded = showDecimalsMenu,
+                        onDismissRequest = { showDecimalsMenu = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        (0..3).forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = when (option) {
+                                            0 -> "0 — whole km (slider)"
+                                            1 -> "1 — e.g. 21.1 km (slider)"
+                                            2 -> "2 — e.g. 21.10 km (type it in)"
+                                            else -> "3 — e.g. 21.098 km (type it in)"
+                                        },
+                                        style = AppTextStyles.body,
+                                        color = Colors.textPrimary
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.onTargetDistanceDecimalsChanged(option)
+                                    showDecimalsMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+            item {
+                // The slider's window. Capped at a 50 km span (0 dp) or 25 km (1 dp) so every
+                // position stays reachable by touch; anyone targeting beyond 50 km moves the
+                // window (e.g. 20–70) instead. Not used at 2–3 dp, where the target is typed.
+                SectionTitle(title = "Distance Slider Range (km)")
+                Text(
+                    if (TargetDistance.usesTextEntry(targetDistanceDecimals))
+                        "Not used at $targetDistanceDecimals decimal places — you type the target distance instead"
+                    else
+                        "Up to ${TargetDistance.maxSliderSpanKm(targetDistanceDecimals)} km between minimum and maximum. Shift the range to target longer distances.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+                Spacer(modifier = Modifier.height(Spacing.md))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    OutlinedTextField(
+                        value = distanceMinKm,
+                        onValueChange = viewModel::onDistanceMinKmChanged,
+                        label = { Text("Minimum") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        isError = distanceRangeError != null,
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Colors.textPrimary,
+                            unfocusedTextColor = Colors.textPrimary,
+                            cursorColor = Colors.primary,
+                            focusedBorderColor = Colors.primary,
+                            unfocusedBorderColor = Colors.textMuted
+                        )
+                    )
+                    OutlinedTextField(
+                        value = distanceMaxKm,
+                        onValueChange = viewModel::onDistanceMaxKmChanged,
+                        label = { Text("Maximum") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        isError = distanceRangeError != null,
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Colors.textPrimary,
+                            unfocusedTextColor = Colors.textPrimary,
+                            cursorColor = Colors.primary,
+                            focusedBorderColor = Colors.primary,
+                            unfocusedBorderColor = Colors.textMuted
+                        )
+                    )
+                }
+                distanceRangeError?.let { error ->
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(error, style = AppTextStyles.caption, color = Colors.error)
+                }
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+            item {
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Button(
                     onClick = {
@@ -404,6 +539,7 @@ fun PersonalDetailsScreen(
                             }
                         }
                     },
+                    enabled = distanceRangeError == null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),

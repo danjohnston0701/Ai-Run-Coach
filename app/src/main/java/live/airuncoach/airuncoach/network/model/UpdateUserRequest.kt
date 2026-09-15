@@ -12,6 +12,9 @@ data class UpdateUserRequest(
     val subscriptionTier: String? = null,
     val subscriptionStatus: String? = null,
     val defaultSessionType: String? = null,
-    /** When true the target-distance control accepts decimals (up to 3 dp); otherwise whole km. */
-    val distanceDecimalsEnabled: Boolean? = null
+    /** Decimal places (0–3) the target-distance control accepts; 2+ replaces the slider with a field. */
+    val targetDistanceDecimals: Int? = null,
+    /** Slider window for the target distance (whole km); span capped per TargetDistance.maxSliderSpanKm. */
+    val distanceMinKm: Float? = null,
+    val distanceMaxKm: Float? = null
 )
