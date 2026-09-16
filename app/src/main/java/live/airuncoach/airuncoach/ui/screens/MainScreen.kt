@@ -469,7 +469,7 @@ fun MainScreen(
                     initialAiCoachEnabled = aiCoach,
                     initialSessionType = sessionType,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, latitude, longitude, aiCoach ->
+                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, latitude, longitude, aiCoach, activityTypeString ->
                         // Guard against double-taps - only allow one navigation at a time
                         if (isNavigatingToRoute) return@MapMyRunSetupScreen
                         isNavigatingToRoute = true
@@ -493,7 +493,8 @@ fun MainScreen(
                             liveTrackingEnabled = liveTrackingEnabled,
                             liveTrackingObservers = liveTrackingObservers,
                             isGroupRun = isGroupRun,
-                            groupRunParticipants = groupRunParticipants
+                            groupRunParticipants = groupRunParticipants,
+                            activityType = activityTypeString
                         )
                         
                         // Navigate to check_route_availability - it will handle the API check itself
@@ -634,6 +635,7 @@ fun MainScreen(
                             groupRunParticipants = params.groupRunParticipants,
                             aiCoachEnabled = params.aiCoachEnabled
                         )
+                        viewModel.setActivityType(params.activityType)
 
                         // Generate routes with GPS location
                         val targetTimeMinutes = if (params.hasTime) params.hours * 60 + params.minutes else null
@@ -642,7 +644,7 @@ fun MainScreen(
                             latitude = params.latitude,
                             longitude = params.longitude,
                             distanceKm = params.distance.toDouble(),
-                            activityType = "run",
+                            activityType = params.activityType.lowercase(),
                             preferTrails = true,
                             avoidHills = false,
                             targetTime = targetTimeMinutes,
@@ -708,6 +710,7 @@ fun MainScreen(
                 val isGroupRun by viewModel.isGroupRun.collectAsState()
                 val groupRunParticipants by viewModel.groupRunParticipants.collectAsState()
                 val socialAiCoachEnabled by viewModel.aiCoachEnabled.collectAsState()
+                val routeActivityType by viewModel.activityType.collectAsState()
                 var selectedRouteId by remember { mutableStateOf<String?>(null) }
                 // Seeded from the setup screen's AI Coach toggle (previously always started
                 // false here regardless of what was chosen on MapMyRunSetupScreen) — still
@@ -741,6 +744,9 @@ fun MainScreen(
 
                     // Create RunSetupConfig with route + pro-rated target time
                     val config = RunSetupConfig(
+                        // Setup-screen toggle — previously never set here, so every routed
+                        // session ran as RUN regardless of the WALK selection.
+                        activityType = PhysicalActivityType.fromString(routeActivityType),
                         targetDistance = route.distance.toFloat(),
                         hasTargetTime = hasTargetTime,
                         targetHours = adjustedHours,
@@ -1222,6 +1228,8 @@ fun MainScreen(
                 }
                 val trainingPlanViewModel: TrainingPlanViewModel =
                     if (planBackStackEntry != null) hiltViewModel(planBackStackEntry) else hiltViewModel()
+                val workoutDetailContext = LocalContext.current
+                val profileSessionType = remember { SessionManager(workoutDetailContext).defaultSessionType() }
                 if (workout == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
@@ -1236,7 +1244,11 @@ fun MainScreen(
                             val isWatchMode = WorkoutHolder.isWatchMode
                             val targetDistanceKm = w.distance?.toFloat()
                             val config = RunSetupConfig(
-                                activityType = PhysicalActivityType.RUN,
+                                // Was hardcoded RUN — walking plan workouts were coached as runs.
+                                activityType = PhysicalActivityType.forPlannedWorkout(
+                                    workoutType = w.workoutType,
+                                    profileDefault = profileSessionType
+                                ),
                                 targetDistance = targetDistanceKm,
                                 // Wire target time if the workout has a duration set
                                 hasTargetTime = w.duration != null,
@@ -1355,13 +1367,14 @@ fun MainScreen(
                     isGroupRun = true,
                     groupRunId = groupRunId,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { _, _, _, _, _, _, _, _, _, _, _, _ ->
+                    onGenerateRoute = { _, _, _, _, _, _, _, _, _, _, _, _, _ ->
                         // Group runs don't support route generation - ignore this callback
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, _, isWatchMode ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, activityTypeString, isWatchMode ->
                         // Create RunSetupConfig with group run context
                         val config = RunSetupConfig(
-                            activityType = PhysicalActivityType.RUN,
+                            // Setup-screen toggle — was hardcoded RUN with the value discarded.
+                            activityType = PhysicalActivityType.fromString(activityTypeString),
                             targetDistance = distance,
                             hasTargetTime = hasTime,
                             targetHours = hours,

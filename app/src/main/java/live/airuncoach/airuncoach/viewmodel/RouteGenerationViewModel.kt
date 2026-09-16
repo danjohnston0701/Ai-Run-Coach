@@ -76,6 +76,14 @@ class RouteGenerationViewModel @Inject constructor(
     val groupRunParticipants: StateFlow<List<String>> = _groupRunParticipants.asStateFlow()
     private val _aiCoachEnabled = MutableStateFlow(false)
     val aiCoachEnabled: StateFlow<Boolean> = _aiCoachEnabled.asStateFlow()
+    // "RUN" | "WALK" from the setup screen's toggle. Routed sessions used to lose this entirely
+    // (RunSetupConfig defaulted to RUN), so a routed walk was coached as a run.
+    private val _activityType = MutableStateFlow("RUN")
+    val activityType: StateFlow<String> = _activityType.asStateFlow()
+
+    fun setActivityType(activityType: String) {
+        _activityType.value = if (activityType.equals("walk", ignoreCase = true)) "WALK" else "RUN"
+    }
 
     fun setTargetTime(hasTime: Boolean, hours: Int, minutes: Int, seconds: Int, distanceKm: Double) {
         _hasTargetTime.value = hasTime

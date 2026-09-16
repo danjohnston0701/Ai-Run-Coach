@@ -229,6 +229,13 @@ class SessionManager(context: Context) {
         }
     }
 
+    /**
+     * The athlete's profile walk/run preference ("run"/"walk", any case) from the cached user,
+     * or null when unknown. Used only where a session has no run/walk toggle of its own (a
+     * coaching-plan workout with an ambiguous type) — a toggle, where one exists, always wins.
+     */
+    fun defaultSessionType(): String? = cachedUser()?.defaultSessionType
+
     fun needsFitnessLevel(): Boolean {
         // A malformed or missing cache must never block a signed-in user out of the app.
         val user = cachedUser() ?: return false

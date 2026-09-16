@@ -21,7 +21,8 @@ object RouteGenerationParamsHolder {
         liveTrackingEnabled: Boolean = false,
         liveTrackingObservers: List<String> = emptyList(),
         isGroupRun: Boolean = false,
-        groupRunParticipants: List<String> = emptyList()
+        groupRunParticipants: List<String> = emptyList(),
+        activityType: String = "RUN"
     ) {
         params = RouteGenerationParams(
             distance = distance,
@@ -35,7 +36,8 @@ object RouteGenerationParamsHolder {
             liveTrackingEnabled = liveTrackingEnabled,
             liveTrackingObservers = liveTrackingObservers,
             isGroupRun = isGroupRun,
-            groupRunParticipants = groupRunParticipants
+            groupRunParticipants = groupRunParticipants,
+            activityType = activityType
         )
     }
 
@@ -64,5 +66,7 @@ data class RouteGenerationParams(
     val liveTrackingEnabled: Boolean = false,
     val liveTrackingObservers: List<String> = emptyList(),
     val isGroupRun: Boolean = false,
-    val groupRunParticipants: List<String> = emptyList()
+    val groupRunParticipants: List<String> = emptyList(),
+    /** "RUN" | "WALK" — the setup screen's toggle, carried through to the routed session. */
+    val activityType: String = "RUN"
 )

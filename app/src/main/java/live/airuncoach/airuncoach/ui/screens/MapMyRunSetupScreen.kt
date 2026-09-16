@@ -82,8 +82,9 @@ fun MapMyRunSetupScreen(
         groupRunParticipants: List<String>,
         latitude: Double,
         longitude: Double,
-        aiCoachEnabled: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _ -> },
+        aiCoachEnabled: Boolean,
+        activityType: String
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
     onStartRunWithoutRoute: (
         distance: Float,
         targetTimeEnabled: Boolean,
@@ -429,7 +430,8 @@ fun MapMyRunSetupScreen(
                                     groupRunParticipants,
                                     lat,
                                     lng,
-                                    isAiCoachEnabled
+                                    isAiCoachEnabled,
+                                    if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
                                 )
                             }
                         }

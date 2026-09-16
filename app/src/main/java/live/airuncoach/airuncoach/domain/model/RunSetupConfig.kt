@@ -81,5 +81,31 @@ data class RunSetupConfig(
 
 enum class PhysicalActivityType {
     RUN,
-    WALK
+    WALK;
+
+    companion object {
+        /** "RUN"/"WALK" (any case, as the setup screen's toggle emits) → enum; anything else RUN. */
+        fun fromString(value: String?): PhysicalActivityType =
+            if (value?.trim().equals("walk", ignoreCase = true)) WALK else RUN
+
+        /**
+         * Session type for a coaching-plan workout, which has no run/walk toggle of its own.
+         * An explicitly walking workout type ("walk", "brisk_walk", "recovery_walk"…) is a WALK;
+         * an explicitly running one — including "walk_run" intervals, which the in-run engine
+         * coaches as a run session with walk recoveries — is a RUN; anything ambiguous ("easy",
+         * "recovery", "intervals") falls back to the athlete's profile preference, since the
+         * plan was generated around that preference in the first place. Mirrors iOS
+         * PlanRunContext.activityMode(forWorkoutType:profileDefault:).
+         */
+        fun forPlannedWorkout(workoutType: String?, profileDefault: String?): PhysicalActivityType {
+            val type = workoutType?.trim()?.lowercase() ?: ""
+            val mentionsWalk = type.contains("walk")
+            val mentionsRun = type.contains("run") || type.contains("jog")
+            return when {
+                mentionsWalk && !mentionsRun -> WALK
+                mentionsRun -> RUN
+                else -> fromString(profileDefault)
+            }
+        }
+    }
 }
