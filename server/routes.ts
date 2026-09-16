@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "node:http";
 import { eq, and, or, gte, gt, lt, desc, asc, lte, count, isNull, isNotNull, inArray } from "drizzle-orm";
 import { storage } from "./storage";
+import { toClientUser, normalizeSessionType } from "./user-serializer";
 import { db } from "./db";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
 import { getRunForReader, getRunForOwner, ONBOARDING_TOUR_DEMO_RUN_ID } from "./run-access";
@@ -423,7 +424,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // Return requiresVerification flag with user data (but no auth token yet)
-        const { password: _, ...userWithoutPassword } = user;
+        const userWithoutPassword = toClientUser(user);
         return res.status(201).json({
           requiresVerification: true,
           user: userWithoutPassword,
@@ -436,7 +437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // shape as a successful login so both apps' existing "token present"
       // auto-login handling picks it up with no client-side change.
       const token = generateToken({ userId: user.id, email: user.email });
-      const { password: _, ...userWithoutPassword } = user;
+      const userWithoutPassword = toClientUser(user);
       res.status(201).json({ user: userWithoutPassword, token });
     } catch (error: any) {
       console.error("Register error:", error);
@@ -460,7 +461,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user.emailVerified) {
         // Already verified — just return a token so the app can continue
         const token = generateToken({ userId: user.id, email: user.email });
-        const { password: _, ...userWithoutPassword } = user;
+        const userWithoutPassword = toClientUser(user);
         return res.json({ user: userWithoutPassword, token });
       }
 
@@ -486,7 +487,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const token = generateToken({ userId: user.id, email: user.email });
-      const { password: _, ...userWithoutPassword } = user;
+      const userWithoutPassword = toClientUser(user);
       res.json({ user: { ...userWithoutPassword, emailVerified: true }, token });
     } catch (error: any) {
       console.error("Verify email error:", error);
@@ -703,7 +704,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const token = generateToken({ userId: user.id, email: user.email });
 
-      const { password: _, ...userWithoutPassword } = user;
+      const userWithoutPassword = toClientUser(user);
       res.json({ user: userWithoutPassword, token });
     } catch (error: any) {
       console.error("Login error:", error);
@@ -1095,7 +1096,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
       
-      const { password: _, ...userWithoutPassword } = user;
+      const userWithoutPassword = toClientUser(user);
       // Map injuryHistory → injuries so Android model (which uses 'injuries') deserializes correctly
       const response = {
         ...userWithoutPassword,
@@ -1115,7 +1116,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
       
-      const { password: _, ...userWithoutPassword } = user;
+      const userWithoutPassword = toClientUser(user);
       res.json(userWithoutPassword);
     } catch (error: any) {
       console.error("Get user error:", error);
@@ -1201,6 +1202,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Older clients still send the retired boolean; the column is gone from the schema, so
       // drop it rather than let Drizzle reject the whole update. Clamp the replacement to 0–3.
       delete updateData.distanceDecimalsEnabled;
+      // iOS sends the walk/run preference as `defaultActivityMode` ("RUN"/"WALK"); the column is
+      // `defaultSessionType` ("run"/"walk"). Drizzle silently drops keys that aren't columns —
+      // and when it was the ONLY key the generated `update users set  where …` failed outright —
+      // so a Walk selection from iOS never persisted. Map it, and normalise either spelling.
+      if (updateData.defaultActivityMode !== undefined) {
+        const mapped = normalizeSessionType(updateData.defaultActivityMode);
+        if (mapped && updateData.defaultSessionType === undefined) updateData.defaultSessionType = mapped;
+        delete updateData.defaultActivityMode;
+      }
+      if (updateData.defaultSessionType !== undefined) {
+        const mapped = normalizeSessionType(updateData.defaultSessionType);
+        if (mapped) updateData.defaultSessionType = mapped; else delete updateData.defaultSessionType;
+      }
+      // Nothing left to write (e.g. an unknown-field-only body) — return the current user rather
+      // than letting Drizzle throw "No values to set".
+      if (Object.keys(updateData).length === 0) {
+        const current = await storage.getUser(req.params.id);
+        if (!current) return res.status(404).json({ error: "User not found" });
+        return res.json(toClientUser(current));
+      }
       if (updateData.targetDistanceDecimals !== undefined) {
         const n = Number(updateData.targetDistanceDecimals);
         updateData.targetDistanceDecimals = Number.isInteger(n) ? Math.min(3, Math.max(0, n)) : 0;
@@ -1218,7 +1239,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
       
-      const { password: _, ...userWithoutPassword } = updated;
+      const userWithoutPassword = toClientUser(updated);
       res.json(userWithoutPassword);
     } catch (error: any) {
       console.error("Update user error:", error);
@@ -1370,7 +1391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const { password: _, ...userWithoutPassword } = updated;
+      const userWithoutPassword = toClientUser(updated);
       res.json(userWithoutPassword);
     } catch (error: any) {
       console.error("Upload profile picture error:", error);
@@ -12018,6 +12039,35 @@ function transformRunForAndroid(run: any) {
     }
   };
 
+  // Helper: fill in runner biometrics the client didn't send, from the profile. The cadence
+  // model in generatePhaseCoaching() is height-driven (step length = ratio × height) and falls
+  // back to 170cm when runnerHeight is absent — iOS's PhaseCoachingRequest has no height field
+  // at all, so a 187cm runner was getting cadence targets computed for a 170cm one (~+15 spm).
+  const backfillRunnerBiometrics = async (body: any): Promise<void> => {
+    const uid = body.userId ?? body.user_id;
+    if (!uid) return;
+    const needsHeight = !(Number(body.runnerHeight) > 0);
+    const needsWeight = !(Number(body.runnerWeight) > 0);
+    const needsAge = !(Number(body.runnerAge) > 0);
+    if (!needsHeight && !needsWeight && !needsAge) return;
+    try {
+      const user = await storage.getUser(String(uid));
+      if (!user) return;
+      if (needsHeight && Number(user.height) > 0) body.runnerHeight = Number(user.height);
+      if (needsWeight && Number(user.weight) > 0) body.runnerWeight = Number(user.weight);
+      if (needsAge && user.dob) {
+        const dob = new Date(user.dob);
+        if (!Number.isNaN(dob.getTime())) {
+          const now = new Date();
+          let age = now.getFullYear() - dob.getFullYear();
+          const m = now.getMonth() - dob.getMonth();
+          if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+          if (age > 0 && age < 120) body.runnerAge = age;
+        }
+      }
+    } catch { /* non-fatal — the model's defaults still apply */ }
+  };
+
   // Helper: resolve all coach voice/persona settings from the DB.
   // This overrides whatever the Android sends, ensuring the correct user preferences are
   // always applied even if the Android caches stale values between sessions.
@@ -12664,6 +12714,7 @@ function transformRunForAndroid(run: any) {
       req.body.coachTone = effectiveTone;
 
       await enrichReqBodyWithWatchDynamics(req.body);
+      await backfillRunnerBiometrics(req.body);
 
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
@@ -15198,7 +15249,7 @@ function transformRunForAndroid(run: any) {
         return res.status(404).json({ error: 'User not found' });
       }
       
-      const { password: _, ...userWithoutPassword } = updatedUser;
+      const userWithoutPassword = toClientUser(updatedUser);
       res.json(userWithoutPassword);
     } catch (error: any) {
       console.error("Update coach settings error:", error);
