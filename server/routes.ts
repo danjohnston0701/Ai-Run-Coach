@@ -61,7 +61,7 @@ import {
   sendActivityNotification,
   getUnreadNotificationCount
 } from "./notification-service";
-import { getUsageWithLimits, checkAndEnforceLimit, recordUsage } from "./usage-service";
+import { getUsageWithLimits, checkAndEnforceLimit, recordUsage, FEATURE_LABELS, featureNotIncludedResponse, effectiveTier as resolveEffectiveTier } from "./usage-service";
 import { checkCooldown, recordFired, buildSkipResponse } from "./coaching-cooldown";
 import {
   checkAchievementsAfterRun,
@@ -6326,6 +6326,25 @@ function transformRunForAndroid(run: any) {
       // Determine if available
       const isUnlimited = limit === null;
       const isAvailable = isUnlimited || (remaining !== null && remaining > 0);
+
+      // Zero allowance = the feature isn't part of this plan at all (free trial, or a
+      // paid SKU without AI Plans) — not a monthly cap. Clients use `notIncluded` to show
+      // the "upgrade to unlock" screen without a usage bar / reset date.
+      const gated = featureName as keyof typeof FEATURE_LABELS;
+      const label = FEATURE_LABELS[gated] ?? featureName;
+      const notIncluded = !isUnlimited && limit === 0;
+      let notIncludedInfo: { reason: string; message: string } | null = null;
+      if (notIncluded) {
+        const aiPlansExcluded = gated === "trainingPlansGenerated" && user?.aiPlansEnabled === false;
+        const resolvedTier = resolveEffectiveTier(user?.subscriptionTier, user?.trialExpiresAt ?? null, user?.createdAt ?? null);
+        const body = featureNotIncludedResponse(gated, resolvedTier);
+        notIncludedInfo = {
+          reason: aiPlansExcluded ? "ai_plans_excluded" : body.reason,
+          message: aiPlansExcluded
+            ? "AI Training Plans aren't included in your current plan. Switch to a Lite or Standard plan with AI Plans to generate one."
+            : body.message,
+        };
+      }
       
       // Get renewal date (start of next month)
       const [year, month] = usageData.yearMonth.split("-");
@@ -6340,11 +6359,15 @@ function transformRunForAndroid(run: any) {
         used,
         renewalDate,
         isUnlimited,
+        notIncluded,
+        reason: notIncludedInfo?.reason ?? null,
         message: isUnlimited 
-          ? `You have unlimited ${featureName}`
+          ? `You have unlimited ${label}`
+          : notIncludedInfo
+          ? notIncludedInfo.message
           : isAvailable
-          ? `You have ${remaining} of ${limit} ${featureName} remaining this month`
-          : `You've reached your limit of ${limit} ${featureName} this month`
+          ? `You have ${remaining} of ${limit} ${label} remaining this month`
+          : `You've reached your limit of ${limit} ${label} this month`
       });
     } catch (error: any) {
       console.error("[Features] GET /api/features/:featureName/available error:", error);

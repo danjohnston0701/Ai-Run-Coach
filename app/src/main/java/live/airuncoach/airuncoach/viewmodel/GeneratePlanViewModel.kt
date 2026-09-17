@@ -28,13 +28,22 @@ sealed class GeneratePlanState {
     object Generating : GeneratePlanState()
     data class Success(val planId: String) : GeneratePlanState()
     data class Error(val message: String) : GeneratePlanState()
+    /**
+     * The server refused to generate because of the user's plan — either the monthly
+     * allowance is used up (429 `monthly_limit_reached`) or AI Plans aren't part of the
+     * plan at all (403 `ai_plans_not_included` — free trial, or a paid "no AI Plans" SKU;
+     * 402 `trial_expired`). [notIncluded] picks which upsell copy the screen shows.
+     */
     data class LimitReached(
         val message: String,
         val feature: String,
         val resetMonth: String,
         val used: Int,
         val limit: Int,
-        val remaining: Int
+        val remaining: Int,
+        val notIncluded: Boolean = false,
+        /** "free_trial" | "ai_plans_excluded" | "not_in_tier" | "trial_expired" | null */
+        val reason: String? = null
     ) : GeneratePlanState()
 }
 
@@ -301,6 +310,50 @@ class GeneratePlanViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Turns the server's plan-gating responses into a [GeneratePlanState.LimitReached], or
+     * null if this HTTP error is something else. Handles:
+     *  - 429 `monthly_limit_reached` — allowance used up, resets next month
+     *  - 403 `ai_plans_not_included` / `feature_not_included` — not part of the plan
+     *    (free trial, or a paid SKU without AI Plans)
+     *  - 402 `trial_expired`
+     */
+    private fun parseLimitError(e: retrofit2.HttpException): GeneratePlanState.LimitReached? {
+        if (e.code() !in listOf(402, 403, 429)) return null
+        return try {
+            val errorBody = e.response()?.errorBody()?.string() ?: return null
+            val json = gson.fromJson(errorBody, Map::class.java) ?: return null
+            val code = json["error"]?.toString() ?: return null
+            val notIncluded = when (code) {
+                "ai_plans_not_included", "feature_not_included", "trial_expired" -> true
+                "monthly_limit_reached" -> false
+                else -> return null
+            }
+            GeneratePlanState.LimitReached(
+                message = json["message"]?.toString()
+                    ?: if (notIncluded) "AI Training Plans aren't included in your current plan. Upgrade to unlock them."
+                       else "You've used all of this month's AI Training Plans.",
+                feature = json["feature"]?.toString() ?: "trainingPlansGenerated",
+                resetMonth = json["resetMonth"]?.toString() ?: "",
+                used = (json["used"] as? Number)?.toInt() ?: 0,
+                limit = (json["limit"] as? Number)?.toInt() ?: if (notIncluded) 0 else 1,
+                remaining = (json["remaining"] as? Number)?.toInt() ?: 0,
+                notIncluded = notIncluded,
+                reason = json["reason"]?.toString() ?: if (code == "trial_expired") "trial_expired" else null
+            )
+        } catch (parseErr: Exception) {
+            Log.e("GeneratePlanVM", "Could not parse ${e.code()} error body", parseErr)
+            null
+        }
+    }
+
+    /** Back out of the limit screen to the form (e.g. after the user taps Back). */
+    fun dismissLimitState() {
+        if (_generateState.value is GeneratePlanState.LimitReached) {
+            _generateState.value = GeneratePlanState.Idle
+        }
+    }
+
     fun generatePlan() {
         val distKm = _targetDistance.value.toDoubleOrNull() ?: 5.0
         val targetTimeSecs: Int? = if (_hasTimeGoal.value) {
@@ -363,31 +416,11 @@ class GeneratePlanViewModel @Inject constructor(
                 val response = apiService.generateTrainingPlan(request)
                 _generateState.value = GeneratePlanState.Success(response.planId)
             } catch (e: retrofit2.HttpException) {
-                when (e.code()) {
-                    429 -> {
-                        // Try to parse as monthly_limit_reached error
-                        try {
-                            val errorBody = e.response()?.errorBody()?.string()
-                            val errorJson = gson.fromJson(errorBody, Map::class.java)
-                            
-                            if (errorJson["error"] == "monthly_limit_reached") {
-                                _generateState.value = GeneratePlanState.LimitReached(
-                                    message = errorJson["message"]?.toString() ?: "Monthly limit reached",
-                                    feature = errorJson["feature"]?.toString() ?: "trainingPlansGenerated",
-                                    resetMonth = errorJson["resetMonth"]?.toString() ?: "",
-                                    used = (errorJson["used"] as? Number)?.toInt() ?: 0,
-                                    limit = (errorJson["limit"] as? Number)?.toInt() ?: 1,
-                                    remaining = (errorJson["remaining"] as? Number)?.toInt() ?: 0
-                                )
-                            } else {
-                                _generateState.value = GeneratePlanState.Error("A plan is already being generated. Please wait for it to complete.")
-                            }
-                        } catch (parseErr: Exception) {
-                            Log.e("GeneratePlanVM", "Could not parse 429 error", parseErr)
-                            _generateState.value = GeneratePlanState.Error("A plan is already being generated. Please wait for it to complete.")
-                        }
-                    }
-                    409 -> _generateState.value = GeneratePlanState.Error("An active Coaching Plan already exists. Unable to generate a duplicate plan.")
+                val limitState = parseLimitError(e)
+                when {
+                    limitState != null -> _generateState.value = limitState
+                    e.code() == 429 -> _generateState.value = GeneratePlanState.Error("A plan is already being generated. Please wait for it to complete.")
+                    e.code() == 409 -> _generateState.value = GeneratePlanState.Error("An active Coaching Plan already exists. Unable to generate a duplicate plan.")
                     else -> _generateState.value = GeneratePlanState.Error("Failed to generate plan (${e.code()})")
                 }
                 Log.e("GeneratePlanVM", "HTTP ${e.code()} generating plan", e)

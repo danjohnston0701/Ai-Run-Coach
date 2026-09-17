@@ -996,9 +996,11 @@ fun MainScreen(
                             nextRenewalDate = availability!!.renewalDate,
                             usedCount = availability!!.used,
                             limitCount = availability!!.limit,
+                            notIncluded = availability!!.notIncluded,
+                            message = availability!!.serverMessage,
                             onUpgradeClick = {
-                                // Navigate to subscription screen
-                                navController.navigate(Screen.Profile.route) {
+                                // Straight to the subscription screen (not just the profile tab)
+                                navController.navigate("subscription") {
                                     popUpTo("check_plan_availability") { inclusive = true }
                                 }
                             },
@@ -1098,7 +1100,8 @@ fun MainScreen(
                         // After goal creation the screen will navigate back to generate_plan
                         // with the goal pre-filled via GoalPlanHolder.
                         navController.navigate("create_goal_for_plan")
-                    }
+                    },
+                    onNavigateToSubscription = { navController.navigate("subscription") }
                 )
             }
 

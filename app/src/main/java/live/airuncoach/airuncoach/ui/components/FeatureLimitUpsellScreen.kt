@@ -42,7 +42,15 @@ fun FeatureLimitUpsellScreen(
     modifier: Modifier = Modifier,
     featureEmoji: String = "🔒",            // 📋, 🗺️, 📊, etc.
     nextRenewalDate: LocalDate? = null,     // When subscription renews
-    renewalLabel: String = "Your plan resets on:"
+    renewalLabel: String = "Your plan resets on:",
+    /**
+     * The feature isn't part of the user's plan at all (free trial, or a paid SKU without
+     * AI Plans) rather than a used-up monthly allowance. Hides the "0 of 0 used / resets on"
+     * card — there's nothing to wait for — and lists what upgrading unlocks instead.
+     */
+    notIncluded: Boolean = false,
+    /** Bullet points shown in [notIncluded] mode under "Upgrade to unlock". */
+    unlockPoints: List<String> = emptyList()
 ) {
     Column(
         modifier = modifier
@@ -126,8 +134,36 @@ fun FeatureLimitUpsellScreen(
                     modifier = Modifier.padding(bottom = Spacing.lg)
                 )
 
-                // Usage Stats Card
-                Card(
+                // Usage Stats Card (allowance used up) — or what upgrading unlocks (not included)
+                if (notIncluded) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = Spacing.md),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Colors.backgroundSecondary
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(Spacing.md),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        ) {
+                            Text(
+                                "Upgrade to unlock",
+                                style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold),
+                                color = Colors.textSecondary
+                            )
+                            unlockPoints.forEach { point ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("✓", color = Colors.primary, style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold))
+                                    Spacer(modifier = Modifier.width(Spacing.sm))
+                                    Text(point, style = AppTextStyles.body, color = Colors.textPrimary)
+                                }
+                            }
+                        }
+                    }
+                } else Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = Spacing.md),
@@ -259,7 +295,10 @@ fun FeatureLimitUpsellScreen(
 
             // Info text
             Text(
-                "Upgrade now to start creating Ai Coaching Plans and accessing premium features. Your current plan renews automatically every month.",
+                if (notIncluded)
+                    "Upgrade now to start creating Ai Coaching Plans and accessing premium features. You can change or cancel your subscription at any time."
+                else
+                    "Upgrade now to start creating Ai Coaching Plans and accessing premium features. Your current plan renews automatically every month.",
                 style = AppTextStyles.small,
                 color = Colors.textSecondary,
                 textAlign = TextAlign.Center,
@@ -291,24 +330,39 @@ fun FeatureLimitUpsellScreenPreview() {
 // ── Variations for Different Features ────────────────────────────────────────
 
 /**
- * Feature Limit Upsell for AI Plan Generation
+ * Feature Limit Upsell for AI Plan Generation.
+ *
+ * [notIncluded] = AI Plans aren't part of the user's plan (free trial, or a Lite/Standard
+ * "no AI Plans" SKU) — shown with the server's explanation and an upgrade path rather than
+ * a "0 of 0 used" allowance card. [message] overrides the default copy (pass the server's).
  */
 @Composable
 fun AiPlanLimitUpsellScreen(
     nextRenewalDate: LocalDate? = null,
     usedCount: Int = 5,
     limitCount: Int = 5,
+    notIncluded: Boolean = false,
+    message: String? = null,
     onUpgradeClick: () -> Unit = { },
     onPromoCodeClick: () -> Unit = { },
     onBackClick: () -> Unit = { }
 ) {
     FeatureLimitUpsellScreen(
-        featureName = "AI Plan Generation",
+        featureName = if (notIncluded) "AI Training Plans" else "AI Plan Generation",
         featureEmoji = "📋",
-        message = "You've reached your monthly limit for AI-powered training plans.",
+        message = message ?: if (notIncluded)
+            "AI Training Plans aren't included in your current plan. Upgrade to a Lite or Standard plan with AI Plans to have your coach build a programme around your goal."
+        else
+            "You've reached your monthly limit for AI-powered training plans.",
         usedCount = usedCount,
         limitCount = limitCount,
         nextRenewalDate = nextRenewalDate,
+        notIncluded = notIncluded,
+        unlockPoints = listOf(
+            "A training plan built around your goal and fitness",
+            "Sessions that adapt to how your runs actually go",
+            "Live in-run coaching for every planned session"
+        ),
         onUpgradeClick = onUpgradeClick,
         onPromoCodeClick = onPromoCodeClick,
         onBackClick = onBackClick

@@ -231,17 +231,23 @@ export async function checkAndEnforceLimit(
     console.error(`[UsageService] Error checking unlimited grant: ${err}`);
   }
 
+  // ── Feature not included in this plan at all ────────────────────────────────
+  // A zero allowance (free trial → AI plans/routes; paid tiers without a feature)
+  // is not a "monthly limit reached" — there's nothing to wait for next month.
+  // Give the clients a distinct code + a message they can show verbatim, so a
+  // trial user sees "not included, upgrade" instead of "0 of 0 used, resets on…".
+  if (limit === 0) {
+    const notIncluded = featureNotIncludedResponse(feature, resolvedTier);
+    res.status(403).json(notIncluded);
+    return false;
+  }
+
   const yearMonth = currentYearMonth();
   const row = await storage.getMonthlyUsage(userId, yearMonth);
   const current = row[feature] as number;
 
   if (current + amount > limit) {
-    const featureLabel: Record<GatedFeature, string> = {
-      aiCoachingKm: "AI coaching",
-      trainingPlansGenerated: "Plans",
-      routesGenerated: "Routes",
-      postRunAnalyses: "post-run AI analysis",
-    };
+    const featureLabel = FEATURE_LABELS;
 
     const nextMonth = nextMonthLabel(yearMonth);
     const isFreeUser = resolvedTier === "free" || !tier;
@@ -267,6 +273,44 @@ export async function checkAndEnforceLimit(
   }
 
   return true;
+}
+
+/** Human-readable feature names shared by the limit responses and the availability endpoint. */
+export const FEATURE_LABELS: Record<GatedFeature, string> = {
+  aiCoachingKm: "AI coaching",
+  trainingPlansGenerated: "AI Training Plans",
+  routesGenerated: "Route generation",
+  postRunAnalyses: "post-run AI analysis",
+};
+
+/**
+ * Body for a feature whose allowance on the user's current plan is zero.
+ * `error` stays `ai_plans_not_included` for training plans (the code the
+ * ai_plans_enabled=false branch has always sent) so a client can treat "free trial"
+ * and "paid plan without AI Plans" identically; `reason` distinguishes them.
+ */
+export function featureNotIncludedResponse(feature: GatedFeature, resolvedTier: string) {
+  const isFreeTrial = resolvedTier === "free";
+  const label = FEATURE_LABELS[feature];
+  const message =
+    feature === "trainingPlansGenerated"
+      ? isFreeTrial
+        ? "AI Training Plans aren't included in the free trial. Upgrade to a Lite or Standard plan with AI Plans to have your coach build a programme around your goal."
+        : "AI Training Plans aren't included in your current plan. Switch to a Lite or Standard plan with AI Plans to generate one."
+      : isFreeTrial
+        ? `${label} isn't included in the free trial. Upgrade to a paid plan to unlock it.`
+        : `${label} isn't included in your current plan. Upgrade to unlock it.`;
+  return {
+    error: feature === "trainingPlansGenerated" ? "ai_plans_not_included" : "feature_not_included",
+    feature,
+    reason: isFreeTrial ? "free_trial" : "not_in_tier",
+    message,
+    upgradeRequired: true,
+    isFreeUser: isFreeTrial,
+    limit: 0,
+    used: 0,
+    remaining: 0,
+  };
 }
 
 /**

@@ -27,6 +27,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.BackHandler
 import androidx.hilt.navigation.compose.hiltViewModel
 import java.util.Locale
 import live.airuncoach.airuncoach.R
@@ -54,7 +55,9 @@ fun GeneratePlanScreen(
     onNavigateBack: () -> Unit,
     onPlanCreated: (String) -> Unit,  // planId
     /** Called when user taps "Create a goal first" — navigates to CreateGoalScreen in returnToPlan mode */
-    onCreateGoalFirst: () -> Unit = {}
+    onCreateGoalFirst: () -> Unit = {},
+    /** Opens the subscription screen from the "AI Plans not included / limit reached" upsell. */
+    onNavigateToSubscription: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val consentManager = remember { AiConsentManager(context) }
@@ -140,6 +143,23 @@ fun GeneratePlanScreen(
     ) { padding ->
         when (generateState) {
             is GeneratePlanState.Generating -> GeneratingScreen()
+            // The server refused because of the user's plan — free trial / no-AI-Plans SKU
+            // (notIncluded) or a used-up monthly allowance. Show the proper upsell screen
+            // rather than the form with a red error line.
+            is GeneratePlanState.LimitReached -> {
+                val limit = generateState as GeneratePlanState.LimitReached
+                BackHandler { viewModel.dismissLimitState() }
+                live.airuncoach.airuncoach.ui.components.AiPlanLimitUpsellScreen(
+                    nextRenewalDate = null,
+                    usedCount = limit.used,
+                    limitCount = limit.limit,
+                    notIncluded = limit.notIncluded,
+                    message = limit.message,
+                    onUpgradeClick = onNavigateToSubscription,
+                    onPromoCodeClick = { showPromoDialog = true },
+                    onBackClick = { viewModel.dismissLimitState() }
+                )
+            }
             else -> {
                 Column(
                     modifier = Modifier
@@ -790,59 +810,6 @@ fun GeneratePlanScreen(
                                 color = Colors.error,
                                 modifier = Modifier.padding(bottom = Spacing.md)
                             )
-                        }
-                        is GeneratePlanState.LimitReached -> {
-                            val limit = generateState as GeneratePlanState.LimitReached
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = Spacing.md),
-                                colors = CardDefaults.cardColors(containerColor = Colors.error.copy(alpha = 0.1f))
-                            ) {
-                                Column(modifier = Modifier.padding(Spacing.md)) {
-                                    Text(
-                                        limit.message,
-                                        style = AppTextStyles.body,
-                                        color = Colors.textPrimary,
-                                        modifier = Modifier.padding(bottom = Spacing.sm)
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = Spacing.sm),
-                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                                    ) {
-                                        Button(
-                                            onClick = { showPromoDialog = true },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(40.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text(
-                                                "Have a promo code?",
-                                                style = AppTextStyles.body,
-                                                color = Colors.buttonText
-                                            )
-                                        }
-                                        Button(
-                                            onClick = { /* Navigate to upgrade */ },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(40.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Colors.backgroundSecondary),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text(
-                                                "Upgrade",
-                                                style = AppTextStyles.body,
-                                                color = Colors.textPrimary
-                                            )
-                                        }
-                                    }
-                                }
-                            }
                         }
                         else -> {}
                     }

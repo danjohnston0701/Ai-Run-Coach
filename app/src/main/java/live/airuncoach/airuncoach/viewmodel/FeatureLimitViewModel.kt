@@ -61,7 +61,9 @@ class FeatureLimitViewModel @Inject constructor(
                     limit = response.limit ?: 0,
                     used = response.used ?: 0,
                     renewalDate = response.renewalDate?.let { parseDate(it) },
-                    isUnlimited = response.isUnlimited ?: false
+                    isUnlimited = response.isUnlimited ?: false,
+                    notIncluded = response.notIncluded ?: (response.limit == 0 && response.isUnlimited != true),
+                    serverMessage = response.message
                 )
             } catch (e: Exception) {
                 _aiPlanError.value = e.message ?: "Failed to check availability"
@@ -155,7 +157,11 @@ data class AiPlanAvailability(
     val limit: Int = 0,                 // Total allowed this month
     val used: Int = 0,                  // Already used
     val renewalDate: LocalDate? = null, // When subscription resets
-    val isUnlimited: Boolean = false    // Unlimited access?
+    val isUnlimited: Boolean = false,   // Unlimited access?
+    /** AI Plans aren't part of this user's plan at all (free trial / no-AI-Plans SKU). */
+    val notIncluded: Boolean = false,
+    /** Server's explanation, shown verbatim on the upsell screen when present. */
+    val serverMessage: String? = null
 ) {
     val message: String
         get() = when {
@@ -200,5 +206,8 @@ data class FeatureAvailabilityResponse(
     val used: Int? = null,
     val renewalDate: String? = null,
     val isUnlimited: Boolean? = false,
+    /** True when the allowance is 0 because the feature isn't in the plan (server ≥ 2026-09-18). */
+    val notIncluded: Boolean? = null,
+    val reason: String? = null,
     val message: String? = null
 )
