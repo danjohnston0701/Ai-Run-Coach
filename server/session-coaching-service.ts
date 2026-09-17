@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { runDistanceKm } from './utils/run-units';
 import { db } from "./db";
 import { sessionInstructions, plannedWorkouts, weeklyPlans, trainingPlans, users, runs } from "../shared/schema";
 import { eq, and, desc, isNotNull } from "drizzle-orm";
@@ -674,7 +675,7 @@ export async function getOrGenerateSessionCoaching(
   try {
     const rawRuns = await db.select().from(runs).where(eq(runs.userId, userId)).orderBy(desc(runs.completedAt)).limit(5);
     recentRuns = rawRuns.map(r => {
-      const distKm  = (r.distance ?? 0) / 1000;   // stored in metres
+      const distKm  = runDistanceKm(r.distance);   // km (legacy metre rows normalised)
       const durMin  = Math.round((r.duration ?? 0) / 60);
       const durSec  = r.duration ?? 0;
       const paceSecPerKm = distKm > 0 ? Math.round(durSec / distKm) : 0;

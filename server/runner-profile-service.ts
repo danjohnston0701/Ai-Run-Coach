@@ -52,6 +52,7 @@
  */
 
 import OpenAI, { APIError } from 'openai';
+import { runDistanceKm } from './utils/run-units';
 import { db } from './db';
 import {
   users, runs, userStats, goals, trainingPlans, plannedWorkouts,
@@ -108,6 +109,30 @@ export const RACE_DAY_MARKER = "RACE DAY";
 /** True when the given rendered runner profile says today is the runner's goal event. */
 export function profileIndicatesRaceDay(runnerProfile: string | null | undefined): boolean {
   return !!runnerProfile && runnerProfile.includes(`${RACE_DAY_MARKER}:`);
+}
+
+/**
+ * How much history we actually hold for this runner, phrased for a prompt.
+ *
+ * Every "recent 4 weeks" / "previous runs" figure is computed over a window that starts
+ * at account creation — the app has no idea what the runner did before they signed up.
+ * Without this the model reads "2 runs in the last 4 weeks" on a 3-day-old account as a
+ * comeback ("getting back into it after a quiet month", "concerning low engagement").
+ * Returns '' once the account is old enough that the window is genuinely 4+ weeks.
+ */
+export function accountDataWindowNote(createdAt: Date | string | null | undefined, now: Date = new Date()): string {
+  if (!createdAt) return '';
+  const created = new Date(createdAt);
+  if (isNaN(created.getTime())) return '';
+  const ageDays = Math.max(0, Math.floor((now.getTime() - created.getTime()) / 86_400_000));
+  if (ageDays >= 28) return '';
+  const since = created.toISOString().split('T')[0];
+  const ageLabel = ageDays === 0 ? 'today' : ageDays === 1 ? 'yesterday' : `${ageDays} days ago`;
+  return `DATA WINDOW: this runner created their account on ${since} (${ageLabel}). ` +
+    `Every figure below covers only the ${ageDays < 7 ? 'few days' : `${Math.ceil(ageDays / 7)} week(s)`} since then — ` +
+    `there is NO record of what they did before joining, and "no activity" before ${since} is missing data, not inactivity. ` +
+    `Do not describe them as returning, restarting, inconsistent, disengaged or "getting back into it"; ` +
+    `treat this as their opening baseline and coach forward from it.`;
 }
 
 export function runnerProfileBlock(profile: string | null | undefined): string {
@@ -334,9 +359,14 @@ interface RunnerContext {
   totalDistanceKm: number;
   totalHours: number;
 
-  // Weekly volume (last 4 weeks)
+  // Weekly volume over the observed window (up to the last 4 weeks — see weeksObserved)
   avgWeeklyRunsLast4Weeks: number;
   avgWeeklyKmLast4Weeks: number;
+  /** Weeks the averages above were divided by: 4, or fewer for accounts younger than 28 days. */
+  weeksObserved: number;
+  /** Account creation — the earliest point we can know anything about this runner. */
+  accountCreatedAt: Date | null;
+  accountAgeDays: number | null;
 
   // Personal bests (formatted strings)
   pb5k: string | null;
@@ -373,6 +403,8 @@ interface RunnerContext {
     avgHeartRate: number | null;
     elevationGainM: number | null;
     workoutType: string | null;
+    /** 'run' | 'walk' — walks must not be read as slow runs. */
+    sessionType: string | null;
     durationMin: number;
   }[];
 
@@ -405,11 +437,17 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
       desiredFitnessLevel:  users.desiredFitnessLevel,
       coachName:            users.coachName,
       injuryHistory:        users.injuryHistory,
+      createdAt:            users.createdAt,
     })
     .from(users)
     .where(eq(users.id, userId));
 
   if (!user) return null;
+
+  const accountCreatedAt = user.createdAt ? new Date(user.createdAt) : null;
+  const accountAgeDays = accountCreatedAt && !isNaN(accountCreatedAt.getTime())
+    ? Math.max(0, Math.floor((Date.now() - accountCreatedAt.getTime()) / 86_400_000))
+    : null;
 
   // ── 2. Cached totals + PBs + current profile + coaching observations ──────
   const [stats] = await db
@@ -443,6 +481,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
       avgHeartRate:  runs.avgHeartRate,
       elevationGain: runs.elevationGain,
       workoutType:   runs.workoutType,
+      sessionType:   runs.sessionType,
     })
     .from(runs)
     .where(eq(runs.userId, userId))
@@ -456,17 +495,24 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
     .where(and(eq(runs.userId, userId), gte(runs.completedAt, fourWeeksAgo)));
 
   const runsLast4Weeks = recentRunsForVolume.length;
-  const kmLast4Weeks   = recentRunsForVolume.reduce((sum, r) => sum + (r.distance ?? 0) / 1000, 0);
-  const avgWeeklyRunsLast4Weeks = Math.round((runsLast4Weeks / 4) * 10) / 10;
-  const avgWeeklyKmLast4Weeks   = Math.round((kmLast4Weeks   / 4) * 10) / 10;
+  const kmLast4Weeks   = recentRunsForVolume.reduce((sum, r) => sum + runDistanceKm(r.distance), 0);
+  // Average over the weeks we can actually see. A 3-day-old account with 2 sessions is
+  // "2 sessions in its first week", not "0.5 per week" — dividing by 4 regardless is what
+  // produced "concerning low engagement" for brand-new users.
+  const weeksObserved = accountAgeDays == null || accountAgeDays >= 28
+    ? 4
+    : Math.max(1, Math.ceil((accountAgeDays + 1) / 7));
+  const avgWeeklyRunsLast4Weeks = Math.round((runsLast4Weeks / weeksObserved) * 10) / 10;
+  const avgWeeklyKmLast4Weeks   = Math.round((kmLast4Weeks   / weeksObserved) * 10) / 10;
 
   const recentRuns = recentRawRuns.map(r => ({
     date:           r.completedAt?.toISOString().split('T')[0] ?? '',
-    distanceKm:     Math.round(((r.distance ?? 0) / 1000) * 100) / 100,
+    distanceKm:     Math.round(runDistanceKm(r.distance) * 100) / 100,
     avgPace:        r.avgPace ?? null,
     avgHeartRate:   r.avgHeartRate ?? null,
     elevationGainM: r.elevationGain != null ? Math.round(r.elevationGain) : null,
     workoutType:    r.workoutType ?? null,
+    sessionType:    r.sessionType ?? null,
     durationMin:    Math.round((r.duration ?? 0) / 60),
   }));
 
@@ -516,6 +562,10 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
   let imminentGoal: { title: string; daysUntil: number } | null = null;
   for (const g of activeGoalRows) {
     if (!g.targetDate) continue;
+    // Only an EVENT (race / organised run) is something to taper for and "race" on the day.
+    // A CONSISTENCY / HEALTH_WELLBEING / DISTANCE_TIME goal's target date is a deadline,
+    // not a start line — "walk daily by 30 Sep" was being coached as an upcoming race.
+    if ((g.type ?? '').toUpperCase() !== 'EVENT') continue;
     const daysUntil = Math.round((startOfDayUTC(g.targetDate) - todayUTC) / 86_400_000);
     if (daysUntil < 0 || daysUntil > 14) continue;
     if (!imminentGoal || daysUntil < imminentGoal.daysUntil) {
@@ -575,6 +625,9 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
 
     avgWeeklyRunsLast4Weeks,
     avgWeeklyKmLast4Weeks,
+    weeksObserved,
+    accountCreatedAt,
+    accountAgeDays,
 
     pb5k:      fmtPb(stats?.pb5kDurationMs,       5.0),
     pb10k:     fmtPb(stats?.pb10kDurationMs,      10.0),
@@ -660,8 +713,13 @@ async function generateProfile(ctx: RunnerContext): Promise<string> {
   ].filter(Boolean).join(', ');
 
   const recentRunLines = ctx.recentRuns.slice(0, 8).map(r =>
-    `${r.date}: ${r.distanceKm}km in ${r.durationMin}min${r.avgPace ? ` @ ${r.avgPace}/km` : ''}${r.elevationGainM ? ` (+${r.elevationGainM}m elev)` : ''}${r.workoutType ? ` [${r.workoutType}]` : ''}${r.avgHeartRate ? ` HR:${r.avgHeartRate}` : ''}`,
+    `${r.date}: ${r.sessionType === 'walk' ? 'WALK ' : ''}${r.distanceKm}km in ${r.durationMin}min${r.avgPace ? ` @ ${r.avgPace}/km` : ''}${r.elevationGainM ? ` (+${r.elevationGainM}m elev)` : ''}${r.workoutType ? ` [${r.workoutType}]` : ''}${r.avgHeartRate ? ` HR:${r.avgHeartRate}` : ''}`,
   ).join('\n');
+
+  const dataWindowNote = accountDataWindowNote(ctx.accountCreatedAt);
+  const windowLabel = ctx.weeksObserved < 4
+    ? `Since joining (${ctx.weeksObserved} week${ctx.weeksObserved === 1 ? '' : 's'} of data)`
+    : 'Recent 4-week avg';
 
   const lastRunNote = ctx.lastRun
     ? `Last run: ${ctx.lastRun.date}, ${ctx.lastRun.distanceKm}km, ${ctx.lastRun.durationMin}min${ctx.lastRun.avgPace ? ` @ ${ctx.lastRun.avgPace}/km` : ''}.`
@@ -712,14 +770,14 @@ ${obsLines}`;
   })();
 
   const userPrompt = `
-RUNNER DATA:
+${dataWindowNote ? dataWindowNote + '\n\n' : ''}RUNNER DATA:
 Name: ${ctx.name}${ctx.age ? `, Age: ${ctx.age}` : ''}${ctx.gender ? `, Gender: ${ctx.gender}` : ''}
 ${physicalLine ? physicalLine + '\n' : ''}Fitness level: ${ctx.fitnessLevel ?? 'not set'} → aiming for: ${ctx.desiredFitnessLevel ?? 'not set'}
-${injuryNote}
+${injuryNote}${ctx.accountCreatedAt ? `\nAccount created: ${ctx.accountCreatedAt.toISOString().split('T')[0]}${ctx.accountAgeDays != null ? ` (${ctx.accountAgeDays} days ago)` : ''} — data starts here.` : ''}
 
-TOTALS:
-${ctx.totalRuns} runs | ${ctx.totalDistanceKm}km | ${ctx.totalHours} hours lifetime
-Recent 4-week avg: ${ctx.avgWeeklyRunsLast4Weeks} runs/week, ${ctx.avgWeeklyKmLast4Weeks}km/week
+TOTALS (since joining):
+${ctx.totalRuns} sessions | ${ctx.totalDistanceKm}km | ${ctx.totalHours} hours
+${windowLabel}: ${ctx.avgWeeklyRunsLast4Weeks} sessions/week, ${ctx.avgWeeklyKmLast4Weeks}km/week
 
 PERSONAL BESTS:
 ${pbLines || 'None recorded yet'}
@@ -763,7 +821,11 @@ INCLUDE (where data is available):
 
 TONE: Factual and concise. No fluff. Write as a coach would brief a colleague.
 FORMAT: Plain text only. No bullet points, headers, or markdown. One flowing paragraph or two short paragraphs.
-DO NOT fabricate data not provided. If a field is missing, simply omit it.`
+DO NOT fabricate data not provided. If a field is missing, simply omit it.
+DATA STARTS AT ACCOUNT CREATION: the app only knows what the runner has done since they joined.
+A new account with a few sessions is a runner establishing a baseline, not one returning from
+a break — never infer inactivity, a comeback, or "getting back into it" from the absence of
+earlier data. Sessions marked WALK are walks; describe them as walking, not as slow running.`
 
     : `You are an AI running coach maintaining your living knowledge of a specific runner.
 
@@ -786,7 +848,11 @@ FORMAT: Plain text only. No bullet points, headers, or markdown. Third person ("
 One flowing paragraph or two short paragraphs. 150–280 words.
 TONE: Factual and sharp. Coaches briefing each other. No filler.
 DO NOT fabricate data not provided. Only reference observed patterns that appear in the
-coaching observations log above — don't invent tendencies.`;
+coaching observations log above — don't invent tendencies.
+DATA STARTS AT ACCOUNT CREATION: if the runner joined recently, everything you know covers
+only that window. Never describe them as returning, restarting, inconsistent or disengaged
+because there is nothing before their join date — that is missing data, not a quiet month.
+Sessions marked WALK are walks; describe them as walking, not as slow running.`;
 
   let completion: Awaited<ReturnType<typeof openai.chat.completions.create>>;
   try {

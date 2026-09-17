@@ -516,6 +516,43 @@ export async function runAutoMigrations(): Promise<void> {
     console.warn(`[AutoMigrate] Admin email setup (non-fatal): ${err.message}`);
   }
 
+  // ── One-time data repair: coaching observation distances written as metres÷1000 ──
+  // POST /api/runs/:id/comprehensive-analysis stored `distanceKm = runs.distance / 1000`
+  // on the assumption the column was metres; it's kilometres, so every observation
+  // (which the AI runner profile reads back as "[date · 0.01km · score]") was ~1000×
+  // too small. Re-derive from the run row for any observation under 0.2 km that still
+  // has a resolvable runId. Idempotent — the WHERE clause makes it a no-op once clean.
+  try {
+    const result = await pool.query(`
+      UPDATE user_stats s
+      SET coaching_observations = (
+        SELECT jsonb_agg(
+          CASE
+            WHEN r.id IS NOT NULL AND (o->>'distanceKm')::numeric < 0.2
+            THEN jsonb_set(o, '{distanceKm}', to_jsonb(round((CASE WHEN r.distance > 200 THEN r.distance / 1000.0 ELSE r.distance END)::numeric, 2)))
+            ELSE o
+          END ORDER BY t.ord
+        )
+        FROM jsonb_array_elements(s.coaching_observations) WITH ORDINALITY AS t(o, ord)
+        LEFT JOIN runs r ON r.id = t.o->>'runId'
+      )
+      WHERE s.coaching_observations IS NOT NULL
+        AND jsonb_typeof(s.coaching_observations) = 'array'
+        AND jsonb_array_length(s.coaching_observations) > 0
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(s.coaching_observations) o
+          JOIN runs r ON r.id = o->>'runId'
+          WHERE (o->>'distanceKm')::numeric < 0.2
+            AND (CASE WHEN r.distance > 200 THEN r.distance / 1000.0 ELSE r.distance END) >= 0.2
+        )
+    `);
+    if (result.rowCount && result.rowCount > 0) {
+      console.log(`[AutoMigrate] Repaired coaching_observations distanceKm for ${result.rowCount} user(s)`);
+    }
+  } catch (err: any) {
+    console.warn(`[AutoMigrate] coaching_observations distance repair (non-fatal): ${err.message}`);
+  }
+
   // ── One-time data repair: fix corrupted aiCoachingNotes timestamps ──────────
   // The POST /api/runs handler was passing note.time through parseDate(), which
   // treated the elapsed-ms value as SECONDS and multiplied by 1000.  This made

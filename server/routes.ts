@@ -90,6 +90,7 @@ import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
 import googlePlayRouter from "./routes-google-play";
+import { runDistanceKm } from "./utils/run-units";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
@@ -3997,6 +3998,7 @@ function transformRunForAndroid(run: any) {
           avgWakingRespirationValue: wellness.avgWakingRespirationValue || undefined,
         } : undefined,
         previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 10),
+        accountCreatedAt: analysisUser?.createdAt ?? null,
         userProfile: user ? {
           fitnessLevel: user.fitnessLevel || undefined,
           age: user.dob ? (() => { 
@@ -4136,7 +4138,7 @@ function transformRunForAndroid(run: any) {
         const observation = {
           date:             new Date().toISOString().split('T')[0],
           runId,
-          distanceKm:       Math.round(((run.distance ?? 0) / 1000) * 100) / 100,
+          distanceKm:       Math.round(runDistanceKm(run.distance) * 100) / 100,
           workoutType:      run.workoutType ?? null,
           performanceScore: (analysis as any).performanceScore ?? null,
           patternObserved:  (analysis as any).runPatternAnalysis ?? null,
@@ -6124,15 +6126,18 @@ function transformRunForAndroid(run: any) {
   /**
    * POST /api/subscriptions/verify-purchase
    *
-   * Called by the Android app after a Google Play purchase is acknowledged.
-   * Updates the user's subscription tier, status, billing period, and approximate
-   * expiry date in the database so all services read the correct entitlement.
+   * Called by the Android app after a Google Play purchase is acknowledged, and again on
+   * every app start for each active subscription (BillingManager.queryAndSyncPurchases),
+   * which keeps the DB in sync after automatic renewals.
    *
-   * Also called on app startup when the billing client detects an active
-   * subscription, which keeps the DB in sync after automatic renewals.
+   * Verification lives in google-play-billing.ts: with GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
+   * configured the token is checked against the Play Developer API and the *real*
+   * state/expiry is applied (a cancelled-and-lapsed token no longer re-grants the tier);
+   * without it we fall back to trusting the client productId with a guessed expiry, but the
+   * token is still recorded so the hourly reconcile can verify it once the key is in place.
    *
    * Product ID convention:
-   *   lite_monthly, lite_annual, standard_monthly, standard_annual
+   *   lite_monthly, lite_annual, standard_monthly, standard_annual (+ *_noaiplan_* variants)
    */
   app.post("/api/subscriptions/verify-purchase", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -16262,6 +16267,7 @@ function transformRunForAndroid(run: any) {
           runData: runDataForAi,
           sessionType: runDataForAi.sessionType,
           previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 10),
+          accountCreatedAt: user?.createdAt ?? null,
           weatherImpactAnalysis: weatherImpactAnalysis || undefined,
           userProfile: body.userProfile || (user ? {
             fitnessLevel: user.fitnessLevel || undefined,

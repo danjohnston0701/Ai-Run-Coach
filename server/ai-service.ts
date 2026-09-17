@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { COACHING_PHASE_PROMPT, determinePhase, type CoachingPhase } from "../shared/coaching-statements";
-import { runnerProfileBlock, profileIndicatesRaceDay } from "./runner-profile-service";
+import { runnerProfileBlock, profileIndicatesRaceDay, accountDataWindowNote } from "./runner-profile-service";
 import { resolveActivityType, activityVocab } from "./coaching-activity";
 import * as runPrompts from "./coaching-prompts-run";
 import * as walkPrompts from "./coaching-prompts-walk";
@@ -4572,6 +4572,11 @@ export async function generateComprehensiveRunAnalysis(params: {
   }>;
   expectedSessionGoal?: string;
   runnerProfile?: string | null;
+  /**
+   * When the account was created. History before this simply doesn't exist, so the
+   * "recent run history" must not be read as a comeback / low engagement for new users.
+   */
+  accountCreatedAt?: Date | string | null;
   /** Coaching insight from plan reassessment (or null for users without a plan). */
   coachingInsight?: {
     reason: string;
@@ -5126,10 +5131,19 @@ Acknowledge how weather conditions impacted performance in your analysis.
 `;
   }
 
+  // How far back our knowledge of this runner actually goes. Without it, a first or
+  // second session on a days-old account reads as "no activity in weeks → comeback".
+  const dataWindowNote = accountDataWindowNote(params.accountCreatedAt);
+  if (dataWindowNote) {
+    prompt += `
+## ${dataWindowNote}
+`;
+  }
+
   // Add historical context if available
   if (previousRuns && previousRuns.length > 0) {
     prompt += `
-## RECENT RUN HISTORY (last ${Math.min(previousRuns.length, 10)} runs):
+## RECENT RUN HISTORY (last ${Math.min(previousRuns.length, 10)} runs${dataWindowNote ? ' — all since the account was created' : ''}):
 Use this to identify patterns in their running - pace trends, consistency, pacing strategy, heart rate patterns, etc.
 `;
     previousRuns.slice(0, 10).forEach((run, i) => {
@@ -5148,6 +5162,10 @@ PATTERN ANALYSIS GUIDANCE:
 - Are there patterns in when they struggle?
 - How does their heart rate respond to effort?
 - Any improvements since previous weeks?
+${dataWindowNote ? '- This account is new: judge trajectory only within the sessions listed. Do NOT call the runner inconsistent, returning or "getting back into it" — you have no earlier data.\n' : ''}`;
+  } else if (dataWindowNote) {
+    prompt += `
+## RUN HISTORY: none yet — this is the first session recorded on this account. Treat it as the baseline, not a return from a break.
 `;
   }
 
