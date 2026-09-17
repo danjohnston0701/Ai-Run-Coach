@@ -6822,6 +6822,24 @@ private fun tanakaMaxHr(userAge: Int?): Int =
  * This shows cadence as a percentage of their personalized target,
  * creating a 0-100% scale on the ring visualization.
  */
+/** Brisk-walking cadence band; walks are scored against this instead of the running formula. */
+private val WALK_CADENCE_RANGE = 100..120
+
+/**
+ * Walking cadence quality: 100% anywhere inside [WALK_CADENCE_RANGE], then −5% per spm
+ * outside it (0% at 20 spm out). Same scoring as iOS's RunSummaryScreen so a walk reads
+ * identically on both platforms.
+ */
+private fun walkCadenceQualityScore(actual: Int): Float {
+    if (actual <= 0) return 0f
+    val delta = when {
+        actual < WALK_CADENCE_RANGE.first -> WALK_CADENCE_RANGE.first - actual
+        actual > WALK_CADENCE_RANGE.last  -> actual - WALK_CADENCE_RANGE.last
+        else -> 0
+    }
+    return (1f - delta / 20f).coerceIn(0f, 1f)
+}
+
 private fun cadenceQualityScore(actual: Int, targetCadence: Int): Float {
     if (actual <= 0 || targetCadence <= 0) return 0f
     
@@ -6902,12 +6920,13 @@ private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightC
     ) {
         computeOptimalCadence(run, userHeightCm, userAge, userWeightKg)
     }
-    val cadenceScore = remember(run.cadence, targetCadence) {
-        cadenceQualityScore(run.cadence, targetCadence)
-    }
     val isWalking = (run.averageSpeed > 0f && run.averageSpeed < 2.0f) ||
                     (run.averageSpeed <= 0f && run.distance > 0 && run.duration > 0 &&
                      run.distance / (run.duration / 1000.0) < 2.0)
+    val cadenceScore = remember(run.cadence, targetCadence, isWalking) {
+        if (isWalking) walkCadenceQualityScore(run.cadence)
+        else cadenceQualityScore(run.cadence, targetCadence)
+    }
     val cadenceFraction: Float? = if (!hasHr && run.cadence > 0) cadenceScore else null
     
     // Color based on cadence percentage of target
@@ -7007,7 +7026,8 @@ private fun RunMetricRingsRow(run: RunSession, userAge: Int? = null, userHeightC
                         value = cadenceFraction?.let { "${(it * 100).roundToInt()}%" } ?: "—",
                         subLabel = if (run.cadence > 0) "${run.cadence} spm" else "No data",
                         targetLabel = if (run.cadence > 0)
-                            "target $targetCadence spm"
+                            if (isWalking) "target ${WALK_CADENCE_RANGE.first}–${WALK_CADENCE_RANGE.last} spm"
+                            else "target $targetCadence spm"
                         else null,
                         progress = cadenceFraction ?: 0f,
                         ringColor = cadenceColor,
