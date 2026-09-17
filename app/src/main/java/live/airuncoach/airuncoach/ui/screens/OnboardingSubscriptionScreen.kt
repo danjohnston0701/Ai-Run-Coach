@@ -448,8 +448,8 @@ private fun TrialSummaryCard() {
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            FeatureItem("15 km of realtime AI coaching and run insights")
-            FeatureItem("3 post-run AI summaries")
+            FeatureItem("50 km of realtime AI coaching and run insights per month")
+            FeatureItem("15 post-run AI summaries per month")
             FeatureItem("Garmin watch compatibility for enhanced insights and reporting")
         }
     }

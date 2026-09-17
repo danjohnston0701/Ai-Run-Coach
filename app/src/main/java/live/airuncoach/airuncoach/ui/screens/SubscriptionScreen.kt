@@ -1086,7 +1086,7 @@ private fun UsageTabContent(
             }
         }
 
-        // Usage Rows — limit values reflect the trial caps (15km, 3 summaries, 0 routes, 0 plans)
+        // Usage Rows — limit values come from the server (tier-limits.ts)
         item {
             when (usageState) {
                 is SubscriptionViewModel.UsageState.Success -> {
@@ -1231,13 +1231,15 @@ private fun UsageRowsContainer(
     isTrialExpired: Boolean = false,
     isPremium: Boolean = false
 ) {
-    // For free-trial users the caps are fixed regardless of what the server returns,
-    // so we always display the correct trial limits in the UI.
+    // Limits come straight from /api/usage/current — server/tier-limits.ts is the single
+    // source of truth for every tier and SKU (trial, Lite/Standard, with or without AI
+    // Plans). Hard-coding the trial caps here previously meant a quota change on the server
+    // showed stale numbers in this tile until an app release.
     val isFreeTrial = !isPremium
-    val coachingLimit = if (isFreeTrial) 15 else usage.aiCoachingKmLimit
-    val summariesLimit = if (isFreeTrial) 3 else usage.postRunAnalysesLimit
-    val routesLimit = if (isFreeTrial) 0 else usage.routesGeneratedLimit
-    val plansLimit = if (isFreeTrial) 0 else usage.trainingPlansLimit
+    val coachingLimit = usage.aiCoachingKmLimit
+    val summariesLimit = usage.postRunAnalysesLimit
+    val routesLimit = usage.routesGeneratedLimit
+    val plansLimit = usage.trainingPlansLimit
 
     Card(
         modifier = Modifier
@@ -1573,11 +1575,11 @@ data class PlanData(
             accentColor = Color(0xFF8E9BAE),
             monthlyEquivalent = "No credit card required",
             features = listOf(
-                PlanFeature("15km of AI Coaching during trial", true),
-                PlanFeature("3 AI Session Summaries during trial", true),
+                PlanFeature("50km of AI Coaching per month during trial", true),
+                PlanFeature("15 AI Session Summaries per month during trial", true),
                 PlanFeature("No AI Route Generation", false),
                 PlanFeature("No AI Training Plans", false),
-                PlanFeature("Full access expires after 14 days", false)
+                PlanFeature("Full access expires when the trial ends", false)
             )
         )
 
@@ -1591,8 +1593,8 @@ data class PlanData(
             accentColor = Colors.primary,
             features = listOf(
                 PlanFeature("Unlimited AI Sessions", true),
-                PlanFeature("50km of AI Coaching per month", true),
-                PlanFeature("15 AI Session Summaries per month", true),
+                PlanFeature("100km of AI Coaching per month", true),
+                PlanFeature("20 AI Session Summaries per month", true),
                 PlanFeature("10 AI Route Generations per month", true),
                 PlanFeature("1 AI Training Plan per month", true)
             )
@@ -1608,14 +1610,16 @@ data class PlanData(
             accentColor = Color(0xFFA78BFA),
             features = listOf(
                 PlanFeature("Unlimited AI Sessions", true),
-                PlanFeature("200km of AI Coaching per month", true),
-                PlanFeature("50 AI Session Summaries per month", true),
+                PlanFeature("400km of AI Coaching per month", true),
+                PlanFeature("75 AI Session Summaries per month", true),
                 PlanFeature("30 AI Route Generations per month", true),
                 PlanFeature("3 AI Training Plan generations per month", true)
             )
         )
 
-        // "No AI Plans" variants — same tier limits otherwise, AI Training Plans excluded.
+        // "No AI Plans" variants — AI Training Plans excluded, and they keep the original
+        // (smaller) coaching/summary allowances; only the AI-Plans SKUs got the 2026-09 uplift.
+        // Mirrors server/tier-limits.ts lite_noaiplan / standard_noaiplan.
         // Pricing is a placeholder pending final confirmation (see /api/googlePlayPricing).
         val LITE_NOAI = LITE.copy(
             monthlyPriceDisplay = "USD 3.99",

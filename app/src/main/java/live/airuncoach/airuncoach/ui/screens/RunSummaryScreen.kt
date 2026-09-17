@@ -2310,7 +2310,8 @@ private fun AiAnalysisLimitCard(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 val nextTier = if (state.isFreeUser || state.isTrialExpired) "Lite" else "Standard"
-                val nextLimit = if (state.isFreeUser || state.isTrialExpired) "15" else "50"
+                // Lite / Standard with AI Plans — mirrors server/tier-limits.ts postRunAnalyses
+                val nextLimit = if (state.isFreeUser || state.isTrialExpired) "20" else "75"
                 Text(
                     "💡 Upgrade to $nextTier to get $nextLimit AI analyses per month + training plans, route generation and more.",
                     style = AppTextStyles.caption.copy(fontWeight = FontWeight.Medium),
