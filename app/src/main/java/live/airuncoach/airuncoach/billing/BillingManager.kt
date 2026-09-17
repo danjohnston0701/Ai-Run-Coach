@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.VerifyPurchaseRequest
@@ -27,7 +28,12 @@ import javax.inject.Singleton
  *  - Acknowledge completed purchases
  *  - Call POST /api/subscriptions/verify-purchase so the backend database is
  *    kept in sync with the user's entitlement (fixes the bug where the DB was
- *    never updated after a Google Play purchase)
+ *    never updated after a Google Play purchase). The backend verifies the
+ *    token against the Play Developer API; cancellations/expiries are pushed
+ *    to it via RTDN and an hourly reconcile, so the DB tier — not this client —
+ *    is the source of truth for whether a lapsed subscriber still has access.
+ *  - Tag each purchase with the user ID (setObfuscatedAccountId) so the backend
+ *    can link Play notifications back to the account
  *  - Update the locally-cached user profile in SharedPreferences so the UI
  *    reflects the new tier immediately
  *  - Expose [purchaseVerificationResult] so ViewModels can react to purchase
@@ -36,7 +42,8 @@ import javax.inject.Singleton
 @Singleton
 class BillingManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val apiService: ApiService
+    private val apiService: ApiService,
+    private val sessionManager: SessionManager
 ) {
     private lateinit var billingClient: BillingClient
 
@@ -192,6 +199,13 @@ class BillingManager @Inject constructor(
                             .build()
                     )
                 )
+                .apply {
+                    // Google echoes this back as externalAccountIdentifiers.obfuscatedExternalAccountId
+                    // on the Play Developer API, which is how the backend links an RTDN
+                    // (renewal / cancellation / expiry) to a user when the purchase token isn't
+                    // already on file — the Play analogue of StoreKit's appAccountToken.
+                    sessionManager.getUserId()?.let { setObfuscatedAccountId(it) }
+                }
                 .build()
 
             billingClient.launchBillingFlow(activity, flowParams)
@@ -271,8 +285,20 @@ class BillingManager @Inject constructor(
                 )
             )
 
-            if (response.success) {
-                Log.i(TAG, "Backend confirmed tier=${response.tier} billingPeriod=${response.billingPeriod}")
+            if (response.success && !response.entitled) {
+                // The backend checked the token with Google and it no longer grants access
+                // (expired / on hold / revoked). Play can still hand us such a purchase from
+                // queryPurchasesAsync for a short while after lapse — take the DB's word for
+                // the tier rather than the product ID, and don't announce a purchase.
+                Log.w(TAG, "Backend says purchase is not entitled (state=${response.subscriptionState}) — tier=${response.tier}")
+                updateCachedUserTier(
+                    tier               = response.tier,
+                    subscriptionStatus = response.subscriptionStatus,
+                    aiPlansEnabled     = response.user?.aiPlansEnabled ?: true,
+                    updatedUser        = response.user
+                )
+            } else if (response.success) {
+                Log.i(TAG, "Backend confirmed tier=${response.tier} billingPeriod=${response.billingPeriod} expires=${response.expiresAt}")
 
                 // ── Update the locally-cached user profile ───────────────────
                 // The SubscriptionViewModel reads subscriptionTier from this

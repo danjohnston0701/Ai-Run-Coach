@@ -89,6 +89,7 @@ import { refreshStravaToken } from "./strava-oauth-service";
 import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
+import googlePlayRouter from "./routes-google-play";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
@@ -141,6 +142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/my-data", myDataRouter);
   app.use("/api/coaching", realtimeCoachingRouter); // Real-time biomechanical coaching
   app.use("/api", achievementsRouter);
+  app.use("/api", googlePlayRouter); // Google Play RTDN (Pub/Sub push) — see routes-google-play.ts
   registerSessionCoachingRoutes(app);
 
   // Version probe — tells us immediately which build is running
@@ -6141,60 +6143,56 @@ function transformRunForAndroid(run: any) {
         return res.status(400).json({ error: "purchaseToken and productId are required" });
       }
 
-      // ── Derive tier, billing period, and AI-plans inclusion from productId ──
-      // e.g. "lite_monthly" → tier="lite", billingPeriod="monthly", aiPlansEnabled=true
-      //      "standard_annual" → tier="standard", billingPeriod="annual", aiPlansEnabled=true
-      //      "lite_noaiplan_monthly" → tier="lite", billingPeriod="monthly", aiPlansEnabled=false
-      //      "standard_noaiplan_annual" → tier="standard", billingPeriod="annual", aiPlansEnabled=false
-      let tier: string;
-      let billingPeriod: string;
+      const {
+        verifyAndApplyPurchase,
+        mapPlayProductIdToTier,
+        PurchaseNotFoundError,
+        GOOGLE_PLAY_PACKAGE_NAME,
+      } = await import("./google-play-billing");
 
-      if (productId.startsWith("lite")) {
-        tier = "lite";
-      } else if (productId.startsWith("standard")) {
-        tier = "standard";
-      } else {
+      if (!mapPlayProductIdToTier(productId)) {
         console.warn(`[Subscription] Unknown productId: ${productId} for user ${userId}`);
         return res.status(400).json({ error: `Unknown product ID: ${productId}` });
       }
 
-      billingPeriod = productId.endsWith("annual") ? "annual" : "monthly";
-      const aiPlansEnabled = !productId.includes("noai");
-
-      // ── Calculate approximate next renewal date ─────────────────────────────
-      const now = new Date();
-      const expiresAt = new Date(now);
-      if (billingPeriod === "annual") {
-        expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-      } else {
-        expiresAt.setMonth(expiresAt.getMonth() + 1);
+      let applied;
+      try {
+        applied = await verifyAndApplyPurchase(userId, purchaseToken, productId, packageName || GOOGLE_PLAY_PACKAGE_NAME);
+      } catch (err: any) {
+        if (err instanceof PurchaseNotFoundError) {
+          console.warn(`[Subscription] ${err.message} (user ${userId}, product ${productId})`);
+          return res.status(400).json({ error: "Purchase could not be verified with Google Play" });
+        }
+        throw err;
       }
 
-      // ── Update user record in database ──────────────────────────────────────
-      const updatedUser = await storage.updateUser(userId, {
-        subscriptionTier: tier,
-        subscriptionStatus: "active",
-        entitlementType: `google_play_${billingPeriod}`,   // e.g. "google_play_monthly"
-        entitlementExpiresAt: expiresAt,
-        aiPlansEnabled,
-      });
-
+      const updatedUser = await storage.getUser(userId);
       if (!updatedUser) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      console.log(
-        `[Subscription] ✅ User ${userId} (${updatedUser.email}) upgraded to ${tier} ` +
-        `(${billingPeriod}, AI Plans ${aiPlansEnabled ? "enabled" : "disabled"}) via Google Play. Token: ${purchaseToken.substring(0, 20)}...`
-      );
+      if (applied.entitled) {
+        console.log(
+          `[Subscription] ✅ User ${userId} (${updatedUser.email}) on ${applied.tier} ` +
+          `(${applied.billingPeriod}, AI Plans ${applied.aiPlansEnabled ? "enabled" : "disabled"}) via Google Play. Token: ${purchaseToken.substring(0, 20)}...`
+        );
+      } else {
+        console.log(
+          `[Subscription] ⚠️ User ${userId} presented a ${applied.subscriptionState} Google Play token for ${productId} — not granted`
+        );
+      }
 
+      // Shape is what BillingManager.kt's VerifyPurchaseResponse expects. For a non-entitled
+      // token, `tier` reflects what the DB now says (may be "free") rather than the product.
       res.json({
         success: true,
-        tier,
-        billingPeriod,
-        aiPlansEnabled,
-        subscriptionStatus: "active",
-        expiresAt: expiresAt.toISOString(),
+        entitled: applied.entitled,
+        tier: applied.entitled ? applied.tier : (updatedUser.subscriptionTier || "free"),
+        billingPeriod: applied.billingPeriod ?? (productId.endsWith("annual") ? "annual" : "monthly"),
+        aiPlansEnabled: applied.entitled ? applied.aiPlansEnabled : (updatedUser.aiPlansEnabled ?? true),
+        subscriptionStatus: applied.entitled ? "active" : (updatedUser.subscriptionStatus || applied.subscriptionStatus),
+        subscriptionState: applied.subscriptionState,
+        expiresAt: applied.expiresAt ? applied.expiresAt.toISOString() : null,
         user: updatedUser,
       });
     } catch (error: any) {

@@ -45,12 +45,21 @@ data class PricingTierData(
 
 data class VerifyPurchaseResponse(
     val success: Boolean,
-    /** "lite" or "standard" */
+    /**
+     * Whether Google Play confirmed the token still grants access. False when the backend
+     * (verifying against the Play Developer API) found the subscription expired / on hold /
+     * revoked — in that case [tier] and [user] describe the DB's current state, not the product.
+     * Defaults to true for older backends that don't send it.
+     */
+    val entitled: Boolean = true,
+    /** "lite" or "standard" (or "free" when [entitled] is false) */
     val tier: String,
     /** "monthly" or "annual" */
     val billingPeriod: String,
     val subscriptionStatus: String,
-    /** ISO-8601 timestamp of the approximate next renewal date. */
+    /** Google's SubscriptionPurchaseV2.subscriptionState, e.g. SUBSCRIPTION_STATE_ACTIVE (null on older backends). */
+    val subscriptionState: String? = null,
+    /** ISO-8601 timestamp of the next renewal / expiry date (real when server-verified). */
     val expiresAt: String? = null,
     /** Full updated user record — cache this in SharedPreferences. */
     val user: User? = null

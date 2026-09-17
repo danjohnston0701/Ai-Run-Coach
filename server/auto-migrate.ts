@@ -452,6 +452,38 @@ export async function runAutoMigrations(): Promise<void> {
       sql: "CREATE INDEX IF NOT EXISTS idx_apple_transactions_original_id ON apple_transactions(original_transaction_id)",
     },
 
+    // ── google_play_transactions ─────────────────────────────────────────────────
+    // Purchase-token → user mapping for Google Play subscriptions (the Play analogue of
+    // apple_transactions). Written by verify-purchase, RTDN and the hourly reconcile in
+    // google-play-billing.ts. Canonical copy: migrations/20260918_google_play_transactions.sql
+    {
+      name: "google_play_transactions.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS google_play_transactions (
+          id                    VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id               VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          purchase_token        TEXT NOT NULL UNIQUE,
+          product_id            VARCHAR NOT NULL,
+          package_name          VARCHAR NOT NULL DEFAULT 'live.airuncoach.airuncoach',
+          linked_purchase_token TEXT,
+          expiry_time           TIMESTAMP,
+          auto_renewing         BOOLEAN DEFAULT FALSE,
+          subscription_state    VARCHAR,
+          last_checked_at       TIMESTAMP,
+          created_at            TIMESTAMP DEFAULT NOW(),
+          updated_at            TIMESTAMP DEFAULT NOW()
+        )
+      `,
+    },
+    {
+      name: "idx_google_play_transactions_user",
+      sql: "CREATE INDEX IF NOT EXISTS idx_google_play_transactions_user ON google_play_transactions(user_id)",
+    },
+    {
+      name: "idx_google_play_transactions_expiry",
+      sql: "CREATE INDEX IF NOT EXISTS idx_google_play_transactions_expiry ON google_play_transactions(expiry_time)",
+    },
+
     // ── users.apple_account_token ───────────────────────────────────────────────
     // Store the app account token to link Apple notifications to users
     {

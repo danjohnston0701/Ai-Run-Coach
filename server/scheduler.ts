@@ -7,6 +7,7 @@ import { db } from './db';
 import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '@shared/schema';
 import { eq, and, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
+import { reconcileGooglePlaySubscriptions } from './google-play-billing';
 import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek, correctImplausibleHRZoneBPMs } from './session-enrichment-service';
 
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
@@ -334,6 +335,26 @@ export function startScheduler(): void {
     }
   });
   console.log('[Scheduler] BPM self-healing scheduled (daily at 6:10 AM UTC)');
+
+  // Google Play subscription reconcile — safety net for missed RTDNs and for the
+  // pre-RTDN guessed expiry dates. Re-checks lapsed purchase tokens against the Play
+  // Developer API and clears tiers that Google says have expired. No-ops (skipped=true)
+  // until GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is configured.
+  cron.schedule('15 * * * *', async () => {
+    try {
+      const r = await reconcileGooglePlaySubscriptions();
+      if (r.skipped) return;
+      if (r.tokensChecked + r.usersChecked > 0 || r.errors > 0) {
+        console.log(
+          `[Scheduler] Google Play reconcile: ${r.tokensChecked} token(s), ${r.usersChecked} user(s) checked — ` +
+          `${r.entitlementsCleared} expired, ${r.unverifiableCleared} cleared unverifiable, ${r.errors} error(s)`
+        );
+      }
+    } catch (err) {
+      console.error('[Scheduler] Google Play reconcile error:', err);
+    }
+  });
+  console.log('[Scheduler] Google Play subscription reconcile scheduled (hourly at :15)');
 
   // Run BPM self-heal once on startup to fix any existing wrong values immediately
   setImmediate(async () => {
