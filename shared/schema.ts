@@ -2059,6 +2059,10 @@ export const monthlyUsage = pgTable("monthly_usage", {
   trainingPlansGenerated: integer("training_plans_generated").notNull().default(0),
   routesGenerated: integer("routes_generated").notNull().default(0),
   postRunAnalyses: integer("post_run_analyses").notNull().default(0),
+  // Features for which the "approaching your monthly limit" email has already gone out
+  // this month (values are TierLimits keys) — sent at most once per feature per month.
+  // See usage-service.ts maybeSendUsageAlert().
+  usageAlertsSent: text("usage_alerts_sent").array().notNull().default(sql`'{}'::text[]`),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

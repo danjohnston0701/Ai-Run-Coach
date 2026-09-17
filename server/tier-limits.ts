@@ -19,16 +19,20 @@ export interface TierLimits {
 // ── Per-tier limits ───────────────────────────────────────────────────────────
 // Tiers are matched case-insensitively (e.g. "Free", "FREE", "free" all match).
 //
-// FREE TIER — 14-day trial only.  These limits apply during the trial window.
-// Once trial_expires_at has passed, the server enforces "trial_expired" (all zeros).
-// Route generation and training plans are NOT available on the free trial —
-// users must upgrade to access those features at all.
+// FREE TIER — trial only. These limits apply per calendar month while the trial is
+// open (trial_expires_at in the future). Once it has passed, the server enforces
+// "trial_expired" (all zeros). Route generation and training plans are NOT available
+// on the free trial — users must upgrade to access those features at all.
+//
+// LITE / STANDARD — the "with AI Plans" SKUs. The "no AI Plans" SKUs of the same tier
+// (users.ai_plans_enabled = false) use the *_noaiplan entries below, which keep the
+// original allowances; only the AI-Plans SKUs got the 2026-09 uplift.
 export const TIER_LIMITS: Record<string, TierLimits> = {
   free: {
-    aiCoachingKm: 15,              // 15 km of AI-coached running during the 14-day trial
+    aiCoachingKm: 50,              // 50 km of AI-coached running per month during the trial
     trainingPlansGenerated: 0,     // Not available on free trial — paid plans only
     routesGenerated: 0,            // Not available on free trial — paid plans only
-    postRunAnalyses: 3,            // 3 AI post-run summaries during the trial
+    postRunAnalyses: 15,           // 15 AI post-run summaries per month during the trial
   },
   // Hard block applied server-side when trial_expires_at is in the past for a free user.
   // All limits are 0 — every feature request is rejected with a 402 upgrade required.
@@ -39,14 +43,26 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
     postRunAnalyses: 0,
   },
   lite: {
-    aiCoachingKm: 50,
+    aiCoachingKm: 100,
     trainingPlansGenerated: 1,
+    routesGenerated: 10,
+    postRunAnalyses: 20,
+  },
+  lite_noaiplan: {
+    aiCoachingKm: 50,
+    trainingPlansGenerated: 0,
     routesGenerated: 10,
     postRunAnalyses: 15,
   },
   standard: {
-    aiCoachingKm: 200,
+    aiCoachingKm: 400,
     trainingPlansGenerated: 3,
+    routesGenerated: 30,
+    postRunAnalyses: 75,
+  },
+  standard_noaiplan: {
+    aiCoachingKm: 200,
+    trainingPlansGenerated: 0,
     routesGenerated: 30,
     postRunAnalyses: 50,
   },
@@ -55,11 +71,28 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
 /** Users with no tier set, or an unknown tier, fall back to free limits. */
 export const DEFAULT_TIER = "free";
 
-/** Returns the limits for a given tier string, defaulting to free. */
-export function getLimitsForTier(tier: string | null | undefined): TierLimits {
+/**
+ * Returns the limits for a given tier string, defaulting to free.
+ *
+ * `aiPlansEnabled` selects the SKU variant: a paid tier with AI Plans switched off
+ * resolves to its `<tier>_noaiplan` entry when one exists (free / trial_expired have no
+ * variant — the flag is irrelevant there). Callers that pass nothing get the AI-Plans
+ * allowances, matching the historical default of users.ai_plans_enabled.
+ */
+export function getLimitsForTier(
+  tier: string | null | undefined,
+  aiPlansEnabled: boolean = true
+): TierLimits {
   const normalised = (tier ?? DEFAULT_TIER).toLowerCase().trim();
+  if (!aiPlansEnabled) {
+    const variant = TIER_LIMITS[`${normalised}_noaiplan`];
+    if (variant) return variant;
+  }
   return TIER_LIMITS[normalised] ?? TIER_LIMITS[DEFAULT_TIER];
 }
+
+/** Fraction of a monthly limit at which the "approaching your limit" email is sent. */
+export const USAGE_ALERT_THRESHOLD = 0.9;
 
 /**
  * Returns a human-readable label for a limit value.

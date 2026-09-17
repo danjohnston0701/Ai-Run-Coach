@@ -430,3 +430,73 @@ export async function sendEmailVerificationEmail(opts: {
 
   console.log(`[Email] Email verification OTP sent to ${opts.email}`);
 }
+
+/**
+ * "Approaching your monthly limit" — sent once per feature per month when a user's usage
+ * crosses USAGE_ALERT_THRESHOLD (tier-limits.ts). The user gets a heads-up with an upgrade
+ * nudge; SUPPORT_NOTIFICATION_EMAIL gets a one-line internal copy so we can see who is
+ * running hot. Triggered from usage-service.ts recordUsage() → maybeSendUsageAlert().
+ */
+export async function sendUsageThresholdAlert(opts: {
+  userId: string;
+  email: string;
+  name: string;
+  tier: string;
+  feature: "aiCoachingKm" | "trainingPlansGenerated" | "routesGenerated" | "postRunAnalyses";
+  used: number;
+  limit: number;
+  yearMonth: string;
+  resetMonth: string;
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const notifyEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || "support@airuncoach.live";
+
+  const featureLabel: Record<typeof opts.feature, string> = {
+    aiCoachingKm: "AI-coached kilometres",
+    trainingPlansGenerated: "AI training plans",
+    routesGenerated: "AI route generations",
+    postRunAnalyses: "AI post-run summaries",
+  };
+  const label = featureLabel[opts.feature];
+  const unit = opts.feature === "aiCoachingKm" ? " km" : "";
+  const usedStr = opts.feature === "aiCoachingKm" ? opts.used.toFixed(1) : String(opts.used);
+  const pct = Math.round((opts.used / opts.limit) * 100);
+  const isFree = opts.tier === "free";
+  const tierLabel = isFree ? "free trial" : `${opts.tier.replace("_noaiplan", "")} plan`;
+  const firstName = opts.name.trim().split(" ")[0] || "there";
+  const nudge = isFree
+    ? "Upgrade to a paid plan for a much bigger monthly allowance — and AI route generation and training plans."
+    : `Your allowance resets on the 1st of next month, or upgrade now for more headroom.`;
+
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: opts.email,
+    subject: `You've used ${pct}% of your ${label} this month`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #00E5FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #0A0A1A;">${pct}% of your monthly allowance used</h1>
+        </div>
+        <div style="padding: 40px 32px;">
+          <p style="margin: 0 0 16px; color: #e2e8f0; line-height: 1.6;">Hi ${firstName},</p>
+          <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">Great going — you've used <strong style="color:#ffffff;">${usedStr}${unit} of ${opts.limit}${unit}</strong> ${label} on your ${tierLabel} this month.</p>
+          <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #00E5FF;">
+            <p style="margin: 0; color: #e2e8f0; font-size: 14px;">${nudge}</p>
+          </div>
+          <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">Open AI Run Coach → Profile → Subscription to see your usage or change plan.</p>
+        </div>
+      </div>
+    `,
+    text: `Hi ${firstName},\n\nYou've used ${usedStr}${unit} of ${opts.limit}${unit} ${label} on your ${tierLabel} this month (${pct}%).\n\n${nudge}\n\nOpen AI Run Coach → Profile → Subscription to see your usage or change plan.`,
+  });
+
+  // Internal copy — deliberately terse; this can fire for many users near month-end.
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: notifyEmail,
+    subject: `[Usage ${pct}%] ${opts.email} — ${label} (${opts.tier})`,
+    text: `User ${opts.userId} (${opts.email}, ${opts.name}) reached ${pct}% of ${label} on tier "${opts.tier}" for ${opts.yearMonth}: ${usedStr}${unit} / ${opts.limit}${unit}. Resets ${opts.resetMonth}.`,
+  });
+
+  console.log(`[Email] Usage ${pct}% alert sent to ${opts.email} for ${opts.feature} (${opts.yearMonth})`);
+}

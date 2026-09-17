@@ -176,6 +176,7 @@ export interface IStorage {
   // Monthly Usage Tracking
   getMonthlyUsage(userId: string, yearMonth: string): Promise<MonthlyUsage>;
   incrementUsage(userId: string, yearMonth: string, updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses'>>): Promise<MonthlyUsage>;
+  markUsageAlertSent(userId: string, yearMonth: string, feature: string): Promise<void>;
 
   // Interest Registrations
   createInterestRegistration(data: InsertInterestRegistration): Promise<InterestRegistration>;
@@ -1449,6 +1450,17 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     return updated;
+  }
+
+  async markUsageAlertSent(userId: string, yearMonth: string, feature: string): Promise<void> {
+    // array_append guarded by NOT (... = ANY) keeps this idempotent under concurrent increments.
+    await db.update(monthlyUsage)
+      .set({ usageAlertsSent: sql`array_append(${monthlyUsage.usageAlertsSent}, ${feature})` })
+      .where(and(
+        eq(monthlyUsage.userId, userId),
+        eq(monthlyUsage.yearMonth, yearMonth),
+        sql`NOT (${feature} = ANY(${monthlyUsage.usageAlertsSent}))`
+      ));
   }
   async createInterestRegistration(data: InsertInterestRegistration): Promise<InterestRegistration> {
     const [row] = await db.insert(interestRegistrations).values(data).returning();

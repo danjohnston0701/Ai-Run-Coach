@@ -7,7 +7,7 @@
 
 import { Response } from "express";
 import { storage } from "./storage";
-import { getLimitsForTier, TierLimits } from "./tier-limits";
+import { getLimitsForTier, TierLimits, USAGE_ALERT_THRESHOLD } from "./tier-limits";
 
 // ── Trial expiry helpers ──────────────────────────────────────────────────────
 
@@ -114,9 +114,9 @@ export async function getUsageWithLimits(
   const resolvedTier = effectiveTier(tier, trialExpiresAt, createdAt);
   // getLimitsForTier() returns a direct reference into the shared TIER_LIMITS record —
   // never mutate it in place. Copy before applying the aiPlansEnabled override.
-  const limits: TierLimits = { ...getLimitsForTier(resolvedTier) };
-  // A "no AI Plans" SKU zeroes out the plan-generation limit regardless of tier —
-  // orthogonal to subscriptionTier, so every other limit on this tier is unaffected.
+  const limits: TierLimits = { ...getLimitsForTier(resolvedTier, aiPlansEnabled) };
+  // A "no AI Plans" SKU never generates plans regardless of tier. The tier-limits table
+  // already carries a *_noaiplan variant for paid tiers; this covers any tier without one.
   if (!aiPlansEnabled) {
     limits.trainingPlansGenerated = 0;
   }
@@ -201,14 +201,20 @@ export async function checkAndEnforceLimit(
     }
     res.status(403).json({
       error: "ai_plans_not_included",
-      message: "AI Training Plans are not included in your current plan. Upgrade to a plan with AI Training Plans to generate one.",
+      feature,
+      reason: "ai_plans_excluded",
+      message: "AI Training Plans aren't included in your current plan. Switch to a Lite or Standard plan with AI Plans to generate one.",
       upgradeRequired: true,
+      isFreeUser: false,
+      limit: 0,
+      used: 0,
+      remaining: 0,
     });
     return false;
   }
 
   const resolvedTier = effectiveTier(tier, trialExpiresAt, createdAt);
-  const limits = getLimitsForTier(resolvedTier);
+  const limits = getLimitsForTier(resolvedTier, aiPlansEnabled);
   const limit = limits[feature];
 
   // Unlimited tier — skip the DB read entirely
@@ -273,8 +279,52 @@ export function recordUsage(
   amount: number = 1
 ): void {
   const yearMonth = currentYearMonth();
-  storage.incrementUsage(userId, yearMonth, { [feature]: amount } as any).catch((err) => {
-    console.error(`[UsageService] Failed to record usage for user=${userId} feature=${feature}:`, err);
+  storage
+    .incrementUsage(userId, yearMonth, { [feature]: amount } as any)
+    .then((row) => maybeSendUsageAlert(userId, yearMonth, feature, row))
+    .catch((err) => {
+      console.error(`[UsageService] Failed to record usage for user=${userId} feature=${feature}:`, err);
+    });
+}
+
+/**
+ * Sends the "approaching your monthly limit" email the first time a feature's usage
+ * crosses USAGE_ALERT_THRESHOLD of its limit in a given month. Once per feature per
+ * month — recorded in monthly_usage.usage_alerts_sent so retries and later increments
+ * don't re-send. Runs off the request path; failures are logged, never surfaced.
+ */
+async function maybeSendUsageAlert(
+  userId: string,
+  yearMonth: string,
+  feature: GatedFeature,
+  row: { [K in GatedFeature]: number } & { usageAlertsSent?: string[] | null }
+): Promise<void> {
+  if (row.usageAlertsSent?.includes(feature)) return;
+
+  const user = await storage.getUser(userId);
+  if (!user?.email) return;
+
+  const resolvedTier = effectiveTier(user.subscriptionTier, user.trialExpiresAt, user.createdAt);
+  const limit = getLimitsForTier(resolvedTier, user.aiPlansEnabled ?? true)[feature];
+  if (!Number.isFinite(limit) || limit <= 0) return; // unlimited, or feature not on this tier
+
+  const used = row[feature];
+  if (used < limit * USAGE_ALERT_THRESHOLD) return;
+
+  // Mark first so a slow/failed send can't double up on the next increment.
+  await storage.markUsageAlertSent(userId, yearMonth, feature);
+
+  const { sendUsageThresholdAlert } = await import("./email-service");
+  await sendUsageThresholdAlert({
+    userId,
+    email: user.email,
+    name: user.name ?? "",
+    tier: resolvedTier,
+    feature,
+    used,
+    limit,
+    yearMonth,
+    resetMonth: nextMonthLabel(yearMonth),
   });
 }
 

@@ -3812,7 +3812,7 @@ function transformRunForAndroid(run: any) {
 
       // ── Tier limit check (only for new analyses, not cached returns) ──────
       const analysisUser = await storage.getUser(userId);
-      const analysisAllowed = await checkAndEnforceLimit(res, userId, analysisUser?.subscriptionTier, "postRunAnalyses", 1, analysisUser?.trialExpiresAt ?? null, analysisUser?.createdAt ?? null);
+      const analysisAllowed = await checkAndEnforceLimit(res, userId, analysisUser?.subscriptionTier, "postRunAnalyses", 1, analysisUser?.trialExpiresAt ?? null, analysisUser?.createdAt ?? null, analysisUser?.aiPlansEnabled ?? true);
       if (!analysisAllowed) return;
       
       // Get the run data
@@ -4428,7 +4428,7 @@ function transformRunForAndroid(run: any) {
       // ── Tier limit check ─────────────────────────────────────────────────
       if (userId) {
         const routeUser = await storage.getUser(userId);
-        const routeAllowed = await checkAndEnforceLimit(res, userId, routeUser?.subscriptionTier, "routesGenerated", 1, routeUser?.trialExpiresAt ?? null, routeUser?.createdAt ?? null);
+        const routeAllowed = await checkAndEnforceLimit(res, userId, routeUser?.subscriptionTier, "routesGenerated", 1, routeUser?.trialExpiresAt ?? null, routeUser?.createdAt ?? null, routeUser?.aiPlansEnabled ?? true);
         if (!routeAllowed) return;
       }
 
@@ -4493,7 +4493,7 @@ function transformRunForAndroid(run: any) {
       // ── Tier limit check ─────────────────────────────────────────────────
       const templateRouteUserId = req.user!.userId;
       const templateRouteUser = await storage.getUser(templateRouteUserId);
-      const templateRouteAllowed = await checkAndEnforceLimit(res, templateRouteUserId, templateRouteUser?.subscriptionTier, "routesGenerated", 1, templateRouteUser?.trialExpiresAt ?? null, templateRouteUser?.createdAt ?? null);
+      const templateRouteAllowed = await checkAndEnforceLimit(res, templateRouteUserId, templateRouteUser?.subscriptionTier, "routesGenerated", 1, templateRouteUser?.trialExpiresAt ?? null, templateRouteUser?.createdAt ?? null, templateRouteUser?.aiPlansEnabled ?? true);
       if (!templateRouteAllowed) return;
       
       const routeGenV1 = await import("./route-generation");
