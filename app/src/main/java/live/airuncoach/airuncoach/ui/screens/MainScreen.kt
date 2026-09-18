@@ -151,7 +151,11 @@ fun MainScreen(
     // When the trial has expired the entire app UI is replaced by a full-screen
     // paywall — nothing is accessible until the user upgrades or signs out.
     val subscriptionViewModel: SubscriptionViewModel = hiltViewModel()
-    val isTrialExpired = subscriptionViewModel.isTrialExpired()
+    // Keyed on the reactive tier so a purchase made on the subscription screen (which
+    // updates the cached user + emits subscriptionTierState) re-evaluates the gate and
+    // drops the wall immediately, without a navigation to force recomposition.
+    val subscriptionTierForGate by subscriptionViewModel.subscriptionTierState.collectAsState()
+    val isTrialExpired = remember(subscriptionTierForGate) { subscriptionViewModel.isTrialExpired() }
 
     // Permission requests are now handled in LocationPermissionScreen
     // Only request notification permission here if needed
@@ -1569,7 +1573,17 @@ fun MainScreen(
         // When the trial is expired AND the user has not subscribed, this full-screen
         // overlay blocks ALL app content.  Only "Upgrade" (→ subscription screen) and
         // "Sign Out" are accessible — no runs, history, goals, or plans can be started.
-        if (isTrialExpired) {
+        //
+        // The overlay MUST step aside while the subscription flow is on top of the
+        // NavHost: "Upgrade" navigates the NavHost *underneath* this overlay, so without
+        // this exemption the subscription screen rendered invisibly behind the wall and
+        // the button appeared to do nothing — expired-trial users had no way to pay.
+        // Get Support / Change Password are reachable from the subscription screen, so
+        // they're exempt too; everything else stays walled.
+        val isOnUpgradePath = currentRoute == "subscription" ||
+            currentRoute == "get_support" ||
+            currentRoute == "change_password"
+        if (isTrialExpired && !isOnUpgradePath) {
             TrialExpiredWallScreen(
                 onUpgradeClick = { navController.navigate("subscription") },
                 onSignOutClick = { onNavigateToLogin() },
