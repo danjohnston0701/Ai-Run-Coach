@@ -1,6 +1,5 @@
 package live.airuncoach.airuncoach.ui.screens
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -126,24 +125,7 @@ fun SignUpScreen(
                 .padding(bottom = 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Logo
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .background(
-                        color = Color(0xFF1A2332),
-                        shape = RoundedCornerShape(BorderRadius.xl)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.icon),
-                    contentDescription = "AI Run Coach Logo",
-                    modifier = Modifier.size(70.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.xl))
+            // (App-icon logo removed here, as on LoginScreen — it only pushed the form down.)
 
             // Title
             Text(

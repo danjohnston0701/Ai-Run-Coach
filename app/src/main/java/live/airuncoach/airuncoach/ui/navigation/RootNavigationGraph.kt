@@ -36,6 +36,7 @@ import live.airuncoach.airuncoach.ui.screens.GarminWatchUpdateScreen
 import live.airuncoach.airuncoach.ui.screens.InSessionCoachingSettingsScreen
 import live.airuncoach.airuncoach.ui.screens.InjuryOnboardingScreen
 import live.airuncoach.airuncoach.ui.screens.LoginScreen
+import live.airuncoach.airuncoach.ui.screens.OnboardingTourScreen
 import live.airuncoach.airuncoach.ui.screens.ObserverLoginScreen
 import live.airuncoach.airuncoach.ui.screens.ObserverRunSessionScreen
 import live.airuncoach.airuncoach.ui.screens.OnboardingIntroScreen
@@ -179,7 +180,26 @@ private fun NavGraphBuilder.rootNavigationDestinations(
                 },
                 onNavigateToEmailVerification = { email ->
                     navController.navigate("email_verification/${java.net.URLEncoder.encode(email, "UTF-8")}")
+                },
+                onNavigateToTour = {
+                    navController.navigate("onboarding_tour_preview")
                 }
+            )
+        }
+
+        // Pre-login tour — the same OnboardingTourScreen MainScreen hosts for signed-in users,
+        // reachable from the fresh-install welcome so a download can see the product before
+        // creating an account. Runs in preview mode (no tour telemetry, no authenticated
+        // fetches) and its closing page's CTA is "Create a Free Account" → sign_up.
+        composable("onboarding_tour_preview") {
+            OnboardingTourScreen(
+                isPreLogin = true,
+                onFinish = { navController.popBackStack() },
+                onCreateAccount = {
+                    navController.navigate("sign_up") {
+                        popUpTo("onboarding_tour_preview") { inclusive = true }
+                    }
+                },
             )
         }
 

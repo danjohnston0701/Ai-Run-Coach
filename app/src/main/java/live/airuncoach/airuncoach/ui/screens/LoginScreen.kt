@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -62,6 +61,7 @@ fun LoginScreen(
     onNavigateToForgotPassword: () -> Unit = {},
     onNavigateToObserverSession: (sessionId: String) -> Unit = {}, // TODO: Remove when Live Share is enabled
     onNavigateToEmailVerification: (email: String) -> Unit = {},
+    onNavigateToTour: () -> Unit = {},
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -69,6 +69,12 @@ fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     var isCheckingAuth by remember { mutableStateOf(true) }
     var showObserverTokenInput by remember { mutableStateOf(false) }
+    // Fresh install vs returning device. A device that has never had an account signed in
+    // gets a create-account-first welcome (the download → account step is where we lose
+    // people); any device with a previous login gets the sign-in form straight away.
+    // "Log in" on the welcome flips this for the session so existing users on a new phone
+    // aren't stuck.
+    var showSignInForm by remember { mutableStateOf(SessionManager(context).hasEverLoggedIn()) }
     
     // Keyboard handling
     val emailBringIntoView = remember { BringIntoViewRequester() }
@@ -218,26 +224,8 @@ fun LoginScreen(
                 .padding(bottom = 0.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Logo
-            Box(
-                modifier = Modifier
-                    .size(120.dp)
-                    .background(
-                        color = Color(0xFF1A2332),
-                        shape = RoundedCornerShape(BorderRadius.xl)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.icon),
-                    contentDescription = "AI Run Coach Logo",
-                    modifier = Modifier.size(80.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.xxxl))
-
-            // Title
+            // Title (the app-icon logo that used to sit above this was removed — it pushed
+            // the form and the sign-up CTA below the fold on smaller phones for no benefit)
             Text(
                 text = "Ai Run Coach",
                 style = AppTextStyles.h1.copy(fontWeight = FontWeight.Bold),
@@ -245,6 +233,18 @@ fun LoginScreen(
             )
 
             Spacer(modifier = Modifier.height(Spacing.sm))
+
+            if (!showSignInForm) {
+                NewInstallWelcome(
+                    onCreateAccount = onNavigateToSignUp,
+                    onTakeTour = onNavigateToTour,
+                    onSignInInstead = { showSignInForm = true },
+                )
+                Spacer(modifier = Modifier.height(Spacing.xxxl))
+                LoginTermsText()
+                Spacer(modifier = Modifier.height(bottomContentPadding))
+                return@Column
+            }
 
             // Subtitle
             Text(
@@ -473,51 +473,148 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(Spacing.xxxl))
 
-            // Terms and Privacy with hyperlinks
-            val uriHandler = LocalUriHandler.current
-            val termsUrl = "https://airuncoach.live/privacy"
-            
-            val termsAnnotatedString = buildAnnotatedString {
-                append("By continuing, you agree to our ")
-                pushStringAnnotation(tag = "URL", annotation = termsUrl)
-                withStyle(
-                    style = SpanStyle(
-                        color = Colors.primary,
-                        textDecoration = TextDecoration.Underline
-                    )
-                ) {
-                    append("Terms of Service")
-                }
-                pop()
-                append(" and ")
-                pushStringAnnotation(tag = "URL", annotation = termsUrl)
-                withStyle(
-                    style = SpanStyle(
-                        color = Colors.primary,
-                        textDecoration = TextDecoration.Underline
-                    )
-                ) {
-                    append("Privacy Policy")
-                }
-                pop()
-            }
-            
-            ClickableText(
-                text = termsAnnotatedString,
-                style = AppTextStyles.small.copy(
-                    color = Colors.textMuted,
-                    textAlign = TextAlign.Center
-                ),
-                onClick = { offset ->
-                    termsAnnotatedString.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                        .firstOrNull()?.let { annotation ->
-                            uriHandler.openUri(annotation.item)
-                        }
-                }
-            )
+            LoginTermsText()
             Spacer(modifier = Modifier.height(bottomContentPadding))
         }
     }
+}
+
+/**
+ * What a fresh install sees instead of the sign-in form: one job, get them to create an
+ * account. "Take a tour" lets them see the product before committing (the tour runs
+ * pre-login — see RootNavigationGraph's "onboarding_tour_preview"), and the sign-in link is
+ * the escape hatch for an existing user on a new device.
+ */
+@Composable
+private fun NewInstallWelcome(
+    onCreateAccount: () -> Unit,
+    onTakeTour: () -> Unit,
+    onSignInInstead: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = "Your AI running coach — live in your ear, every run",
+            style = AppTextStyles.body,
+            color = Colors.textSecondary,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.xxxxl))
+
+        Text(
+            text = "Get started with a free account",
+            style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+            color = Colors.textPrimary,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(Spacing.sm))
+        Text(
+            text = "14-day free trial. No card needed — real-time AI coaching, post-run analysis and training plans from your first run.",
+            style = AppTextStyles.small,
+            color = Colors.textSecondary,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
+        Button(
+            onClick = onCreateAccount,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Spacing.buttonHeight),
+            shape = RoundedCornerShape(BorderRadius.full),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Colors.primary,
+                contentColor = Colors.buttonText
+            )
+        ) {
+            Text(
+                text = "Create a Free Account",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.md))
+
+        OutlinedButton(
+            onClick = onTakeTour,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(Spacing.buttonHeight),
+            shape = RoundedCornerShape(BorderRadius.full),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.primary),
+            border = BorderStroke(1.dp, Colors.primary)
+        ) {
+            Text(
+                text = "Take a Tour First",
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.SemiBold)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
+        val signInString = buildAnnotatedString {
+            withStyle(style = SpanStyle(color = Colors.textSecondary)) {
+                append("Already have an account? ")
+            }
+            withStyle(style = SpanStyle(color = Colors.primary, fontWeight = FontWeight.Bold)) {
+                append("Log In")
+            }
+        }
+        Text(
+            text = signInString,
+            style = AppTextStyles.body,
+            modifier = Modifier
+                .clickable { onSignInInstead() }
+                .padding(Spacing.sm)
+        )
+    }
+}
+
+/** Terms / Privacy footer shared by the sign-in form and the new-install welcome. */
+@Composable
+private fun LoginTermsText() {
+    val uriHandler = LocalUriHandler.current
+    val termsUrl = "https://airuncoach.live/privacy"
+
+    val termsAnnotatedString = buildAnnotatedString {
+        append("By continuing, you agree to our ")
+        pushStringAnnotation(tag = "URL", annotation = termsUrl)
+        withStyle(
+            style = SpanStyle(
+                color = Colors.primary,
+                textDecoration = TextDecoration.Underline
+            )
+        ) {
+            append("Terms of Service")
+        }
+        pop()
+        append(" and ")
+        pushStringAnnotation(tag = "URL", annotation = termsUrl)
+        withStyle(
+            style = SpanStyle(
+                color = Colors.primary,
+                textDecoration = TextDecoration.Underline
+            )
+        ) {
+            append("Privacy Policy")
+        }
+        pop()
+    }
+
+    ClickableText(
+        text = termsAnnotatedString,
+        style = AppTextStyles.small.copy(
+            color = Colors.textMuted,
+            textAlign = TextAlign.Center
+        ),
+        onClick = { offset ->
+            termsAnnotatedString.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                .firstOrNull()?.let { annotation ->
+                    uriHandler.openUri(annotation.item)
+                }
+        }
+    )
 }
 
 /**

@@ -136,7 +136,7 @@ private data class InfoPage(
 )
 
 /** Step 0 is the watch-choice screen; the paged tour is 1..TOUR_TOTAL_STEPS. */
-private const val TOUR_TOTAL_STEPS = 2 + 9 + 1 // leadPages + INTERACTIVE_STEP_COUNT + tailPages
+private const val TOUR_TOTAL_STEPS = 2 + 10 + 1 // leadPages + INTERACTIVE_STEP_COUNT + tailPages
 private const val TOUR_WATCH_CHOICE_STEP = 0
 
 /**
@@ -155,9 +155,10 @@ private fun tourStepName(step: Int): String = when (step) {
     7 -> "injury_management"
     8 -> "dashboard_run_without_route"
     9 -> "run_setup"
-    10 -> "run_summary"
-    11 -> "ai_plans"
-    12 -> "ready_to_run"
+    10 -> "run_session"
+    11 -> "run_summary"
+    12 -> "ai_plans"
+    13 -> "ready_to_run"
     else -> "step_$step"
 }
 
@@ -167,6 +168,9 @@ private fun tourStepName(step: Int): String = when (step) {
  * Non-fatal: tracking must never block or crash the tour itself.
  */
 private fun recordTourEvent(event: String, step: Int? = null) {
+    // Pre-login preview: there's no user to attribute the event to and the endpoint is
+    // authenticated, so don't fire (it would only 401 and be dropped anyway).
+    if (!tourTelemetryEnabled) return
     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
         try {
             live.airuncoach.airuncoach.network.RetrofitClient.apiService.recordOnboardingTourEvent(
@@ -183,10 +187,27 @@ private fun recordTourEvent(event: String, step: Int? = null) {
     }
 }
 
+/**
+ * Process-wide switch for the tour's telemetry + authenticated fetches, set by [OnboardingTourScreen]
+ * from its `isPreLogin` flag. Module-level rather than threaded through every mock screen because
+ * recordTourEvent() is deliberately scope-free (see its doc) and has no composable context.
+ */
+@Volatile
+private var tourTelemetryEnabled = true
+
 @Composable
 fun OnboardingTourScreen(
     onFinish: () -> Unit,
+    /**
+     * True when reached from the fresh-install welcome (RootNavigationGraph's
+     * "onboarding_tour_preview") rather than from a signed-in session: no telemetry, no
+     * authenticated fetches, and the closing page's CTA becomes "Create a Free Account"
+     * ([onCreateAccount]) instead of "Finish Tour".
+     */
+    isPreLogin: Boolean = false,
+    onCreateAccount: () -> Unit = onFinish,
 ) {
+    tourTelemetryEnabled = !isPreLogin
     var watchChoice by remember { mutableStateOf<TourWatchChoice?>(null) }
     // Where the user currently is, for the "left" event below. 0 until a watch is chosen.
     var currentStep by remember { mutableIntStateOf(TOUR_WATCH_CHOICE_STEP) }
@@ -223,6 +244,8 @@ fun OnboardingTourScreen(
             watchChoice = watchChoice!!,
             onStepShown = { currentStep = it },
             onFinish = onFinish,
+            isPreLogin = isPreLogin,
+            onCreateAccount = onCreateAccount,
         )
     }
 }
@@ -307,7 +330,7 @@ private fun tailPages(): List<InfoPage> = listOf(
 )
 
 /** Total interactive steps between the lead and tail info pages — see the `when` in TourStepController. */
-private const val INTERACTIVE_STEP_COUNT = 9
+private const val INTERACTIVE_STEP_COUNT = 10
 
 @Composable
 private fun TourStepController(
@@ -315,6 +338,8 @@ private fun TourStepController(
     /** Reports the 1-based tour page now on screen (for the parent's "left" tracking). */
     onStepShown: (Int) -> Unit,
     onFinish: () -> Unit,
+    isPreLogin: Boolean = false,
+    onCreateAccount: () -> Unit = onFinish,
 ) {
     val context = LocalContext.current
     val lead = remember { leadPages() }
@@ -332,6 +357,13 @@ private fun TourStepController(
     fun advance() {
         if (step >= totalSteps - 1) {
             AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TOUR_COMPLETED)
+            if (isPreLogin) {
+                // Preview from the fresh-install welcome: the natural end is the sign-up
+                // form. Don't mark the (not-yet-existing) account's tour as completed — the
+                // real post-onboarding tour offer should still stand once they have one.
+                onCreateAccount()
+                return
+            }
             // Only fires on reaching the natural end (this branch) — never on Skip — so
             // the completed timestamp genuinely means "finished the tour," not "opened it."
             SessionManager(context).setOnboardingTourCompleted()
@@ -369,7 +401,10 @@ private fun TourStepController(
                 )
                 else -> {
                     val tailIndex = step - lead.size - INTERACTIVE_STEP_COUNT
-                    InfoPageContent(tail[tailIndex], onNext = ::advance, isLast = step == totalSteps - 1)
+                    InfoPageContent(
+                        tail[tailIndex], onNext = ::advance, isLast = step == totalSteps - 1,
+                        lastLabel = if (isPreLogin) "Create a Free Account" else "Finish Tour",
+                    )
                 }
             }
         }
@@ -394,7 +429,7 @@ private fun TourProgressDots(current: Int, total: Int) {
 }
 
 @Composable
-private fun InfoPageContent(page: InfoPage, onNext: () -> Unit, isLast: Boolean) {
+private fun InfoPageContent(page: InfoPage, onNext: () -> Unit, isLast: Boolean, lastLabel: String = "Finish Tour") {
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Spacing.xl),
@@ -418,7 +453,7 @@ private fun InfoPageContent(page: InfoPage, onNext: () -> Unit, isLast: Boolean)
             colors = ButtonDefaults.buttonColors(containerColor = Colors.primary, contentColor = Colors.buttonText),
             shape = RoundedCornerShape(BorderRadius.lg),
         ) {
-            Text(if (isLast) "Finish Tour" else "Next", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(if (isLast) lastLabel else "Next", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
     }
 }
@@ -440,8 +475,9 @@ private fun InteractiveStep(index: Int, watchChoice: TourWatchChoice, onAdvance:
         4 -> MockInjuryManagementScreen(onBack = onAdvance)
         5 -> MockDashboardScreen(highlight = DashboardHighlight.RUN_WITHOUT_ROUTE, onHighlightTapped = onAdvance)
         6 -> MockRunSetupScreen(watchChoice = watchChoice, onProceed = onAdvance)
-        7 -> MockRunSummaryScreen(onFinished = onAdvance)
-        8 -> MockAiPlansScreen(onAdvance = onAdvance)
+        7 -> MockRunSessionScreen(onFinished = onAdvance)
+        8 -> MockRunSummaryScreen(onFinished = onAdvance)
+        9 -> MockAiPlansScreen(onAdvance = onAdvance)
     }
 }
 
@@ -1103,8 +1139,8 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
             TourPromptBanner(
                 when {
                     !gpsLocked -> "Locking on to GPS, just like the real thing…"
-                    hasWatch -> "That's the setup screen. Tap \"Prepare for Watch\" (or \"Prepare Run\") to see what a finished run looks like."
-                    else -> "That's the setup screen. Tap \"PREPARE RUN\" to see what a finished run looks like."
+                    hasWatch -> "That's the setup screen. Tap \"Prepare for Watch\" (or \"Prepare Run\") to open the run screen."
+                    else -> "That's the setup screen. Tap \"PREPARE RUN\" to open the run screen."
                 }
             )
         } else {
@@ -1114,6 +1150,208 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
                 onNext = { beat += 1 },
             )
         }
+    }
+}
+
+// ── Run session (the real run screen's own instruments, driven by a genuine timer) ─────────
+
+private enum class MockRunPhase { PREPARING, BRIEFED, RUNNING, PAUSED, SAVING }
+
+/** Simulated steady effort for the instruments while the (real) timer runs. */
+private const val TOUR_RUN_PACE_SEC_PER_KM = 330 // 5:30/km
+
+/** Fired once, a few seconds into the run, so the in-run coaching panel is seen too. */
+private const val TOUR_RUN_FIRST_CUE_AT_SEC = 6
+private const val TOUR_RUN_FIRST_CUE =
+    "Nice and steady — that's the pace. Drop your shoulders, quick light steps, and settle in. I'll call your split at the first kilometre."
+
+/**
+ * The REAL run screen's building blocks — RunSessionScreen.kt's TopBarSection,
+ * AiCoachLivePanel, FreeRunEliteDashboard, ControlButtons and RunSavingOverlay — with the
+ * ViewModel replaced by a small state machine that walks the phone-prepared session exactly
+ * as a runner experiences it:
+ *
+ *  1. "Coach is preparing…" (the panel's real loading state), then the pre-run brief text
+ *     a phone-prepared session shows before Start.
+ *  2. Start Run → a genuine wall-clock timer in the real dashboard; distance/pace/cadence/HR
+ *     are simulated at a steady 5:30/km so the instruments come alive. Pause/Resume work.
+ *  3. An in-run coaching cue lands a few seconds in, then Stop is spotlit → the real
+ *     "Stop run?" confirmation → the real saving overlay → the Run Summary step.
+ *
+ * Added 2026-09-19 so the tour shows the prepare → run → summary flow end-to-end (it used
+ * to jump from the setup screen straight to a finished run). Not on iOS yet.
+ */
+@Composable
+private fun MockRunSessionScreen(onFinished: () -> Unit) {
+    val context = LocalContext.current
+    val firstName = remember {
+        SessionManager(context).getUserName()?.trim()?.takeIf { it.isNotBlank() }?.substringBefore(' ')
+    }
+    var phase by remember { mutableStateOf(MockRunPhase.PREPARING) }
+    var elapsedSec by remember { mutableIntStateOf(0) }
+    var coachMessage by remember { mutableStateOf<String?>(null) }
+    var showStopConfirm by remember { mutableStateOf(false) }
+    var showPauseConfirm by remember { mutableStateOf(false) }
+    var cueFired by remember { mutableStateOf(false) }
+
+    // The same generic brief RunSessionViewModel shows for a phone-prepared session with no
+    // coaching-plan brief (weather + distance + "tap Start"), personalised the same way.
+    val briefText = remember {
+        val greeting = if (firstName != null) "Right, $firstName —" else "Right —"
+        "$greeting 5 km easy run today. GPS is locked and I'm with you the whole way: I'll call your pace each kilometre, " +
+            "check in at halfway, and let you know if you're drifting off target. Tap Start when you're ready."
+    }
+
+    // 1. Preparing → briefed, mirroring the real screen's "Coach is preparing…" wait.
+    LaunchedEffect(Unit) {
+        delay(2200)
+        coachMessage = briefText
+        phase = MockRunPhase.BRIEFED
+    }
+
+    // 2. Genuine timer — one tick per wall-clock second while running.
+    LaunchedEffect(phase) {
+        if (phase != MockRunPhase.RUNNING) return@LaunchedEffect
+        while (true) {
+            delay(1000)
+            elapsedSec += 1
+            if (!cueFired && elapsedSec >= TOUR_RUN_FIRST_CUE_AT_SEC) {
+                cueFired = true
+                coachMessage = TOUR_RUN_FIRST_CUE
+            }
+        }
+    }
+
+    // 3. Saving → summary, through the real overlay for the same beat a real save takes.
+    LaunchedEffect(phase) {
+        if (phase == MockRunPhase.SAVING) {
+            delay(1800)
+            onFinished()
+        }
+    }
+
+    val isRunning = phase == MockRunPhase.RUNNING
+    val isPaused = phase == MockRunPhase.PAUSED
+    val isSaving = phase == MockRunPhase.SAVING
+    val timeStr = String.format(Locale.US, "%02d:%02d", elapsedSec / 60, elapsedSec % 60)
+    val distanceKm = elapsedSec.toDouble() / TOUR_RUN_PACE_SEC_PER_KM
+    val distanceStr = String.format(Locale.US, "%.2f", distanceKm)
+    val hasMoved = elapsedSec > 0
+    val paceStr = if (hasMoved) "5:30" else "0:00"
+    // Small live wobble so the instant pace / cadence / HR read as live sensors, not labels.
+    val wobble = if (hasMoved) ((elapsedSec * 7) % 5) - 2 else 0
+    val currentPaceStr = if (hasMoved) {
+        val sec = TOUR_RUN_PACE_SEC_PER_KM + wobble * 2
+        String.format(Locale.US, "%d:%02d", sec / 60, sec % 60)
+    } else "0:00"
+    val cadenceStr = if (hasMoved) "${170 + wobble}" else "0"
+    val heartRateStr = if (hasMoved) "${minOf(152, 118 + elapsedSec * 2) + wobble}" else "0"
+    val highlightStop = isRunning && cueFired
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = Colors.backgroundRoot,
+            contentWindowInsets = WindowInsets(0),
+            bottomBar = {
+                Column {
+                    // The real bottom bar; Stop gets the spotlight once the coaching cue
+                    // has landed, so the runner sees the whole in-run beat first.
+                    val bar: @Composable () -> Unit = {
+                        ControlButtons(
+                            isRunning = isRunning,
+                            isPaused = isPaused,
+                            isStopping = isSaving,
+                            onStart = { if (phase == MockRunPhase.BRIEFED) phase = MockRunPhase.RUNNING },
+                            onPause = { showPauseConfirm = true },
+                            onResume = { phase = MockRunPhase.RUNNING },
+                            onStop = { showStopConfirm = true },
+                            onCancel = {},
+                        )
+                    }
+                    if (highlightStop) TourHighlight { bar() } else if (phase == MockRunPhase.BRIEFED) {
+                        TourHighlight(highlightColor = Colors.buttonText) { bar() }
+                    } else bar()
+                    TourPromptBanner(
+                        when (phase) {
+                            MockRunPhase.PREPARING -> "This is your run screen. When you prepare a session on your phone, your coach gets ready first…"
+                            MockRunPhase.BRIEFED -> "Your coach briefs you before every run — this is what they'll say. Tap \"Start Run\" to begin."
+                            MockRunPhase.RUNNING -> if (!cueFired)
+                                "That's a real timer. Time, distance, pace, cadence and heart rate all live here while you run."
+                            else
+                                "Coaching cues land here mid-run, spoken in your ear. Tap Stop when you're ready to see your run summary."
+                            MockRunPhase.PAUSED -> "Paused — tap Resume to keep going, or Stop to finish and see your summary."
+                            MockRunPhase.SAVING -> "Saving your run…"
+                        }
+                    )
+                }
+            },
+        ) { padding ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(bottom = Spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                item {
+                    TopBarSection(
+                        isCoachEnabled = true,
+                        isMuted = false,
+                        actionsEnabled = !(isRunning || isPaused),
+                        micEnabled = true,
+                        onCoachToggle = {},
+                        onMicClick = {},
+                        onShareClick = {},
+                        onCloseClick = {},
+                    )
+                }
+                item {
+                    AiCoachLivePanel(
+                        message = coachMessage,
+                        isLoading = phase == MockRunPhase.PREPARING,
+                        modifier = Modifier.padding(horizontal = Spacing.md),
+                    )
+                }
+                item {
+                    FreeRunEliteDashboard(
+                        time = timeStr,
+                        distanceKmStr = distanceStr,
+                        paceStr = paceStr,
+                        currentPaceStr = currentPaceStr,
+                        cadenceStr = cadenceStr,
+                        heartRateStr = heartRateStr,
+                        aiCoachMessage = null,
+                        aiSpeaking = coachMessage != null || phase == MockRunPhase.PREPARING,
+                        isRunning = isRunning,
+                        isLoadingBriefing = phase == MockRunPhase.PREPARING,
+                    )
+                }
+            }
+        }
+
+        if (isSaving) RunSavingOverlay()
+    }
+
+    // The real screen's own confirmations, so the flow matches what a runner will meet.
+    if (showPauseConfirm) {
+        AlertDialog(
+            onDismissRequest = { showPauseConfirm = false },
+            title = { Text("Pause run?") },
+            text = { Text("This will pause tracking until you resume.") },
+            confirmButton = {
+                TextButton(onClick = { showPauseConfirm = false; phase = MockRunPhase.PAUSED }) { Text("Pause") }
+            },
+            dismissButton = { TextButton(onClick = { showPauseConfirm = false }) { Text("Cancel") } },
+        )
+    }
+    if (showStopConfirm) {
+        AlertDialog(
+            onDismissRequest = { showStopConfirm = false },
+            title = { Text("Stop run?") },
+            text = { Text("This will end the session and save your run.") },
+            confirmButton = {
+                TextButton(onClick = { showStopConfirm = false; phase = MockRunPhase.SAVING }) { Text("Stop") }
+            },
+            dismissButton = { TextButton(onClick = { showStopConfirm = false }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -1230,13 +1468,15 @@ private const val TOUR_DEMO_RUN_ID = "09b2fa5f-1b16-4de3-a89a-85129644a9c8"
 
 private suspend fun loadTourDemoRun(fallbackCenter: Pair<Double, Double>): TourDemoRun {
     val api = live.airuncoach.airuncoach.network.RetrofitClient.apiService
-    try {
+    // Both endpoints are authenticated — pre-login they'd just 401 twice before falling
+    // through, so go straight to the fabricated run.
+    if (tourTelemetryEnabled) try {
         val response = api.getOnboardingTourDemoRun()
         return TourDemoRun(response.run, parseTourAnalysis(response.analysis))
     } catch (e: Exception) {
         android.util.Log.w("OnboardingTourScreen", "Demo-run endpoint unavailable, trying direct fetch: ${e.message}")
     }
-    try {
+    if (tourTelemetryEnabled) try {
         val run = api.getRunById(TOUR_DEMO_RUN_ID)
         val analysis = try { api.getRunAnalysisRecord(TOUR_DEMO_RUN_ID)?.analysis } catch (e: Exception) { null }
         return TourDemoRun(run, parseTourAnalysis(analysis))

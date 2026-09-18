@@ -3302,7 +3302,7 @@ private fun computeStabilityProxy(cadence: Int?, paceSec: Int?): Int {
 }
 
 @Composable
-private fun RunSavingOverlay(activityType: String = "run") {
+internal fun RunSavingOverlay(activityType: String = "run") {
     val isWalk = activityType.lowercase() == "walk"
     Box(
         modifier = Modifier

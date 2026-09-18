@@ -51,8 +51,20 @@ class SessionManager(context: Context) {
         }
         sharedPreferences.edit {
             putString("auth_token", token)
+            // Every successful login/sign-up lands here, so this is the one place to record
+            // that this install has had an account on it. Deliberately NOT removed by
+            // clearSession(): a signed-out device is still a returning device and should get
+            // the sign-in form, not the fresh-install "Create a Free Account" welcome.
+            putBoolean("has_ever_logged_in", true)
         }
     }
+
+    /**
+     * Whether any account has ever signed in on this install. False means a fresh download
+     * that has never got past the login screen — the audience LoginScreen's create-account
+     * welcome exists for.
+     */
+    fun hasEverLoggedIn(): Boolean = sharedPreferences.getBoolean("has_ever_logged_in", false)
 
     /**
      * Retrieves the authentication token from the encrypted preferences.
