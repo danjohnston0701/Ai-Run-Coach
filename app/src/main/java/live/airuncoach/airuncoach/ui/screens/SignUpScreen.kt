@@ -51,6 +51,14 @@ fun SignUpScreen(
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val loginState by viewModel.loginState.collectAsState()
+    val analyticsContext = androidx.compose.ui.platform.LocalContext.current
+    // Sign-up form reached — the first event after first_open, so the install→account
+    // drop-off is finally visible in Firebase.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        live.airuncoach.airuncoach.util.AppAnalytics.logEvent(
+            analyticsContext, live.airuncoach.airuncoach.util.AppAnalytics.Event.SIGNUP_STARTED
+        )
+    }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
 

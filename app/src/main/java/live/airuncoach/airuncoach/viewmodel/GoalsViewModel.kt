@@ -1,6 +1,7 @@
 
 package live.airuncoach.airuncoach.viewmodel
 
+import live.airuncoach.airuncoach.util.AppAnalytics
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -224,6 +225,7 @@ class GoalsViewModel(
                 )
 
                 val createdGoal = apiService.createGoal(request)
+                AppAnalytics.logEvent(context, AppAnalytics.Event.GOAL_CREATED, AppAnalytics.Param.GOAL_TYPE to type)
                 _createGoalState.value = CreateGoalState.Success(createdGoalId = createdGoal.id)
                 
                 // Don't call loadGoals() here — it would set _goalsState to Loading, causing the

@@ -1,5 +1,8 @@
 package live.airuncoach.airuncoach.viewmodel
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+import live.airuncoach.airuncoach.util.AppAnalytics
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -27,6 +30,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class RouteGenerationViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val apiService: ApiService
 ) : ViewModel() {
 
@@ -114,6 +118,11 @@ class RouteGenerationViewModel @Inject constructor(
             try {
                 val response = apiService.generateAIRoutes(request)
                 _routes.value = response.routes.map { it.toGeneratedRoute() }
+                AppAnalytics.logEvent(
+                    context, AppAnalytics.Event.ROUTE_GENERATED,
+                    AppAnalytics.Param.ROUTE_COUNT to response.routes.size,
+                    AppAnalytics.Param.GENERATOR to "ai",
+                )
             } catch (e: Exception) {
                 _error.value = e.message
             } finally {
@@ -171,6 +180,12 @@ class RouteGenerationViewModel @Inject constructor(
                 
                 Log.d("RouteGeneration", "✅ Received ${response.routes.size} routes from GraphHopper")
                 _routes.value = response.routes.map { it.toGeneratedRoute() }
+                AppAnalytics.logEvent(
+                    context, AppAnalytics.Event.ROUTE_GENERATED,
+                    AppAnalytics.Param.ROUTE_COUNT to response.routes.size,
+                    AppAnalytics.Param.DISTANCE_KM to distanceKm,
+                    AppAnalytics.Param.GENERATOR to "intelligent",
+                )
                 Log.d("RouteGeneration", "🎉 Routes converted successfully!")
             } catch (e: SocketTimeoutException) {
                 val errorMsg = "Request timed out. The backend or routing service may be slow. Please try again."

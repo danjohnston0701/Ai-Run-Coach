@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.service
 
+import live.airuncoach.airuncoach.util.AppAnalytics
 import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
@@ -5509,6 +5510,19 @@ class RunTrackingService : Service(), SensorEventListener {
             // Power saver mode telemetry — if phone's power saver was active during this run
             powerSaverModeDetected   = powerSaverModeDetected,
         )
+
+        // Run is final at this point regardless of whether the upload below succeeds now or
+        // later via SyncWorker — log once here so offline runs count and retries don't double up.
+        run {
+            val km = runSession.distance / 1000.0
+            AppAnalytics.logEvent(
+                this, AppAnalytics.Event.RUN_COMPLETED,
+                AppAnalytics.Param.SESSION_TYPE to runSession.sessionType,
+                AppAnalytics.Param.DISTANCE_KM to Math.round(km * 100.0) / 100.0,
+                AppAnalytics.Param.DISTANCE_BUCKET to AppAnalytics.distanceBucket(km),
+                AppAnalytics.Param.DURATION_MIN to (runSession.duration / 60_000L),
+            )
+        }
 
         // Retry up to 3 times with exponential backoff for server errors
         val maxRetries = 3

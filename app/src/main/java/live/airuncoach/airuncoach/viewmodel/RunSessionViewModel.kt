@@ -1,6 +1,7 @@
 
 package live.airuncoach.airuncoach.viewmodel
 
+import live.airuncoach.airuncoach.util.AppAnalytics
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -1732,6 +1733,10 @@ class RunSessionViewModel @Inject constructor(
                 Log.d("RunSessionViewModel", "Set navigation data: ${route.turnInstructions.size} turn instructions")
             }
             
+            AppAnalytics.logEvent(
+                context, AppAnalytics.Event.RUN_STARTED,
+                AppAnalytics.Param.SESSION_TYPE to (runConfig?.activityType?.name?.lowercase() ?: "run"),
+            )
             val intent = Intent(context, RunTrackingService::class.java).apply {
                 action = RunTrackingService.ACTION_START_TRACKING
                 // Pass target distance and time to service if configured

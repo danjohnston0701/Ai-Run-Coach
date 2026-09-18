@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.viewmodel
 
+import live.airuncoach.airuncoach.util.AppAnalytics
 import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -136,6 +137,7 @@ class LoginViewModel @Inject constructor(
                 sessionManager.saveUserName(user.name)
                 val savedToken = sessionManager.getAuthToken()
                 android.util.Log.d("LoginViewModel", "Token saved and verified: ${savedToken != null && savedToken == token}")
+                AppAnalytics.logEvent(context, AppAnalytics.Event.LOGIN_SUCCESS)
                 
                 if (savedToken != token) {
                     android.util.Log.e("LoginViewModel", "⚠️ Token save verification FAILED!")
@@ -300,6 +302,8 @@ class LoginViewModel @Inject constructor(
                 )
 
                 android.util.Log.d("LoginViewModel", "✅ Registration API call successful!")
+                // Account exists server-side from here, whether or not OTP verification follows.
+                AppAnalytics.logEvent(context, AppAnalytics.Event.SIGNUP_COMPLETED)
 
                 // New flow: server requires email verification before issuing a token.
                 // We check for ABSENCE of a token (most reliable signal) rather than
@@ -465,6 +469,7 @@ class LoginViewModel @Inject constructor(
                     )
                 }
                 android.util.Log.d("LoginViewModel", "🎉 Email verified — registration complete!")
+                AppAnalytics.logEvent(context, AppAnalytics.Event.EMAIL_VERIFIED)
                 uploadFcmToken()
             } catch (e: retrofit2.HttpException) {
                 val errorBody = e.response()?.errorBody()?.string()

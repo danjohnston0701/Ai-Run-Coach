@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.viewmodel
 
+import live.airuncoach.airuncoach.util.AppAnalytics
 import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -414,6 +415,11 @@ class GeneratePlanViewModel @Inject constructor(
                     activityType = userSessionType
                 )
                 val response = apiService.generateTrainingPlan(request)
+                AppAnalytics.logEvent(
+                    context, AppAnalytics.Event.PLAN_GENERATED,
+                    AppAnalytics.Param.GOAL_TYPE to _goalType.value,
+                    AppAnalytics.Param.DURATION_WEEKS to _durationWeeks.value,
+                )
                 _generateState.value = GeneratePlanState.Success(response.planId)
             } catch (e: retrofit2.HttpException) {
                 val limitState = parseLimitError(e)
