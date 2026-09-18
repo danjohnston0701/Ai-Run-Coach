@@ -133,6 +133,10 @@ interface ApiService {
     @POST("/api/user/onboarding-complete")
     suspend fun recordOnboardingComplete()
 
+    /** Pre-login tour telemetry (no auth) — see routes-guest-tour.ts / guest_tour_sessions. */
+    @POST("/api/onboarding-tour/guest-event")
+    suspend fun recordGuestTourEvent(@Body request: live.airuncoach.airuncoach.network.model.GuestTourEventRequest)
+
     @GET("/api/onboarding-tour/demo-run")
     suspend fun getOnboardingTourDemoRun(): live.airuncoach.airuncoach.network.model.OnboardingTourDemoRunResponse
 

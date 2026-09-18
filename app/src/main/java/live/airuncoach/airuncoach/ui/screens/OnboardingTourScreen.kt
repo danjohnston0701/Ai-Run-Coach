@@ -167,10 +167,59 @@ private fun tourStepName(step: Int): String = when (step) {
  * "left" and "skipped" events are sent as the screen is going away and must outlive it.
  * Non-fatal: tracking must never block or crash the tour itself.
  */
+/**
+ * Everything the pre-login tour sends alongside each guest event so guest_tour_sessions
+ * carries the same device detail users.* gets at register/login. Built once by
+ * [OnboardingTourScreen] when it mounts in preview mode.
+ */
+private data class GuestTourContext(
+    val deviceId: String,
+    val timezone: String?,
+    val country: String?,
+    val device: live.airuncoach.airuncoach.network.model.DeviceInfo?,
+)
+
+@Volatile
+private var guestTourContext: GuestTourContext? = null
+
+private fun buildGuestTourContext(context: android.content.Context): GuestTourContext = GuestTourContext(
+    deviceId = live.airuncoach.airuncoach.util.InstallIdentity.id(context),
+    timezone = java.util.TimeZone.getDefault().id,
+    country = java.util.Locale.getDefault().country.ifBlank { null },
+    device = try {
+        val pkg = context.packageManager.getPackageInfo(context.packageName, 0)
+        live.airuncoach.airuncoach.network.model.deviceInfo(appVersion = pkg.versionName ?: "unknown")
+    } catch (e: Exception) {
+        null
+    },
+)
+
 private fun recordTourEvent(event: String, step: Int? = null) {
-    // Pre-login preview: there's no user to attribute the event to and the endpoint is
-    // authenticated, so don't fire (it would only 401 and be dropped anyway).
-    if (!tourTelemetryEnabled) return
+    // Pre-login preview: no user to attribute the event to, so it goes to the unauthenticated
+    // guest endpoint keyed by install id instead (guest_tour_sessions) — that's how we count
+    // downloads that tour without registering, and later whether they converted.
+    if (!tourTelemetryEnabled) {
+        val guest = guestTourContext ?: return
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                live.airuncoach.airuncoach.network.RetrofitClient.apiService.recordGuestTourEvent(
+                    live.airuncoach.airuncoach.network.model.GuestTourEventRequest(
+                        deviceId = guest.deviceId,
+                        event = event,
+                        step = step,
+                        totalSteps = TOUR_TOTAL_STEPS,
+                        stepName = step?.let(::tourStepName),
+                        timezone = guest.timezone,
+                        country = guest.country,
+                        device = guest.device,
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("OnboardingTourScreen", "Failed to record guest tour '$event' (non-fatal): ${e.message}")
+            }
+        }
+        return
+    }
     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
         try {
             live.airuncoach.airuncoach.network.RetrofitClient.apiService.recordOnboardingTourEvent(
@@ -208,6 +257,10 @@ fun OnboardingTourScreen(
     onCreateAccount: () -> Unit = onFinish,
 ) {
     tourTelemetryEnabled = !isPreLogin
+    val context = LocalContext.current
+    if (isPreLogin) {
+        guestTourContext = remember { buildGuestTourContext(context) }
+    }
     var watchChoice by remember { mutableStateOf<TourWatchChoice?>(null) }
     // Where the user currently is, for the "left" event below. 0 until a watch is chosen.
     var currentStep by remember { mutableIntStateOf(TOUR_WATCH_CHOICE_STEP) }
@@ -361,6 +414,8 @@ private fun TourStepController(
                 // Preview from the fresh-install welcome: the natural end is the sign-up
                 // form. Don't mark the (not-yet-existing) account's tour as completed — the
                 // real post-onboarding tour offer should still stand once they have one.
+                recordTourEvent("completed", totalSteps)
+                recordTourEvent("create_account", totalSteps)
                 onCreateAccount()
                 return
             }

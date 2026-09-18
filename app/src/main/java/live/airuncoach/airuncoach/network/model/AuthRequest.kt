@@ -43,7 +43,9 @@ data class RegisterRequest(
     val timezone: String? = null,
     val country: String? = null,
     val platform: String = "android",
-    val device: DeviceInfo? = null
+    val device: DeviceInfo? = null,
+    /** Install id — lets the backend mark this install's pre-login tour as converted. */
+    val guestDeviceId: String? = null,
 )
 
 data class ForgotPasswordRequest(

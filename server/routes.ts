@@ -90,6 +90,7 @@ import adaptationRouter from "./routes-adaptation";
 import myDataRouter from "./routes-my-data";
 import achievementsRouter from "./routes-achievements";
 import googlePlayRouter from "./routes-google-play";
+import guestTourRouter, { markGuestTourConverted } from "./routes-guest-tour";
 import { runDistanceKm } from "./utils/run-units";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
@@ -144,6 +145,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/coaching", realtimeCoachingRouter); // Real-time biomechanical coaching
   app.use("/api", achievementsRouter);
   app.use("/api", googlePlayRouter); // Google Play RTDN (Pub/Sub push) — see routes-google-play.ts
+  app.use("/api", guestTourRouter); // pre-login "Take a Tour" tracking — see routes-guest-tour.ts
   registerSessionCoachingRoutes(app);
 
   // Version probe — tells us immediately which build is running
@@ -415,6 +417,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         deviceSource: normalizedPlatform,
         ...parseDeviceInfo(req.body),
       });
+
+      // If this install took the pre-login tour, record that it became this user
+      // (guest_tour_sessions.converted_*). Clients send their install id as guestDeviceId.
+      await markGuestTourConverted(req.body?.guestDeviceId, user.id);
 
       if (EMAIL_VERIFICATION_ENABLED) {
         // Send verification email (non-blocking — don't fail registration if email fails)

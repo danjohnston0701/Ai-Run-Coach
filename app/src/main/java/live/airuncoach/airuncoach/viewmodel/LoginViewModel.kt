@@ -297,7 +297,8 @@ class LoginViewModel @Inject constructor(
                         password = _loginState.value.password,
                         timezone = java.util.TimeZone.getDefault().id,
                         country = java.util.Locale.getDefault().country.ifBlank { null },
-                        device = currentDeviceInfo()
+                        device = currentDeviceInfo(),
+                        guestDeviceId = live.airuncoach.airuncoach.util.InstallIdentity.id(context),
                     )
                 )
 
