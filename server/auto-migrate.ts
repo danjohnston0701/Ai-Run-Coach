@@ -452,6 +452,20 @@ export async function runAutoMigrations(): Promise<void> {
       sql: "CREATE INDEX IF NOT EXISTS idx_apple_transactions_original_id ON apple_transactions(original_transaction_id)",
     },
 
+    // ── users.target_distance_decimals ───────────────────────────────────────────
+    // Added to shared/schema.ts in 3fc9513 with a hand-run migration
+    // (migrations/add_target_distance_decimals.sql) that was never applied to Neon. Drizzle
+    // selects every schema column explicitly, so without this every storage.getUser() fails
+    // with 42703 the moment that build is deployed. Backfill mirrors the SQL file.
+    {
+      name: "users.target_distance_decimals",
+      sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS target_distance_decimals INTEGER NOT NULL DEFAULT 0",
+    },
+    {
+      name: "users.target_distance_decimals.backfill",
+      sql: "UPDATE users SET target_distance_decimals = 3 WHERE distance_decimals_enabled = TRUE AND target_distance_decimals = 0",
+    },
+
     // ── users.onboarding_tour_* progress ─────────────────────────────────────────
     // How far the onboarding feature tour got and how it ended (skip / closed app /
     // completed). The original started_at/completed_at pair came via
