@@ -1244,6 +1244,23 @@ export async function generatePhaseCoaching(params: {
   planTotalWeeks?: number;
 } & WatchDynamicsParams): Promise<string> {
   const { phase, distance, targetDistance, elapsedTime, currentPace, currentGrade, totalElevationGain, heartRate, cadence, coachName, coachTone, coachAccent, coachGender, activityType, hasRoute, targetPace, targetTime, triggerType, navigationInstruction, navigationDistance, fitnessLevel, runnerName, runnerAge, runnerWeight, runnerHeight } = params;
+
+  // Whole-session average pace. `currentPace` is the last few hundred metres (or, on older
+  // clients, a handful of GPS samples), so a prompt that lists "distance covered", "time
+  // elapsed" and only that one pace invites the model to present it as the pace those two
+  // numbers imply — "covered 0.3 km in 3:39, settling into 15:16/km" on a walk averaging 12:00.
+  // Prefer the client's explicit value; otherwise derive it from distance and elapsed time.
+  const averagePaceResolved: string | null = (() => {
+    const explicit = (params as any).averagePaceSoFar ?? (params as any).averagePace;
+    if (typeof explicit === 'string' && /^\d+:\d{2}$/.test(explicit)) return explicit;
+    const elapsedSec: number | undefined = typeof (params as any).elapsedTimeSeconds === 'number'
+      ? (params as any).elapsedTimeSeconds
+      : (typeof elapsedTime === 'number' ? elapsedTime * 60 : undefined);
+    if (!elapsedSec || !distance || distance < 0.05) return null;
+    const secPerKm = elapsedSec / distance;
+    if (!Number.isFinite(secPerKm) || secPerKm <= 0 || secPerKm > 1800) return null;
+    return `${Math.floor(secPerKm / 60)}:${String(Math.round(secPerKm % 60)).padStart(2, '0')}`;
+  })();
   
   const timeMin = Math.floor(elapsedTime / 60);  // kept for backward compat
   const timeFormatted = formatElapsedForTTS(elapsedTime);  // "X min Y sec" for TTS
@@ -1821,7 +1838,7 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
       distanceFormatted: formatDistanceForCoaching(distance),
       targetDistanceSuffix: targetDistance ? ` of ${formatDistanceForCoaching(targetDistance)} target (${progress}%)` : '',
       timeFormatted,
-      currentPaceLine: currentPace ? `- Current pace: ${spokenPhasePace}` : '',
+      currentPaceLine: buildPaceLines(currentPace, spokenPhasePace, averagePaceResolved),
       paceComparisonInfo, targetTimeInfo, hrInfo, cadenceInfo, terrainInfo,
       elevationInstruction, cadenceInstruction, noTerrainRule, runnerProfileContext, planContext,
       runnerFirstName, targetPace,
@@ -4542,7 +4559,7 @@ export async function generateComprehensiveRunAnalysis(params: {
   wellness?: GarminWellnessData;
   weatherImpactAnalysis?: string; // Weather impact analysis from historical data
   previousRuns?: any[];
-  userProfile?: { fitnessLevel?: string; age?: number; weight?: number };
+  userProfile?: { fitnessLevel?: string; age?: number; weight?: number; injuries?: string[] };
   coachName: string;
   coachTone: string;
   coachAccent?: string;
@@ -4721,6 +4738,13 @@ Think of yourself analyzing a training session you coached in person - you'd und
     }
     prompt += `Tailor your analysis depth, pacing expectations, and recommendations to this runner's fitness level. `;
     prompt += `For example, a "Newcomer" needs simple encouragement and basic form tips, while a "Competitive" or "Elite" runner expects detailed training load analysis and race-specific insights.\n`;
+    if (userProfile.injuries && userProfile.injuries.length > 0) {
+      prompt += `
+## INJURIES & CONDITIONS (from the runner's own injury record):
+${userProfile.injuries.map(i => `- ${i}`).join('\n')}
+Read the run in the light of these. If pace varied, slowed late, or they walked/stopped, consider first whether a listed condition explains it before calling it unexplained or attributing it to fitness or effort — and say so plainly ("your knee may well be behind the slower fourth kilometre") rather than "for unknown reasons". Keep recommendations compatible with the condition (no "push harder", "add hill sprints" or "increase mileage" advice against a chronic or active injury). Do not be alarmist and do not diagnose; you are noting a pattern they already know about.
+`;
+    }
   }
 
   // NEW: Add personalization from user profile context (what we know about this runner)
@@ -6695,6 +6719,47 @@ function determineCueingStrategy(
 }
 
 // Format sec/km pace as human-readable string for AI prompt
+/**
+ * The pace lines for an in-session prompt, plus the rule that keeps them honest. Average pace is
+ * what belongs next to "distance covered / time elapsed"; the momentary pace is only ever
+ * "right now", and is omitted when it is within 20 s/km of the average (nothing to say).
+ */
+function buildPaceLines(currentPace: string | undefined, spokenCurrent: string | null, averagePace: string | null): string {
+  const toSec = (p: string) => { const [m, s] = p.split(':').map(Number); return m * 60 + s; };
+  const lines: string[] = [];
+  if (averagePace) lines.push(`- Average pace so far: ${formatPaceForTTS(averagePace)}`);
+  if (currentPace && spokenCurrent) {
+    const differs = !averagePace || Math.abs(toSec(currentPace) - toSec(averagePace)) > 20;
+    if (differs) lines.push(`- Pace right now (last few hundred metres): ${spokenCurrent}`);
+  }
+  if (lines.length === 0) return '';
+  lines.push(`PACE RULE: when you mention distance covered and time elapsed together, the pace that goes with them is the AVERAGE pace. Describe the right-now pace only as "right now" or "at the moment" — never as the pace they have "settled into", are "holding" or are "averaging". Never state a pace that contradicts the distance and time you have just given.`);
+  return lines.join('\n');
+}
+
+/**
+ * Active and chronic entries from users.injury_history, formatted for a prompt. Healed
+ * injuries are left out. Shape per entry (see Android/iOS injury management):
+ * { bodyPart, status: "ACTIVE" | "CHRONIC" | "HEALED" | …, severity?, notes?, injurySide?,
+ *   injuryDate?, isProstheticOrAFO?, prostheticType? }.
+ */
+export function activeInjuriesForPrompt(injuryHistory: unknown): string[] {
+  if (!Array.isArray(injuryHistory)) return [];
+  return injuryHistory
+    .filter((i: any) => i && typeof i === 'object' && !/^healed$|^recovered$|^resolved$/i.test(String(i.status ?? '')))
+    .map((i: any) => {
+      const side = i.injurySide ? `${String(i.injurySide).toLowerCase()} ` : '';
+      const part = i.bodyPart ? `${side}${String(i.bodyPart).toLowerCase()}` : 'unspecified';
+      const bits: string[] = [];
+      if (i.status) bits.push(String(i.status).toLowerCase());
+      if (i.severity) bits.push(`${String(i.severity).toLowerCase()} severity`);
+      if (i.isProstheticOrAFO) bits.push(i.prostheticType ? `uses ${i.prostheticType}` : 'prosthetic / AFO');
+      const notes = typeof i.notes === 'string' && i.notes.trim() ? ` — ${i.notes.trim().slice(0, 160)}` : '';
+      return `${part}${bits.length ? ` (${bits.join(', ')})` : ''}${notes}`;
+    })
+    .slice(0, 6);
+}
+
 export function formatPaceForPrompt(secPerKm?: number): string {
   if (!secPerKm) return "not specified";
   const mins = Math.floor(secPerKm / 60);

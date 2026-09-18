@@ -4036,6 +4036,7 @@ function transformRunForAndroid(run: any) {
             return ageYears > 0 && ageYears < 150 ? ageYears : undefined; 
           })() : undefined,
           weight: user.weight ? (() => { const w = parseFloat(user.weight); return w > 0 && w < 500 ? w : undefined; })() : undefined,
+          injuries: aiService.activeInjuriesForPrompt(user.injuryHistory),
         } : undefined,
         coachName,
         coachTone,
@@ -16297,11 +16298,15 @@ function transformRunForAndroid(run: any) {
           previousRuns: previousRuns.filter(r => r.id !== runId).slice(0, 10),
           accountCreatedAt: user?.createdAt ?? null,
           weatherImpactAnalysis: weatherImpactAnalysis || undefined,
-          userProfile: body.userProfile || (user ? {
-            fitnessLevel: user.fitnessLevel || undefined,
-            age: user.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : undefined,
-            weight: user.weight ? parseFloat(user.weight as any) : undefined,
-          } : undefined),
+          userProfile: (() => {
+            const base = body.userProfile || (user ? {
+              fitnessLevel: user.fitnessLevel || undefined,
+              age: user.dob ? Math.floor((Date.now() - new Date(user.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : undefined,
+              weight: user.weight ? parseFloat(user.weight as any) : undefined,
+            } : undefined);
+            // Injuries always come from the DB record, whatever the client sent.
+            return base && user ? { ...base, injuries: aiService.activeInjuriesForPrompt(user.injuryHistory) } : base;
+          })(),
           coachName,
           coachTone,
           coachAccent: user?.coachAccent || body.coachAccent || undefined,

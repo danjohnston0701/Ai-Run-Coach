@@ -6490,6 +6490,15 @@ class RunTrackingService : Service(), SensorEventListener {
         // (check500mMilestones() itself doesn't come through here, so this can't deadlock it.)
         if (totalDistance < 500.0) return false
         if (coachingFeaturePrefs.halfKmCheckInEnabled && last500mMilestone == 0) return false
+        // Split-proximity lockout: within the last 150 m before a km-split boundary, leave the
+        // slot for the split so it is never queued behind a discretionary cue and announced
+        // late (iOS heard "you're at 1 kilometre" at 1.10 km on 17 Sep for exactly this reason).
+        if (coachingFeaturePrefs.kmSplitsEnabled && !isCoachingPlanActive) {
+            val intervalM = coachingFeaturePrefs.kmSplitIntervalKm.coerceAtLeast(1) * 1000.0
+            val toNextSplit = intervalM - (totalDistance % intervalM)
+            if (toNextSplit <= 150.0) return false
+        }
+
         // Non-navigation coaching: both time AND distance must have passed
         return timeSinceLastCoaching >= minGapMs && distSinceLastCoaching >= GLOBAL_COACHING_MIN_GAP_M
     }
