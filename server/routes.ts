@@ -1485,28 +1485,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   /**
    * POST /api/user/onboarding-tour-event
-   * Records the first time a user reaches (event: "started") or completes (event: "completed")
-   * the onboarding feature tour — see OnboardingTourScreen.kt/.swift. Write-once per field: a
-   * user retaking the tour later from their profile doesn't overwrite their original adoption
-   * timestamp, so `onboardingTourStartedAt`/`onboardingTourCompletedAt` on the users table
-   * answer "who is and isn't using it" directly from a user lookup.
+   * Records the onboarding feature tour's lifecycle — see OnboardingTourScreen.kt/.swift.
+   * Body: { event, step?, totalSteps?, stepName? }
+   *   started   — the tour screen was actually reached (write-once onboardingTourStartedAt)
+   *   step      — a page was shown; step 0 = watch choice, 1..totalSteps = the paged tour
+   *   left      — the app went to the background / was closed while on `step`
+   *   skipped   — Skip tapped on `step` (write-once onboardingTourSkippedAt / …AtStep)
+   *   completed — reached the natural end (write-once onboardingTourCompletedAt)
+   * First-occurrence timestamps are preserved so a user retaking the tour from their profile
+   * doesn't overwrite their original adoption data; furthestStep is a running max; lastEvent
+   * is always the most recent, which is what tells "still going" from "closed the app".
    */
   app.post("/api/user/onboarding-tour-event", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { event } = req.body as { event?: string };
-      if (event !== "started" && event !== "completed") {
-        return res.status(400).json({ error: "event must be 'started' or 'completed'" });
+      const { event, step, totalSteps, stepName } = req.body as {
+        event?: string; step?: number; totalSteps?: number; stepName?: string;
+      };
+      const TOUR_EVENTS = ["started", "step", "left", "skipped", "completed"] as const;
+      if (!TOUR_EVENTS.includes(event as any)) {
+        return res.status(400).json({ error: `event must be one of ${TOUR_EVENTS.join(", ")}` });
       }
 
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ error: "User not found" });
 
-      const field = event === "started" ? "onboardingTourStartedAt" : "onboardingTourCompletedAt";
-      if (!(user as any)[field]) {
-        await storage.updateUser(userId, { [field]: new Date() } as any);
+      const now = new Date();
+      const stepNum = Number.isInteger(step) ? (step as number) : null;
+      const totalNum = Number.isInteger(totalSteps) && (totalSteps as number) > 0 ? (totalSteps as number) : null;
+      const patch: Record<string, any> = {
+        onboardingTourLastEvent: event,
+        onboardingTourLastEventAt: now,
+      };
+      if (totalNum) patch.onboardingTourTotalSteps = totalNum;
+
+      // Running max of how far they've been, with the page name at that point.
+      const reached = event === "completed" ? (totalNum ?? user.onboardingTourTotalSteps ?? stepNum) : stepNum;
+      if (reached != null && reached >= (user.onboardingTourFurthestStep ?? -1)) {
+        patch.onboardingTourFurthestStep = reached;
+        if (event === "completed") patch.onboardingTourFurthestStepName = "completed";
+        else if (typeof stepName === "string" && stepName) patch.onboardingTourFurthestStepName = stepName.slice(0, 60);
       }
 
+      if (event === "started" && !user.onboardingTourStartedAt) patch.onboardingTourStartedAt = now;
+      if (event === "completed" && !user.onboardingTourCompletedAt) patch.onboardingTourCompletedAt = now;
+      if (event === "skipped" && !user.onboardingTourSkippedAt) {
+        patch.onboardingTourSkippedAt = now;
+        patch.onboardingTourSkippedAtStep = stepNum;
+      }
+
+      await storage.updateUser(userId, patch as any);
       res.json({ success: true });
     } catch (error: any) {
       console.error("[POST /api/user/onboarding-tour-event] Error:", error);

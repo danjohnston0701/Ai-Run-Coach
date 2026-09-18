@@ -135,34 +135,95 @@ private data class InfoPage(
     val description: String,
 )
 
+/** Step 0 is the watch-choice screen; the paged tour is 1..TOUR_TOTAL_STEPS. */
+private const val TOUR_TOTAL_STEPS = 2 + 9 + 1 // leadPages + INTERACTIVE_STEP_COUNT + tailPages
+private const val TOUR_WATCH_CHOICE_STEP = 0
+
+/**
+ * Stable page names sent with each tour event so "furthest step" reads as a screen, not a
+ * number. Keep in lockstep with leadPages()/InteractiveStep()/tailPages() and with the iOS
+ * `tourStepName` — the two apps share the same 12-page tour.
+ */
+private fun tourStepName(step: Int): String = when (step) {
+    TOUR_WATCH_CHOICE_STEP -> "watch_choice"
+    1 -> "goals_intro"
+    2 -> "ai_plans_intro"
+    3 -> "dashboard_profile_tab"
+    4 -> "profile_connected_devices"
+    5 -> "connected_devices"
+    6 -> "profile_injuries"
+    7 -> "injury_management"
+    8 -> "dashboard_run_without_route"
+    9 -> "run_setup"
+    10 -> "run_summary"
+    11 -> "ai_plans"
+    12 -> "ready_to_run"
+    else -> "step_$step"
+}
+
+/**
+ * Fire-and-forget tour telemetry. Uses its own IO scope rather than a composable's, because the
+ * "left" and "skipped" events are sent as the screen is going away and must outlive it.
+ * Non-fatal: tracking must never block or crash the tour itself.
+ */
+private fun recordTourEvent(event: String, step: Int? = null) {
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        try {
+            live.airuncoach.airuncoach.network.RetrofitClient.apiService.recordOnboardingTourEvent(
+                live.airuncoach.airuncoach.network.model.OnboardingTourEventRequest(
+                    event = event,
+                    step = step,
+                    totalSteps = TOUR_TOTAL_STEPS,
+                    stepName = step?.let(::tourStepName),
+                )
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("OnboardingTourScreen", "Failed to record tour '$event' (non-fatal): ${e.message}")
+        }
+    }
+}
+
 @Composable
 fun OnboardingTourScreen(
     onFinish: () -> Unit,
 ) {
     var watchChoice by remember { mutableStateOf<TourWatchChoice?>(null) }
+    // Where the user currently is, for the "left" event below. 0 until a watch is chosen.
+    var currentStep by remember { mutableIntStateOf(TOUR_WATCH_CHOICE_STEP) }
 
     // Fires once, on first composition — "started" means the tour screen was actually reached,
     // not just the "Take a tour" button tapped (permission/consent steps can intervene between
     // the tap and this screen mounting). Server preserves the first occurrence, so this is safe
-    // to call every time the screen mounts. Non-fatal: tracking must never block or crash the
-    // tour itself.
-    LaunchedEffect(Unit) {
-        try {
-            live.airuncoach.airuncoach.network.RetrofitClient.apiService.recordOnboardingTourEvent(
-                live.airuncoach.airuncoach.network.model.OnboardingTourEventRequest(event = "started")
-            )
-        } catch (e: Exception) {
-            android.util.Log.w("OnboardingTourScreen", "Failed to record tour start (non-fatal): ${e.message}")
+    // to call every time the screen mounts.
+    LaunchedEffect(Unit) { recordTourEvent("started", TOUR_WATCH_CHOICE_STEP) }
+
+    // "left": the app was backgrounded or closed mid-tour. ON_STOP fires for home/recents/
+    // swipe-away (a hard kill can pre-empt the request — the server then shows the last
+    // 'step' with no completion, which reads the same way). Disposed when the tour finishes,
+    // so completing or skipping never also reports a "left".
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) recordTourEvent("left", currentStep)
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     if (watchChoice == null) {
         WatchChoiceScreen(
             onChoose = { watchChoice = it },
-            onSkip = onFinish,
+            onSkip = {
+                recordTourEvent("skipped", TOUR_WATCH_CHOICE_STEP)
+                onFinish()
+            },
         )
     } else {
-        TourStepController(watchChoice = watchChoice!!, onFinish = onFinish)
+        TourStepController(
+            watchChoice = watchChoice!!,
+            onStepShown = { currentStep = it },
+            onFinish = onFinish,
+        )
     }
 }
 
@@ -251,14 +312,22 @@ private const val INTERACTIVE_STEP_COUNT = 9
 @Composable
 private fun TourStepController(
     watchChoice: TourWatchChoice,
+    /** Reports the 1-based tour page now on screen (for the parent's "left" tracking). */
+    onStepShown: (Int) -> Unit,
     onFinish: () -> Unit,
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     val lead = remember { leadPages() }
     val tail = remember { tailPages() }
     val totalSteps = lead.size + INTERACTIVE_STEP_COUNT + tail.size
     var step by remember { mutableIntStateOf(0) }
+
+    // One "step" event per page shown (step is 0-based here, 1-based on the wire — 0 is the
+    // watch-choice screen). This is what answers "how far did they get?".
+    LaunchedEffect(step) {
+        onStepShown(step + 1)
+        recordTourEvent("step", step + 1)
+    }
 
     fun advance() {
         if (step >= totalSteps - 1) {
@@ -266,15 +335,7 @@ private fun TourStepController(
             // Only fires on reaching the natural end (this branch) — never on Skip — so
             // the completed timestamp genuinely means "finished the tour," not "opened it."
             SessionManager(context).setOnboardingTourCompleted()
-            coroutineScope.launch {
-                try {
-                    live.airuncoach.airuncoach.network.RetrofitClient.apiService.recordOnboardingTourEvent(
-                        live.airuncoach.airuncoach.network.model.OnboardingTourEventRequest(event = "completed")
-                    )
-                } catch (e: Exception) {
-                    android.util.Log.w("OnboardingTourScreen", "Failed to record tour completion (non-fatal): ${e.message}")
-                }
-            }
+            recordTourEvent("completed", totalSteps)
             onFinish()
         } else {
             step += 1
@@ -290,6 +351,7 @@ private fun TourStepController(
             TourProgressDots(current = step, total = totalSteps)
             TextButton(onClick = {
                 AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TOUR_SKIPPED)
+                recordTourEvent("skipped", step + 1)
                 onFinish()
             }) {
                 Text("Skip", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Colors.textSecondary)

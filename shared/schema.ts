@@ -63,6 +63,21 @@ export const users = pgTable("users", {
   // user reached the natural end (tapped "Get Started"), not Skip at any point.
   onboardingTourStartedAt: timestamp("onboarding_tour_started_at"),
   onboardingTourCompletedAt: timestamp("onboarding_tour_completed_at"),
+  // How far the tour got and how it ended — answers "started but never completed: did they
+  // skip, close the app, or is it still in progress?" Step 0 = the watch-choice screen,
+  // 1..totalSteps = the paged tour (see tourStepName in OnboardingTourScreen.kt/.swift for
+  // the step vocabulary). furthestStep is a running max across attempts; skippedAt is
+  // write-once like the timestamps above; lastEvent/lastEventAt always reflect the most
+  // recent event ('started' | 'step' | 'left' | 'skipped' | 'completed') — 'left' = the app
+  // was backgrounded/closed mid-tour. No completedAt, no skippedAt and lastEvent in
+  // ('started','step','left') = abandoned (or the process was killed before 'left' sent).
+  onboardingTourFurthestStep: integer("onboarding_tour_furthest_step"),
+  onboardingTourTotalSteps: integer("onboarding_tour_total_steps"),
+  onboardingTourFurthestStepName: text("onboarding_tour_furthest_step_name"),
+  onboardingTourLastEvent: text("onboarding_tour_last_event"),
+  onboardingTourLastEventAt: timestamp("onboarding_tour_last_event_at"),
+  onboardingTourSkippedAt: timestamp("onboarding_tour_skipped_at"),
+  onboardingTourSkippedAtStep: integer("onboarding_tour_skipped_at_step"),
   // When the user finished the onboarding SCREENS (distinct from the optional feature tour
   // above). Completion was previously inferred only from local SharedPreferences/UserDefaults
   // flags that live on the device and are cleared by unrelated actions, so "who never finished

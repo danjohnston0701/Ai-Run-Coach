@@ -452,6 +452,19 @@ export async function runAutoMigrations(): Promise<void> {
       sql: "CREATE INDEX IF NOT EXISTS idx_apple_transactions_original_id ON apple_transactions(original_transaction_id)",
     },
 
+    // ── users.onboarding_tour_* progress ─────────────────────────────────────────
+    // How far the onboarding feature tour got and how it ended (skip / closed app /
+    // completed). The original started_at/completed_at pair came via
+    // migrations/add_onboarding_tour_tracking.sql; these extend it — see
+    // migrations/20260918_onboarding_tour_progress.sql.
+    { name: "users.onboarding_tour_furthest_step", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_furthest_step INTEGER" },
+    { name: "users.onboarding_tour_total_steps", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_total_steps INTEGER" },
+    { name: "users.onboarding_tour_furthest_step_name", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_furthest_step_name TEXT" },
+    { name: "users.onboarding_tour_last_event", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_last_event TEXT" },
+    { name: "users.onboarding_tour_last_event_at", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_last_event_at TIMESTAMP" },
+    { name: "users.onboarding_tour_skipped_at", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_skipped_at TIMESTAMP" },
+    { name: "users.onboarding_tour_skipped_at_step", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_skipped_at_step INTEGER" },
+
     // ── google_play_transactions ─────────────────────────────────────────────────
     // Purchase-token → user mapping for Google Play subscriptions (the Play analogue of
     // apple_transactions). Written by verify-purchase, RTDN and the hourly reconcile in
