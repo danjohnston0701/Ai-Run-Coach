@@ -201,20 +201,6 @@ class RunTrackingService : Service(), SensorEventListener {
     // before tapping stop would show as having missed their target time, even though they hit it
     // exactly when the coach congratulated them for it.
     private var targetReachedAtDurationMs: Long? = null
-    // For walk sessions: tracks the last 500m boundary at which a split coaching cue fired.
-    // Walk sessions get a coaching update every 500m (vs every 1km for runs) because walkers
-    // move slower and need more frequent check-ins to stay engaged and on pace.
-    private var lastWalk500mSplit = 0
-    // Separate timing state for the walk 500m checkpoint, distinct from lastSplitTime/
-    // splitPausedMs (which belong to the real km-boundary split below). Previously the walk
-    // checkpoint shared those variables with the real km-split mechanism — since both can fire
-    // within the same tick (a 500m-block boundary and a real km boundary can land on the same
-    // distance sample), whichever ran second computed its elapsed time against a lastSplitTime
-    // the OTHER mechanism had just overwritten moments earlier, producing a near-zero or
-    // negative interval and a literal "0:00" pace (calculatePace() returns "0:00" for any
-    // speed <= 0). Reported 2026-09 — Nino: "0 minutes per kilometre" pace values during a walk.
-    private var lastWalk500mSplitTime: Long = 0
-    private var walk500mSplitPausedMs: Long = 0
     private val coachingHistory = mutableListOf<AiCoachingNote>() // Track what coaching has been given with timestamps
     private var preRunBriefingText: String? = null // Pre-run briefing text to record in coaching history
     private var isMuted = false // User can mute coach
@@ -1929,7 +1915,6 @@ class RunTrackingService : Service(), SensorEventListener {
         // Resetting it here would erase the flag before we can use it.
         startTime = System.currentTimeMillis()
         lastSplitTime = startTime
-        lastWalk500mSplitTime = startTime
         lastSplitWatchElapsedSeconds = 0
 
         // Flip observers from "Waiting for X to start" to the live map. Done here — in the one
@@ -1953,7 +1938,6 @@ class RunTrackingService : Service(), SensorEventListener {
         pauseStartTime = 0
         isFinalizingStop = false  // Re-arm stopTracking() for this new run
         splitPausedMs = 0
-        walk500mSplitPausedMs = 0
         hasCreditedStartIdle = false  // Re-arm start-line idle detection for new run
         startIdleDistances.clear()
         startIdleTimes.clear()
@@ -1963,7 +1947,6 @@ class RunTrackingService : Service(), SensorEventListener {
         lastKmSplit = 0
         pendingKmSplitCoachingQueue.clear()  // Clear any deferred splits from previous run
         last500mMilestone = 0  // Reset for new run
-        lastWalk500mSplit = 0  // Reset for new walk session
         hasFiredTargetReachedCoaching = false  // Reset for new run
         targetReachedAtDurationMs = null  // Reset for new run
         hasGarminData = false       // Will be set true once first watch biometric frame arrives
@@ -2062,6 +2045,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastTechniqueCoachingTime = 0
         lastGlobalCoachingTime = 0
         lastGlobalCoachingDistance = 0.0
+        lastEliteCoachingDistance = -9999.0
         lastMilestonePercent = 0
         lastTargetEtaKm = 0
         lastPaceTrendCheckKm = 0
@@ -3910,7 +3894,6 @@ class RunTrackingService : Service(), SensorEventListener {
                                 if (idleMs > 0) {
                                     totalPausedMs += idleMs
                                     splitPausedMs += idleMs
-                                    walk500mSplitPausedMs += idleMs
                                     Log.d("RunTrackingService", "Auto-credited ${idleMs}ms of start-line idle time before first movement " +
                                         "(confirmed sustained ${windowPaceSecPerKm.toInt()}s/km over $START_IDLE_CONFIRM_SAMPLES samples)")
                                 }
@@ -4114,53 +4097,10 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun checkForKmSplit() {
         val currentKm = (totalDistance / 1000).toInt()
 
-        // ── Walk session: 500m splits ───────────────────────────────────────────────────────────
-        // Walkers move at ~8–15 min/km — a 1km split interval means 8–15 minutes of silence.
-        // Every 500m gives walkers regular coaching check-ins to keep them engaged and on target.
-        // This fires for all walk sessions (free walks and continuous coaching plan walks).
-        // Suppressed in the final 500m — final stretch cues handle the finish.
-        // The initial 500m is already handled by check500mMilestones() as a one-time event,
-        // so walk 500m splits start from the 1000m mark (same as km 1 split, then 1500m, 2000m, etc.)
-        if (currentActivityType == "walk" && !isCoachingPlanActive) {
-            val current500mBlock = (totalDistance / 500).toInt()
-            // Skip the very first block (0-500m) — handled by check500mMilestones() as the initial check-in
-            // Skip if in the final stretch — final 500m coaching takes over
-            if (current500mBlock > lastWalk500mSplit && current500mBlock >= 2 && !isInFinalStretch()) {
-                // A single update can cross more than one 500m boundary at once — same class of
-                // bug as checkForKmSplit()'s real km-split fix below, and the same root causes
-                // (a GPS gap, a watch relay catching up after a BLE stall, a large accepted
-                // distance correction). Unlike that fix, there's no permanent per-block data
-                // record to preserve here — this only drives a single spoken check-in — so the
-                // correct fix is simpler: use the REAL distance covered since the last checkpoint
-                // (which may be more than 500m) rather than assuming exactly 500m. The old
-                // hardcoded 500.0 made the reported pace look up to N times too slow whenever N
-                // boundaries were crossed in one update, since the same elapsed time was divided
-                // by only a fraction of the distance actually covered.
-                val blocksCrossed = current500mBlock - lastWalk500mSplit
-                lastWalk500mSplit = current500mBlock
-                val hasReachedTarget = targetDistance != null && totalDistance >= (targetDistance!! * 0.99)
-                if (!hasReachedTarget && !hasCoachingFiredThisTick && canFireCoaching()) {
-                    Log.d("RunTrackingService", "Walk 500m split at ${String.format("%.1f", totalDistance / 1000)}km — triggering coaching" + if (blocksCrossed > 1) " ($blocksCrossed boundaries crossed in one update)" else "")
-                    hasCoachingFiredThisTick = true
-                    recordCoachingFired()
-                    // Build a synthetic split using distance since last 500m boundary. Uses its
-                    // own lastWalk500mSplitTime/walk500mSplitPausedMs, NOT the real km-split's
-                    // lastSplitTime/splitPausedMs — see those fields' declaration for why.
-                    val now = System.currentTimeMillis()
-                    val splitTime = (now - lastWalk500mSplitTime) - walk500mSplitPausedMs
-                    val distSinceLastSplit = 500.0 * blocksCrossed
-                    val splitSpeedKmh = if (splitTime > 0) (distSinceLastSplit / (splitTime / 1000.0) * 3.6).toFloat() else 0f
-                    val walkSplit = KmSplit(
-                        km = current500mBlock, // Use 500m block count as the "km" index for the API
-                        time = splitTime,
-                        pace = calculatePace(splitSpeedKmh)
-                    )
-                    lastWalk500mSplitTime = now
-                    walk500mSplitPausedMs = 0
-                    triggerKmSplitCoaching(walkSplit, isWalkCheckpoint = true)
-                }
-            }
-        }
+        // Walks get the same split cadence as runs: the user's km-split interval, nothing in
+        // between. The extra 500 m "walk splits" that used to fire here (1.5, 2.5 km …) were
+        // removed 2026-09-18 — with the elite/technique channel they gave a walker a message
+        // every ~200 m. The one-time first-500 m check-in (check500mMilestones) is unchanged.
 
         // ── Retry the oldest pending split from a previous tick where cooldown blocked it ──
         // Drop anything that has gone stale first, so a slot is never spent announcing a
@@ -5079,7 +5019,6 @@ class RunTrackingService : Service(), SensorEventListener {
             val thisPauseDuration = System.currentTimeMillis() - pauseStartTime
             totalPausedMs += thisPauseDuration
             splitPausedMs += thisPauseDuration  // Track pause within current km split
-            walk500mSplitPausedMs += thisPauseDuration  // Same, for the separate walk-checkpoint timer
             Log.d("RunTrackingService", "Resumed after ${thisPauseDuration}ms pause, totalPausedMs: ${totalPausedMs}")
             pauseStartTime = 0
         }
@@ -6542,9 +6481,28 @@ class RunTrackingService : Service(), SensorEventListener {
             return timeSinceLastCoaching >= minGapMs
         }
 
+        // ── Opening lockout ──────────────────────────────────────────────────────────
+        // Nothing discretionary (pace, HR, cadence, phase-change, struggle, elite/technique)
+        // before the first 500 m check-in has been heard — or, when the user has that check-in
+        // switched off, before 500 m. The run-start line and the pre-run brief are the only
+        // things spoken in the opening half kilometre, for walks and runs alike. Plan-driven
+        // phase transitions take the bypassDistanceGate path above and are unaffected.
+        // (check500mMilestones() itself doesn't come through here, so this can't deadlock it.)
+        if (totalDistance < 500.0) return false
+        if (coachingFeaturePrefs.halfKmCheckInEnabled && last500mMilestone == 0) return false
         // Non-navigation coaching: both time AND distance must have passed
         return timeSinceLastCoaching >= minGapMs && distSinceLastCoaching >= GLOBAL_COACHING_MIN_GAP_M
     }
+
+    /**
+     * Minimum distance between two elite/technique cues. That channel is paced by a 45 s
+     * cooldown tuned for running; at a 12 min/km walk that is ~60 m, which (with the old
+     * 500 m walk splits) is how a walker ended up with a message every ~200 m. Same floor as
+     * iOS's discretionaryCueMinGapM: 1 km walking, 500 m running.
+     */
+    private val eliteCueMinGapM: Double
+        get() = if (currentActivityType == "walk") 1000.0 else 500.0
+    private var lastEliteCoachingDistance: Double = -9999.0
 
     /**
      * Record that coaching audio just fired. Call this from every coaching trigger
@@ -9210,6 +9168,7 @@ class RunTrackingService : Service(), SensorEventListener {
         if (!forceBypassCooldown) {
             if ((now - lastEliteCoachingTime) < ELITE_COACHING_COOLDOWN_MS) return false
             if ((now - lastCoachingTime) < COACHING_COOLDOWN_MS) return false
+            if (totalDistance - lastEliteCoachingDistance < eliteCueMinGapM) return false
         }
 
         // Priority order: milestone > target ETA > pace trend > positive reinforcement > technique > elevation
@@ -9791,6 +9750,7 @@ class RunTrackingService : Service(), SensorEventListener {
         val now = System.currentTimeMillis()
         val previousEliteTime = lastEliteCoachingTime
         lastEliteCoachingTime = now
+        lastEliteCoachingDistance = totalDistance
         lastCoachingTime = now
         hasCoachingFiredThisTick = true
         recordCoachingFired()
