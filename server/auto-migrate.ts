@@ -479,6 +479,27 @@ export async function runAutoMigrations(): Promise<void> {
     { name: "users.onboarding_tour_skipped_at", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_skipped_at TIMESTAMP" },
     { name: "users.onboarding_tour_skipped_at_step", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_skipped_at_step INTEGER" },
 
+    // ── user_stats.coaching_observations: drop sub-100 m runs ───────────────────
+    // Observations recorded from test taps / aborted starts (< 0.1 km) shaped "What your
+    // coach knows about you". The service now refuses to record them; this clears the
+    // ones already stored. Profiles regenerate on the next run / My Data refresh.
+    {
+      name: "user_stats.coaching_observations.drop_sub_100m",
+      sql: `
+        UPDATE user_stats s
+        SET coaching_observations = (
+          SELECT COALESCE(jsonb_agg(o ORDER BY ord), '[]'::jsonb)
+          FROM jsonb_array_elements(s.coaching_observations) WITH ORDINALITY AS t(o, ord)
+          WHERE COALESCE((o->>'distanceKm')::numeric, 0) >= 0.1
+        )
+        WHERE s.coaching_observations IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(s.coaching_observations) AS e(o)
+            WHERE COALESCE((e.o->>'distanceKm')::numeric, 0) < 0.1
+          )
+      `,
+    },
+
     // ── guest_tour_sessions ──────────────────────────────────────────────────────
     // Pre-login "Take a Tour" tracking per install + whether it converted to a user.
     // Canonical copy: migrations/20260919_guest_tour_sessions.sql

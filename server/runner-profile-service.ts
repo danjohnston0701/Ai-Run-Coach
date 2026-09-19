@@ -52,7 +52,7 @@
  */
 
 import OpenAI, { APIError } from 'openai';
-import { runDistanceKm } from './utils/run-units';
+import { runDistanceKm, MIN_MEANINGFUL_RUN_KM } from './utils/run-units';
 import { db } from './db';
 import {
   users, runs, userStats, goals, trainingPlans, plannedWorkouts,
@@ -289,6 +289,9 @@ export async function persistCoachingObservation(
   observation: CoachingObservation,
 ): Promise<void> {
   try {
+    // A sub-100 m "run" carries no information about the runner — never let its analysis
+    // become a coaching observation (see MIN_MEANINGFUL_RUN_KM).
+    if ((observation.distanceKm ?? 0) < MIN_MEANINGFUL_RUN_KM) return;
     // Only persist if there's at least one meaningful observation field
     const hasContent = observation.patternObserved || observation.progressionNote ||
       observation.adaptationSignal || observation.struggleNote ||
@@ -484,7 +487,10 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
       sessionType:   runs.sessionType,
     })
     .from(runs)
-    .where(eq(runs.userId, userId))
+    // Sub-100 m records (a test tap, an aborted start) are not evidence about the runner
+    // and used to drag the profile towards "very short sessions / low engagement".
+    // (Legacy metre-stored rows are > 200 and pass this too, which is correct.)
+    .where(and(eq(runs.userId, userId), gte(runs.distance, MIN_MEANINGFUL_RUN_KM)))
     .orderBy(desc(runs.completedAt))
     .limit(10);
 
@@ -492,7 +498,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
   const recentRunsForVolume = await db
     .select({ distance: runs.distance })
     .from(runs)
-    .where(and(eq(runs.userId, userId), gte(runs.completedAt, fourWeeksAgo)));
+    .where(and(eq(runs.userId, userId), gte(runs.completedAt, fourWeeksAgo), gte(runs.distance, MIN_MEANINGFUL_RUN_KM)));
 
   const runsLast4Weeks = recentRunsForVolume.length;
   const kmLast4Weeks   = recentRunsForVolume.reduce((sum, r) => sum + runDistanceKm(r.distance), 0);

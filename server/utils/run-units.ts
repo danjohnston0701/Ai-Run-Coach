@@ -11,3 +11,14 @@ export function runDistanceKm(distance: number | null | undefined): number {
   const d = distance ?? 0;
   return d > 200 ? d / 1000 : d;
 }
+
+/**
+ * Minimum distance for a run to count as evidence about the runner (AI runner profile,
+ * coaching observations, pre-run context). Anything shorter is a test tap / aborted start —
+ * "0.03 km in 12 s" — and must not shape "What your coach knows about you".
+ */
+export const MIN_MEANINGFUL_RUN_KM = 0.1;
+
+export function isMeaningfulRun(distance: number | null | undefined): boolean {
+  return runDistanceKm(distance) >= MIN_MEANINGFUL_RUN_KM;
+}

@@ -341,6 +341,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return fields;
   }
 
+  /**
+   * POST /api/auth/refresh — issue a fresh 30-day token for a still-valid session. Tokens
+   * had no refresh at all, so every user was signed out every 30 days. Both apps call this
+   * on foreground when their token is within a week of expiry.
+   */
+  app.post("/api/auth/refresh", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = await storage.getUser(req.user!.userId);
+      if (!user) return res.status(401).json({ error: "User not found" });
+      const token = generateToken({ userId: user.id, email: user.email });
+      res.json({ token });
+    } catch (error: any) {
+      console.error("[POST /api/auth/refresh] error:", error);
+      res.status(500).json({ error: "Failed to refresh token" });
+    }
+  });
+
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
       const { password, name, timezone, country, platform } = req.body;
@@ -17361,6 +17378,53 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   });
 
   // Adapt training plan
+  /**
+   * POST /api/training-plans/:planId/reassess — { runId, injuries? }
+   * iOS has called this after every plan-linked run (RunSessionViewModel.uploadRun and the
+   * Apple Watch sync path) since launch, but the route never existed — every call 404'd into
+   * a `try?`. Run-triggered reassessment already happens inside POST /api/runs, so this
+   * re-runs the same reassessment on demand and, when injuries are supplied, adapts the plan
+   * around them (the injury flow on the plan screens). Response shape matches the client's
+   * PlanReassessmentResponse.
+   */
+  app.post("/api/training-plans/:planId/reassess", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { planId } = req.params;
+      const userId = req.user!.userId;
+      const { runId, injuries } = req.body ?? {};
+
+      const [plan] = await db.select().from(trainingPlans).where(eq(trainingPlans.id, planId)).limit(1);
+      if (!plan) return res.status(404).json({ success: false, message: "Training plan not found" });
+      if (plan.userId !== userId) return res.status(403).json({ success: false, message: "Not your plan" });
+
+      const adjustmentsMade: string[] = [];
+      if (typeof runId === "string" && runId) {
+        const [run] = await db.select({ id: runs.id, userId: runs.userId }).from(runs).where(eq(runs.id, runId)).limit(1);
+        if (run && run.userId === userId) {
+          await reassessTrainingPlansWithRunData(userId, runId);
+          adjustmentsMade.push("Reassessed against your latest run");
+        }
+      }
+      if (Array.isArray(injuries) && injuries.length > 0) {
+        const summary = injuries
+          .map((i: any) => [i?.bodyPart, i?.status, i?.notes].filter(Boolean).join(" — "))
+          .filter(Boolean)
+          .join("; ");
+        await adaptTrainingPlan(planId, `Runner reported injury: ${summary || "unspecified"}. Adjust upcoming sessions to train around it safely.`, userId);
+        adjustmentsMade.push("Upcoming sessions adjusted around your reported injury");
+      }
+
+      res.json({
+        success: true,
+        message: adjustmentsMade.length ? adjustmentsMade.join(". ") : "Nothing to reassess yet",
+        adjustmentsMade,
+      });
+    } catch (error: any) {
+      console.error("[POST /api/training-plans/:planId/reassess] error:", error);
+      res.status(500).json({ success: false, message: error.message || "Failed to reassess training plan" });
+    }
+  });
+
   app.post("/api/training-plans/:planId/adapt", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { planId } = req.params;
