@@ -29,6 +29,7 @@ import {
   comparePassword, 
   authMiddleware, 
   optionalAuthMiddleware,
+  requireEntitledUser,
   type AuthenticatedRequest 
 } from "./auth";
 import {
@@ -342,7 +343,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/register", async (req: Request, res: Response) => {
     try {
-      const { email, password, name, timezone, country, platform } = req.body;
+      const { password, name, timezone, country, platform } = req.body;
+      const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : req.body.email;
       // Which app the account was created from — "ios" | "android". Anything else
       // (missing, web, typo) is left null rather than stored as garbage.
       const normalizedPlatform: "ios" | "android" | undefined =
@@ -350,6 +352,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!email || !password || !name) {
         return res.status(400).json({ error: "Email, password, and name are required" });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: "Please enter a valid email address" });
+      }
+      if (typeof password !== "string" || password.length < 8) {
+        return res.status(400).json({ error: "Password must be at least 8 characters" });
       }
       
       const existingUser = await storage.getUserByEmail(email);
@@ -1118,7 +1126,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/:id", async (req: Request, res: Response) => {
+  // Requires a session: this was public, exposing any user's email/DOB/body metrics/
+  // subscription to anyone holding a user id (ids travel in share links and invites).
+  app.get("/api/users/:id", authMiddleware, async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.params.id);
       if (!user) {
@@ -5751,7 +5761,7 @@ function transformRunForAndroid(run: any) {
 
   // ==================== AI ENDPOINTS (Direct OpenAI) ====================
   
-  app.post("/api/ai/coach", async (req: Request, res: Response) => {
+  app.post("/api/ai/coach", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const { message, context } = req.body;
       const aiService = await import("./ai-service");
@@ -5763,7 +5773,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/tts", async (req: Request, res: Response) => {
+  app.post("/api/ai/tts", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const { text, voice, coachAccent, coachGender } = req.body;
       const aiService = await import("./ai-service");
@@ -5776,7 +5786,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/coaching", async (req: Request, res: Response) => {
+  app.post("/api/ai/coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const { message, context } = req.body;
       const aiService = await import("./ai-service");
@@ -5788,7 +5798,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/run-summary", async (req: Request, res: Response) => {
+  app.post("/api/ai/run-summary", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const { lat, lng, distance, elevationGain, elevationLoss, difficulty, activityType, targetTime, firstTurnInstruction } = req.body;
       
@@ -5877,7 +5887,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/pre-run-summary", async (req: Request, res: Response) => {
+  app.post("/api/ai/pre-run-summary", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const { route, weather } = req.body;
       const aiService = await import("./ai-service");
@@ -5889,7 +5899,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/elevation-coaching", async (req: Request, res: Response) => {
+  app.post("/api/ai/elevation-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -5912,7 +5922,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/pace-update", async (req: Request, res: Response) => {
+  app.post("/api/ai/pace-update", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -5935,7 +5945,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/phase-coaching", async (req: Request, res: Response) => {
+  app.post("/api/ai/phase-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -5958,7 +5968,7 @@ function transformRunForAndroid(run: any) {
     }
   });
 
-  app.post("/api/ai/struggle-coaching", async (req: Request, res: Response) => {
+  app.post("/api/ai/struggle-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -12244,7 +12254,7 @@ function transformRunForAndroid(run: any) {
   }
 
   // Pace Update Coaching with TTS
-  app.post("/api/coaching/pace-update", async (req: Request, res: Response) => {
+  app.post("/api/coaching/pace-update", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
@@ -12342,7 +12352,7 @@ function transformRunForAndroid(run: any) {
   // surface that RunTrackingService.kt actually uses. The client fires this exactly once,
   // at the moment it detects the crossing, so no isRunCompleted() re-check is done here.
   // ─────────────────────────────────────────────────────────────────────────
-  app.post("/api/coaching/target-reached", async (req: Request, res: Response) => {
+  app.post("/api/coaching/target-reached", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
 
@@ -12398,7 +12408,7 @@ function transformRunForAndroid(run: any) {
   // Called from Android when a coaching plan session trigger condition becomes true.
   // Unlike the pre-run plan (templates), this generates a bespoke message from live data.
   // ─────────────────────────────────────────────────────────────────────────
-  app.post("/api/coaching/session-trigger-live", async (req: Request, res: Response) => {
+  app.post("/api/coaching/session-trigger-live", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
 
@@ -12447,7 +12457,7 @@ function transformRunForAndroid(run: any) {
   });
 
   // Struggle Coaching with TTS
-  app.post("/api/coaching/struggle-coaching", async (req: Request, res: Response) => {
+  app.post("/api/coaching/struggle-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       // Accept snake_case aliases for iOS clients — this route had no alias handling at all
@@ -12530,7 +12540,7 @@ function transformRunForAndroid(run: any) {
   });
 
   // Cadence/Stride Coaching with TTS - analyzes overstriding/understriding
-  app.post("/api/coaching/cadence-coaching", async (req: Request, res: Response) => {
+  app.post("/api/coaching/cadence-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('cadence-coaching', req.body, coachingUserId);
@@ -12579,7 +12589,7 @@ function transformRunForAndroid(run: any) {
   });
 
   // Elevation Coaching with TTS
-  app.post("/api/coaching/elevation-coaching", async (req: Request, res: Response) => {
+  app.post("/api/coaching/elevation-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('elevation-coaching', req.body, coachingUserId);
@@ -12628,7 +12638,7 @@ function transformRunForAndroid(run: any) {
   });
 
   // Elite Coaching with TTS — technique, milestones, positive reinforcement, target ETA, pace trends, elevation insights
-  app.post("/api/coaching/elite-coaching", async (req: Request, res: Response) => {
+  app.post("/api/coaching/elite-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
@@ -12715,7 +12725,7 @@ function transformRunForAndroid(run: any) {
   });
 
   // Phase Coaching with TTS
-  app.post("/api/coaching/phase-coaching", async (req: Request, res: Response) => {
+  app.post("/api/coaching/phase-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       // Accept snake_case aliases for iOS clients — this route had no alias handling at all
@@ -12815,7 +12825,7 @@ function transformRunForAndroid(run: any) {
 
   // Interval-specific coaching (work and recovery phases)
   // Note: interval-coaching is always treated as a milestone — every interval transition matters.
-  app.post("/api/coaching/interval-coaching", async (req: Request, res: Response) => {
+  app.post("/api/coaching/interval-coaching", requireEntitledUser, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       // interval-coaching is milestone by design — checkCooldown returns allowed:true immediately

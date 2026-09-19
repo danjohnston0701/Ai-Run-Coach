@@ -190,7 +190,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
+    // Case-insensitive: emails were matched exactly, so a user who registered as
+    // "Jane@x.com" and later typed "jane@x.com" got "invalid credentials" (and
+    // forgot-password, which lowercases, could never find them at all).
+    const needle = (email ?? "").trim();
+    if (!needle) return undefined;
+    const [user] = await db.select().from(users).where(sql`lower(${users.email}) = lower(${needle})`);
     return user || undefined;
   }
 
