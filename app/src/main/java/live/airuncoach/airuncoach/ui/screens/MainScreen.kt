@@ -151,11 +151,35 @@ fun MainScreen(
     // When the trial has expired the entire app UI is replaced by a full-screen
     // paywall — nothing is accessible until the user upgrades or signs out.
     val subscriptionViewModel: SubscriptionViewModel = hiltViewModel()
-    // Keyed on the reactive tier so a purchase made on the subscription screen (which
-    // updates the cached user + emits subscriptionTierState) re-evaluates the gate and
-    // drops the wall immediately, without a navigation to force recomposition.
-    val subscriptionTierForGate by subscriptionViewModel.subscriptionTierState.collectAsState()
-    val isTrialExpired = remember(subscriptionTierForGate) { subscriptionViewModel.isTrialExpired() }
+    // Reactive access state: recomputed after the server refresh below and after a purchase,
+    // so both the trial wall and the lapsed-subscription prompts drop the moment the account
+    // is entitled again, without a navigation to force recomposition.
+    val subscriptionAccess by subscriptionViewModel.accessState.collectAsState()
+    val isTrialExpired = subscriptionAccess == SubscriptionViewModel.SubscriptionAccess.TRIAL_EXPIRED
+    val isSubscriptionExpired = subscriptionAccess == SubscriptionViewModel.SubscriptionAccess.SUBSCRIPTION_EXPIRED
+    // Lapsed-subscription UX: a dismissible prompt once per app open (foreground), and a
+    // dismissible gate whenever a paused feature is tapped. Dashboard + history stay usable.
+    var expiredPromptDismissed by remember { mutableStateOf(false) }
+    var showExpiredGate by remember { mutableStateOf(false) }
+    // Re-read the account from the server every time the app comes to the foreground: store
+    // lifecycle events (expiry, refund) land server-side while the user is logged in, and the
+    // cached profile was previously only rewritten at login — a lapsed subscriber kept full
+    // access until they happened to sign in again.
+    val mainLifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(mainLifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                expiredPromptDismissed = false
+                navCoroutineScope.launch { subscriptionViewModel.refreshUserFromServer() }
+            }
+        }
+        mainLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { mainLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    /** Runs [action] unless the subscription has lapsed, in which case the renew gate shows. */
+    fun gated(action: () -> Unit) {
+        if (isSubscriptionExpired) showExpiredGate = true else action()
+    }
 
     // Permission requests are now handled in LocationPermissionScreen
     // Only request notification permission here if needed
@@ -264,6 +288,13 @@ fun MainScreen(
                         enabled = !isRunSessionRoute,
                         onClick = {
                             if (isRunSessionRoute) return@NavigationBarItem
+                            // Lapsed subscription: Goals and AI Plans are paused features;
+                            // Home / History / Profile stay open (Profile is how they renew).
+                            if (isSubscriptionExpired &&
+                                (screen.route == Screen.Goals.route || screen.route == Screen.AiPlans.route)) {
+                                showExpiredGate = true
+                                return@NavigationBarItem
+                            }
                             // Guard against a rapid double-tap firing navigate() twice before
                             // the first call's back-stack entry finishes transitioning — with
                             // popUpTo(...){inclusive=true} below, a second navigate() can try to
@@ -316,7 +347,7 @@ fun MainScreen(
                 // Use backStackEntry as refresh key - it changes when navigating back
                 val refreshKey = backStackEntry.lifecycle.currentState.hashCode()
                 DashboardScreen(
-                    onNavigateToRouteGeneration = {
+                    onNavigateToRouteGeneration = { gated {
                         val dist = dashboardViewModel.targetDistance.value
                         val timeOn = dashboardViewModel.isTargetTimeEnabled.value
                         val h = dashboardViewModel.targetHours.value
@@ -325,8 +356,8 @@ fun MainScreen(
                         val sessionType = user?.defaultSessionType ?: "RUN"
                         // For route mode: always default to AI Coach disabled
                         navController.navigate("map_my_run_setup/route/$dist/$timeOn/$h/$m/$s/false/$sessionType")
-                    },
-                    onNavigateToFreeRunSetup = {
+                    } },
+                    onNavigateToFreeRunSetup = { gated {
                         val dist = dashboardViewModel.targetDistance.value
                         val timeOn = dashboardViewModel.isTargetTimeEnabled.value
                         val h = dashboardViewModel.targetHours.value
@@ -336,18 +367,18 @@ fun MainScreen(
                         val sessionType = user?.defaultSessionType ?: "RUN"
                         // For free run mode: preserve dashboard preference
                         navController.navigate("map_my_run_setup/no_route/$dist/$timeOn/$h/$m/$s/$aiCoach/$sessionType")
-                    },
-                    onNavigateToRunSession = {
+                    } },
+                    onNavigateToRunSession = { gated {
                         navController.navigate("run_session") {
                             popUpTo("map_my_run_setup") { inclusive = true }
                         }
-                    },
+                    } },
                     onNavigateToPreviousRuns = {
                         navController.navigate("previous_runs")
                     },
-                    onNavigateToGoals = {
+                    onNavigateToGoals = { gated {
                         navController.navigate(Screen.Goals.route)
-                    },
+                    } },
                     onNavigateToProfile = {
                         navController.navigate(Screen.Profile.route)
                     },
@@ -359,12 +390,12 @@ fun MainScreen(
                         onLocationPermissionGranted = { dashboardViewModel.checkLocationPermission() }
                         showLocationPermissionDialog = true
                     },
-                    onCreateGoal = {
+                    onCreateGoal = { gated {
                         navController.navigate("create_goal")
-                    },
-                    onNavigateToWorkoutDetail = {
+                    } },
+                    onNavigateToWorkoutDetail = { gated {
                         navController.navigate("workout_detail")
-                    },
+                    } },
                     onNavigateToColorOSSetup = {
                         navController.navigate("color_os_setup")
                     },
@@ -1584,9 +1615,32 @@ fun MainScreen(
             currentRoute == "get_support" ||
             currentRoute == "change_password"
         if (isTrialExpired && !isOnUpgradePath) {
+            val wallContext = androidx.compose.ui.platform.LocalContext.current
             TrialExpiredWallScreen(
                 onUpgradeClick = { navController.navigate("subscription") },
-                onSignOutClick = { onNavigateToLogin() },
+                onSignOutClick = {
+                    // Must actually end the session before navigating: LoginScreen auto-resumes
+                    // any still-valid token straight back into MainScreen, so navigating alone
+                    // just re-showed this wall (reported: "Sign Out doesn't do anything").
+                    SessionManager(wallContext).clearSession()
+                    wallContext.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+                        .edit().remove("user").apply()
+                    onNavigateToLogin()
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Colors.backgroundRoot)
+            )
+        }
+
+        // ── Lapsed-subscription gate (dismissible) ────────────────────────────
+        if (isSubscriptionExpired && showExpiredGate && !isOnUpgradePath) {
+            live.airuncoach.airuncoach.ui.components.SubscriptionExpiredGateScreen(
+                onRenewClick = {
+                    showExpiredGate = false
+                    navController.navigate("subscription")
+                },
+                onDismiss = { showExpiredGate = false },
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Colors.backgroundRoot)
@@ -1595,6 +1649,19 @@ fun MainScreen(
 
         } // end Box (trial gate wrapper)
     } // end Scaffold content
+
+    // Lapsed subscription: dismissible renew prompt, once per app open, until they renew.
+    // Not shown over the subscription flow itself or mid-run.
+    if (isSubscriptionExpired && !expiredPromptDismissed && !showExpiredGate &&
+        currentRoute != "subscription" && !isRunSession) {
+        live.airuncoach.airuncoach.ui.components.SubscriptionExpiredDialog(
+            onRenewClick = {
+                expiredPromptDismissed = true
+                navController.navigate("subscription")
+            },
+            onDismiss = { expiredPromptDismissed = true }
+        )
+    }
 
     // Show promo code dialog when requested
     if (showPromoCodeDialog) {

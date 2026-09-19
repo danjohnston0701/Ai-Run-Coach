@@ -239,6 +239,7 @@ fun LoginScreen(
                     onCreateAccount = onNavigateToSignUp,
                     onTakeTour = onNavigateToTour,
                     onSignInInstead = { showSignInForm = true },
+                    onObserverSession = onNavigateToObserverSession,
                 )
                 Spacer(modifier = Modifier.height(Spacing.xxxl))
                 LoginTermsText()
@@ -490,7 +491,9 @@ private fun NewInstallWelcome(
     onCreateAccount: () -> Unit,
     onTakeTour: () -> Unit,
     onSignInInstead: () -> Unit,
+    onObserverSession: (sessionId: String) -> Unit,
 ) {
+    var showObserverInput by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = "Your AI running coach — live in your ear, every run",
@@ -567,6 +570,18 @@ private fun NewInstallWelcome(
             modifier = Modifier
                 .clickable { onSignInInstead() }
                 .padding(Spacing.sm)
+        )
+
+        Spacer(modifier = Modifier.height(Spacing.lg))
+        HorizontalDivider(color = Colors.primary.copy(alpha = 0.2f))
+        Spacer(modifier = Modifier.height(Spacing.lg))
+
+        // Invited to watch someone's live run? No account needed — same entry point the
+        // sign-in form offers, so a brand-new download with an invite isn't stuck.
+        ObserverTokenInputSection(
+            isExpanded = showObserverInput,
+            onExpandToggle = { showObserverInput = it },
+            onSessionStarted = onObserverSession
         )
     }
 }

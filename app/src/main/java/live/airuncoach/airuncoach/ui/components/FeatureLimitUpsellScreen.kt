@@ -583,3 +583,132 @@ fun PostRunAnalysisLimitUpsellScreen(
         onBackClick = onBackClick
     )
 }
+
+// ── Lapsed paid subscription ──────────────────────────────────────────────────
+//
+// An ex-subscriber (subscription_status = expired/refunded, tier cleared server-side) is NOT
+// hard-walled like an expired free trial: they keep the dashboard and run history, get a
+// dismissible renew prompt every time the app opens, and hit this gate when they try any
+// feature (run without/with route, AI plans, goals). Both are dismissible — the wall above is
+// not. Mirrors iOS's SubscriptionExpiredGateView / expired alert in MainTabRoot.
+
+/** Dismissible full-screen renew prompt shown when a lapsed subscriber taps a gated feature. */
+@Composable
+fun SubscriptionExpiredGateScreen(
+    onRenewClick: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = Spacing.lg),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Spacer(modifier = Modifier.height(Spacing.xxxl))
+                Card(
+                    modifier = Modifier.size(80.dp),
+                    colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.15f)),
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Subscription expired",
+                            tint = Colors.primary,
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(Spacing.xl))
+                Text(
+                    "Your Subscription Has Expired",
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Colors.textPrimary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = Spacing.md)
+                )
+                Text(
+                    "Your run history is still here, but AI coaching, routes and training plans are paused " +
+                    "until you renew. Pick up right where you left off.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = Spacing.lg)
+                )
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.md),
+                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        TrialFeatureHighlight("🎙️", "Real-time AI coaching while you run")
+                        TrialFeatureHighlight("📊", "Detailed AI post-run analysis")
+                        TrialFeatureHighlight("🗺️", "AI-generated personalised routes")
+                        TrialFeatureHighlight("📋", "Custom AI training plans")
+                    }
+                }
+            }
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg).padding(bottom = Spacing.xl),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Button(
+                onClick = onRenewClick,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Renew Subscription", style = AppTextStyles.body.copy(color = Colors.buttonText, fontWeight = FontWeight.Bold))
+            }
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Colors.textSecondary),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Not Now", style = AppTextStyles.body.copy(color = Colors.textSecondary))
+            }
+        }
+    }
+}
+
+/** Dismissible "your subscription has expired" prompt shown on every app open until renewed. */
+@Composable
+fun SubscriptionExpiredDialog(
+    onRenewClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Colors.backgroundSecondary,
+        title = {
+            Text("Your subscription has expired", style = AppTextStyles.h3, color = Colors.textPrimary)
+        },
+        text = {
+            Text(
+                "Renew to keep your AI coach, post-run analysis, routes and training plans. " +
+                "Your run history is safe either way.",
+                style = AppTextStyles.body,
+                color = Colors.textSecondary
+            )
+        },
+        confirmButton = {
+            Button(onClick = onRenewClick, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
+                Text("Renew", color = Colors.buttonText)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Not now", color = Colors.textSecondary) }
+        }
+    )
+}

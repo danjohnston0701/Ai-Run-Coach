@@ -92,6 +92,7 @@ class SubscriptionViewModel @Inject constructor(
                     _subscriptionTier.value = result.tier
                     _lastBillingPeriod.value = result.billingPeriod
                     _purchaseJustCompleted.value = true
+                    recomputeAccessState()
                     // Also reload usage data to show the new tier's limits
                     loadUsageData()
                 }
@@ -218,7 +219,71 @@ class SubscriptionViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Where the account stands for gating purposes. Distinct from the tier string because an
+     * ex-subscriber and a never-subscribed trial user both end up on "free"/null tier but need
+     * very different treatment (hard wall vs. soft renew prompts — see MainScreen).
+     */
+    enum class SubscriptionAccess { ACTIVE, TRIAL_EXPIRED, SUBSCRIPTION_EXPIRED }
+
+    private companion object {
+        val LAPSED_STATUSES = setOf("expired", "refunded", "cancelled", "canceled", "on_hold", "paused", "inactive")
+    }
+
+    private val _accessState = MutableStateFlow(computeAccessState())
+    val accessState: StateFlow<SubscriptionAccess> = _accessState.asStateFlow()
+
+    private fun computeAccessState(): SubscriptionAccess = when {
+        isSubscriptionExpired() -> SubscriptionAccess.SUBSCRIPTION_EXPIRED
+        isTrialExpired() -> SubscriptionAccess.TRIAL_EXPIRED
+        else -> SubscriptionAccess.ACTIVE
+    }
+
+    /**
+     * A PAID subscription that has lapsed: both stores' server-side lifecycle handlers write
+     * `subscription_tier = NULL, subscription_status = 'expired' | 'refunded'` (see
+     * apple-server-notifications.ts / google-play-billing.ts). Unlike an expired free trial this
+     * user keeps read access (dashboard, history) and gets dismissible renew prompts instead of
+     * the hard wall.
+     */
+    fun isSubscriptionExpired(): Boolean {
+        val user = getCachedUser() ?: return false
+        val status = user.subscriptionStatus?.lowercase()?.trim() ?: return false
+        val tier = user.subscriptionTier?.lowercase()?.trim()
+        val tierGone = tier.isNullOrEmpty() || tier == "null" || tier == "free"
+        return tierGone && status in LAPSED_STATUSES
+    }
+
+    /**
+     * Pulls the current user from the server and replaces the cached profile, so subscription
+     * changes made server-side (store lifecycle events, admin promos) take effect on the next
+     * app open — not only after the next login. Previously the cache was only ever written at
+     * login and after a Play purchase, which is how a lapsed subscriber kept full access.
+     * Silent on failure: the cached profile stays authoritative offline.
+     */
+    suspend fun refreshUserFromServer(): SubscriptionAccess {
+        try {
+            val fresh = apiService.getCurrentUser()
+            val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("user", Gson().toJson(fresh)).apply()
+            _subscriptionTier.value = getSubscriptionTier()
+            fresh.currency?.takeIf { it.isNotBlank() }?.let { _userCurrency.value = it }
+        } catch (e: Exception) {
+            android.util.Log.w("SubscriptionViewModel", "Could not refresh user from server (non-fatal): ${e.message}")
+        }
+        return recomputeAccessState()
+    }
+
+    fun recomputeAccessState(): SubscriptionAccess {
+        val state = computeAccessState()
+        _accessState.value = state
+        return state
+    }
+
     fun isTrialExpired(): Boolean {
+        // A lapsed paid subscriber also lands on a null/free tier, but is handled by the
+        // softer SUBSCRIPTION_EXPIRED path — never the hard trial wall.
+        if (isSubscriptionExpired()) return false
         val tier = getSubscriptionTier()
         if (tier != "free") return false
 
