@@ -2,6 +2,7 @@
 package live.airuncoach.airuncoach.viewmodel
 
 import live.airuncoach.airuncoach.util.AppAnalytics
+import live.airuncoach.airuncoach.util.RunConfigHolder
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -2161,8 +2162,15 @@ class RunSessionViewModel @Inject constructor(
                         // ── Heart Rate & Effort ────────────────────────────────────────
                         heartRate = runSession.value?.heartRate?.takeIf { it > 0 },
                         avgHeartRate = runSession.value?.heartRate?.takeIf { it > 0 },  // May be improved later
-                        maxHeartRate = null,  // TODO: track during run
-                        minHeartRate = null,  // TODO: track during run
+                        maxHeartRate = runSession.value?.let { rs ->
+                            rs.heartRateData?.filter { it > 0 }?.maxOrNull()
+                                ?: rs.routePoints.mapNotNull { it.heartRate }.filter { it > 0 }.maxOrNull()
+                        },
+                        minHeartRate = runSession.value?.let { rs ->
+                            rs.minHeartRate?.takeIf { it > 0 }
+                                ?: rs.heartRateData?.filter { it > 0 }?.minOrNull()
+                                ?: rs.routePoints.mapNotNull { it.heartRate }.filter { it > 0 }.minOrNull()
+                        },
                         
                         // ── Cadence & Running Dynamics ─────────────────────────────────
                         cadence = runSession.value?.cadence?.takeIf { it > 0 },
@@ -2183,9 +2191,13 @@ class RunSessionViewModel @Inject constructor(
                         totalElevationGain = runSession.value?.totalElevationGain,
                         
                         // ── Time Tracking ────────────────────────────────────────────────
-                        targetTime = null,  // TODO: fetch from session
+                        targetTime = RunConfigHolder.getConfig()?.takeIf { it.hasTargetTime }?.let {
+                            ((it.targetHours * 3600L) + (it.targetMinutes * 60L) + it.targetSeconds) * 1000L
+                        }?.takeIf { it > 0 },
                         elapsedTime = (runSession.value?.duration?.div(1000))?.toInt(),
-                        movingTime = null,  // TODO: track separately
+                        // duration already excludes paused time (the service's timer stops on
+                        // pause), so it IS the moving time unless the session tracked one itself.
+                        movingTime = runSession.value?.let { rs -> (rs.movingTime ?: (rs.duration / 1000)).toInt() },
                         
                         // ── Environment & Weather ────────────────────────────────────────
                         weather = runSession.value?.weatherAtStart,

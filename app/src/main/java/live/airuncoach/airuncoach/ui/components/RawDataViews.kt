@@ -108,12 +108,19 @@ fun RawDataTab(runSession: RunSession) {
         // ========== PHYSIOLOGICAL ==========
         item {
             RawDataSection("Physiological Metrics") {
+                val hrSamples = (runSession.heartRateData?.filter { it > 0 } ?: emptyList())
+                    .ifEmpty { runSession.routePoints.mapNotNull { it.heartRate }.filter { it > 0 } }
+                val maxHr = hrSamples.maxOrNull()
+                val minHr = runSession.minHeartRate?.takeIf { it > 0 } ?: hrSamples.minOrNull()
                 RawDataRow("Average Heart Rate", "${runSession.heartRate} bpm")
-                RawDataRow("Max Heart Rate", "N/A") // TODO: Track max HR
-                RawDataRow("Min Heart Rate", "N/A") // TODO: Track min HR
-                RawDataRow("HR Reserve Used", "N/A") // TODO: Calculate
+                RawDataRow("Max Heart Rate", maxHr?.let { "$it bpm" } ?: "N/A")
+                RawDataRow("Min Heart Rate", minHr?.let { "$it bpm" } ?: "N/A")
+                RawDataRow("HR Range Used", if (maxHr != null && minHr != null && maxHr > minHr) "${maxHr - minHr} bpm" else "N/A")
                 RawDataRow("Average Cadence", "${runSession.cadence} spm")
-                RawDataRow("Max Cadence", "N/A") // TODO: Track max cadence
+                val maxCad = runSession.maxCadence?.takeIf { it > 0 }
+                    ?: runSession.cadenceData?.filter { it > 0 }?.maxOrNull()
+                    ?: runSession.routePoints.mapNotNull { it.cadence }.filter { it > 0 }.maxOrNull()
+                RawDataRow("Max Cadence", maxCad?.let { "$it spm" } ?: "N/A")
                 RawDataRow("Step Count (estimated)", "${runSession.cadence * (runSession.duration / 1000 / 60).toInt()}")
             }
         }
@@ -262,7 +269,9 @@ fun RawDataTab(runSession: RunSession) {
             RawDataSection("Technical Information") {
                 RawDataRow("Coaching Phase", runSession.phase.name)
                 RawDataRow("Is Struggling", runSession.isStruggling.toString())
-                RawDataRow("GPS Accuracy", "N/A") // TODO: Track GPS accuracy
+                val accs = runSession.routePoints.mapNotNull { it.accuracy }.filter { it > 0f }
+                RawDataRow("GPS Accuracy (avg / worst)",
+                    if (accs.isNotEmpty()) String.format("%.1f m / %.1f m", accs.average(), accs.max()) else "N/A")
                 RawDataRow("Sensor Data Points", runSession.routePoints.size.toString())
                 RawDataRow("Data Collection Rate", 
                     if (runSession.duration > 0) 

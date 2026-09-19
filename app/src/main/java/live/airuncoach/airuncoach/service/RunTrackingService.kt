@@ -461,6 +461,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var watchGpsAccuracySum:   Float = 0f
     private var watchGpsAccuracyCount: Int   = 0
     private var watchGpsAccuracyWorst: Float = 0f   // highest metres CEP seen (worst)
+    private var phoneGpsAccuracySum:   Float = 0f
+    private var phoneGpsAccuracyCount: Int   = 0
+    private var phoneGpsAccuracyWorst: Float = 0f
     // Pace extremes (sec/km) — min = fastest, max = slowest
     private var watchMinPace: Double = 0.0
     private var watchMaxPace: Double = 0.0
@@ -2014,6 +2017,7 @@ class RunTrackingService : Service(), SensorEventListener {
         watchPwrSeries.clear();     watchRespSeries.clear()
         watchBearingSeries.clear(); watchStepsSeries.clear()
         watchGpsAccuracySum = 0f; watchGpsAccuracyCount = 0; watchGpsAccuracyWorst = 0f
+        phoneGpsAccuracySum = 0f; phoneGpsAccuracyCount = 0; phoneGpsAccuracyWorst = 0f
         watchMinPace = 0.0; watchMaxPace = 0.0
         runStartStepCount = -1
         windowStartStepCount = -1
@@ -3725,8 +3729,15 @@ class RunTrackingService : Service(), SensorEventListener {
             heartRate = currentHeartRate.takeIf { it > 0 },
             bearing = location.bearing.takeIf { location.hasBearing() },
             cadence = currentCadence.takeIf { it > 0 },
-            inclineDegrees = inclineDegrees
+            inclineDegrees = inclineDegrees,
+            accuracy = location.accuracy.takeIf { location.hasAccuracy() && it > 0f }
         )
+        // Phone GPS accuracy — the same avg/worst the watch path already reports, so uploads
+        // and the Raw Data tab no longer show N/A for phone-only runs.
+        newPoint.accuracy?.let { acc ->
+            phoneGpsAccuracySum += acc; phoneGpsAccuracyCount++
+            if (acc > phoneGpsAccuracyWorst) phoneGpsAccuracyWorst = acc
+        }
 
         if (routePoints.isNotEmpty()) {
             val prevPoint = routePoints.last()
@@ -5444,8 +5455,12 @@ class RunTrackingService : Service(), SensorEventListener {
             stepsData                = watchStepsSeries.takeIf { it.isNotEmpty() },
             minPace                  = watchMinPace.takeIf { it > 0.0 },
             maxPace                  = watchMaxPace.takeIf { it > 0.0 },
-            avgGpsAccuracy           = if (watchGpsAccuracyCount > 0) watchGpsAccuracySum / watchGpsAccuracyCount else null,
-            worstGpsAccuracy         = watchGpsAccuracyWorst.takeIf { it > 0f },
+            avgGpsAccuracy           = when {
+                watchGpsAccuracyCount > 0 -> watchGpsAccuracySum / watchGpsAccuracyCount
+                phoneGpsAccuracyCount > 0 -> phoneGpsAccuracySum / phoneGpsAccuracyCount
+                else -> null
+            },
+            worstGpsAccuracy         = (if (watchGpsAccuracyCount > 0) watchGpsAccuracyWorst else phoneGpsAccuracyWorst).takeIf { it > 0f },
             // Power saver mode telemetry — if phone's power saver was active during this run
             powerSaverModeDetected   = powerSaverModeDetected,
         )

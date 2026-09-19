@@ -61,6 +61,10 @@ interface ApiService {
     @GET("/api/users/me")
     suspend fun getCurrentUser(): User
 
+    /** Fresh 30-day token for a still-valid session — see SubscriptionViewModel.refreshUserFromServer. */
+    @POST("/api/auth/refresh")
+    suspend fun refreshAuthToken(): live.airuncoach.airuncoach.network.model.TokenRefreshResponse
+
     @POST("/api/users/me/fcm-token")
     suspend fun saveFcmToken(@Body body: Map<String, String>): retrofit2.Response<Unit>
 

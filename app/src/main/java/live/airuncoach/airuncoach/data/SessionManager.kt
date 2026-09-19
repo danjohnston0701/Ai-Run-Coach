@@ -319,6 +319,21 @@ class SessionManager(context: Context) {
      *
      * @return true if no token exists OR the token's exp is in the past.
      */
+    /** Seconds until the stored JWT expires, or null when there's no parseable token. */
+    fun tokenSecondsToExpiry(): Long? {
+        val token = getAuthToken() ?: return null
+        return try {
+            val parts = token.split(".")
+            if (parts.size != 3) return null
+            val padded = parts[1].replace('-', '+').replace('_', '/')
+                .let { it.padEnd((it.length + 3) / 4 * 4, '=') }
+            val payloadJson = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT))
+            org.json.JSONObject(payloadJson).getLong("exp") - System.currentTimeMillis() / 1000
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun isTokenExpired(): Boolean {
         val token = getAuthToken() ?: return true
         return try {

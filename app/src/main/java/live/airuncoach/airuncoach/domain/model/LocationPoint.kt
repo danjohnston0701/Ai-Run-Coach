@@ -9,6 +9,7 @@ data class LocationPoint(
     val heartRate: Int? = null,
     val bearing: Float? = null,
     val cadence: Int? = null,
-    val inclineDegrees: Float? = null // Incline in degrees, calculated from elevation change
+    val inclineDegrees: Float? = null, // Incline in degrees, calculated from elevation change
+    val accuracy: Float? = null // Horizontal accuracy (metres) reported by the fix, when known
 )
 

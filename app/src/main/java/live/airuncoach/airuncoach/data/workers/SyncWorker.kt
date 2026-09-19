@@ -205,8 +205,12 @@ class SyncWorker(
                 duration = run.duration,
                 avgPace = run.averagePace ?: "0:00",
                 avgHeartRate = if (run.heartRate > 0) run.heartRate else null,
-                maxHeartRate = null,
-                minHeartRate = run.minHeartRate,
+                // Was hard-coded null: every run uploaded via this offline-retry path lost its
+                // max HR. Same derivation the summary screen uses.
+                maxHeartRate = run.heartRateData?.filter { it > 0 }?.maxOrNull()
+                    ?: run.routePoints.mapNotNull { it.heartRate }.filter { it > 0 }.maxOrNull(),
+                minHeartRate = run.minHeartRate
+                    ?: run.heartRateData?.filter { it > 0 }?.minOrNull(),
                 calories = run.calories,
                 cadence = run.cadence,
                 maxCadence = run.maxCadence,

@@ -262,6 +262,17 @@ class SubscriptionViewModel @Inject constructor(
      * Silent on failure: the cached profile stays authoritative offline.
      */
     suspend fun refreshUserFromServer(): SubscriptionAccess {
+        // Silent token refresh: tokens live 30 days with no rotation, which signed everyone
+        // out monthly. Renew once we're inside the last 7 days of validity.
+        try {
+            val session = live.airuncoach.airuncoach.data.SessionManager(context)
+            val secondsLeft = session.tokenSecondsToExpiry()
+            if (secondsLeft != null && secondsLeft > 0 && secondsLeft < 7L * 24 * 3600) {
+                apiService.refreshAuthToken().token?.takeIf { it.isNotBlank() }?.let { session.saveAuthToken(it) }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("SubscriptionViewModel", "Token refresh skipped (non-fatal): ${e.message}")
+        }
         try {
             val fresh = apiService.getCurrentUser()
             val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
