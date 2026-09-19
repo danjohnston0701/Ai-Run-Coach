@@ -14,6 +14,11 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
@@ -192,15 +197,26 @@ private fun NavGraphBuilder.rootNavigationDestinations(
         // creating an account. Runs in preview mode (no tour telemetry, no authenticated
         // fetches) and its closing page's CTA is "Create a Free Account" → sign_up.
         composable("onboarding_tour_preview") {
-            OnboardingTourScreen(
-                isPreLogin = true,
-                onFinish = { navController.popBackStack() },
-                onCreateAccount = {
-                    navController.navigate("sign_up") {
-                        popUpTo("onboarding_tour_preview") { inclusive = true }
-                    }
-                },
-            )
+            // The tour's mock screens opt out of their own insets (contentWindowInsets = 0)
+            // because MainScreen's Scaffold supplies them for the signed-in tour. There is no
+            // Scaffold on this root-level route, so apply the status/navigation-bar insets here
+            // — without this the prompt banner and its buttons sat under the system nav bar.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Colors.backgroundRoot)
+                    .systemBarsPadding()
+            ) {
+                OnboardingTourScreen(
+                    isPreLogin = true,
+                    onFinish = { navController.popBackStack() },
+                    onCreateAccount = {
+                        navController.navigate("sign_up") {
+                            popUpTo("onboarding_tour_preview") { inclusive = true }
+                        }
+                    },
+                )
+            }
         }
 
         // Standalone observer session (accessed from login screen with a resolved token —

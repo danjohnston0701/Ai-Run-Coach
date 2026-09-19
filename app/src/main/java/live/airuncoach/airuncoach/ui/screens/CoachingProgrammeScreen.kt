@@ -436,6 +436,14 @@ fun TrainingPlanDashboardScreen(
     val actionError by viewModel.actionError.collectAsState()
     val pendingAdaptationsCount by viewModel.pendingAdaptationsCount.collectAsState()
     val planActionSuccess by viewModel.planActionSuccess.collectAsState()
+    val infoMessage by viewModel.infoMessage.collectAsState()
+    val infoContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(infoMessage) {
+        infoMessage?.let {
+            android.widget.Toast.makeText(infoContext, it, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.clearInfoMessage()
+        }
+    }
     val blockStatus by viewModel.blockStatus.collectAsState()
     val nextBlockTriggering by viewModel.nextBlockTriggering.collectAsState()
 
@@ -584,16 +592,17 @@ fun TrainingPlanDashboardScreen(
         AddInjuryRecalibrateDialog(
             onDismiss = { showAddInjuryDialog = false },
             onConfirm = { bodyPart, status, notes, shouldRecalculate ->
-                // Save injury to user profile
-                val sharedPrefs = viewModel.javaClass.getDeclaredField("context").let {
-                    // Get context through viewModel - simplified approach
-                }
-                
-                // For now, just show the dialog and save the injury
-                // The recalculation would require a backend API call
                 showAddInjuryDialog = false
-                
-                // TODO: Implement actual injury save and plan recalculation via API
+                viewModel.addInjury(
+                    planId = planId,
+                    injury = Injury(
+                        bodyPart = bodyPart,
+                        status = status,
+                        notes = notes,
+                        injuryDate = java.time.LocalDate.now().toString(),
+                    ),
+                    recalculate = shouldRecalculate,
+                )
             }
         )
     }

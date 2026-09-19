@@ -65,6 +65,37 @@ class TrainingPlanViewModel @Inject constructor(
 
     fun clearPlanActionSuccess() { _planActionSuccess.value = false }
 
+    /** One-shot user-facing message (e.g. "Injury saved"); the screen shows it and clears it. */
+    private val _infoMessage = MutableStateFlow<String?>(null)
+    val infoMessage: StateFlow<String?> = _infoMessage.asStateFlow()
+    fun clearInfoMessage() { _infoMessage.value = null }
+
+    /**
+     * "Add injury" from the Coaching Programme screen. Saves to the user's injury history
+     * (the same endpoint the Profile → Health & Injuries screen uses — this dialog used to
+     * close without saving anything) and reloads the plan. The plan itself adapts on the
+     * next run save (server-side reassessment reads injury history), so [recalculate] only
+     * changes the confirmation copy.
+     */
+    fun addInjury(planId: String, injury: live.airuncoach.airuncoach.domain.model.Injury, recalculate: Boolean) {
+        viewModelScope.launch {
+            _actionLoading.value = true
+            try {
+                apiService.addInjury(injury)
+                _infoMessage.value = if (recalculate)
+                    "Injury saved — your coach will adapt upcoming sessions around it."
+                else
+                    "Injury saved to your profile."
+                loadPlanDetail(planId)
+            } catch (e: Exception) {
+                android.util.Log.e("TrainingPlanViewModel", "Failed to add injury: ${e.message}")
+                _actionError.value = "Couldn't save that injury — please try again."
+            } finally {
+                _actionLoading.value = false
+            }
+        }
+    }
+
     // Tab selection: 0=Active, 1=Completed, 2=Cancelled
     private val _selectedTab = MutableStateFlow(0)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()

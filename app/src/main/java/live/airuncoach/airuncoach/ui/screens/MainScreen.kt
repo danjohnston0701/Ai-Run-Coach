@@ -132,6 +132,7 @@ fun MainScreen(
     var onLocationPermissionGranted: (() -> Unit)? by remember { mutableStateOf(null) }
     var showPromoCodeDialog by remember { mutableStateOf(false) }
     var promoCodeLoading by remember { mutableStateOf(false) }
+    var promoCodeError by remember { mutableStateOf<String?>(null) }
 
     val versionCheckVm: VersionCheckViewModel = hiltViewModel()
     val garminUpdate  by versionCheckVm.garminUpdateAvailable.collectAsState()
@@ -169,12 +170,24 @@ fun MainScreen(
     androidx.compose.runtime.DisposableEffect(mainLifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
+                // Token lifetime is 30 days with no refresh. If it lapsed while the app sat in
+                // the background, go to sign-in now instead of leaving every screen failing.
+                if (!SessionManager(context).isSessionValid()) {
+                    onNavigateToLogin()
+                    return@LifecycleEventObserver
+                }
                 expiredPromptDismissed = false
                 navCoroutineScope.launch { subscriptionViewModel.refreshUserFromServer() }
             }
         }
         mainLifecycleOwner.lifecycle.addObserver(observer)
         onDispose { mainLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // The server rejected the token (401): RetrofitClient has already cleared it, but nothing
+    // used to navigate — the app just sat there with every request failing until a restart.
+    val unauthorizedTick by live.airuncoach.airuncoach.network.RetrofitClient.unauthorizedEvents.collectAsState()
+    LaunchedEffect(unauthorizedTick) {
+        if (unauthorizedTick > 0) onNavigateToLogin()
     }
     /** Runs [action] unless the subscription has lapsed, in which case the renew gate shows. */
     fun gated(action: () -> Unit) {
@@ -1668,17 +1681,41 @@ fun MainScreen(
         PromoCodeDialog(
             isVisible = true,
             isLoading = promoCodeLoading,
-            onDismiss = { 
+            errorMessage = promoCodeError,
+            onDismiss = {
                 showPromoCodeDialog = false
+                promoCodeError = null
             },
             onRedeem = { code ->
-                // TODO: Implement full promo code redemption flow
-                // This will need to:
-                // 1. Call apiService.redeemPromoCode(PromoCodeRequest(code))
-                // 2. Show success/error message
-                // 3. Refresh feature limit checks
-                promoCodeLoading = false
-                showPromoCodeDialog = false
+                // Redeem against the server, then re-read the account so the new entitlement
+                // (tier / limits) is live immediately. Previously this closed the dialog and
+                // did nothing at all.
+                promoCodeLoading = true
+                promoCodeError = null
+                navCoroutineScope.launch {
+                    try {
+                        val result = live.airuncoach.airuncoach.network.RetrofitClient.apiService
+                            .redeemPromoCode(live.airuncoach.airuncoach.network.model.PromoCodeRequest(code.trim()))
+                        if (result.success) {
+                            subscriptionViewModel.refreshUserFromServer()
+                            showPromoCodeDialog = false
+                            android.widget.Toast.makeText(context, result.message.ifBlank { "Promo code applied" }, android.widget.Toast.LENGTH_LONG).show()
+                            // Back to where they were trying to go — the limit screen re-checks on return.
+                            navController.popBackStack()
+                        } else {
+                            promoCodeError = result.message.ifBlank { "That code isn't valid" }
+                        }
+                    } catch (e: retrofit2.HttpException) {
+                        val body = e.response()?.errorBody()?.string().orEmpty()
+                        promoCodeError = try {
+                            com.google.gson.Gson().fromJson(body, live.airuncoach.airuncoach.network.model.PromoCodeResponse::class.java)?.message
+                        } catch (_: Exception) { null }?.takeIf { it.isNotBlank() } ?: "That code isn't valid"
+                    } catch (e: Exception) {
+                        promoCodeError = "Couldn't reach the server — check your connection"
+                    } finally {
+                        promoCodeLoading = false
+                    }
+                }
             }
         )
     }

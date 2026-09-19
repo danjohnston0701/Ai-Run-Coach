@@ -189,6 +189,9 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                 val path = request.url.encodedPath
                 android.util.Log.e("RetrofitClient", "❌ 401 Unauthorized on $path - clearing session and forcing re-login")
                 sessionManager.clearAuthToken()
+                // Let the UI (MainScreen) take the user to sign-in; clearing alone left the
+                // app running with a dead session until it was restarted.
+                signalUnauthorized()
             }
             
             // Log response details for debugging
@@ -270,6 +273,11 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
     }
 
     companion object {
+        /** Increments on every 401 the interceptor sees — observed by MainScreen to route to sign-in. */
+        private val _unauthorizedEvents = kotlinx.coroutines.flow.MutableStateFlow(0)
+        val unauthorizedEvents: kotlinx.coroutines.flow.StateFlow<Int> = _unauthorizedEvents
+        internal fun signalUnauthorized() { _unauthorizedEvents.value = _unauthorizedEvents.value + 1 }
+
         @Volatile
         private var INSTANCE: ApiService? = null
         private var _sessionManager: SessionManager? = null

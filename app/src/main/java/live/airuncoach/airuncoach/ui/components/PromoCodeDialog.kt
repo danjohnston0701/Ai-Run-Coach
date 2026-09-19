@@ -30,6 +30,8 @@ fun PromoCodeDialog(
     onDismiss: () -> Unit,
     onRedeem: (code: String) -> Unit,
     isLoading: Boolean = false,
+    /** Server rejection to show inline (wrong/expired code) — dialog stays open. */
+    errorMessage: String? = null,
 ) {
     if (!isVisible) return
 
@@ -102,6 +104,8 @@ fun PromoCodeDialog(
                         }
                     ),
                     textStyle = AppTextStyles.body.copy(color = Colors.textPrimary),
+                    isError = errorMessage != null,
+                    supportingText = errorMessage?.let { { Text(it, style = AppTextStyles.small, color = Colors.error) } },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Colors.primary,
                         unfocusedBorderColor = Colors.backgroundSecondary,
