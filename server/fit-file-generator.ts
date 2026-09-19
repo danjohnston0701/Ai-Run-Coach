@@ -98,7 +98,10 @@ export async function generateFitFile(
       }
 
       const hr = point.heartRate ? Math.round(point.heartRate) : null;
-      const cad = point.cadence ? Math.round(point.cadence) : null;
+      // We store cadence in steps/min (both feet). The Garmin TrackPointExtension `cad`
+      // field is per-foot (rpm) for running — Strava doubles it on import for display —
+      // so writing spm here showed users 2× their real cadence in Strava (Wayne, 2026-09-19).
+      const cad = point.cadence ? Math.round(point.cadence / 2) : null;
 
       gpxContent += `      <trkpt lat="${lat}" lon="${lng}">
         <ele>${Math.round(ele)}</ele>

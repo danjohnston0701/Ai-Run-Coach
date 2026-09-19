@@ -30,6 +30,7 @@
  */
 
 import { db } from './db';
+import { MEANINGFUL_RUN_SQL } from "./utils/run-units";
 import { runs, userStats, goals } from '@shared/schema';
 import { eq, and, gte, lte, isNotNull, count, sum, avg, max, min, sql } from 'drizzle-orm';
 import { refreshRunnerProfile } from './runner-profile-service';
@@ -144,7 +145,7 @@ export async function recomputeForUser(userId: string): Promise<void> {
     // avgPace is stored as "M:SS" format (e.g. "5:22") — parse via SPLIT_PART
     fastestPace: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
     avgPace:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
-  }).from(runs).where(eq(runs.userId, userId));
+  }).from(runs).where(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL));
 
   // ── Find PBs for each distance category ─────────────────────────────────
   const pbUpdates: Record<string, number | string | Date | null> = {};
@@ -165,6 +166,7 @@ export async function recomputeForUser(userId: string): Promise<void> {
       FROM runs r,
       LATERAL jsonb_array_elements(r.km_splits) AS elem
       WHERE r.user_id = ${userId}
+        AND r.distance >= 0.1
         AND r.km_splits IS NOT NULL
         AND jsonb_typeof(r.km_splits) = 'array'
         AND (elem->>'pace') LIKE '%:%'
@@ -207,7 +209,7 @@ export async function recomputeForUser(userId: string): Promise<void> {
       .select({ id: runs.id, duration: runs.duration, completedAt: runs.completedAt })
       .from(runs)
       .where(and(
-        eq(runs.userId, userId),
+        and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL),
         sql`(CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END) >= ${minKm}`,
         sql`(CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END) <= ${maxKm}`,
         isNotNull(runs.avgPace),
@@ -250,7 +252,7 @@ export async function recomputeForUser(userId: string): Promise<void> {
     const [longestRun] = await db
       .select({ duration: runs.duration })
       .from(runs)
-      .where(eq(runs.userId, userId))
+      .where(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL))
       .orderBy(sql`CASE WHEN ${runs.distance} > 200 THEN ${runs.distance} / 1000.0 ELSE ${runs.distance} END DESC NULLS LAST`)
       .limit(1);
     // Normalize duration: legacy rows may be in ms; values > 86400 are impossible in seconds.

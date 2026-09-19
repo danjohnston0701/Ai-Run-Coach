@@ -12,6 +12,7 @@
  */
 
 import { db } from './db';
+import { MEANINGFUL_RUN_SQL } from "./utils/run-units";
 import { runs, userStats, goals } from '@shared/schema';
 import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull, isNull, or, lt, inArray } from 'drizzle-orm';
 import { type InferSelectModel } from 'drizzle-orm';
@@ -58,7 +59,7 @@ export async function getPersonalBests(userId: string, excludeCoachingPlan: bool
         const cachedRuns = runIds.length > 0
           ? await db.select({ id: runs.id, distance: runs.distance })
               .from(runs)
-              .where(and(eq(runs.userId, userId), inArray(runs.id, runIds)))
+              .where(and(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL), inArray(runs.id, runIds)))
           : [];
         const runById = new Map(cachedRuns.map(r => [r.id, r]));
 
@@ -108,8 +109,8 @@ async function getPersonalBestsLive(userId: string, excludeCoachingPlan: boolean
     .select()
     .from(runs)
     .where(excludeCoachingPlan
-      ? and(eq(runs.userId, userId), isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId))
-      : eq(runs.userId, userId))
+      ? and(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL), isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId))
+      : and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL))
     .orderBy(asc(runs.completedAt));
 
   // ── Distance-based PBs: only awarded for actual full-distance runs ──────────
@@ -279,7 +280,7 @@ export async function getPeriodStatistics(userId: string, days: number, excludeC
       fastestPaceNumeric: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
       slowestPaceNumeric: sql<number>`MAX(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
     }).from(runs).where(and(
-      eq(runs.userId, userId),
+      and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL),
       gte(runs.completedAt, startDate),
       ...(excludeCoachingPlan ? [isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId)] : []),
     ));
@@ -356,7 +357,7 @@ export async function getDetailedTrends(userId: string, days: number, excludeCoa
       })
       .from(runs)
       .where(and(
-        eq(runs.userId, userId),
+        and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL),
         gte(runs.completedAt, startDate),
         ...(excludeCoachingPlan ? [isNull(runs.linkedPlanId), isNull(runs.linkedWorkoutId)] : []),
       ))
@@ -453,7 +454,7 @@ export async function getCoachingPlanSummary(userId: string, days: number) {
 
   // Coaching plan sessions = runs that are linked to a plan OR a specific workout
   const coachingFilter = and(
-    eq(runs.userId, userId),
+    and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL),
     or(isNotNull(runs.linkedPlanId), isNotNull(runs.linkedWorkoutId)),
   );
 
@@ -716,7 +717,7 @@ async function getAllTimeStatsLive(userId: string, excludeCoachingPlan: boolean 
       maxElevation:         max(runs.maxElevation),
       fastestPaceNumeric: sql<number>`MIN(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
       avgPaceNumeric:     sql<number>`AVG(CASE WHEN ${runs.avgPace} IS NULL OR ${runs.avgPace} = '' OR ${runs.avgPace} NOT LIKE '%:%' THEN NULL ELSE SPLIT_PART(${runs.avgPace}, ':', 1)::numeric + SPLIT_PART(${runs.avgPace}, ':', 2)::numeric / 60.0 END)`,
-    }).from(runs).where(planFilter ? and(eq(runs.userId, userId), planFilter) : eq(runs.userId, userId));
+    }).from(runs).where(planFilter ? and(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL), planFilter) : and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL));
 
     const totalRuns = Number(stats.totalRuns ?? 0);
     if (totalRuns === 0) {
@@ -731,7 +732,7 @@ async function getAllTimeStatsLive(userId: string, excludeCoachingPlan: boolean 
     const longestRun = await db
       .select({ duration: runs.duration })
       .from(runs)
-      .where(planFilter ? and(eq(runs.userId, userId), planFilter) : eq(runs.userId, userId))
+      .where(planFilter ? and(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL), planFilter) : and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL))
       .orderBy(desc(runs.distance))
       .limit(1);
 
@@ -798,7 +799,7 @@ export async function calculateLongestConsecutiveRunStreak(userId: string): Prom
     const runDates = await db
       .select({ runDate: runs.runDate })
       .from(runs)
-      .where(eq(runs.userId, userId))
+      .where(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL))
       .orderBy(asc(runs.runDate));
 
     if (runDates.length === 0) return 0;

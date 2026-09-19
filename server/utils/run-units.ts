@@ -22,3 +22,13 @@ export const MIN_MEANINGFUL_RUN_KM = 0.1;
 export function isMeaningfulRun(distance: number | null | undefined): boolean {
   return runDistanceKm(distance) >= MIN_MEANINGFUL_RUN_KM;
 }
+
+/**
+ * SQL twin of isMeaningfulRun() for Drizzle where-clauses: `runs.distance >= 0.1`.
+ * (Legacy metre-stored rows are > 200 and pass, which is correct.) Applied to run history
+ * lists and every My Data / stats-cache aggregate so a 0.03 km test tap never shows up as a
+ * "run" or drags a personal-best / average.
+ */
+import { sql } from "drizzle-orm";
+import { runs } from "@shared/schema";
+export const MEANINGFUL_RUN_SQL = sql`${runs.distance} >= ${MIN_MEANINGFUL_RUN_KM}`;

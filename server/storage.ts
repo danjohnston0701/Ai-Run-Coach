@@ -13,6 +13,7 @@ import {
   type GarminWellnessMetric, type OauthStateStore, type GarminWebhookEvent, type PasswordResetToken,
   type MonthlyUsage, type InsertInterestRegistration, type InterestRegistration
 } from "@shared/schema";
+import { MEANINGFUL_RUN_SQL } from "./utils/run-units";
 import { db } from "./db";
 import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min } from "drizzle-orm";
 import crypto from "crypto";
@@ -566,7 +567,7 @@ export class DatabaseStorage implements IStorage {
 
   async getUserRuns(userId: string, options?: { limit?: number; offset?: number }): Promise<Run[]> {
     const query = db.select().from(runs)
-      .where(eq(runs.userId, userId))
+      .where(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL))
       .orderBy(desc(runs.completedAt));
     if (options?.limit) {
       return query.limit(options.limit).offset(options.offset ?? 0);
@@ -580,7 +581,7 @@ export class DatabaseStorage implements IStorage {
    */
   async getRecentUserRuns(userId: string, limit: number = 20): Promise<Run[]> {
     return db.select().from(runs)
-      .where(eq(runs.userId, userId))
+      .where(and(eq(runs.userId, userId), MEANINGFUL_RUN_SQL))
       .orderBy(desc(runs.completedAt))
       .limit(limit);
   }
