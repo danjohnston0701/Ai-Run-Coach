@@ -379,8 +379,16 @@ fun MetricsPanel(session: ObserverLiveRunSession) {
         // Staleness line — the runner syncs every 5 s, so anything past ~20 s means the phone
         // has stopped reporting (no signal, backgrounded, dead battery). Without this the
         // observer can't tell frozen numbers from a steady runner. Re-evaluated every second.
-        val lastSyncMs = session.lastSyncedAtMs
-        if (lastSyncMs != null && !session.isPaused) {
+        //
+        // Age is measured on the observer's own clock from when the server's lastSyncedAt last
+        // ADVANCED in a poll response, and only shown while our own polling is demonstrably
+        // alive (a response within the last 10 s). Comparing the server timestamp straight
+        // against the device clock (the old code) blamed the runner for the observer's own
+        // gaps and for clock skew — 2026-09-20: an iOS observer saw "3m 21s ago — may have
+        // lost signal" on a run with full signal after unlocking their phone.
+        val seenMs = session.lastRunnerUpdateSeenAtMs
+        val fetchedMs = session.lastFetchedAtMs
+        if (seenMs != null && !session.isPaused) {
             var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
             LaunchedEffect(Unit) {
                 while (true) {
@@ -388,8 +396,9 @@ fun MetricsPanel(session: ObserverLiveRunSession) {
                     nowMs = System.currentTimeMillis()
                 }
             }
-            val ageSecs = ((nowMs - lastSyncMs) / 1000L).coerceAtLeast(0)
-            if (ageSecs >= 20) {
+            val ageSecs = ((nowMs - seenMs) / 1000L).coerceAtLeast(0)
+            val pollingAlive = fetchedMs != null && (nowMs - fetchedMs) < 10_000L
+            if (ageSecs >= 20 && pollingAlive) {
                 Text(
                     "Last update ${formatTime(ageSecs.toInt())} ago — ${session.runnerName} may have lost signal",
                     style = AppTextStyles.caption,
@@ -411,9 +420,18 @@ fun MetricsPanel(session: ObserverLiveRunSession) {
                 value = "%.2f km".format(session.distanceCovered),
                 modifier = Modifier.weight(1f)
             )
+            // Ticks once a second between polls so the clock reads like a stopwatch rather than
+            // stepping in the runner's 5 s sync lumps.
+            var clockNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    kotlinx.coroutines.delay(1000)
+                    clockNowMs = System.currentTimeMillis()
+                }
+            }
             MetricBox(
                 label = "Time",
-                value = formatTime(session.elapsedTime),
+                value = formatTime(session.displayedElapsedSeconds(clockNowMs)),
                 modifier = Modifier.weight(1f)
             )
             MetricBox(
@@ -587,8 +605,21 @@ data class ObserverLiveRunSession(
     val gpsTrack: List<GpsPoint>?,
     val isPaused: Boolean = false,      // runner paused — shown instead of silently frozen metrics
     val resultRunId: String? = null,    // the runner's uploaded run, once their phone links it
-    val lastSyncedAtMs: Long? = null    // server-side last update, for the "last update Xs ago" line
-)
+    val lastSyncedAtMs: Long? = null,   // server-side last update (informational)
+    // Observer-clock readings (see ObserverRunSessionViewModel): when we last got a poll
+    // response, and when the server's lastSyncedAt last advanced in one.
+    val lastFetchedAtMs: Long? = null,
+    val lastRunnerUpdateSeenAtMs: Long? = null,
+    // Locally-ticking elapsed clock anchor (see ObserverRunSessionViewModel.reconcileElapsed).
+    val elapsedBaseSeconds: Int = elapsedTime,
+    val elapsedBaseAtMs: Long = 0L,
+    val elapsedTicking: Boolean = false
+) {
+    /** Elapsed seconds to show at [nowMs] — ticks each second between polls while the run is live. */
+    fun displayedElapsedSeconds(nowMs: Long): Int =
+        if (elapsedTicking) maxOf(elapsedBaseSeconds, elapsedBaseSeconds + ((nowMs - elapsedBaseAtMs) / 1000L).toInt())
+        else elapsedBaseSeconds
+}
 
 data class GpsPoint(
     val lat: Double,

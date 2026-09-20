@@ -71,6 +71,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class RunTrackingService : Service(), SensorEventListener {
 
@@ -165,6 +166,9 @@ class RunTrackingService : Service(), SensorEventListener {
     // same 1 Hz timer tick that already drives updateRunSession()) — and once started, are
     // left running for the rest of the session rather than flapping on/off.
     private var phoneGpsFallbackActive: Boolean = false
+    // Timestamp of the last phone-fix sample appended to the watch pace/altitude series while
+    // the fallback is active (see onNewLocation()).
+    private var lastFallbackSeriesSampleMs: Long = 0L
     private var hasGarminData: Boolean = false   // true once any biometric frame is received
     private var garminDeviceName: String? = null // e.g. "Vívoactive 4", "Forerunner 965"
 
@@ -286,6 +290,18 @@ class RunTrackingService : Service(), SensorEventListener {
     // Authoritative elapsed time (seconds) from the watch firmware (Activity.Info.timerTime).
     // Used as session duration when wasRunStartedByWatch so the phone clock divergence is eliminated.
     private var watchElapsedSeconds: Int = 0
+    // Phone-side anchors taken at the moment watchElapsedSeconds last advanced: wall-clock
+    // time (for staleness) and the phone's own active-run clock (for extrapolation). If the
+    // watch stops sending frames mid-run (battery died, BLE gone for good) the watch timer
+    // above simply freezes — and because every duration consumer trusted it unconditionally,
+    // the live timer, ETA/projection maths, the km-split clock and the SAVED duration all
+    // froze with it. Confirmed 2026-09-20 (Daniel, half marathon): the vívoactive died at
+    // 20.6 km, phone GPS fallback kept distance going, but the run saved as 1:49:13 against
+    // a real 1:54:09, the km-21 split came out as a bogus 4:15, and the "Final 250m" cue
+    // projected a finish time earlier than the moment it was spoken. currentWatchClockMs()
+    // below carries the watch clock forward on the phone clock once frames go stale.
+    private var watchElapsedAnchorWallMs: Long = 0L
+    private var watchElapsedAnchorPhoneActiveMs: Long = -1L
     // Last accepted Garmin distance. Kept separately from totalDistance because a
     // transient phone-GPS update must not prevent a later valid Garmin total from
     // correcting it.
@@ -366,6 +382,8 @@ class RunTrackingService : Service(), SensorEventListener {
     // candidate reading is within HR_MAX_SUDDEN_CHANGE_BPM of the rolling average.
     private val recentHrReadings: ArrayDeque<Pair<Long, Int>> = ArrayDeque() // (timestamp ms, bpm)
     private var lastConfidentHr: Int = 0   // Last validated HR reading (used as reference)
+    // Wall-clock time of the last ACCEPTED HR sample from any source — see checkHeartRateStaleness().
+    private var lastHrAcceptedWallMs: Long = 0L
 
     // ── HR trend tracking (for smart coaching: "are they already responding?") ──
     // A ring buffer of the last HR_TREND_WINDOW confident readings (no timestamps needed here;
@@ -845,9 +863,24 @@ class RunTrackingService : Service(), SensorEventListener {
         // ── TERRAIN STATE CLASSIFICATION ────────────────────────────────────────
         // Grade thresholds — raised from 2% to 3% because GPS altitude error over 150m
         // produces ~3% apparent grade on genuinely flat terrain.
+        // How long watch frames must be absent before the watch's session clock and its last
+        // heart-rate reading are treated as stale — matches checkPhoneGpsFallback()'s window so
+        // clock, HR and distance all switch to their fallbacks together.
+        private const val WATCH_CLOCK_STALE_MS = 15_000L
+        // Wider than the clock window: optical HR legitimately drops out for 10–20 s on a
+        // loose strap, and the buffer already tolerates that. 30 s without any sample means
+        // the source is gone, not flaky.
+        private const val HR_STALE_MS = 30_000L
+
         private const val UPHILL_GRADE_THRESHOLD = 3.0
         private const val DOWNHILL_GRADE_THRESHOLD = -3.0
-        private const val STEEP_UPHILL_GRADE_THRESHOLD = 5.0
+        // "Steep" is reserved for a sustained ≥10% grade now that the grade itself is measured
+        // over 100 m (see trailingWindowGradePercent()). It was 5% when the per-tick grade was
+        // so noisy that a 5% reading meant nothing; on a real 100 m measurement 5% is an
+        // ordinary road hill and 3–6% a gentle rise — neither warrants "steep" language. The
+        // band between (6–10%) is announced by its number ("a 7% climb") on the server side.
+        private const val STEEP_UPHILL_GRADE_THRESHOLD = 10.0
+        private const val STRUGGLE_HILL_TOLERANCE_GRADE = 6.0
         // Deliberately steeper in magnitude than the uphill threshold — gravity assists a
         // descent, so the same grade feels meaningfully easier going down than up. Was
         // symmetric at -5.0, which a real user report confirmed was miscalibrated: an -8%
@@ -857,8 +890,9 @@ class RunTrackingService : Service(), SensorEventListener {
         // working exactly as configured, the configured value was just too aggressive. -9.0
         // puts that real -8% descent (and, per the same logic, most everyday gentle downhill
         // stretches) into gradual_descent instead, reserving steep_descent's language for
-        // grades that are actually steep.
-        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -9.0
+        // grades that are actually steep. Now symmetric with the uphill value again at -10.0 —
+        // with the 100 m window grade, -10% sustained IS a steep descent.
+        private const val STEEP_DOWNHILL_GRADE_THRESHOLD = -10.0
 
         // A terrain state must be sustained for at least this distance before the classifier
         // accepts it as the new state (avoids flipping on brief GPS noise spikes).
@@ -883,6 +917,8 @@ class RunTrackingService : Service(), SensorEventListener {
         // Legacy alias kept for any remaining references in downhill-finish logic
         private const val DOWNHILL_MIN_DISTANCE_M = 150.0
         private const val ALTITUDE_SMOOTHING_WINDOW = 5      // Number of altitude readings to average for smoothing
+        // Distance over which live grade is measured — see trailingWindowGradePercent().
+        private const val GRADE_WINDOW_M = 100.0
         
         // How often (ms) the service pushes GPS/metrics to the live session on the server.
         // 5 seconds keeps observers up-to-date without hammering the API.
@@ -1955,6 +1991,7 @@ class RunTrackingService : Service(), SensorEventListener {
         hasGarminData = false       // Will be set true once first watch biometric frame arrives
         garminDeviceName = null     // Re-captured on first frame new run
         phoneGpsFallbackActive = false  // Reset for new run — re-evaluated below / by checkPhoneGpsFallback()
+        lastFallbackSeriesSampleMs = 0L
         lastPhase = null        // Reset for new run - allow first phase change to trigger
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
@@ -1971,11 +2008,15 @@ class RunTrackingService : Service(), SensorEventListener {
         smoothedWatchSpeedMs = 0f    // Reset EMA smoother for clean pace display on new run
         watchGpsUpdateCount = 0      // Reset warm-up counter
         watchElapsedSeconds = 0      // Reset authoritative watch timer
+        watchElapsedAnchorWallMs = 0L
+        watchElapsedAnchorPhoneActiveMs = -1L
         watchDistanceM = 0f          // Reset authoritative Garmin distance
         lastWatchDistanceAcceptedAtSec = -1  // Re-arm the distance-jump sanity check for new run
         totalElevationGain = 0.0
         hasGpsElevation = false
         currentSmoothedGrade = 0.0
+        steepestWindowInclinePct = 0f
+        steepestWindowDeclinePct = 0f
         totalElevationLoss = 0.0
         garminElevBuffer.clear()
         prevGarminElevWindowMean = null
@@ -1992,6 +2033,7 @@ class RunTrackingService : Service(), SensorEventListener {
         minHeartRate = 0
         recentHrReadings.clear()
         lastConfidentHr = 0
+        lastHrAcceptedWallMs = 0L
         heartRateSum = 0L
         heartRateSampleCount = 0
         hrTrendBuffer.clear()
@@ -3083,7 +3125,12 @@ class RunTrackingService : Service(), SensorEventListener {
         val td = targetDistance ?: inferredTargetDistance ?: return false // Always in metres (normalized on receipt)
         if (td <= 0) return false
         val remaining = td - totalDistance
-        return remaining in 0.0..FINAL_STRETCH_METERS
+        // <= rather than a 0..N range: once the runner is PAST the target, remaining goes
+        // negative and this must still read as "final stretch / done", not "mid-run". With the
+        // old range check, struggle detection re-armed the moment the target was crossed and
+        // fired when the runner slowed to stop (2026-09-20: a "Struggle" cue 90 s after
+        // "Target reached" on a half marathon, coaching the cool-down as a fade).
+        return remaining <= FINAL_STRETCH_METERS
     }
     
     // ==================== EXPERIENCE LEVEL HELPER ====================
@@ -3589,9 +3636,35 @@ class RunTrackingService : Service(), SensorEventListener {
             // queued frame must not make duration or average pace regress.
             if (frame.elapsedSeconds > watchElapsedSeconds) {
                 watchElapsedSeconds = frame.elapsedSeconds
+                watchElapsedAnchorWallMs = System.currentTimeMillis()
+                watchElapsedAnchorPhoneActiveMs = if (startTime > 0L) getActiveRunDuration() else -1L
             }
         }
     }
+
+    /**
+     * The session clock every duration consumer should use, in ms.
+     *
+     * Watch-initiated run: the watch's own timer (Activity.Info.timerTime) is authoritative
+     * while frames are arriving — it starts exactly on the watch START press, auto-pauses with
+     * the watch session and is immune to BT delivery lag. But it only advances when a frame
+     * arrives, so once frames have been stale for longer than [WATCH_CLOCK_STALE_MS] (the same
+     * window that flips phone GPS on as the distance fallback — see checkPhoneGpsFallback())
+     * the last watch value is carried forward on the phone's active-run clock, which excludes
+     * any phone-side pauses. As soon as the watch is back its value wins again, so a normal
+     * BLE hiccup never shows a phone-derived number. Phone-only run: the phone clock as before.
+     */
+    private fun currentWatchClockMs(): Long {
+        if (!wasRunStartedByWatch || watchElapsedSeconds <= 0) return getActiveRunDuration()
+        val watchMs = watchElapsedSeconds * 1000L
+        val staleMs = System.currentTimeMillis() - watchElapsedAnchorWallMs
+        if (staleMs < WATCH_CLOCK_STALE_MS || watchElapsedAnchorPhoneActiveMs < 0L || startTime <= 0L) return watchMs
+        val phoneSinceAnchor = (getActiveRunDuration() - watchElapsedAnchorPhoneActiveMs).coerceAtLeast(0L)
+        return watchMs + phoneSinceAnchor
+    }
+
+    /** Whole-second form of [currentWatchClockMs] for the km-split clock. */
+    private fun currentWatchClockSeconds(): Int = (currentWatchClockMs() / 1000L).toInt()
 
     private fun requestLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -3828,12 +3901,25 @@ class RunTrackingService : Service(), SensorEventListener {
                 // bursty rather than slow: 2-5 m hops read as 700-800 s/km and sail under it.
                 // That is how a phone standing still reported a plausible 12:06/km. The
                 // stationary gate is the real answer; the cap stays as a backstop.
-                currentPace = if (!looksStationary && smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
-                    val minutes = (smoothedPaceSeconds / 60).toInt()
-                    val seconds = (smoothedPaceSeconds % 60).toInt()
-                    String.format("%d:%02d", minutes, seconds)
-                } else {
-                    "0:00"
+                //
+                // Watch-driven run: leave currentPace alone. injectWatchLocation() has just set it
+                // from the watch firmware's own Doppler speed (EMA-smoothed) — the same number the
+                // watch face is showing the runner — and this synthetic "garmin" Location is that
+                // same frame. Overwriting it here with a position-derived pace made the coach quote
+                // paces the runner could not see anywhere: on a 2026-09-20 half marathon the
+                // position-derived figure ran ~4-5% faster than the watch's speed field over the
+                // first 4 km ("flying at 4:24/km" while the wrist read ~4:45), and the runner
+                // reasonably concluded the coaching was wrong. Phone-native fixes (fallback after
+                // watch GPS goes stale, or a phone-only run) still compute pace here as before.
+                val isWatchSpeedPace = location.provider == "garmin" && wasRunStartedByWatch
+                if (!isWatchSpeedPace) {
+                    currentPace = if (!looksStationary && smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
+                        val minutes = (smoothedPaceSeconds / 60).toInt()
+                        val seconds = (smoothedPaceSeconds % 60).toInt()
+                        String.format("%d:%02d", minutes, seconds)
+                    } else {
+                        "0:00"
+                    }
                 }
                 // Feed the pace trend buffer whenever we have a valid smoothed pace
                 if (!looksStationary && smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
@@ -3995,13 +4081,41 @@ class RunTrackingService : Service(), SensorEventListener {
                     // and runners deserve hill coaching on free runs, parkruns, etc.
                     if (prevSmoothed != null && recentAltitudes.size >= ALTITUDE_SMOOTHING_WINDOW) {
                         val smoothedElevChange = smoothedAltitude!! - prevSmoothed
-                        val smoothedGradePercent = (smoothedElevChange / distanceIncrement) * 100
+                        // Grade is measured as rise over the trailing GRADE_WINDOW_M of route,
+                        // NOT (smoothed-altitude delta ÷ this one GPS step). That old formula
+                        // divided a sub-metre change in a 5-sample mean by a single ~6 m step,
+                        // which amplified ordinary altitude jitter into a ±8% (p5–p95) signal on
+                        // ground whose true grade sat inside ±5%. Replayed against a real
+                        // 2026-09-20 half marathon: 421 ticks read ≥5% ("steep") at a median TRUE
+                        // grade of 2.6%, the coach announced "steep hill at 5.6%" on a 2.8% rise
+                        // and "steep descent" on ground that was actually rising 1.8%, while the
+                        // run's one genuine 7–10% climb happened to tick at 3–6% and got called
+                        // "gentle". Over 100 m the same jitter is worth about ±1%.
+                        val windowGrade = trailingWindowGradePercent(newPoint) ?: 0.0
+                        if (windowGrade > steepestWindowInclinePct) steepestWindowInclinePct = windowGrade.toFloat()
+                        if (-windowGrade > steepestWindowDeclinePct) steepestWindowDeclinePct = (-windowGrade).toFloat()
                         // Track current real-time grade for isOnHill (not the whole-run average)
-                        currentSmoothedGrade = smoothedGradePercent
-                        updateElevationCoaching(distanceIncrement, smoothedGradePercent, smoothedElevChange)
+                        currentSmoothedGrade = windowGrade
+                        updateElevationCoaching(distanceIncrement, windowGrade, smoothedElevChange)
                     }
                 }
                 routePoints.add(newPoint)
+                // Watch run whose watch has gone quiet: keep the pace/altitude sample series
+                // going from the phone fix, throttled to the watch's ~2 s frame cadence so the
+                // series keep roughly the same sample spacing. The summary's elevation chart
+                // prefers altitudeData and spaces it evenly across the whole run, so a series
+                // that simply stops at the watch's death gets stretched over the full distance
+                // (2026-09-20: series ended at 3276 samples, track ran to 3512). HR has no
+                // phone-side source, so it correctly stays absent.
+                if (wasRunStartedByWatch && phoneGpsFallbackActive && location.provider != "garmin" &&
+                    newPoint.timestamp - lastFallbackSeriesSampleMs >= 1_500L
+                ) {
+                    lastFallbackSeriesSampleMs = newPoint.timestamp
+                    newPoint.altitude?.let { watchAltSeries.add(it.toFloat()) }
+                    if (!looksStationary && smoothedPaceSeconds > 0 && smoothedPaceSeconds < 900) {
+                        watchPaceSeries.add(smoothedPaceSeconds.toDouble().coerceIn(180.0, 900.0))
+                    }
+                }
                 if (location.speed > maxSpeed) maxSpeed = location.speed
 
                 // Route Memory Engine — emit first GPS fix so ViewModel can call recognize-route
@@ -4089,8 +4203,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 "beginner" -> 35.0             // Relaxed — beginners have more natural variation
                 else -> 25.0
             }
-            // On a steep hill, add 10% tolerance (uphill naturally slows pace)
-            val hillTolerance = if (currentSmoothedGrade > STEEP_UPHILL_GRADE_THRESHOLD) 10.0 else 0.0
+            // Uphill naturally slows pace: +10% tolerance from a real 6% climb (the old gate was
+            // the 5% "steep" threshold, which has moved to 10% now that grade is measured over
+            // 100 m — a slowdown on a 6-9% climb is terrain, not a struggle).
+            val hillTolerance = if (currentSmoothedGrade > STRUGGLE_HILL_TOLERANCE_GRADE) 10.0 else 0.0
             val effectiveThreshold = fitnessThreshold + hillTolerance
             if (paceDropPercent > effectiveThreshold && (now - lastStruggleTriggerTime) > STRUGGLE_COOLDOWN_MS) {
                 isStruggling = true
@@ -4147,8 +4263,12 @@ class RunTrackingService : Service(), SensorEventListener {
 
         if (currentKm > lastKmSplit) {
             val now = System.currentTimeMillis()
+            // currentWatchClockSeconds(), not watchElapsedSeconds directly — see that helper for
+            // why (a dead watch otherwise freezes this clock and the next boundary gets a bogus
+            // near-zero split time).
+            val watchClockNow = currentWatchClockSeconds()
             val totalSplitTime = if (wasRunStartedByWatch && watchElapsedSeconds > 0) {
-                ((watchElapsedSeconds - lastSplitWatchElapsedSeconds).coerceAtLeast(0) * 1000L)
+                ((watchClockNow - lastSplitWatchElapsedSeconds).coerceAtLeast(0) * 1000L)
             } else {
                 (now - lastSplitTime) - splitPausedMs  // Exclude paused time from this split
             }
@@ -4172,7 +4292,7 @@ class RunTrackingService : Service(), SensorEventListener {
             }
             lastKmSplit = currentKm
             lastSplitTime = now
-            lastSplitWatchElapsedSeconds = watchElapsedSeconds
+            lastSplitWatchElapsedSeconds = watchClockNow
             splitPausedMs = 0  // Reset pause accumulator for next split
             Log.d("RunTrackingService", "Reached ${currentKm}km split" + if (numSplitsCrossed > 1) " ($numSplitsCrossed boundaries crossed in one update)" else "")
 
@@ -4338,11 +4458,9 @@ class RunTrackingService : Service(), SensorEventListener {
         // The phone's own clock (getActiveRunDuration) stamps startTime when the "start"
         // BT command arrives — which can be 30–90s later due to screen-lock / BT delivery
         // delay, causing the visible timer gap Nino reported (01:01:17 vs 1:00:06).
-        val duration = if (wasRunStartedByWatch && watchElapsedSeconds > 0) {
-            watchElapsedSeconds * 1000L
-        } else {
-            getActiveRunDuration()
-        }
+        // currentWatchClockMs() also carries the watch clock forward on the phone clock if the
+        // watch stops sending frames mid-run — see that helper.
+        val duration = currentWatchClockMs()
         
         // Only show distance/pace after user has moved at least 5 meters (filters GPS drift)
         val minDistanceMeters = 5.0
@@ -4656,25 +4774,24 @@ class RunTrackingService : Service(), SensorEventListener {
 
     private fun calculateAverageGradient(): Float = if (totalDistance == 0.0) 0f else ((totalElevationGain - totalElevationLoss) / totalDistance * 100).toFloat()
     
-    private fun calculateMaxGradient(): Float = (1 until routePoints.size).mapNotNull { i-> val p1=routePoints[i-1]; val p2=routePoints[i]; if(p1.altitude!=null&&p2.altitude!=null) { val d=calculateDistance(p1,p2); if(d>0) ((p2.altitude-p1.altitude)/d * 100).toFloat() else null } else null }.maxOrNull() ?: 0f
-    
-    /** Steepest uphill gradient (positive %) across all consecutive point pairs */
-    private fun calculateSteepestIncline(): Float = (1 until routePoints.size).mapNotNull { i ->
-        val p1 = routePoints[i - 1]; val p2 = routePoints[i]
-        if (p1.altitude != null && p2.altitude != null) {
-            val d = calculateDistance(p1, p2)
-            if (d > 2) ((p2.altitude - p1.altitude) / d * 100).toFloat() else null // min 2m to avoid noise
-        } else null
-    }.filter { it > 0 }.maxOrNull() ?: 0f
-    
-    /** Steepest downhill gradient (positive % — magnitude of descent) across all consecutive point pairs */
-    private fun calculateSteepestDecline(): Float = (1 until routePoints.size).mapNotNull { i ->
-        val p1 = routePoints[i - 1]; val p2 = routePoints[i]
-        if (p1.altitude != null && p2.altitude != null) {
-            val d = calculateDistance(p1, p2)
-            if (d > 2) ((p1.altitude - p2.altitude) / d * 100).toFloat() else null // inverted: positive = downhill
-        } else null
-    }.filter { it > 0 }.maxOrNull() ?: 0f
+    // Steepest sustained grades, tracked incrementally from the same 100 m window that drives
+    // live hill coaching (see trailingWindowGradePercent()). Previously all three of these
+    // rescanned every consecutive point pair on every 1 Hz tick and reported the single worst
+    // pair — with a 2 m minimum distance, that is pure altitude jitter: a flat-classified
+    // 2026-09-20 half marathon (22 m total altitude range, true steepest 100 m ≈ 10%) saved
+    // steepestIncline = 50.5% / steepestDecline = 58.9%, which the summary then showed as a
+    // 27° "Max Incline".
+    private var steepestWindowInclinePct: Float = 0f
+    private var steepestWindowDeclinePct: Float = 0f
+
+    /** Steepest uphill grade (%) over any 100 m window so far — see [steepestWindowInclinePct]. */
+    private fun calculateMaxGradient(): Float = steepestWindowInclinePct
+
+    /** Steepest uphill grade (positive %) over any 100 m window so far. */
+    private fun calculateSteepestIncline(): Float = steepestWindowInclinePct
+
+    /** Steepest downhill grade (positive % — magnitude of descent) over any 100 m window so far. */
+    private fun calculateSteepestDecline(): Float = steepestWindowDeclinePct
     
     /** Minimum elevation (lowest point) during the run */
     private fun calculateMinElevation(): Double? {
@@ -4684,6 +4801,31 @@ class RunTrackingService : Service(), SensorEventListener {
     /** Maximum elevation (highest point) during the run */
     private fun calculateMaxElevation(): Double? {
         return routePoints.mapNotNull { it.altitude }.maxOrNull()
+    }
+
+    /**
+     * Grade (%) over the trailing [GRADE_WINDOW_M] of route ending at [latest] (not yet in
+     * routePoints), or null until the run has covered that much ground with altitude data.
+     * The near end uses the current 5-sample smoothed altitude; the far end averages the three
+     * points around the window boundary, so single-sample jitter at either end is damped
+     * rather than divided by a short distance. Walks back ~30-60 points per call at 1 Hz.
+     */
+    private fun trailingWindowGradePercent(latest: LocationPoint): Double? {
+        val nearAlt = smoothedAltitude ?: latest.altitude ?: return null
+        var dist = 0.0
+        var prev = latest
+        var i = routePoints.size - 1
+        while (i >= 0 && dist < GRADE_WINDOW_M) {
+            dist += calculateDistance(routePoints[i], prev)
+            prev = routePoints[i]
+            i--
+        }
+        if (dist < GRADE_WINDOW_M) return null
+        val farIdx = i + 1
+        val farAlts = (maxOf(0, farIdx - 1)..minOf(routePoints.size - 1, farIdx + 1))
+            .mapNotNull { routePoints[it].altitude }
+        if (farAlts.isEmpty()) return null
+        return (nearAlt - farAlts.average()) / dist * 100.0
     }
     
     /**
@@ -4867,6 +5009,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     // Update the run session every second regardless of location
                     updateRunSession()
                     checkPhoneGpsFallback()
+                    checkHeartRateStaleness()
                 } catch (e: Exception) {
                     Log.e("RunTrackingService", "Timer update failed", e)
                 } finally {
@@ -5209,8 +5352,13 @@ class RunTrackingService : Service(), SensorEventListener {
                         // can lag the watch's real start by 30-90s during a screen-locked start; using
                         // the phone-clock delta here silently re-shortens the SAVED duration by that
                         // same gap even though the live in-session display already accounts for it.
+                        //
+                        // currentWatchClockMs() rather than watchElapsedSeconds directly: if the
+                        // watch died before Stop, the raw watch value is frozen at the moment of
+                        // death and would save a duration short by however long the runner kept
+                        // going on phone GPS afterwards (see that helper's comment).
                         val finalDurationMs = if (watchInitiatedRun && watchElapsedSeconds > 0) {
-                            watchElapsedSeconds * 1000L
+                            currentWatchClockMs()
                         } else if (startTime > 0L) {
                             (System.currentTimeMillis() - startTime) - finalPausedMs
                         } else {
@@ -8418,6 +8566,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     paceDropPercent = paceDropPercent.toDouble(),
                     currentGrade = calculateAverageGradient().toDouble(),
                     totalElevationGain = totalElevationGain,
+                    wind = currentWindContext(),
+                    elevationRangeM = currentElevationRangeM(),
                     coachName = currentUser?.coachName,
                     coachTone = currentUser?.coachTone,
                     coachGender = currentUser?.coachGender,
@@ -8525,6 +8675,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     splitPace = split.pace,   // Pace for this specific km split
                     currentGrade = currentSmoothedGrade,   // Real-time grade, not whole-run average
                     totalElevationGain = totalElevationGain,
+                    wind = currentWindContext(),
+                    elevationRangeM = currentElevationRangeM(),
                     isOnHill = abs(currentSmoothedGrade) > UPHILL_GRADE_THRESHOLD,
                     kmSplits = splitsForBackend,  // Send with seconds, not milliseconds
                     hasRoute = hasGpsElevation,   // True when GPS altitude data is available
@@ -8664,6 +8816,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // Reading accepted — add to buffer
         recentHrReadings.addLast(Pair(now, rawHr))
         lastConfidentHr = rawHr
+        lastHrAcceptedWallMs = now
 
         // Also add to the trend buffer (capped at HR_TREND_WINDOW entries)
         hrTrendBuffer.addLast(rawHr)
@@ -8679,6 +8832,29 @@ class RunTrackingService : Service(), SensorEventListener {
      */
     private fun isHRReadingConfident(): Boolean {
         return recentHrReadings.size >= HR_CONFIDENCE_WINDOW && currentHeartRate > 0
+    }
+
+    /**
+     * Drops the live heart-rate reading once no source (watch frame or phone sensor) has
+     * delivered an accepted sample for [HR_STALE_MS]. Runs off the 1 Hz timer tick.
+     *
+     * Without this, currentHeartRate held its last value indefinitely: every accepted reading
+     * only ever *replaced* it, and the confidence window (recentHrReadings) is only pruned
+     * inside validateAndUpdateHRBuffer() — i.e. only when a new reading arrives — so a dead
+     * sensor left isHRReadingConfident() permanently true on a frozen number. Confirmed
+     * 2026-09-20 (Daniel, half marathon): the watch died at 20.6 km and its final 126 bpm was
+     * stamped into all 240 subsequent GPS points and fed to the coaching prompts as live HR.
+     * Clearing the window too means HR coaching stays quiet until a real source re-establishes
+     * confidence, rather than firing on the first reading after a gap.
+     */
+    private fun checkHeartRateStaleness() {
+        if (currentHeartRate <= 0 || lastHrAcceptedWallMs <= 0L) return
+        val staleMs = System.currentTimeMillis() - lastHrAcceptedWallMs
+        if (staleMs < HR_STALE_MS) return
+        Log.w("RunTrackingService", "❤️ No heart-rate sample for ${staleMs / 1000}s — treating HR as unknown (was $currentHeartRate bpm)")
+        currentHeartRate = 0
+        recentHrReadings.clear()
+        hrTrendBuffer.clear()
     }
 
     /**
@@ -8913,7 +9089,13 @@ class RunTrackingService : Service(), SensorEventListener {
                     // (e.g. "HR high because you're on a steep climb" vs "HR high on flat — check effort")
                     terrainContext = currentTerrainState.takeIf { it != "flat" },
                     activityType = currentActivityType,
-                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
+                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId,
+                    wind = currentWindContext(),
+                    elevationRangeM = currentElevationRangeM(),
+                    kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) }.ifEmpty { null },
+                    distance = totalDistance / 1000.0,
+                    targetDistance = (targetDistance ?: inferredTargetDistance)?.takeIf { it > 0 }?.let { it / 1000.0 },
+                    targetTime = targetTime?.let { it / 1000 }
                 )
                 val response = apiService.getHeartRateCoaching(request)
                 // Server returns skipped=true with no message when the shared per-user coaching
@@ -9671,6 +9853,37 @@ class RunTrackingService : Service(), SensorEventListener {
         Log.d("RunTrackingService", "Fallback start coaching: $startMessage")
     }
 
+    // ── Live environment context for coaching requests ──────────────────────────
+    /**
+     * Wind from the run-start weather fix, classified against the runner's current heading.
+     * Wind direction is meteorological (the direction it blows FROM), so a heading equal to it
+     * means running straight into the wind. Null when weather never loaded or it's calm.
+     */
+    private fun currentWindContext(): live.airuncoach.airuncoach.network.model.WindContext? {
+        val weather = weatherAtStart ?: return null
+        val speedKmh = weather.windSpeed.roundToInt()
+        if (speedKmh <= 0) return null
+        val windFrom = weather.windDirection
+        val heading: Double? = routePoints.asReversed().take(20).firstOrNull { it.bearing != null }?.bearing?.toDouble()
+            ?: watchLatestBearing.takeIf { it > 0f }?.toDouble()
+        val relative = if (windFrom != null && heading != null) {
+            val diff = abs(((heading - windFrom + 180.0) % 360.0 + 360.0) % 360.0 - 180.0) // 0 = into the wind, 180 = at their back
+            when {
+                diff <= 45.0  -> "headwind"
+                diff >= 135.0 -> "tailwind"
+                else          -> "crosswind"
+            }
+        } else null
+        return live.airuncoach.airuncoach.network.model.WindContext(speedKmh, windFrom, relative)
+    }
+
+    /** Highest − lowest altitude seen so far (metres), or null before any altitude data. */
+    private fun currentElevationRangeM(): Double? {
+        val min = calculateMinElevation() ?: return null
+        val max = calculateMaxElevation() ?: return null
+        return (max - min).coerceAtLeast(0.0)
+    }
+
     private fun buildBaseEliteRequest(type: String, distKm: Double, duration: Long, avgSpeed: Float): EliteCoachingRequest {
         val elapsedSec = duration / 1000
 
@@ -9716,6 +9929,8 @@ class RunTrackingService : Service(), SensorEventListener {
             currentGrade = currentSmoothedGrade,
             totalElevationGain = totalElevationGain,
             totalElevationLoss = totalElevationLoss,
+            wind = currentWindContext(),
+            elevationRangeM = currentElevationRangeM(),
             targetTime = targetTime?.let { it / 1000 },
             targetPace = if (targetPaceSecondsPerKm > 0) formatPace(targetPaceSecondsPerKm) else null,
             kmSplits = kmSplits.map { KmSplitBrief(it.km, it.pace) },
@@ -10369,6 +10584,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     maxGradientSoFar = calculateMaxGradient().toDouble(),
                     segmentElevationGain = slopeElevationGain.takeIf { it > 0 },
                     segmentElevationLoss = slopeElevationLoss.takeIf { it > 0 },
+                    elevationRangeM = currentElevationRangeM(),
+                    wind = currentWindContext(),
                     paceSpreadSeconds = paceSpread,
                     isNegativeSplitting = isNegSplit,
                     fitnessLevel = currentUser?.fitnessLevel,

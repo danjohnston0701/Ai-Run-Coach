@@ -107,7 +107,16 @@ data class EliteCoachingRequest(
     // ── Physiological response to last cue ────────────────────────────────────
     @SerializedName("lastCueHrDelta") val lastCueHrDelta: Int? = null,     // bpm change since last cue (negative = fell)
     @SerializedName("lastCuePaceDelta") val lastCuePaceDelta: Int? = null, // sec/km change since last cue (negative = faster)
-    @SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null
+    @SerializedName("athleteRespondedToLastCue") val athleteRespondedToLastCue: Boolean? = null,
+
+    // ── Live environment context (2026-09-20) ─────────────────────────────────
+    // Wind at the run's start fix, with its relationship to the current heading — see WindContext.
+    @SerializedName("wind") val wind: WindContext? = null,
+    // Altitude range covered so far (highest point − lowest point, metres). This is the
+    // "elevation" figure the product shows the runner; totalElevationGain is the accumulation of
+    // every rise and is far larger on undulating ground (224 m of "climbing" on a course with a
+    // 22 m range). Prompts should describe the course with this, not the accumulation.
+    @SerializedName("elevationRangeM") val elevationRangeM: Double? = null
 )
 
 data class KmSplitBrief(

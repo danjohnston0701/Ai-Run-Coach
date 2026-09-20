@@ -331,6 +331,178 @@ export function freeSessionEffortRule(hasTarget: boolean, activity: 'run' | 'wal
   return `EFFORT PHILOSOPHY (free ${activity} — no target pace, target time or target heart-rate zone): the ${person} has chosen their own effort and it is legitimate, however hard it looks. Do NOT suggest they slow down, ease off, hold back, back off, dial it down or pace themselves. Coach consistency instead: encourage them to hold what they are doing, stay relaxed and keep the effort steady. Noting how pace naturally changes with terrain is fine (steady effort up a climb means a slower pace) as long as it is not framed as conserving energy or as a warning.`;
 }
 
+// ── Shared live-context helpers (2026-09-20) ──────────────────────────────────────────
+// Built after a half-marathon field review where the coaching (a) repeated "settle back to
+// your target pace" a dozen times to a runner who was consistently and comfortably 15–20%
+// ahead of a deliberately conservative target, (b) said "approaching the halfway mark" at
+// 31% and "final stretch" at 45%, (c) called 2–3% rises "steep hills" and (d) never knew it
+// was a 34 km/h headwind day. Each helper is used by several prompt builders so the rules
+// stay identical across split, HR, elite and struggle coaching.
+
+/** Parse "M:SS" (or "H:MM:SS") pace into seconds/km; undefined when unparseable. */
+export function parsePaceSeconds(pace?: string | null): number | undefined {
+  if (!pace) return undefined;
+  const parts = String(pace).replace('/km', '').trim().split(':').map(Number);
+  if (parts.some(n => Number.isNaN(n))) return undefined;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return undefined;
+}
+
+export interface TargetPaceSettled {
+  /** True when the target pace should no longer be used as a coaching lever. */
+  settled: boolean;
+  /** Why: 'consistent' (≥3 consistent km all ahead of target) and/or 'banked' (past halfway with a real cushion). */
+  reasons: Array<'consistent' | 'banked'>;
+  consecutiveKm: number;
+  avgAheadSec: number;
+}
+
+/**
+ * Decides whether "you're ahead of target — settle back" is still a legitimate thing to say.
+ *
+ * A runner who is ahead of a target pace has either gone out too hard (worth one early
+ * warning) or has deliberately chosen a faster effort they can hold (in which case the target
+ * was conservative and coaching to it is noise). The evidence for "chosen and controlled" is
+ * consistency: the last ≥3 completed splits within [adjacentToleranceSec] of their neighbours
+ * and every one of them ahead of target. Separately, past halfway with a projected finish
+ * ≥5% inside the target time, the target is banked — nothing they do at target pace from
+ * here changes the outcome, so "ease back to target" has no purpose.
+ */
+export function assessTargetPaceSettled(params: {
+  kmSplits?: Array<{ km: number; pace: string }> | null;
+  targetPaceSec?: number;
+  progressPercent?: number;      // 0–100, distance covered / target distance
+  projectedFinishSec?: number;
+  targetTimeSec?: number;
+  adjacentToleranceSec?: number; // default 15
+}): TargetPaceSettled {
+  const tol = params.adjacentToleranceSec ?? 15;
+  const result: TargetPaceSettled = { settled: false, reasons: [], consecutiveKm: 0, avgAheadSec: 0 };
+  const target = params.targetPaceSec;
+  if (target && target > 0 && params.kmSplits && params.kmSplits.length >= 3) {
+    const secs = params.kmSplits
+      .slice()
+      .sort((a, b) => a.km - b.km)
+      .map(s => parsePaceSeconds(s.pace))
+      .filter((n): n is number => typeof n === 'number' && n > 0);
+    // Streak from the most recent split backwards: every member ahead of target, and each
+    // within tolerance of the (more recent) split after it.
+    let streak = 0;
+    for (let i = secs.length - 1; i >= 0; i--) {
+      if (secs[i] >= target) break;
+      if (streak > 0 && Math.abs(secs[i] - secs[i + 1]) > tol) break;
+      streak++;
+    }
+    result.consecutiveKm = streak;
+    if (streak >= 3) {
+      const recent = secs.slice(secs.length - streak);
+      result.avgAheadSec = Math.round(target - recent.reduce((a, b) => a + b, 0) / recent.length);
+      result.reasons.push('consistent');
+    }
+  }
+  if (
+    typeof params.progressPercent === 'number' && params.progressPercent >= 50 &&
+    params.projectedFinishSec && params.targetTimeSec &&
+    params.projectedFinishSec <= params.targetTimeSec * 0.95
+  ) {
+    result.reasons.push('banked');
+  }
+  result.settled = result.reasons.length > 0;
+  return result;
+}
+
+/**
+ * The prompt line that replaces every "you MAY suggest settling back to target" directive
+ * once assessTargetPaceSettled() says the target is no longer a lever. Empty when not settled.
+ */
+export function settledTargetPaceRule(assessment: TargetPaceSettled, person: 'runner' | 'walker' = 'runner'): string {
+  if (!assessment.settled) return '';
+  const why: string[] = [];
+  if (assessment.reasons.includes('consistent')) {
+    why.push(`they have held ${assessment.consecutiveKm} consecutive consistent kilometres, every one ahead of target (about ${assessment.avgAheadSec}s/km faster)`);
+  }
+  if (assessment.reasons.includes('banked')) {
+    why.push('they are past halfway with the target time already comfortably in hand');
+  }
+  return `\nTARGET PACE — DO NOT COACH TO IT: ${why.join(', and ')}. This is a deliberately chosen, controlled effort, not a mistake, and the target was conservative. Do NOT say they are ahead of target, do NOT suggest settling back, easing off or "finding the target rhythm", and do NOT quote the target pace. Coach what is actually there: consistency, relaxed form, effort steadiness, terrain, breathing. If the ${person} is drifting SLOWER than their own recent splits you may note that against their own splits — never against the target.`;
+}
+
+/**
+ * Run-stage vocabulary rule for prompts that know progress. Stops the model free-associating
+ * "approaching halfway" at 31% or "final stretch" at 45% just because those phrases are
+ * common in running talk.
+ */
+export function runStageRule(distanceKm?: number, targetDistanceKm?: number): string {
+  if (!distanceKm || !targetDistanceKm || targetDistanceKm <= 0) return '';
+  const pct = Math.round((distanceKm / targetDistanceKm) * 100);
+  let stage: string;
+  if (pct < 40) stage = `EARLY (${pct}% done). Do NOT mention halfway, the finish, the final stretch, the closing stages or "saving something for later".`;
+  else if (pct < 50) stage = `APPROACHING HALFWAY (${pct}% done — halfway is still ahead). Do NOT say they have passed halfway; do NOT mention the finish or final stretch.`;
+  else if (pct < 60) stage = `JUST PAST HALFWAY (${pct}% done). You may say they are past halfway. Do NOT mention the final stretch or closing stages.`;
+  else if (pct < 85) stage = `SECOND HALF (${pct}% done). Halfway is behind them — do NOT refer to approaching or reaching halfway. Do NOT call this the final stretch yet.`;
+  else if (pct < 100) stage = `CLOSING STAGES (${pct}% done). Finish-line language is appropriate.`;
+  else stage = `TARGET DISTANCE ALREADY REACHED (${pct}%). They have finished the target — do not coach pacing toward it.`;
+  return `\nRUN STAGE: ${stage}`;
+}
+
+/**
+ * Grade vocabulary. Grade is measured client-side over 100 m now, so these numbers are real:
+ * under 3% is flat for coaching purposes, 3–6% a gentle incline, 6–10% a climb worth naming by
+ * its number, and only ≥10% sustained is "steep". Never attach "steep" below that — five or six
+ * rounds of prompt tweaking never fixed the "every rise is a steep hill" complaint because the
+ * number underneath was noise; now that it isn't, the adjective must match the number.
+ */
+export function describeGrade(gradePercent?: number | null, style: 'sentence' | 'label' = 'sentence'): string {
+  if (typeof gradePercent !== 'number' || Number.isNaN(gradePercent) || Math.abs(gradePercent) < 3) return '';
+  const g = Math.abs(gradePercent);
+  const n = g >= 10 ? Math.round(g) : Number(g.toFixed(1));
+  const up = gradePercent > 0;
+  let phrase: string;
+  if (g >= 10) phrase = up ? `a steep ${n}% climb` : `a steep ${n}% descent`;
+  else if (g >= 6) phrase = up ? `a ${n}% climb` : `a ${n}% descent`;
+  else phrase = up ? `a gentle ${n}% incline` : `a gentle ${n}% decline`;
+  if (style === 'label') return phrase;
+  return `Currently on ${phrase}. Describe it exactly like that — ${g >= 10 ? 'this one genuinely is steep' : 'do NOT call it steep, a hill, or a big climb; state the number plainly'}. `;
+}
+
+/** Hard rule appended wherever terrain may be discussed. */
+export const GRADE_VOCAB_RULE = `TERRAIN VOCABULARY: "steep" is reserved for a sustained grade of 10% or more. Below that, say the number ("a 7% climb", "a gentle 4% incline") without steep/big/serious/tough. Grades under 3% are not worth mentioning as terrain.`;
+
+/**
+ * Course elevation described as the altitude RANGE (highest − lowest point), which is the
+ * figure the product shows the runner. The accumulated ascent (totalElevationGain) is only
+ * mentioned as such, and only when it is meaningfully larger than the range — "224 m of
+ * climbing" on a course with a 22 m range reads as a mountain to the model otherwise.
+ */
+export function courseElevationLine(params: { elevationRangeM?: number | null; totalElevationGain?: number | null }): string {
+  const range = typeof params.elevationRangeM === 'number' ? Math.round(params.elevationRangeM) : null;
+  const gain = typeof params.totalElevationGain === 'number' ? Math.round(params.totalElevationGain) : null;
+  if (range === null && gain === null) return '';
+  if (range !== null) {
+    const character = range < 30 ? 'essentially flat' : range < 80 ? 'gently undulating' : range < 150 ? 'hilly' : 'very hilly';
+    let line = `Course so far: ${range} m between its lowest and highest point (${character}).`;
+    if (gain !== null && gain > range * 2 && gain > 40) {
+      line += ` Accumulated ascent is ${gain} m because the ground undulates — do NOT describe that as climbing a ${gain} m hill or mountain; the biggest climb is at most ${range} m.`;
+    }
+    return line + ' ';
+  }
+  return gain! > 20 ? `Total elevation climbed so far: ${gain}m. ` : '';
+}
+
+/** Wind line for live prompts, with what it means for pace. Empty when calm/unknown. */
+export function windLine(wind?: { speedKmh?: number; directionDeg?: number | null; relative?: string | null } | null): string {
+  if (!wind || typeof wind.speedKmh !== 'number' || wind.speedKmh < 12) return '';
+  const strength = wind.speedKmh >= 40 ? 'very strong' : wind.speedKmh >= 25 ? 'strong' : 'noticeable';
+  const rel = wind.relative ? ` ${wind.relative}` : '';
+  let effect: string;
+  if (wind.relative === 'headwind') effect = 'A headwind this strong legitimately costs pace and raises heart rate for the same effort — a slower split or higher HR here is the wind, not fatigue or over-pacing. You may reference it; do not coach it as a lapse.';
+  else if (wind.relative === 'tailwind') effect = 'A tailwind flatters pace slightly — a faster split here is partly the wind.';
+  else if (wind.relative === 'crosswind') effect = 'Crosswind: minor pace effect, can unsettle rhythm.';
+  else effect = 'Wind affects pace and effort — a slower split into it is the wind, not a lapse.';
+  return `Wind: ${strength} ${wind.speedKmh} km/h${rel}. ${effect} `;
+}
+
 /**
  * Generate pace-context directives for the AI
  * Helps the AI understand how to coach differently based on runner's typical pace
@@ -860,16 +1032,12 @@ export async function generatePaceUpdate(params: {
   // of whether this session has a planned route (previously gated on hasRoute===true, which
   // silently dropped terrain commentary for routeless free runs even when grade data existed).
   // Falls back to a client-supplied classifier string when no grade figure is available.
+  // Grade wording comes from describeGrade() — "steep" only at ≥10% sustained, the number
+  // stated plainly below that (see that helper for the field history behind this).
   let terrainContext = '';
   const hasGradeSignal = typeof currentGrade === 'number' && currentGrade !== null;
-  if (hasGradeSignal && Math.abs(currentGrade!) > 5) {
-    terrainContext = currentGrade! > 5
-      ? `Currently climbing a steep ${currentGrade!.toFixed(1)}% grade hill. `
-      : `Currently descending a steep ${Math.abs(currentGrade!).toFixed(1)}% grade. `;
-  } else if (hasGradeSignal && Math.abs(currentGrade!) > 3) {
-    terrainContext = currentGrade! > 0
-      ? `On a gentle ${currentGrade!.toFixed(1)}% incline. `
-      : `On a gentle ${Math.abs(currentGrade!).toFixed(1)}% decline. `;
+  if (hasGradeSignal && Math.abs(currentGrade!) >= 3) {
+    terrainContext = describeGrade(currentGrade);
   } else if (params.terrainContext && params.terrainContext !== 'flat') {
     const terrainLabels: Record<string, string> = {
       uphill: 'Currently on an uphill stretch. ',
@@ -878,9 +1046,12 @@ export async function generatePaceUpdate(params: {
     };
     terrainContext = terrainLabels[params.terrainContext] ?? '';
   }
-  if (hasRoute === true && totalElevationGain && totalElevationGain > 20) {
-    terrainContext += `Total elevation climbed so far: ${Math.round(totalElevationGain)}m. `;
+  if (hasRoute === true) {
+    terrainContext += courseElevationLine({ elevationRangeM: (params as any).elevationRangeM, totalElevationGain });
   }
+  terrainContext += windLine((params as any).wind);
+  if (terrainContext) terrainContext += `\n${GRADE_VOCAB_RULE}`;
+  terrainContext += runStageRule(distance, targetDistance);
 
   // Walk/run vocabulary — established early so paceTrend and other context strings use it
   const activityType = resolveActivityType(params as any);
@@ -990,6 +1161,7 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
   const targetPaceParam = isTrainingSession ? undefined : (params as any).targetPace as string | undefined;
   const spokenTargetPace = formatPaceForTTS(targetPaceParam);
   let splitTargetVerdict = '';
+  let targetPaceSettled = false;
   if (targetPaceParam && splitPace) {
     const tParts = targetPaceParam.split(':').map(Number);
     const sParts = splitPace.split(':').map(Number);
@@ -1001,7 +1173,22 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
       if (diffSec > 20) {
         splitTargetVerdict = `⚠️ BEHIND TARGET: This split was ${Math.abs(diffSec)}s/km SLOWER than the target of ${spokenTargetPace}. Encourage them to pick up the pace.`;
       } else if (diffSec < -20) {
-        splitTargetVerdict = `⚠️ AHEAD OF TARGET: This split was ${Math.abs(diffSec)}s/km FASTER than target (${spokenTargetPace}). Gently note they may be going a bit fast.`;
+        // Ahead of target. Only worth flagging while it could still be a pacing mistake — once
+        // the runner has shown it's a held, consistent effort (or the target time is already
+        // banked) the target stops being a coaching lever entirely. See assessTargetPaceSettled.
+        const settledAssessment = assessTargetPaceSettled({
+          kmSplits,
+          targetPaceSec: targetSec,
+          progressPercent: targetDistance ? (distance / targetDistance) * 100 : undefined,
+          projectedFinishSec: targetDistance && distance > 0 && elapsedTime > 0 ? (elapsedTime / distance) * targetDistance : undefined,
+          targetTimeSec: typeof (params as any).targetTime === 'number' ? (params as any).targetTime : undefined,
+        });
+        if (settledAssessment.settled) {
+          targetPaceSettled = true;
+          splitTargetVerdict = settledTargetPaceRule(settledAssessment, personLabel === 'walker' ? 'walker' : 'runner').trim();
+        } else {
+          splitTargetVerdict = `⚠️ AHEAD OF TARGET: This split was ${Math.abs(diffSec)}s/km FASTER than target (${spokenTargetPace}). You may note once that they are ahead of target and check it feels sustainable — a pacing observation, not a warning about burning out or saving energy.`;
+        }
       } else {
         splitTargetVerdict = `✅ ON TARGET: Split pace is within ${Math.abs(diffSec)}s/km of target (${spokenTargetPace}). Reinforce they're nailing the pacing.`;
       }
@@ -1070,7 +1257,7 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     coachName, coachTone, isSplit: !!(isSplit && splitKm && splitPace),
     splitKm, spokenSplitPace, distance, targetDistance, progress, timeFormatted,
     spokenCurrentPace, targetPaceParam, spokenTargetPace, hrContext, cadenceContext,
-    splitTargetVerdict, trainingSessionContext, routeCtxBlock, terrainContext, paceTrend,
+    splitTargetVerdict, targetPaceSettled, trainingSessionContext, routeCtxBlock, terrainContext, paceTrend,
     noTerrainRule, sessionSplitContext, isTrainingSession, workoutType, hasRoute, isOnHill,
     runnerContext, currentGrade, fitnessLevel, heartRate, currentPaceSecPerKm, topicInstruction,
     runnerProfile: params.runnerProfile, accentRule,
@@ -1293,9 +1480,7 @@ export async function generatePhaseCoaching(params: {
     if (typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 2) {
       terrainInfo = currentGrade > 0 ? `Currently climbing (${currentGrade.toFixed(1)}% grade). ` : `Currently descending (${Math.abs(currentGrade).toFixed(1)}% grade). `;
     }
-    if (totalElevationGain && totalElevationGain > 0) {
-      terrainInfo += `Total climb so far: ${Math.round(totalElevationGain)}m. `;
-    }
+    terrainInfo += courseElevationLine({ elevationRangeM: (params as any).elevationRangeM, totalElevationGain });
   }
 
   // Build heart rate info if available — use runner age for accurate zone calculation
@@ -2045,11 +2230,14 @@ export async function generateStruggleCoaching(params: {
   let terrainContext = '';
   if (hasRoute === true) {
     if (typeof currentGrade === 'number' && currentGrade !== null && currentGrade > 3) {
-      terrainContext = `They're currently on a ${currentGrade.toFixed(1)}% uphill which may explain the slowdown. `;
-    } else if (totalElevationGain && totalElevationGain > 50) {
-      terrainContext = `They've climbed ${Math.round(totalElevationGain)}m so far, which is contributing to fatigue. `;
+      terrainContext = `They're currently on ${describeGrade(currentGrade, 'label')} which may explain the slowdown. `;
     }
+    // Course shape by altitude range — never "you've climbed 224 m" on a 22 m-range course.
+    terrainContext += courseElevationLine({ elevationRangeM: (params as any).elevationRangeM, totalElevationGain });
   }
+  // A strong headwind is the most common non-fatigue reason for a pace drop.
+  terrainContext += windLine((params as any).wind);
+  if (terrainContext) terrainContext += GRADE_VOCAB_RULE + ' ';
 
   // Build the no-terrain rule when there's no route
   // hasRoute is set true by the app when GPS altitude data is being tracked (not just for nav routes).
@@ -2516,9 +2704,14 @@ export async function getElevationCoaching(params: {
   let terrainOverview = '\nROUTE TERRAIN PROFILE:';
   terrainOverview += `\n- Classification: ${params.terrainProfile || 'unknown'}`;
   terrainOverview += `\n- Elevation gain per km: ${params.elevationPerKm ? params.elevationPerKm.toFixed(1) + 'm/km' : 'unknown'}`;
-  terrainOverview += `\n- Total climb: ${params.totalElevationGain ? Math.round(params.totalElevationGain) + 'm' : '0m'}`;
-  terrainOverview += `\n- Total descent: ${params.totalElevationLoss ? Math.round(params.totalElevationLoss) + 'm' : '0m'}`;
-  if (params.maxGradientSoFar) terrainOverview += `\n- Steepest gradient so far: ${params.maxGradientSoFar.toFixed(1)}%`;
+  const elevCourseLine = courseElevationLine({ elevationRangeM: (params as any).elevationRangeM, totalElevationGain: params.totalElevationGain }).trim();
+  if (elevCourseLine) terrainOverview += `\n- ${elevCourseLine}`;
+  else terrainOverview += `\n- Total climb: ${params.totalElevationGain ? Math.round(params.totalElevationGain) + 'm' : '0m'}`;
+  terrainOverview += `\n- Total descent (accumulated): ${params.totalElevationLoss ? Math.round(params.totalElevationLoss) + 'm' : '0m'}`;
+  if (params.maxGradientSoFar) terrainOverview += `\n- Steepest sustained gradient so far (over 100 m): ${params.maxGradientSoFar.toFixed(1)}%`;
+  const elevWindLine = windLine((params as any).wind).trim();
+  if (elevWindLine) terrainOverview += `\n- ${elevWindLine}`;
+  terrainOverview += `\n- ${GRADE_VOCAB_RULE}`;
 
   // Build event-specific coaching instructions
   // ── New state-based terrain system ──────────────────────────────────────
@@ -2538,7 +2731,7 @@ export async function getElevationCoaching(params: {
     coachingInstructions = isWalkElevation ? `GRADUAL CLIMB — ${elevPersonCap} is currently on a ${Math.abs(grade).toFixed(1)}% incline.${params.segmentElevationGain ? ` They have climbed ${Math.round(params.segmentElevationGain)}m in this segment.` : ''}${distanceInStateM ? ` They have been climbing for ${distanceInStateM}m.` : segmentM ? ` Segment distance: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what comes after):
-- Acknowledge the climb they are ON: grade, metres climbed, how the effort feels relative to their data
+- Acknowledge the incline they are ON by its number ("a 4% incline", "a 7% climb") — this is NOT steep and NOT a big hill; do not call it either
 - Technique on a gradual climb: lean slightly forward from the ankles, shorten the steps a little, keep a steady rhythm — do NOT mention spm or a numeric step target
 - If HR is elevated: coach effort control — encourage them to keep it conversational and let the climb set the pace, in your own words
 - Correlate pace drop with grade: a 3-4% grade typically costs 15-25s/km — if they're in that range they're managing it well
@@ -2546,7 +2739,7 @@ COACHING FOCUS (current terrain only — do NOT predict what comes after):
 - Reference their actual numbers` : `GRADUAL CLIMB — ${elevPersonCap} is currently on a ${Math.abs(grade).toFixed(1)}% incline.${params.segmentElevationGain ? ` They have climbed ${Math.round(params.segmentElevationGain)}m in this segment.` : ''}${distanceInStateM ? ` They have been climbing for ${distanceInStateM}m.` : segmentM ? ` Segment distance: ${segmentM}m.` : ''}
 
 COACHING FOCUS (current terrain only — do NOT predict what comes after):
-- Acknowledge the climb they are ON: grade, metres climbed, how the effort feels relative to their data
+- Acknowledge the incline they are ON by its number ("a 4% incline", "a 7% climb") — this is NOT steep and NOT a big hill; do not call it either
 - Technique on a gradual climb: shorten stride, keep cadence up (target ${cadenceHint}), stay tall through hips
 - If HR is elevated: coach effort control — encourage them to keep it conversational and let the climb set the pace, in your own words
 - If cadence is low: encourage shorter, lighter steps over big powerful strides uphill — explain briefly why, in your own words
@@ -3185,7 +3378,7 @@ IMPORTANT: You are a fully qualified ${talkVocab.coachLabel} with deep sports sc
     if (context.elevationGain) elevationData += `\n- Elevation climbed: ${context.elevationGain.toFixed(0)}m`;
     if (context.elevationLoss) elevationData += `\n- Elevation descended: ${context.elevationLoss.toFixed(0)}m`;
     if (context.avgGradient) elevationData += `\n- Average gradient: ${context.avgGradient.toFixed(1)}%`;
-    if (typeof context.currentGrade === 'number' && context.currentGrade !== null) elevationData += `\n- Current gradient: ${context.currentGrade.toFixed(1)}% (${context.currentGrade > 5 ? 'steep climb' : context.currentGrade < -5 ? 'steep descent' : context.currentGrade > 0 ? 'gradual climb' : 'gentle descent'})`;
+    if (typeof context.currentGrade === 'number' && context.currentGrade !== null) elevationData += `\n- Current gradient: ${context.currentGrade.toFixed(1)}% (${context.currentGrade >= 10 ? 'steep climb' : context.currentGrade <= -10 ? 'steep descent' : context.currentGrade > 0 ? 'gradual climb' : 'gentle descent'})`;
     if (context.maxGradient) elevationData += `\n- Steepest segment: ${context.maxGradient.toFixed(1)}%`;
     prompt += elevationData;
   }
@@ -3650,16 +3843,19 @@ export async function generateWellnessAwarePreRunBriefing(params: {
 
     // Gradient description
     let gradientNote = '';
-    if (maxGrad > 8) {
+    // maxGrad is a PERCENT grade (rise/run × 100) — it was printed with a degree sign here,
+    // the only place in the product that did so. Bands match the live coaching vocabulary:
+    // steep ≥10%, a climb worth naming 6–10%, gentle 3–6%.
+    if (maxGrad >= 10) {
       gradientNote = isWalk
-        ? `Steepest section: ${maxGrad.toFixed(1)}° — a tough climb, pace yourself and take it steady`
-        : `Steepest section: ${maxGrad.toFixed(1)}° — a tough climb, consider walking if needed`;
-    } else if (maxGrad > 5) {
+        ? `Steepest section: ${maxGrad.toFixed(1)}% — a steep climb, pace yourself and take it steady`
+        : `Steepest section: ${maxGrad.toFixed(1)}% — a steep climb, consider walking if needed`;
+    } else if (maxGrad >= 6) {
       gradientNote = isWalk
-        ? `Steepest section: ${maxGrad.toFixed(1)}° — noticeable hill, shorten your steps a little and maintain effort`
-        : `Steepest section: ${maxGrad.toFixed(1)}° — noticeable hill, shorten your stride and maintain effort`;
-    } else if (maxGrad > 2) {
-      gradientNote = `Steepest section: ${maxGrad.toFixed(1)}° — gentle incline`;
+        ? `Steepest section: ${maxGrad.toFixed(1)}% — a noticeable climb, shorten your steps a little and maintain effort`
+        : `Steepest section: ${maxGrad.toFixed(1)}% — a noticeable climb, shorten your stride and maintain effort`;
+    } else if (maxGrad >= 3) {
+      gradientNote = `Steepest section: ${maxGrad.toFixed(1)}% — gentle incline`;
     }
     
     routeInfo = `
@@ -3971,6 +4167,14 @@ export async function generateHeartRateCoaching(params: {
   avgPace?: string;              // "M:SS" per km, whole run so far
   targetPace?: string;           // "M:SS" per km derived from target time ÷ target distance
   paceVsTargetPercent?: number;  // positive = running FASTER than target pace, negative = slower
+  // Live context (2026-09-20) — lets the HR coach tell a settled, chosen pace from an
+  // over-eager start, and see wind/course before blaming effort. All optional.
+  kmSplits?: Array<{ km: number; pace: string }> | null;
+  distanceKm?: number;
+  targetDistanceKm?: number;
+  targetTimeSec?: number;
+  wind?: { speedKmh?: number; directionDeg?: number | null; relative?: string | null } | null;
+  elevationRangeM?: number | null;
 } & WatchDynamicsParams): Promise<string> {
   const { currentHR, avgHR, maxHR, targetZone, elapsedMinutes, coachName, coachTone, coachAccent, wellness, runnerAge, fitnessLevel, runnerName } = params;
   // currentHR/avgHR/maxHR are required by the type signature but unvalidated — a missing
@@ -4061,14 +4265,21 @@ export async function generateHeartRateCoaching(params: {
   const terrainContextBlock = (() => {
     if (!params.terrain_context || params.terrain_context === 'flat') return '';
     const terrainLabels: Record<string, string> = {
-      gradual_climb: 'currently on a gradual climb (3-5% grade)',
-      steep_climb: 'currently on a steep climb (>5% grade) — elevated HR here is EXPECTED',
+      gradual_climb: 'currently on a climb (3–10% grade — call it an incline or climb, NOT a hill or steep)',
+      steep_climb: 'currently on a steep climb (10%+ sustained) — elevated HR here is EXPECTED',
       gradual_descent: 'currently descending gradually — HR should naturally ease',
-      steep_descent: 'currently on a steep descent — HR may stay elevated from prior climb',
+      steep_descent: 'currently on a steep descent (10%+) — HR may stay elevated from prior climb',
       rolling: 'on rolling terrain — HR will fluctuate with the undulations',
     };
     const label = terrainLabels[params.terrain_context] ?? `on ${params.terrain_context} terrain`;
-    return `\nTerrain context: The ${hrPersonLabel} is ${label}. Factor this into your HR assessment — don't penalise a high HR that's appropriate for the current gradient.\n`;
+    return `\nTerrain context: The ${hrPersonLabel} is ${label}. Factor this into your HR assessment — don't penalise a high HR that's appropriate for the current gradient. ${GRADE_VOCAB_RULE}\n`;
+  })();
+  // Wind and course shape — a headwind raises HR for the same pace; the model must not read
+  // that as the runner over-reaching.
+  const hrEnvironmentBlock = (() => {
+    const wind = windLine(params.wind);
+    const course = courseElevationLine({ elevationRangeM: params.elevationRangeM });
+    return wind || course ? `\nConditions: ${wind}${course}\n` : '';
   })();
 
   // Effort philosophy. A plan session with a target zone is the ONLY case where "ease off"
@@ -4088,7 +4299,28 @@ export async function generateHeartRateCoaching(params: {
     ].filter(Boolean).join(', ');
     if (typeof paceVsTargetPercent === 'number' && targetPace) {
       if (paceVsTargetPercent >= 5) {
-        return `\nPace: ${paceFacts}. They are running about ${Math.round(paceVsTargetPercent)}% FASTER than their target pace. You MAY point out they're ahead of target and could settle back to target pace to finish strong — frame it as pacing, not as being tired.`;
+        // Ahead of target: only a lever while it might still be an over-eager start. Once the
+        // splits show a held, consistent effort (or the target time is banked past halfway)
+        // the target is ruled out entirely — see assessTargetPaceSettled(). Field history:
+        // "consider settling into your target pace of 5:41" was spoken a dozen times in one
+        // half marathon to a runner cruising 15–20% ahead of a deliberately soft target.
+        const targetSec = parsePaceSeconds(targetPace);
+        const avgSec = parsePaceSeconds(avgPace);
+        const settledAssessment = assessTargetPaceSettled({
+          kmSplits: params.kmSplits,
+          targetPaceSec: targetSec,
+          progressPercent: params.distanceKm && params.targetDistanceKm ? (params.distanceKm / params.targetDistanceKm) * 100 : undefined,
+          projectedFinishSec: avgSec && params.targetDistanceKm ? avgSec * params.targetDistanceKm : undefined,
+          targetTimeSec: params.targetTimeSec,
+        });
+        if (settledAssessment.settled) {
+          return `\nPace: ${paceFacts}.${settledTargetPaceRule(settledAssessment, hrPersonLabel === 'walker' ? 'walker' : 'runner')}`;
+        }
+        const alreadyRaised = (params.recentCoachingMessages ?? []).some(m => /target pace|settle|ease (back|off)|dial it back/i.test(m));
+        if (alreadyRaised) {
+          return `\nPace: ${paceFacts}. They are about ${Math.round(paceVsTargetPercent)}% faster than target and a recent cue already raised that — do NOT raise it again. Coach the heart rate and effort steadiness only.`;
+        }
+        return `\nPace: ${paceFacts}. They are running about ${Math.round(paceVsTargetPercent)}% FASTER than their target pace (average pace vs target — current pace may differ). You MAY note once that they're ahead of target and could settle toward it — a pacing observation, never framed as tiredness or saving energy.`;
       }
       if (paceVsTargetPercent <= -3) {
         return `\nPace: ${paceFacts}. They are BEHIND their target pace — under no circumstances suggest slowing down or easing off. Encourage rhythm, relaxation and consistency.`;
@@ -4110,7 +4342,7 @@ export async function generateHeartRateCoaching(params: {
     coachName, coachTone, coachAccent, runnerProfileContext, elapsedMinutes,
     currentHR, percentMax, currentZone, zoneName: zoneNames[currentZone], avgHR,
     targetZone, targetZoneName: targetZone ? zoneNames[targetZone] : undefined,
-    wellnessContext, terrainContextBlock, sensorNote, sessionMemoryBlock, physioBlock,
+    wellnessContext, terrainContextBlock: terrainContextBlock + hrEnvironmentBlock, sensorNote, sessionMemoryBlock, physioBlock,
     targetZoneGuidance, runnerProfile: params.runnerProfile,
     watchDynamicsContext: buildWatchDynamicsText(params),
   });
@@ -5713,9 +5945,28 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
     : `\n- Cadence: ${cadence} spm`;
   const eliteWatchDynamics = buildWatchDynamicsText(params);
   if (eliteWatchDynamics) status += `\n- Watch running dynamics: ${eliteWatchDynamics}`;
-  if (hasRoute && totalElevationGain && totalElevationGain > 0) status += `\n- Elevation climbed: ${Math.round(totalElevationGain)}m`;
-  if (hasRoute && typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) > 2) status += `\n- Current gradient: ${currentGrade.toFixed(1)}%`;
+  // Course described by its altitude range, not the accumulated ascent — see courseElevationLine().
+  const eliteCourseLine = hasRoute ? courseElevationLine({ elevationRangeM: (params as any).elevationRangeM, totalElevationGain }).trim() : '';
+  if (eliteCourseLine) status += `\n- ${eliteCourseLine}`;
+  if (hasRoute && typeof currentGrade === 'number' && currentGrade !== null && Math.abs(currentGrade) >= 3) status += `\n- Current gradient: ${describeGrade(currentGrade, 'label')} (${currentGrade.toFixed(1)}%)`;
+  const eliteWindLine = windLine((params as any).wind).trim();
+  if (eliteWindLine) status += `\n- ${eliteWindLine}`;
   if (kmSplits && kmSplits.length > 0) status += `\n- Splits: ${kmSplits.map(s => `km${s.km}=${s.pace}`).join(', ')}`;
+  // Where they are in the run, spelled out — stops "approaching halfway" at 31% and "final
+  // stretch" at 45% (both observed in one 2026-09-20 half marathon's positive-reinforcement cues).
+  status += runStageRule(distance, targetDistance);
+  // Target pace as a lever: ruled out once the effort is demonstrably settled or the target
+  // time is banked. Shared with split/HR coaching — see assessTargetPaceSettled().
+  const eliteTargetPaceSec = parsePaceSeconds(targetPace);
+  const eliteSettled = assessTargetPaceSettled({
+    kmSplits,
+    targetPaceSec: eliteTargetPaceSec,
+    progressPercent: targetDistance ? (distance / targetDistance) * 100 : undefined,
+    projectedFinishSec: projectedFinishTime ?? (targetDistance && distance > 0 && elapsedTime > 0 ? (elapsedTime / distance) * targetDistance : undefined),
+    targetTimeSec: targetTime,
+  });
+  const eliteSettledRule = settledTargetPaceRule(eliteSettled, isWalkSession ? 'walker' : 'runner');
+  if (eliteSettledRule) status += `\n${eliteSettledRule}`;
 
   // Coaching programme context — adds plan awareness to every insight
   if (trainingPlanId && planGoalType) {
@@ -5763,14 +6014,14 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
   // The dedicated elevation coaching function handles terrain as its primary subject.
   if (params.currentTerrainState && params.currentTerrainState !== 'flat') {
     const terrainLabels: Record<string, string> = {
-      gradual_climb: 'gradual climb (3-5% grade)',
-      steep_climb: 'steep climb (>5% grade)',
-      gradual_descent: 'gradual descent (3-5% grade)',
-      steep_descent: 'steep descent (>5% grade)',
+      gradual_climb: 'a climb of 3–10% grade (say "incline" or "climb" with the number — never "hill" or "steep")',
+      steep_climb: 'a steep climb (10%+ sustained)',
+      gradual_descent: 'a gradual descent (3–10%)',
+      steep_descent: 'a steep descent (10%+ sustained)',
       rolling: 'rolling / undulating terrain',
     };
     const terrainLabel = terrainLabels[params.currentTerrainState] ?? params.currentTerrainState;
-    status += `\n\nTerrain context: The ${isWalkSession ? 'walker' : 'runner'} is currently on ${terrainLabel}. `;
+    status += `\n\nTerrain context: The ${isWalkSession ? 'walker' : 'runner'} is currently on ${terrainLabel}. ${GRADE_VOCAB_RULE} `;
     if (params.currentTerrainState.includes('climb')) {
       status += 'Climbing slows pace — a pace drop on this terrain is normal and expected.';
     } else if (params.currentTerrainState.includes('descent')) {
@@ -6014,7 +6265,11 @@ ${targetPace ? `Target pace: ${spokenTargetPace} (current: ${spokenPace})` : ''}
 
 Give a brief ETA coaching message (2 sentences):
 1. State their projected finish time clearly vs their target
-2. Coach on pacing strategy — should they maintain, push slightly, or ease off?
+2. ${eliteSettled.settled
+  ? 'Reinforce holding exactly what they are doing — do NOT suggest easing off, settling back or slowing to target pace (see TARGET PACE rule above); the cushion is theirs to keep.'
+  : diff < -1
+    ? 'Coach on pacing strategy — maintain or push slightly. Never tell them to ease off or slow down to protect a cushion; being ahead is not a problem to fix.'
+    : 'Coach on pacing strategy — should they maintain or push slightly?'}
 ${PACE_FORMAT_RULE}`;
       systemExtra = 'Give clear projected finish time updates with actionable pacing advice.';
       break;
@@ -6037,8 +6292,7 @@ ${paceTrendDirection === 'slowing' ? `- Acknowledge the gradual slowdown without
 - Give a specific technique cue to arrest the fade — pick a genuine form reset (posture, shoulders, arm drive, foot turnover, breathing) relevant to what their data shows, and phrase it in your own original words each time, not a stock line
 - Remind them of their target or what good pacing looks like` :
   paceTrendDirection === 'speeding_up' ? `- Reinforce the positive trend — they're ${isWalkSession ? 'walking' : 'running'} smart
-- Caution against going too fast too early if they're under 60% done
-- If they're past 60%, encourage the push` :
+${eliteSettled.settled || (targetDistance && distance / targetDistance >= 0.6) ? '- Encourage the push' : '- You may ask them to check the faster pace feels sustainable — a question, not a warning about burning out or saving energy'}` :
   `- Praise the consistency — this is disciplined ${isWalkSession ? 'walking' : 'running'}
 - Give a quick form or mental cue to maintain`}
 

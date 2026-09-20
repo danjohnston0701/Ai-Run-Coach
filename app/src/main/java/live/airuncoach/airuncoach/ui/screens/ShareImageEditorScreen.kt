@@ -1525,7 +1525,7 @@ private val RING_METRIC_OPTIONS = listOf(
     "heartRate"     to "Heart Rate",
     "maxHeartRate"  to "Max HR",
     "calories"      to "Calories",
-    "elevationGain" to "Elev Gain",
+    "elevationGain" to "Elevation",   // altitude range (max − min); key kept for saved layouts
     "elevationLoss" to "Elev Loss",
     "cadence"       to "Cadence",
     "steps"         to "Total Steps",

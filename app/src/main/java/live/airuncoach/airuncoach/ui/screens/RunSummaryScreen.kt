@@ -2133,22 +2133,29 @@ private fun MainStatsGridFlagship(run: RunSession, lastRunForDelta: RunSession?)
             } else {
                 add(StatTile("Avg Cadence", "-- spm", R.drawable.icon_repeat_vector, Colors.textMuted))
             }
-            // Bottom left: Elevation range (max - min) — more intuitive than cumulative gain for runners
+            // Bottom left: Elevation = altitude range (highest − lowest point). Product decision
+            // (Daniel, 2026-09-20): this is THE elevation number shown for a run — not the
+            // accumulation of every rise (totalElevationGain), which on an undulating course
+            // reads as "224 m of climbing" for a route with a 22 m range. Labelled "Elevation",
+            // not "Elev Gain", so it can't be confused with the ascent figure in the Garmin card.
             val elevRange = run.maxElevation?.let { max -> run.minElevation?.let { min -> (max - min).coerceAtLeast(0.0) } }
             val elevDisplay = elevRange?.roundToInt()?.takeIf { it > 0 } ?: run.totalElevationGain.roundToInt().takeIf { it > 0 }
             if (elevDisplay != null && elevDisplay > 0) {
-                add(StatTile("Elev Gain", "$elevDisplay m", R.drawable.icon_trending_vector, Colors.success))
+                add(StatTile("Elevation", "$elevDisplay m", R.drawable.icon_trending_vector, Colors.success))
             } else {
-                add(StatTile("Elev Gain", "0 m", R.drawable.icon_trending_vector, Colors.textMuted))
+                add(StatTile("Elevation", "0 m", R.drawable.icon_trending_vector, Colors.textMuted))
             }
-            // Bottom right: Max Incline (steepest incline, converted from % to degrees: 0°=flat, 90°=vertical)
+            // Bottom right: Max Incline as a percent grade — the unit used everywhere else in the
+            // product (live coaching, splits, Garmin/Strava). It was converted to degrees here,
+            // which made an already-noisy value look like a different quantity (a 50% jitter
+            // artefact displayed as "27°"). steepestIncline is now the steepest sustained 100 m
+            // grade (see RunTrackingService.trailingWindowGradePercent()).
             // Fall back to maxGradient if steepestIncline is not available (older runs)
             val inclinePercent = (run.steepestIncline?.takeIf { it > 0 }) ?: (run.maxGradient.takeIf { it > 0 })
             if (inclinePercent != null && inclinePercent > 0) {
-                val maxInclineDegrees = Math.toDegrees(Math.atan(inclinePercent / 100.0))
-                add(StatTile("Max Incline", "${maxInclineDegrees.roundToInt()}°", R.drawable.icon_trending_vector, Colors.warning))
+                add(StatTile("Max Incline", "${inclinePercent.roundToInt()}%", R.drawable.icon_trending_vector, Colors.warning))
             } else {
-                add(StatTile("Max Incline", "0°", R.drawable.icon_trending_vector, Colors.textMuted))
+                add(StatTile("Max Incline", "0%", R.drawable.icon_trending_vector, Colors.textMuted))
             }
         }
     }
@@ -3656,7 +3663,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
             if (maxAlt - minAlt >= 0.5) {
                 LineChartCardFlagship(
                     title = "Elevation",
-                    subtitleLeft = "Gain: $elevGainDisplay m",
+                    subtitleLeft = "Elevation: $elevGainDisplay m",
                     subtitleRight = "Max: ${maxAlt.roundToInt()} m",
                     accent = Colors.success
                 ) {
@@ -3735,7 +3742,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
             LineChartCardFlagship(
                 title = "Pace vs Elevation",
                 subtitleLeft = "Pace: ${run.averagePace ?: "—"}",
-                subtitleRight = "Gain: $elevGainDisplay m",
+                subtitleRight = "Elevation: $elevGainDisplay m",
                 accent = Colors.primary
             ) {
                 DualAxisChartCanvas(
@@ -3766,7 +3773,7 @@ private fun ChartsSectionFlagship(run: RunSession) {
             LineChartCardFlagship(
                 title = "Cadence vs Elevation",
                 subtitleLeft = "Avg: $avgCadElev spm",
-                subtitleRight = "Gain: $elevGainDisplay m",
+                subtitleRight = "Elevation: $elevGainDisplay m",
                 accent = Color(0xFF8B5CF6)
             ) {
                 DualAxisChartCanvas(
@@ -6160,10 +6167,13 @@ private fun calculateEffortScore(run: RunSession, userAge: Int? = null): EffortR
     val paceSec = (paceSecPerKm % 60).roundToInt()
     factors.add("Pace Intensity" to "$paceMin:${paceSec.toString().padStart(2, '0')}/km")
 
-    // Elevation: 0-15 pts
+    // Elevation: 0-15 pts — scored on the ascent, but DISPLAYED as the altitude range, which is
+    // the elevation figure the rest of the summary shows (see the "Elevation" stat tile).
     val elevScore = (run.totalElevationGain / 500.0 * 15.0).coerceIn(0.0, 15.0)
-    if (run.totalElevationGain > 0) {
-        factors.add("Elevation Gain" to "${run.totalElevationGain.roundToInt()} m")
+    val elevRangeForFactor = run.maxElevation?.let { max -> run.minElevation?.let { min -> (max - min).coerceAtLeast(0.0) } }
+    val elevFactorValue = elevRangeForFactor?.roundToInt()?.takeIf { it > 0 } ?: run.totalElevationGain.roundToInt().takeIf { it > 0 }
+    if (elevFactorValue != null) {
+        factors.add("Elevation" to "$elevFactorValue m")
     }
 
     // Heart Rate: 0-20 pts (if available)

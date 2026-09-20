@@ -145,7 +145,55 @@ class ObserverRunSessionViewModel @Inject constructor(
         }
     }
 
+    // Observer-side freshness for the "may have lost signal" line — see the Screen's staleness
+    // block. Both are THIS device's clock, so clock skew between runner phone / server /
+    // observer can't fake a stale reading, and a gap in our own polling (backgrounded, no
+    // network) is distinguishable from the runner going quiet.
+    private var lastSeenSyncedAt: String? = null
+    private var lastRunnerUpdateSeenAtMs: Long? = null
+
+    // Smooth elapsed clock — the runner syncs elapsedTime every ~5 s and we poll every 2 s, so
+    // rendering the raw server value makes the observer's clock step in 5 s lumps. The screen
+    // ticks locally from elapsedBaseSeconds anchored at elapsedBaseAtMs (observer clock); a
+    // poll only re-anchors when the server has moved AHEAD of our prediction (we were slow) or
+    // fallen behind it by more than 3 s (a real correction: pause/resume/catch-up), so the
+    // ±1–2 s jitter of sync + poll latency doesn't make the clock stutter.
+    private var elapsedBaseSeconds: Int = 0
+    private var elapsedBaseAtMs: Long = 0L
+    private var elapsedTicking: Boolean = false
+
+    private fun reconcileElapsed(serverElapsed: Int, hasStarted: Boolean, isPaused: Boolean, isActive: Boolean, nowMs: Long) {
+        val shouldTick = hasStarted && !isPaused && isActive
+        if (!shouldTick) {
+            elapsedBaseSeconds = serverElapsed; elapsedBaseAtMs = nowMs; elapsedTicking = false
+            return
+        }
+        val predicted = if (elapsedTicking) elapsedBaseSeconds + ((nowMs - elapsedBaseAtMs) / 1000L).toInt() else serverElapsed
+        if (!elapsedTicking || serverElapsed > predicted || predicted - serverElapsed > 3) {
+            elapsedBaseSeconds = serverElapsed; elapsedBaseAtMs = nowMs
+        }
+        elapsedTicking = true
+    }
+
     private fun convertToObserverSession(apiResponse: LiveSessionApiResponse): ObserverLiveRunSession {
+        val nowMs = System.currentTimeMillis()
+        if (apiResponse.lastSyncedAt != lastSeenSyncedAt) {
+            lastSeenSyncedAt = apiResponse.lastSyncedAt
+            lastRunnerUpdateSeenAtMs = nowMs
+        }
+        val serverElapsedSeconds = when (apiResponse.elapsedTime) {
+            is Int -> apiResponse.elapsedTime
+            is String -> (apiResponse.elapsedTime as String).toIntOrNull() ?: 0
+            is Number -> apiResponse.elapsedTime.toInt()
+            else -> 0
+        }
+        reconcileElapsed(
+            serverElapsed = serverElapsedSeconds,
+            hasStarted = apiResponse.hasStarted ?: false,
+            isPaused = apiResponse.isPaused ?: false,
+            isActive = apiResponse.isActive ?: true,
+            nowMs = nowMs
+        )
         return ObserverLiveRunSession(
             id = apiResponse.id,
             userId = apiResponse.userId,
@@ -191,7 +239,12 @@ class ObserverRunSessionViewModel @Inject constructor(
             gpsTrack = parseGpsTrack(apiResponse.gpsTrack),
             isPaused = apiResponse.isPaused ?: false,
             resultRunId = apiResponse.resultRunId,
-            lastSyncedAtMs = parseIsoMillis(apiResponse.lastSyncedAt)
+            lastSyncedAtMs = parseIsoMillis(apiResponse.lastSyncedAt),
+            lastFetchedAtMs = nowMs,
+            lastRunnerUpdateSeenAtMs = lastRunnerUpdateSeenAtMs,
+            elapsedBaseSeconds = elapsedBaseSeconds,
+            elapsedBaseAtMs = elapsedBaseAtMs,
+            elapsedTicking = elapsedTicking
         )
     }
 

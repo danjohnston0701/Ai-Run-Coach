@@ -163,9 +163,12 @@ fun RawDataTab(runSession: RunSession) {
                         RawDataRow("Feels Like (°F)", String.format("%.1f", it * 9/5 + 32))
                     }
                     RawDataRow("Humidity (%)", weather.humidity.toString())
-                    RawDataRow("Wind Speed (m/s)", String.format("%.1f", weather.windSpeed))
-                    RawDataRow("Wind Speed (km/h)", String.format("%.1f", weather.windSpeed * 3.6))
-                    RawDataRow("Wind Speed (mph)", String.format("%.1f", weather.windSpeed * 2.23694))
+                    // WeatherData.windSpeed is km/h as served by /api/weather (Open-Meteo
+                    // wind_speed_10m, km/h by default) — it was being labelled m/s and then
+                    // multiplied up, so a 34 km/h day displayed as 34 m/s / 122 km/h / 76 mph.
+                    RawDataRow("Wind Speed (km/h)", String.format("%.1f", weather.windSpeed))
+                    RawDataRow("Wind Speed (m/s)", String.format("%.1f", weather.windSpeed / 3.6))
+                    RawDataRow("Wind Speed (mph)", String.format("%.1f", weather.windSpeed * 0.621371))
                     weather.windDirection?.let { 
                         RawDataRow("Wind Direction (°)", it.toString())
                         RawDataRow("Wind Direction", getWindDirection(it))
@@ -181,7 +184,7 @@ fun RawDataTab(runSession: RunSession) {
                     RawDataRow("Condition", weather.condition ?: weather.description)
                     RawDataRow("Temperature (°C)", String.format("%.1f", weather.temperature))
                     RawDataRow("Humidity (%)", weather.humidity.toString())
-                    RawDataRow("Wind Speed (m/s)", String.format("%.1f", weather.windSpeed))
+                    RawDataRow("Wind Speed (km/h)", String.format("%.1f", weather.windSpeed))
                 }
             }
         }

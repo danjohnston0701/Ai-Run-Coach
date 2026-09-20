@@ -31,6 +31,9 @@ data class ElevationCoachingRequest(
     @SerializedName("terrainProfile") val terrainProfile: String? = null, // flat, undulating, hilly, mountainous
     @SerializedName("elevationPerKm") val elevationPerKm: Double? = null, // avg metres gained per km
     @SerializedName("maxGradientSoFar") val maxGradientSoFar: Double? = null,
+    // Altitude range so far (highest − lowest, m) and live wind — see WindContext / PaceUpdate.
+    @SerializedName("elevationRangeM") val elevationRangeM: Double? = null,
+    @SerializedName("wind") val wind: WindContext? = null,
 
     // Segment-specific elevation context
     @SerializedName("segmentElevationGain") val segmentElevationGain: Double? = null,

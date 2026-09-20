@@ -64,5 +64,22 @@ data class HeartRateCoachingRequest(
     // watch's live running-dynamics data (ground contact time, vertical oscillation, stride
     // length, running power, respiration rate, training effect) from garminRealtimeData.
     // Null for phone-only runs — the prompt is then built exactly as before, with no enrichment.
-    @SerializedName("garminCompanionSessionId") val garminCompanionSessionId: String? = null
+    @SerializedName("garminCompanionSessionId") val garminCompanionSessionId: String? = null,
+
+    // ── Live environment context (2026-09-20) ─────────────────────────────────
+    // Wind at the run's start fix, with its relationship to the current heading — see WindContext.
+    @SerializedName("wind") val wind: WindContext? = null,
+    // Altitude range covered so far (highest point − lowest point, metres). This is the
+    // "elevation" figure the product shows the runner; totalElevationGain is the accumulation of
+    // every rise and is far larger on undulating ground (224 m of "climbing" on a course with a
+    // 22 m range). Prompts should describe the course with this, not the accumulation.
+    @SerializedName("elevationRangeM") val elevationRangeM: Double? = null,
+    // Completed km splits so the server can tell a settled, deliberately-held pace apart from a
+    // runner who went out too hard — see assessTargetPaceSettled() in ai-service.
+    @SerializedName("kmSplits") val kmSplits: List<KmSplitBrief>? = null,
+    // Progress + goal, so the server can also tell when the target time is already banked.
+    // distance/targetDistance in km, targetTime in seconds (same units as EliteCoachingRequest).
+    @SerializedName("distance") val distance: Double? = null,
+    @SerializedName("targetDistance") val targetDistance: Double? = null,
+    @SerializedName("targetTime") val targetTime: Long? = null
 )

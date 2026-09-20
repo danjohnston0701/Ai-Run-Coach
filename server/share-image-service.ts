@@ -78,6 +78,8 @@ export interface RunDataForImage {
   elevation?: number;
   elevationGain?: number;
   elevationLoss?: number;
+  minElevation?: number;
+  maxElevation?: number;
   difficulty?: string;
   gpsTrack?: Array<{ lat: number; lng: number; elevation?: number; alt?: number; altitude?: number; speed?: number; pace?: number; timestamp?: number }>;
   heartRateData?: Array<{ timestamp: number; value: number }>;
@@ -537,6 +539,28 @@ function metricRing(
 
 type RingMetricData = { label: string; unit: string; value: string; grad: string; prog: number; track: string };
 
+/**
+ * The elevation figure shown on share images: the altitude RANGE of the run (highest point −
+ * lowest point), never the accumulated ascent. Product decision (Daniel, 2026-09-20): a
+ * course with a 22 m range was being shared as "224 m Elev Gain" because every wobble in the
+ * altitude trace was summed. Falls back to the GPS track's altitude spread for older rows
+ * without stored extremes, and only then to the accumulated gain.
+ */
+function elevationRangeFor(run: RunDataForImage): number {
+  if (typeof run.maxElevation === 'number' && typeof run.minElevation === 'number') {
+    return Math.max(0, run.maxElevation - run.minElevation);
+  }
+  const alts = (run.gpsTrack ?? [])
+    .map(p => p.elevation ?? p.alt ?? p.altitude)
+    .filter((a): a is number => typeof a === 'number' && Number.isFinite(a));
+  if (alts.length >= 2) {
+    let lo = Infinity, hi = -Infinity;
+    for (const a of alts) { if (a < lo) lo = a; if (a > hi) hi = a; }
+    return Math.max(0, hi - lo);
+  }
+  return run.elevationGain || run.elevation || 0;
+}
+
 function getMetricData(metric: string, run: RunDataForImage): RingMetricData {
   switch (metric) {
     case "distance": {
@@ -565,8 +589,10 @@ function getMetricData(metric: string, run: RunDataForImage): RingMetricData {
       return { label: "Calories", unit: "kcal", value: cal ? cal.toString() : "0", grad: "greenRingGrad", prog: cal ? Math.min(0.3 + cal / 600 * 0.6, 0.95) : 0.3, track: "#00E676" };
     }
     case "elevationGain": {
-      const eg = run.elevationGain || 0;
-      return { label: "Elev Gain", unit: "m", value: `${Math.round(eg)}`, grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.3, track: "#FF6B35" };
+      // Key kept as "elevationGain" (it's the client's saved ring-layout id) but the figure
+      // and label are the altitude range — see elevationRangeFor().
+      const eg = elevationRangeFor(run);
+      return { label: "Elevation", unit: "m", value: `${Math.round(eg)}`, grad: "orangeRingGrad", prog: eg ? Math.min(0.3 + eg / 200 * 0.6, 0.95) : 0.3, track: "#FF6B35" };
     }
     case "elevationLoss": {
       const el = run.elevationLoss || 0;
@@ -1410,7 +1436,7 @@ function buildStickerSvg(sticker: PlacedSticker, run: RunDataForImage, canvasW: 
     case "stat-calories":
       value = run.calories?.toString() || "--"; unit = "kcal"; label = "CALORIES"; color = C.yellow; break;
     case "stat-elevation":
-      value = Math.round(run.elevationGain || run.elevation || 0).toString(); unit = "m"; label = "ELEVATION"; color = C.green; break;
+      value = Math.round(elevationRangeFor(run)).toString(); unit = "m"; label = "ELEVATION"; color = C.green; break;
     case "stat-cadence":
       value = run.cadence?.toString() || "--"; unit = "spm"; label = "CADENCE"; color = C.cyan; break;
     case "stat-maxhr":

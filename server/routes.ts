@@ -5169,6 +5169,19 @@ function transformRunForAndroid(run: any) {
       const notificationService = await import("./notification-service");
       const emailService = await import("./email-service");
 
+      // Every invitation email must carry the 8-char session code (product rule, 2026-09-20).
+      // Sessions created by current clients always have one; older/odd rows may not, and the
+      // friend-email path used to pass "" silently in that case.
+      const ensureSessionInviteCode = async (): Promise<string> => {
+        if (session.inviteCode) return session.inviteCode;
+        const { generateInviteCode } = await import("./invite-code-generator");
+        const code = generateInviteCode();
+        await storage.updateLiveSession(sessionId, { inviteCode: code } as any);
+        session.inviteCode = code;
+        console.log(`[Live Sessions] Session ${sessionId} had no invite code — generated ${code}`);
+        return code;
+      };
+
       // FLOW 1: Invite registered friend
       if (friendId) {
         // Validate friendship
@@ -5213,7 +5226,7 @@ function transformRunForAndroid(run: any) {
             friend.name || "Friend",
             runner.name || "A runner",
             sessionId,
-            session.inviteCode || ""
+            await ensureSessionInviteCode()
           );
         }
 
@@ -5264,7 +5277,7 @@ function transformRunForAndroid(run: any) {
               existingUser.name || "Friend",
               runner.name || "A runner",
               sessionId,
-              session.inviteCode || ""
+              await ensureSessionInviteCode()
             );
 
             console.log(`[Live Sessions] Invited registered friend ${existingUser.id} (${trimmedEmail}) via email lookup. Push: ${pushSent}, Email: ${emailSent}`);
@@ -5461,6 +5474,66 @@ function transformRunForAndroid(run: any) {
 
   // Public endpoint for non-registered observers to access live sessions
   // Accepts either a 64-char token (legacy) or 8-char short code (new)
+  // Human-facing landing page behind the https link in every observer invitation email
+  // (https://airuncoach.live/observe/{code}). Mail clients such as Gmail ignore custom-scheme
+  // hrefs, so the email button can't be airuncoach://observe/{code} directly; this page shows
+  // the runner + the 8-char code prominently, offers an "Open in app" button that DOES use
+  // the custom scheme (user-initiated taps from a web page are honoured), and store links.
+  // Never leaks anything beyond what the invitation email already contains.
+  app.get("/observe/:code", async (req: Request, res: Response) => {
+    const { code } = req.params;
+    const { isValidInviteCodeFormat, normalizeInviteCode } = await import("./invite-code-generator");
+    const esc = (v: string) => v.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] as string));
+    let runnerName = "A runner";
+    let status: "waiting" | "running" | "ended" | "invalid" = "invalid";
+    let displayCode = code;
+    try {
+      let session: Awaited<ReturnType<typeof storage.getLiveSession>> = undefined;
+      if (isValidInviteCodeFormat(code)) {
+        const normalized = normalizeInviteCode(code);
+        displayCode = normalized;
+        session = await storage.getLiveSessionByInviteCode(normalized);
+        if (!session) {
+          const invitation = await storage.getObserverInvitationByCode(normalized);
+          if (invitation) session = await storage.getLiveSession(invitation.sessionId);
+        }
+      } else {
+        const invitation = await storage.getObserverInvitation(code);
+        if (invitation) session = await storage.getLiveSession(invitation.sessionId);
+      }
+      if (session) {
+        session = await resolveStaleLiveSession(session);
+        const runner = await storage.getUser(session.userId);
+        runnerName = runner?.name || runnerName;
+        status = !session.isActive ? "ended" : session.hasStarted ? "running" : "waiting";
+      }
+    } catch (error: any) {
+      console.error("Observe landing page error:", error);
+    }
+    const appLink = `airuncoach://observe/${encodeURIComponent(displayCode)}`;
+    const statusLine = status === "running" ? `${esc(runnerName)} is running right now.`
+      : status === "waiting" ? `${esc(runnerName)} hasn't started yet — you're set to watch as soon as they do.`
+      : status === "ended" ? `This live run has finished.`
+      : `We couldn't find a live run for this code.`;
+    res.setHeader("Content-Type", "text/html");
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watch ${esc(runnerName)}'s live run — AI Run Coach</title>
+<style>body{margin:0;background:#0A0A1A;color:#fff;font-family:-apple-system,Segoe UI,Arial,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:32px 20px}.hero{background:linear-gradient(135deg,#00D4FF,#0099CC);color:#0A0A1A;border-radius:12px;padding:28px;text-align:center;font-weight:800;letter-spacing:2px;text-transform:uppercase}
+.code{background:#1a1a2e;border-radius:10px;padding:18px;text-align:center;font-family:monospace;font-size:30px;font-weight:700;letter-spacing:6px;color:#00D4FF;margin:20px 0}
+.btn{display:block;text-align:center;background:#00D4FF;color:#0A0A1A;font-weight:700;padding:14px 20px;border-radius:999px;text-decoration:none;margin:12px 0;text-transform:uppercase;letter-spacing:1px}
+.btn.alt{background:#1a1a2e;color:#fff}p,li{color:#94a3b8;line-height:1.6}ol{padding-left:20px}</style></head>
+<body><div class="wrap"><div class="hero">🏃 Live Run Invite</div>
+<h2 style="margin:24px 0 8px">Watch ${esc(runnerName)}'s run live</h2><p>${statusLine}</p>
+${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong></p><div class="code">${esc(displayCode)}</div>
+<a class="btn" href="${appLink}">Open in AI Run Coach</a>
+<p>If nothing happens, the app isn't installed yet — grab it, then enter the code above:</p>
+<a class="btn alt" href="https://apps.apple.com/nz/app/ai-run-coach/id6762181649">App Store (iPhone)</a>
+<a class="btn alt" href="https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach">Google Play (Android)</a>
+<ol><li>Open AI Run Coach</li><li>On the login screen (or Live Share), tap “Observe Live Run”</li><li>Enter the code <strong>${esc(displayCode)}</strong></li></ol>`}
+<p style="font-size:12px;color:#64748b;margin-top:32px">AI Run Coach — Your personal running coach</p></div></body></html>`);
+  });
+
   app.get("/api/observe/:code", async (req: Request, res: Response) => {
     try {
       const { code } = req.params;
@@ -12308,6 +12381,10 @@ function transformRunForAndroid(run: any) {
         paceTrendDirection: 'pace_trend_direction',
         recentCoachingTopics: 'recent_coaching_topics',
         garminCompanionSessionId: 'garmin_companion_session_id',
+        // iOS sends its split history as km_splits ({km, durationSeconds, pace}); the split
+        // prompt's kmSplits consumers (pace trend, settled-target-pace rule) never saw it.
+        kmSplits: 'km_splits',
+        elevationRangeM: 'elevation_range_m',
       };
       for (const [camel, snake] of Object.entries(snakeCaseAliases)) {
         if (req.body[camel] === undefined && req.body[snake] !== undefined) {
@@ -12695,6 +12772,10 @@ function transformRunForAndroid(run: any) {
         isUphill: 'is_uphill',
         fatigueLevel: 'fatigue_level',
         recentTechniqueCategories: 'used_technique_categories',
+        // iOS sends its split history as km_splits — needed by the elite status block's
+        // splits list and the settled-target-pace rule.
+        kmSplits: 'km_splits',
+        elevationRangeM: 'elevation_range_m',
       };
       for (const [camel, snake] of Object.entries(eliteSnakeCaseAliases)) {
         if (req.body[camel] === undefined && req.body[snake] !== undefined) {
@@ -13060,6 +13141,14 @@ function transformRunForAndroid(run: any) {
         lastCuePaceDelta: req.body.lastCuePaceDelta,
         athleteRespondedToLastCue: req.body.athleteRespondedToLastCue,
         terrain_context: req.body.terrain_context ?? req.body.terrainContext,
+        // Live context for the settled-target-pace rule, wind and course shape (2026-09-20).
+        // Android sends distance/targetDistance in km and targetTime in seconds.
+        kmSplits: Array.isArray(req.body.kmSplits) ? req.body.kmSplits : undefined,
+        distanceKm: typeof req.body.distance === 'number' ? req.body.distance : undefined,
+        targetDistanceKm: typeof req.body.targetDistance === 'number' ? req.body.targetDistance : undefined,
+        targetTimeSec: typeof req.body.targetTime === 'number' ? req.body.targetTime : undefined,
+        wind: req.body.wind ?? undefined,
+        elevationRangeM: typeof req.body.elevationRangeM === 'number' ? req.body.elevationRangeM : undefined,
         coachName,
         coachTone: effectiveTone,
         coachAccent: user?.coachAccent || 'british',
@@ -18448,6 +18537,10 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       elevation: run.elevation || undefined,
       elevationGain: run.elevationGain ?? run.elevation_gain ?? undefined,
       elevationLoss: run.elevationLoss ?? run.elevation_loss ?? undefined,
+      // Altitude extremes — the share image's "Elevation" figure is max − min, not the
+      // accumulated gain (see elevationRangeFor() in share-image-service).
+      minElevation: run.minElevation ?? run.min_elevation ?? undefined,
+      maxElevation: run.maxElevation ?? run.max_elevation ?? undefined,
       difficulty: run.difficulty || undefined,
       gpsTrack,
       heartRateData: heartRateData.length > 0 ? heartRateData : undefined,
