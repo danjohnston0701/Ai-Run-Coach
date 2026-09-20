@@ -7,6 +7,7 @@
  * install id, so we can see how many downloads take the tour, how far they get, and — via
  * markGuestTourConverted() from the register handler — whether that install went on to
  * create a user. One row per install (guest_tour_sessions.device_id), upserted per event.
+ * That same conversion also stamps users.acquisition_source = 'guest_tour' on the new user.
  */
 import { Router, Request, Response } from "express";
 import { pool } from "./db";
@@ -118,21 +119,42 @@ router.post("/onboarding-tour/guest-event", async (req: Request, res: Response) 
 });
 
 /**
- * Called from POST /api/auth/register when the client sends its install id: stamps the
- * guest tour row (if that install took the tour) with the user it became. Idempotent; a
- * device that never toured has no row and nothing happens.
+ * Called from POST /api/auth/register when the client sends its install id: records that this
+ * install's tour became this user, on BOTH sides of the join — guest_tour_sessions.converted_*
+ * (per-install funnel) and users.acquisition_source/guest_tour_* (so "was this user acquired
+ * through the tour?" is answerable from the user row alone, without knowing the guest-tour
+ * table exists). Idempotent and write-once on both; a device that never toured has no
+ * guest_tour_sessions row, so nothing is stamped anywhere.
+ *
+ * The two updates are deliberately independent: the guest_tour_sessions one is skipped when
+ * that install already converted (a second account created on the same device), but the new
+ * user still genuinely arrived via the tour, so their own row is stamped either way.
  */
 export async function markGuestTourConverted(deviceId: unknown, userId: string): Promise<void> {
   const id = str(deviceId, 64);
   if (!id) return;
   try {
-    const r = await pool.query(
+    // Did this install actually take the tour? No row = direct sign-up, nothing to record.
+    const tour = await pool.query(`SELECT 1 FROM guest_tour_sessions WHERE device_id = $1`, [id]);
+    if (!tour.rowCount) return;
+
+    await pool.query(
       `UPDATE guest_tour_sessions
          SET converted_user_id = $1, converted_at = NOW(), updated_at = NOW()
        WHERE device_id = $2 AND converted_user_id IS NULL`,
       [userId, id],
     );
-    if (r.rowCount) console.log(`[GuestTour] install ${id} converted → user ${userId}`);
+
+    await pool.query(
+      `UPDATE users
+         SET acquisition_source      = COALESCE(acquisition_source, 'guest_tour'),
+             guest_tour_device_id    = COALESCE(guest_tour_device_id, $2),
+             guest_tour_converted_at = COALESCE(guest_tour_converted_at, NOW())
+       WHERE id = $1`,
+      [userId, id],
+    );
+
+    console.log(`[GuestTour] install ${id} converted → user ${userId} (acquisition_source=guest_tour)`);
   } catch (error) {
     console.error("[GuestTour] Failed to mark conversion (non-fatal):", error);
   }

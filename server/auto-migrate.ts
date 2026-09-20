@@ -479,6 +479,14 @@ export async function runAutoMigrations(): Promise<void> {
     { name: "users.onboarding_tour_skipped_at", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_skipped_at TIMESTAMP" },
     { name: "users.onboarding_tour_skipped_at_step", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_tour_skipped_at_step INTEGER" },
 
+    // ── users.acquisition_source / guest-tour conversion ─────────────────────────
+    // "Did this user arrive via the pre-login tour?" answerable from the user row, without
+    // joining guest_tour_sessions. Canonical copy: migrations/20260920_user_acquisition_source.sql
+    { name: "users.acquisition_source", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS acquisition_source TEXT" },
+    { name: "users.guest_tour_device_id", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS guest_tour_device_id TEXT" },
+    { name: "users.guest_tour_converted_at", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS guest_tour_converted_at TIMESTAMP" },
+    { name: "idx_users_acquisition_source", sql: "CREATE INDEX IF NOT EXISTS idx_users_acquisition_source ON users(acquisition_source)" },
+
     // ── user_stats.coaching_observations: drop sub-100 m runs ───────────────────
     // Observations recorded from test taps / aborted starts (< 0.1 km) shaped "What your
     // coach knows about you". The service now refuses to record them; this clears the

@@ -78,6 +78,15 @@ export const users = pgTable("users", {
   onboardingTourLastEventAt: timestamp("onboarding_tour_last_event_at"),
   onboardingTourSkippedAt: timestamp("onboarding_tour_skipped_at"),
   onboardingTourSkippedAtStep: integer("onboarding_tour_skipped_at_step"),
+  // How this user was acquired, on the user row itself rather than only in guest_tour_sessions.
+  // 'guest_tour' = the install signed up after taking the pre-login "Take a Tour" (stamped by
+  // markGuestTourConverted() in routes-guest-tour.ts from the register handler); NULL = a
+  // direct sign-up, or an account created before 2026-09-20. Write-once — never overwritten.
+  // guestTourDeviceId joins back to guest_tour_sessions.device_id for the full tour detail
+  // (how far they got, completed vs skipped, the device they toured on).
+  acquisitionSource: text("acquisition_source"),
+  guestTourDeviceId: text("guest_tour_device_id"),
+  guestTourConvertedAt: timestamp("guest_tour_converted_at"),
   // When the user finished the onboarding SCREENS (distinct from the optional feature tour
   // above). Completion was previously inferred only from local SharedPreferences/UserDefaults
   // flags that live on the device and are cleared by unrelated actions, so "who never finished
