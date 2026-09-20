@@ -4733,7 +4733,8 @@ class RunTrackingService : Service(), SensorEventListener {
                                 distanceCovered = distKm,
                                 elapsedTime = elapsedSecs,
                                 currentPace = currentPace,
-                                currentHeartRate = currentHeartRate.takeIf { it > 0 }
+                                currentHeartRate = currentHeartRate.takeIf { it > 0 },
+                                recentCoachingNotes = coachingHistory.takeLast(8).ifEmpty { null }
                             )
                         )
                         Log.d("RunTrackingService", "Live session synced: ${String.format("%.2f", distKm)}km, pace=$currentPace")
@@ -8168,7 +8169,9 @@ class RunTrackingService : Service(), SensorEventListener {
             .replace("{repNum}",        "$repNum")
             .replace("{totalReps}",     "$totalReps")
             .replace("{repsLeft}",      "${(totalReps - repNum).coerceAtLeast(0)}")
-            .replace("{elapsedMin}",    "$elapsedMin")
+            // Templates read "…for {elapsedMin} minutes", so past the hour the substitution
+            // carries the hours itself: "1 hour and 35" → "1 hour and 35 minutes", never "95 minutes".
+            .replace("{elapsedMin}",    if (elapsedMin >= 60) "${elapsedMin / 60} hour${if (elapsedMin / 60 == 1) "" else "s"} and ${elapsedMin % 60}" else "$elapsedMin")
             .replace("{distKm}",        distKmStr)
             .replace("{targetHRMax}",   phaseHRMax?.toString() ?: "—")
             .replace("{targetHRMin}",   phaseHRMin?.toString() ?: "—")

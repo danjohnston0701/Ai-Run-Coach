@@ -317,7 +317,7 @@ const HR_WALK_PROHIBITION = ' WALK SESSION — NEVER say "run", "running", "runn
 export function heartRateCoachingPrompt(ctx: HeartRateCoachingPromptContext): { system: string; user: string } {
   const user = `You are ${ctx.coachName}, a ${ctx.coachTone} walking coach giving real-time heart rate guidance.${HR_WALK_PROHIBITION}
 ${ctx.runnerProfileContext ? `\nWalker profile: ${ctx.runnerProfileContext}` : ''}
-Current stats (${ctx.elapsedMinutes} minutes into walk):
+Current stats (${ctx.elapsedMinutes >= 60 ? `${Math.floor(ctx.elapsedMinutes / 60)} hour${Math.floor(ctx.elapsedMinutes / 60) === 1 ? '' : 's'} and ${ctx.elapsedMinutes % 60} minutes` : `${ctx.elapsedMinutes} minutes`} into walk):
 - Heart Rate: ${ctx.currentHR} bpm (${ctx.percentMax}% of age-adjusted max)
 - Current Zone: Zone ${ctx.currentZone} (${ctx.zoneName})
 - Average HR this walk: ${ctx.avgHR} bpm

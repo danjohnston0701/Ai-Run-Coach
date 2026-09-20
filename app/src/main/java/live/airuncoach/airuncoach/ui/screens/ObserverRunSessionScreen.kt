@@ -457,6 +457,48 @@ fun MetricsPanel(session: ObserverLiveRunSession) {
                 )
             }
         }
+
+        // What the runner's coach is saying — the same cues the runner hears, as text. The
+        // newest cue leads; the two before it sit underneath, dimmer, so an observer who
+        // glances at the phone every so often still catches what was said.
+        val notes = session.coachingNotes?.takeLast(3)?.asReversed()
+        if (!notes.isNullOrEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            CoachSaysCard(runnerName = session.runnerName, notes = notes)
+        }
+    }
+}
+
+/** A recent AI coaching cue relayed from the runner's phone (see live_run_sessions.recent_coaching_notes). */
+data class ObserverCoachingNote(val timeMs: Long, val message: String)
+
+@Composable
+private fun CoachSaysCard(runnerName: String, notes: List<ObserverCoachingNote>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundRoot, shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Coach → $runnerName", style = AppTextStyles.caption, color = Colors.textMuted, fontSize = 10.sp)
+        notes.forEachIndexed { index, note ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    formatTime((note.timeMs / 1000L).toInt()),
+                    style = AppTextStyles.caption,
+                    color = Colors.textMuted,
+                    fontSize = 10.sp
+                )
+                Text(
+                    note.message,
+                    style = AppTextStyles.caption,
+                    color = if (index == 0) Colors.textPrimary else Colors.textMuted,
+                    maxLines = if (index == 0) 6 else 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
@@ -606,6 +648,8 @@ data class ObserverLiveRunSession(
     val isPaused: Boolean = false,      // runner paused — shown instead of silently frozen metrics
     val resultRunId: String? = null,    // the runner's uploaded run, once their phone links it
     val lastSyncedAtMs: Long? = null,   // server-side last update (informational)
+    // What the runner's AI coach has said recently (text only), newest last.
+    val coachingNotes: List<ObserverCoachingNote>? = null,
     // Observer-clock readings (see ObserverRunSessionViewModel): when we last got a poll
     // response, and when the server's lastSyncedAt last advanced in one.
     val lastFetchedAtMs: Long? = null,

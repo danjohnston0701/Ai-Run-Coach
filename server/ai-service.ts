@@ -163,9 +163,12 @@ export const formatPaceForTTS = (pace: string | undefined): string => {
   const stripped = pace.replace(/\s*(?:\/km|per\s*km)\b/gi, '').trim();
   const parts = stripped.split(':');
   if (parts.length === 2) {
-    const min = parseInt(parts[0], 10);
-    const sec = parseInt(parts[1], 10);
+    let min = parseInt(parts[0], 10);
+    let sec = parseInt(parts[1], 10);
     if (!isNaN(min) && !isNaN(sec)) {
+      // A "4:60" produced upstream by rounding the seconds component alone is 5:00 —
+      // never let "4 minutes and 60 seconds" reach the runner's ears (reported 2026-09-21).
+      if (sec >= 60) { min += Math.floor(sec / 60); sec = sec % 60; }
       if (sec === 0) return `${min} minutes per kilometer`;
       return `${min} minutes and ${sec} seconds per kilometer`;
     }
@@ -183,28 +186,45 @@ export const formatPaceForTTS = (pace: string | undefined): string => {
 // TTS format rules — applied to every coaching system prompt.
 // Text goes straight to Polly neural TTS, so it must be spoken English with no abbreviations.
 const TTS_UNIT_RULES = `UNIT FORMAT: NEVER use abbreviations — this text is read aloud by a text-to-speech engine. Say "beats per minute" not "bpm"; say "steps per minute" not "spm"; say "kilometres" not "km" for distances.`;
-export const PACE_FORMAT_RULE = `PACE FORMAT: CRITICAL — Always say pace as "X minutes and Y seconds per kilometer" (e.g. "4 minutes and 32 seconds per kilometer"). NEVER use time notation like "5:00/km" or "4:32/km" because TTS will interpret colons as clock time (e.g., "5 o'clock" instead of "5 minutes"). The pace values provided above are already formatted correctly — use them exactly as shown. ${TTS_UNIT_RULES}`;
+/** Prompt rule that accompanies every duration/ETA the model is asked to speak. */
+export const TIME_FORMAT_RULE = `TIME FORMAT: durations of 60 minutes or more are ALWAYS spoken in hours and minutes ("1 hour and 42 minutes", "2 hours and 5 minutes") — never as a raw minute count like "102 minutes". Under an hour, say minutes (and seconds only when given). Never say "60 seconds" — that is the next minute.`;
+export const PACE_FORMAT_RULE = `PACE FORMAT: CRITICAL — Always say pace as "X minutes and Y seconds per kilometer" (e.g. "4 minutes and 32 seconds per kilometer"). NEVER use time notation like "5:00/km" or "4:32/km" because TTS will interpret colons as clock time (e.g., "5 o'clock" instead of "5 minutes"). The pace values provided above are already formatted correctly — use them exactly as shown. ${TTS_UNIT_RULES} ${TIME_FORMAT_RULE}`;
 
 // OpenAI TTS handles commas as natural brief pauses — no comma suppression needed.
 
 // Helper to format seconds-per-km pace value to "X minutes and Y seconds" string
 const formatSecondsAsPace = (secondsPerKm: number): string => {
   if (!secondsPerKm || secondsPerKm <= 0 || secondsPerKm > 3600) return 'unknown';
-  const min = Math.floor(secondsPerKm / 60);
-  const sec = Math.round(secondsPerKm % 60);
+  // Round the TOTAL first — rounding the remainder alone yields "4:60" for 299.6 s/km.
+  const total = Math.round(secondsPerKm);
+  const min = Math.floor(total / 60);
+  const sec = total % 60;
   if (sec === 0) return `${min}:00`;
   return `${min}:${sec.toString().padStart(2, '0')}`;
 };
 
-// Helper to format duration in minutes for TTS - not as clock time
-const formatDurationForTTS = (seconds: number): string => {
-  const totalMinutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (remainingSeconds === 0) {
-    return `${totalMinutes} minutes`;
-  }
-  return `${totalMinutes} minutes and ${remainingSeconds} seconds`;
+/**
+ * Spoken duration for prompts and TTS: hours once a duration reaches 60 minutes, minutes
+ * otherwise, seconds only when asked for. "1 hour and 42 minutes", "1 hour, 42 minutes and
+ * 15 seconds", "48 minutes and 30 seconds", "2 hours". Every duration that reaches the model
+ * should go through this — "102 minutes" was spoken as-is on a 2026-09-20 half marathon.
+ */
+export const formatDurationSpoken = (totalSeconds: number, includeSeconds: boolean = false): string => {
+  const total = Math.max(0, Math.round(totalSeconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours} ${hours === 1 ? 'hour' : 'hours'}`);
+  if (minutes > 0 || (hours === 0 && !includeSeconds)) parts.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`);
+  if (includeSeconds && (seconds > 0 || parts.length === 0)) parts.push(`${seconds} ${seconds === 1 ? 'second' : 'seconds'}`);
+  if (parts.length === 0) return '0 minutes';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 };
+
+// Helper to format duration in minutes for TTS - not as clock time
+const formatDurationForTTS = (seconds: number): string => formatDurationSpoken(seconds, true);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PERSONALIZED CADENCE CALCULATOR
@@ -280,13 +300,7 @@ export function calculateOptimalCadenceRange(
 }
 
 // Helper to format elapsed time as "M minutes and SS seconds" for TTS — avoids truncating seconds
-export const formatElapsedForTTS = (totalSeconds: number): string => {
-  const minutes = Math.floor(totalSeconds / 60);
-  const secs = Math.round(totalSeconds % 60);
-  if (minutes === 0) return `${secs} seconds`;
-  if (secs === 0) return `${minutes} minutes`;
-  return `${minutes} minutes and ${secs} seconds`;
-};
+export const formatElapsedForTTS = (totalSeconds: number): string => formatDurationSpoken(totalSeconds, true);
 
 // Session-level instruction to prevent repetitive phrasing while maintaining consistent voice
 // This preserves coaching personality while avoiding repetition across messages
@@ -1354,9 +1368,7 @@ export async function generateCompletionSummary(params: {
   const { distance, targetDistance, elapsedTime, targetTime, currentPace, coachName, coachTone, coachAccent, runnerName, activityType } = params;
   
   // Format the final stats
-  const totalTimeMin = Math.floor(elapsedTime / 60);
-  const totalTimeSec = Math.round(elapsedTime % 60);
-  const totalTimeStr = `${totalTimeMin} minutes and ${totalTimeSec} seconds`;
+  const totalTimeStr = formatDurationSpoken(elapsedTime, true);
   const finalPace = currentPace || 'unknown';
   const activityLabel = activityType || 'run';
   
@@ -1391,7 +1403,8 @@ Give ONE SENTENCE of brief, celebratory congratulations.
   } catch (error) {
     console.error("Error generating completion summary:", error);
     // Fallback message if AI fails
-    return `Congratulations on completing your ${distance} kilometre ${activityLabel} in ${totalTimeMin}:${totalTimeSec.toString().padStart(2, '0')}! Great effort!`;
+    // Spoken by TTS — a colon-form time would be read as clock time.
+    return `Congratulations on completing your ${distance} kilometre ${activityLabel} in ${totalTimeStr}! Great effort!`;
   }
 }
 
@@ -1582,16 +1595,14 @@ export async function generatePhaseCoaching(params: {
     // Calculate projected finish time based on current pace
     if (distance > 0 && targetDistance && elapsedTime > 0) {
       const projectedTotalSec = (elapsedTime / distance) * targetDistance;
-      const projectedMin = Math.floor(projectedTotalSec / 60);
-      const projectedSec = Math.round(projectedTotalSec % 60);
-      const targetTotalMin = Math.floor(targetTime / 60);
-      const diff = projectedMin - targetTotalMin;
+      const diff = Math.round((projectedTotalSec - targetTime) / 60);
+      const projectedSpoken = formatDurationSpoken(projectedTotalSec, true);
       if (diff > 0) {
-        targetTimeInfo += `\n- Projected finish at current pace: ~${projectedMin} min ${projectedSec}s (${diff} min over target)`;
+        targetTimeInfo += `\n- Projected finish at current pace: about ${projectedSpoken} (${formatDurationSpoken(diff * 60)} over target)`;
       } else if (diff < 0) {
-        targetTimeInfo += `\n- Projected finish at current pace: ~${projectedMin} min ${projectedSec}s (${Math.abs(diff)} min under target)`;
+        targetTimeInfo += `\n- Projected finish at current pace: about ${projectedSpoken} (${formatDurationSpoken(Math.abs(diff) * 60)} under target)`;
       } else {
-        targetTimeInfo += `\n- Projected finish at current pace: ~${projectedMin} min ${projectedSec}s (on target)`;
+        targetTimeInfo += `\n- Projected finish at current pace: about ${projectedSpoken} (on target)`;
       }
     }
   }
@@ -1639,10 +1650,8 @@ CRITICAL: No GPS elevation data for this ${isWalkActivity ? 'walk' : 'run'}. Do 
     const avgPaceFormatted = formatSecondsAsPace(currentAvgPaceSecondsPerKm);
     const rollingPaceFormatted = formatSecondsAsPace(rollingPaceSecondsPerKm);
     const targetPaceFormatted = targetPace || 'unknown';
-    const projectedFinishMin = Math.floor(projectedFinishSeconds / 60);
-    const projectedFinishSec = Math.round(projectedFinishSeconds % 60);
-    const targetTimeMin = targetTime ? Math.floor(targetTime / 60) : 0;
-    const targetTimeSec = targetTime ? Math.round(targetTime % 60) : 0;
+    const projectedFinishSpoken = formatDurationSpoken(projectedFinishSeconds, true);
+    const targetTimeSpoken = formatDurationSpoken(targetTime ?? 0, true);
     
     // Determine pace zone for the prompt
     const pacePerson = isWalkActivity ? 'walker' : 'runner';
@@ -1664,12 +1673,12 @@ Their current pace is ${avgPaceFormatted}/km but they need ${targetPaceFormatted
 Gently suggest pulling back a touch. Their body will thank them in the second half. Current: ${avgPaceFormatted}/km, target: ${targetPaceFormatted}/km.`;
     } else if (paceDeviationPercent > 15) {
       paceZone = 'WELL BEHIND TARGET';
-      paceGuidance = `The ${pacePerson} is ${paceDeviationPercent.toFixed(0)}% slower than target. Their projected finish is ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}.
+      paceGuidance = `The ${pacePerson} is ${paceDeviationPercent.toFixed(0)}% slower than target. Their projected finish is ${projectedFinishSpoken} vs target ${targetTimeSpoken}.
 Encourage them to pick it up if they can, but be realistic. If there's a gradient/hill, acknowledge that hills slow pace naturally.`;
     } else if (paceDeviationPercent > 10) {
       paceZone = 'SLIGHTLY BEHIND';
       paceGuidance = `The ${pacePerson} is ${paceDeviationPercent.toFixed(0)}% behind target pace. They need to pick it up a little. 
-Projected finish: ${projectedFinishMin}:${projectedFinishSec.toString().padStart(2, '0')} vs target ${targetTimeMin}:${targetTimeSec.toString().padStart(2, '0')}. Gentle nudge to increase effort.`;
+Projected finish: ${projectedFinishSpoken} vs target ${targetTimeSpoken}. Gentle nudge to increase effort.`;
     } else {
       paceZone = 'ON PACE';
       paceGuidance = `The ${pacePerson} is RIGHT ON TARGET (within ${Math.abs(paceDeviationPercent).toFixed(0)}% of target pace). 
@@ -2928,7 +2937,6 @@ export async function generateEmotionalCoaching(params: {
     runHistory
   } = params;
 
-  const timeMin = Math.floor(elapsedTime / 60);
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
   const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
 
@@ -5935,7 +5943,7 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
   // Build runner status block (shared across all types)
   let status = `${isWalkSession ? 'Walker' : 'Runner'} Status:
 - Distance: ${formatDistanceForCoaching(distance)}${targetDistance ? ` of ${formatDistanceForCoaching(targetDistance)} (${progress}%)` : ''} — ${remaining} remaining
-- Time: ${timeMin} minutes
+- Time: ${formatDurationSpoken(elapsedTime)}
 - Current pace: ${spokenPace}
 - Average pace: ${spokenAvgPace}`;
   if (heartRate && heartRate > 0) status += `\n- Heart rate: ${heartRate} bpm`;
@@ -6220,7 +6228,7 @@ The ${isWalkSession ? 'walker' : 'runner'} just reached ${milestonePercent}% of 
 Context for your response:
 - Progress: ${milestonePercent}% done
 - Pace: ${spokenPace}
-${targetTime ? `- Projected finish: ${projectedFinishTime ? Math.floor(projectedFinishTime / 60) + ' minutes' : 'unknown'} vs target ${Math.floor(targetTime / 60)} minutes` : ''}
+${targetTime ? `- Projected finish: ${projectedFinishTime ? formatDurationSpoken(projectedFinishTime) : 'unknown'} vs target ${formatDurationSpoken(targetTime)}` : ''}
 ${isAerobicMilestone ? '- This is an aerobic base-building session' : ''}
 
 Give a 2-3 sentence message that fits this moment. Reference their actual numbers. The tone should suit where they are in the run.`;
@@ -6246,9 +6254,6 @@ Give a 2-3 sentence message that reinforces what's working. Reference real data.
       break;
 
     case 'target_eta': {
-      const projMin = projectedFinishTime ? Math.floor(projectedFinishTime / 60) : 0;
-      const projSec = projectedFinishTime ? Math.round(projectedFinishTime % 60) : 0;
-      const targetMin = targetTime ? Math.floor(targetTime / 60) : 0;
       const diff = projectedFinishTime && targetTime ? Math.round((projectedFinishTime - targetTime) / 60) : 0;
 
       typePrompt = `COACHING TYPE: Target time ETA update.
@@ -6256,10 +6261,10 @@ Give a 2-3 sentence message that reinforces what's working. Reference real data.
 ${status}
 ${noTerrainRule}
 
-Target: ${targetTime ? `${targetMin} minutes` : 'no target set'}
-Projected finish: ${projectedFinishTime ? `${projMin} minutes ${projSec} seconds` : 'insufficient data'}
-${diff > 1 ? `STATUS: ${Math.abs(diff)} minute(s) BEHIND target. They need to pick up the pace gradually — not panic.` :
-  diff < -1 ? `STATUS: ${Math.abs(diff)} minute(s) AHEAD of target. They have a cushion — smart pacing.` :
+Target: ${targetTime ? formatDurationSpoken(targetTime) : 'no target set'}
+Projected finish: ${projectedFinishTime ? formatDurationSpoken(projectedFinishTime, true) : 'insufficient data'}
+${diff > 1 ? `STATUS: ${formatDurationSpoken(Math.abs(diff) * 60)} BEHIND target. They need to pick up the pace gradually — not panic.` :
+  diff < -1 ? `STATUS: ${formatDurationSpoken(Math.abs(diff) * 60)} AHEAD of target. They have a cushion — smart pacing.` :
   `STATUS: ON TARGET. They're executing their race plan perfectly.`}
 ${targetPace ? `Target pace: ${spokenTargetPace} (current: ${spokenPace})` : ''}
 

@@ -659,6 +659,10 @@ export const liveRunSessions = pgTable("live_run_sessions", {
   // The `runs` row the finished session became, set by the runner's phone once its upload
   // succeeds — lets a signed-in observer open the full run summary from the finished screen.
   resultRunId: varchar("result_run_id"),
+  // The last few AI coaching cues the runner has heard, as [{ time: <elapsed ms>, message }],
+  // sent by the runner's phone with each sync so observers can read what the runner is being
+  // told (text only, no audio). Capped server-side — see PUT /api/live-sessions/sync.
+  recentCoachingNotes: jsonb("recent_coaching_notes"),
 });
 
 // Push Subscriptions table

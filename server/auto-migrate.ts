@@ -302,6 +302,12 @@ export async function runAutoMigrations(): Promise<void> {
       sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS has_started BOOLEAN DEFAULT false",
     },
     {
+      // Observers read the runner's recent AI coaching cues (2026-09-21). Canonical copy:
+      // migrations/20260921_live_session_coaching_notes.sql
+      name: "live_run_sessions.recent_coaching_notes",
+      sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS recent_coaching_notes JSONB",
+    },
+    {
       name: "live_run_sessions.started_at",
       sql: "ALTER TABLE live_run_sessions ADD COLUMN IF NOT EXISTS started_at TIMESTAMP",
     },

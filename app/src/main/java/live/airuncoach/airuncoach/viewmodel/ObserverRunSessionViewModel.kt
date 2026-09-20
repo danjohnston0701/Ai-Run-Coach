@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.ui.screens.GpsPoint
 import live.airuncoach.airuncoach.ui.screens.ObserverLiveRunSession
+import live.airuncoach.airuncoach.ui.screens.ObserverCoachingNote
 import javax.inject.Inject
 
 @HiltViewModel
@@ -240,6 +241,7 @@ class ObserverRunSessionViewModel @Inject constructor(
             isPaused = apiResponse.isPaused ?: false,
             resultRunId = apiResponse.resultRunId,
             lastSyncedAtMs = parseIsoMillis(apiResponse.lastSyncedAt),
+            coachingNotes = parseCoachingNotes(apiResponse.recentCoachingNotes),
             lastFetchedAtMs = nowMs,
             lastRunnerUpdateSeenAtMs = lastRunnerUpdateSeenAtMs,
             elapsedBaseSeconds = elapsedBaseSeconds,
@@ -260,6 +262,16 @@ class ObserverRunSessionViewModel @Inject constructor(
                 null
             }
         }
+    }
+
+    /** JSONB [{time: elapsed ms, message}] → newest-last list; null when absent/malformed. */
+    private fun parseCoachingNotes(raw: Any?): List<ObserverCoachingNote>? {
+        val list = raw as? List<*> ?: return null
+        return list.mapNotNull { item ->
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+            val message = (map["message"] as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            ObserverCoachingNote(timeMs = (map["time"] as? Number)?.toLong() ?: 0L, message = message)
+        }.ifEmpty { null }
     }
 
     private fun parseGpsTrack(gpsTrackJson: Any?): List<GpsPoint>? {
@@ -315,6 +327,7 @@ data class LiveSessionApiResponse(
     val difficulty: String? = null,
     val cadence: Int? = null,
     val gpsTrack: Any? = null,  // JSONB parsed as List or Map
+    val recentCoachingNotes: Any? = null,  // JSONB [{time, message}] — see parseCoachingNotes()
     val kmSplits: Any? = null,
     val routeId: String? = null,
     val sharedWithFriends: Boolean? = null,

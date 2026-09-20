@@ -496,7 +496,7 @@ export interface HeartRateCoachingPromptContext {
 export function heartRateCoachingPrompt(ctx: HeartRateCoachingPromptContext): { system: string; user: string } {
   const user = `You are ${ctx.coachName}, a ${ctx.coachTone} running coach giving real-time heart rate guidance.
 ${ctx.runnerProfileContext ? `\nRunner profile: ${ctx.runnerProfileContext}` : ''}
-Current stats (${ctx.elapsedMinutes} minutes into run):
+Current stats (${ctx.elapsedMinutes >= 60 ? `${Math.floor(ctx.elapsedMinutes / 60)} hour${Math.floor(ctx.elapsedMinutes / 60) === 1 ? '' : 's'} and ${ctx.elapsedMinutes % 60} minutes` : `${ctx.elapsedMinutes} minutes`} into run):
 - Heart Rate: ${ctx.currentHR} bpm (${ctx.percentMax}% of age-adjusted max)
 - Current Zone: Zone ${ctx.currentZone} (${ctx.zoneName})
 - Average HR this run: ${ctx.avgHR} bpm

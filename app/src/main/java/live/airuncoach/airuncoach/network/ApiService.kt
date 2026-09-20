@@ -1026,7 +1026,10 @@ data class SyncLiveSessionRequest(
     val currentPace: String? = null,
     val currentHeartRate: Int? = null,
     val isPaused: Boolean? = null,      // Runner paused/resumed — observers show a "Paused" state
-    val resultRunId: String? = null     // The uploaded `runs` id, sent once after the run's upload succeeds
+    val resultRunId: String? = null,    // The uploaded `runs` id, sent once after the run's upload succeeds
+    // The last few AI coaching cues spoken to the runner ({time: elapsed ms, message}) so
+    // observers can read what the runner is hearing. Text only; capped server-side at 10.
+    val recentCoachingNotes: List<live.airuncoach.airuncoach.domain.model.AiCoachingNote>? = null
 )
 
 // Request body for inviting observers to a live session

@@ -5086,6 +5086,19 @@ function transformRunForAndroid(run: any) {
           };
         }
 
+        // Recent coaching cues for observers — accept only a well-formed, bounded list so a
+        // client can't grow the jsonb column without limit.
+        if (otherData.recentCoachingNotes !== undefined) {
+          const raw = Array.isArray(otherData.recentCoachingNotes) ? otherData.recentCoachingNotes : [];
+          otherData.recentCoachingNotes = raw
+            .filter((n: any) => n && typeof n.message === 'string' && n.message.trim())
+            .slice(-10)
+            .map((n: any) => ({
+              time: typeof n.time === 'number' && Number.isFinite(n.time) ? Math.max(0, Math.round(n.time)) : 0,
+              message: String(n.message).slice(0, 600),
+            }));
+        }
+
         // Update session with GPS accumulation
         const session = await storage.updateLiveSessionWithGpsAccumulation(
           sessionId,
