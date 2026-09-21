@@ -122,5 +122,9 @@ data class UploadRunRequest(
     val avgGpsAccuracy: Float? = null,
     val worstGpsAccuracy: Float? = null,
     // ── Battery & Power Management ────────────────────────────────────────────────
-    val powerSaverModeDetected: Boolean = false  // Flag indicating phone's power saver was active during run
+    val powerSaverModeDetected: Boolean = false,  // Flag indicating phone's power saver was active during run
+    // ── Phone-GPS filter diagnostics ──────────────────────────────────────────────
+    // Counts of received / accepted / rejected-by-reason fixes and anchor recoveries for the
+    // run (RunTrackingService.onNewLocation). Stored as-is in runs.gps_filter_stats.
+    val gpsFilterStats: Map<String, Any?>? = null,
 )

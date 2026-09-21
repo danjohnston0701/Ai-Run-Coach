@@ -2900,7 +2900,7 @@ function transformRunForAndroid(run: any) {
           "recoveryTimeMinutes", "vo2MaxEstimate", "avgRunningPower", "maxRunningPower",
           "avgRespirationRate", "avgAmbientPressure", "avgBearing", "avgHeartRateZone",
           "timeInZone1", "timeInZone2", "timeInZone3", "timeInZone4", "timeInZone5",
-          "minPace", "maxPace", "avgGpsAccuracy", "worstGpsAccuracy",
+          "minPace", "maxPace", "avgGpsAccuracy", "worstGpsAccuracy", "gpsFilterStats",
           "startedAt"
         ];
         for (const field of fields) {
@@ -3506,6 +3506,7 @@ function transformRunForAndroid(run: any) {
         maxPace:          maxPaceVal,
         avgGpsAccuracy:   avgGpsAccVal,
         worstGpsAccuracy: worstGpsAccVal,
+        gpsFilterStats:   (runData.gpsFilterStats && typeof runData.gpsFilterStats === 'object') ? runData.gpsFilterStats : null,
         minHeartRate:     minHeartRateVal,
         aiCoachEnabled:   aiCoachEnabledVal,
         restingCalories:  restingCalsVal,

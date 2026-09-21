@@ -122,3 +122,30 @@ have on Android, so there's no iOS equivalent of the new `OemBatteryHelper` /
 (`HomeScreens.swift:2830`) already covers the platform-appropriate version of "why is my
 tracking degraded" — Low Power Mode, Precise Location (reduced accuracy), and
 `authorizedAlways` vs `authorizedWhenInUse` — and looks adequate as-is. No gap found.
+
+## 7. (2026-09-21) Sticky-anchor freeze — Android fixed, iOS needs the same audit
+
+Two Android runs saved on 2026-09-20 froze at their very first GPS fix: one stored point,
+0.00 km, yet `avg_gps_accuracy` 4 m (so hundreds of good fixes arrived) and 3,014 hardware
+steps at 172 spm over 17 min. Root cause in Android's `RunTrackingService.onNewLocation()`:
+every fix is judged against `routePoints.last()`, the first fix was adopted as that anchor
+with no accuracy check (27 m / 87 m — Wi-Fi grade), and a rejected fix never became the
+anchor. Once the runner was >100 m from the bad anchor, the fixed 100 m jump cap rejected
+every subsequent fix for the rest of the session. The same shape freezes distance after any
+mid-run GPS outage longer than ~35 s at running pace.
+
+Android now (commit pending as of this note):
+1. replaces a poor anchor (>15 m) with a fix at least twice as accurate while no distance
+   has been credited yet, without crediting the displacement;
+2. re-anchors after 3 consecutive jump/speed-rejected fixes that are plausible relative to
+   each other (≤100 m and under the activity speed cap between consecutive ones, ≤30 m
+   accuracy) — the gap is not credited;
+3. scales the jump cap with the gap since the last accepted fix (`max(100 m, speedCap × Δt)`,
+   up to 120 s; beyond that the base cap applies and rule 2 handles recovery);
+4. uploads `gpsFilterStats` (fix counts by outcome, anchor replacements, re-anchors, first-fix
+   accuracy) into the new `runs.gps_filter_stats` JSONB column.
+
+iOS: check whether `RunSessionViewModel`'s distance filter has the same "compare against last
+accepted point, never adopt a rejected one" structure. If it does, it has the same permanent
+freeze mode and should get rules 1–3. Rule 4 is optional but cheap — the server accepts any
+JSON object under `gpsFilterStats` on `POST /api/runs`.

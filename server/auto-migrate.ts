@@ -19,6 +19,12 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.session_type",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS session_type TEXT NOT NULL DEFAULT 'run'",
     },
+    // Android phone-GPS filter diagnostics (accepted/rejected-by-reason fix counts, anchor
+    // recoveries) — see gpsFilterStats in shared/schema.ts.
+    {
+      name: "runs.gps_filter_stats",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS gps_filter_stats JSONB",
+    },
     // planned_workouts.session_type — added to shared/schema.ts for walk/run workout
     // classification but the DB migration was never applied. Without this, any
     // db.select().from(plannedWorkouts) (e.g. plan reassessment after a run save)

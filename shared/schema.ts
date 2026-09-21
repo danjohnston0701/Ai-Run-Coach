@@ -409,6 +409,10 @@ export const runs = pgTable("runs", {
   // ── GPS Quality ──────────────────────────────────────────────────────────────
   avgGpsAccuracy: real("avg_gps_accuracy"),                   // meters CEP
   worstGpsAccuracy: real("worst_gps_accuracy"),               // meters CEP
+  // Phone-GPS filter diagnostics from Android's RunTrackingService: counts of fixes received /
+  // accepted / rejected per reason plus anchor recoveries. Lets a "0 km" run be diagnosed from
+  // the row alone (two 2026-09-20 runs froze at their first fix with no trace of why).
+  gpsFilterStats: jsonb("gps_filter_stats"),
 
   // ── Additional Time-Series Data ──────────────────────────────────────────────
   stepsData: jsonb("steps_data"),                             // number[] steps per sample

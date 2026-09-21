@@ -362,6 +362,47 @@ class RunTrackingService : Service(), SensorEventListener {
     // more likely a stale speed field than a stationary phone — so that still accumulates.
     private val STATIONARY_MAX_DRIFT_M = 10.0
 
+    // ── Anchor recovery ──────────────────────────────────────────────────────────
+    // Every fix is judged against routePoints.last() — the "anchor" — and a rejected fix
+    // never became the anchor, so once the anchor was wrong nothing could ever put it right.
+    // Two real Android runs on 2026-09-20 froze at their very first fix that way: a 27 m /
+    // 87 m Wi-Fi-grade position was adopted unconditionally as the anchor, the runner left
+    // the doorway, real GPS locked after they were already >100 m away, and every one of
+    // the hundreds of 2–4 m fixes that followed failed the 100 m jump cap for the rest of
+    // the session (17 min, 3,014 steps at 172 spm, 0.00 km saved; avg_gps_accuracy 4.1 m).
+    // The same shape bites mid-run: any GPS outage longer than ~35 s at running pace puts
+    // the next fix beyond the fixed 100 m cap, and distance froze for the remainder unless
+    // the route happened to pass back within 100 m of the freeze point.
+    //
+    //  1. While no distance has been credited yet, a fix that is clearly more accurate
+    //     than a poor anchor REPLACES it instead of being measured against it.
+    //  2. If REANCHOR_CONFIRM_SAMPLES consecutive fixes are rejected as jumps but are
+    //     plausible relative to EACH OTHER (a coherent track, not noise), the latest one
+    //     becomes the new anchor. The gap itself is not credited — correct for an outage.
+    //  3. The jump cap grows with the time since the last accepted fix (bounded by the
+    //     activity's speed cap) so a legitimate 40 s outage is not a rejection by definition.
+    //     Past MAX_GAP_CREDIT_S the straight-line credit is too uncertain, so it falls back
+    //     to the fixed cap and lets (2) re-anchor instead.
+    //  4. Per-run counters of every rejection reason are uploaded as gpsFilterStats so the
+    //     next report of "0 km" can be read straight off the run row.
+    private val GOOD_ANCHOR_ACCURACY_M = 15f
+    private val REANCHOR_CONFIRM_SAMPLES = 3
+    private val REANCHOR_MAX_ACCURACY_M = 30f
+    private val MAX_GAP_CREDIT_S = 120.0
+    private val BASE_MAX_JUMP_M = 100.0
+    /** Consecutive jump-rejected fixes that are mutually plausible; see re-anchor rule (2). */
+    private val pendingReanchor = mutableListOf<LocationPoint>()
+    // Diagnostics — reset per run, uploaded as gpsFilterStats.
+    private var gpsFixesReceived = 0
+    private var gpsFixesAccepted = 0
+    private var gpsRejectedAccuracy = 0
+    private var gpsRejectedDrift = 0      // < 2 m from the anchor
+    private var gpsRejectedJump = 0       // beyond the jump cap
+    private var gpsRejectedSpeed = 0
+    private var gpsAnchorReplaced = 0     // rule (1)
+    private var gpsReanchors = 0          // rule (2)
+    private var gpsFirstFixAccuracyM: Float? = null
+
     private val START_IDLE_CONFIRM_SAMPLES = 3
     private val START_IDLE_MAX_PACE_SEC_PER_KM = 18.0 * 60.0   // 18 min/km — clearly moving, not drift
     private val START_IDLE_MIN_DISTANCE_M = 5.0                // defensive floor only; the sustained-
@@ -1996,6 +2037,10 @@ class RunTrackingService : Service(), SensorEventListener {
         lastCoachingTime = 0   // Reset cooldown for new run
         totalDistance = 0.0
         stationaryPointsRejected = 0
+        pendingReanchor.clear()
+        gpsFixesReceived = 0; gpsFixesAccepted = 0
+        gpsRejectedAccuracy = 0; gpsRejectedDrift = 0; gpsRejectedJump = 0; gpsRejectedSpeed = 0
+        gpsAnchorReplaced = 0; gpsReanchors = 0; gpsFirstFixAccuracyM = null
         // Only reset the watch-GPS suppression window for phone-only runs.
         // For watch-initiated runs, wasRunStartedByWatch is set TRUE before startTracking() is called,
         // and lastWatchGpsMs was stamped at that moment.  Resetting it here would reopen the phone-GPS
@@ -3811,10 +3856,30 @@ class RunTrackingService : Service(), SensorEventListener {
             phoneGpsAccuracySum += acc; phoneGpsAccuracyCount++
             if (acc > phoneGpsAccuracyWorst) phoneGpsAccuracyWorst = acc
         }
+        gpsFixesReceived++
 
         if (routePoints.isNotEmpty()) {
             val prevPoint = routePoints.last()
             val distanceIncrement = calculateDistance(prevPoint, newPoint)
+
+            // Anchor-recovery rule (1): nothing credited yet and the anchor is poor (a Wi-Fi /
+            // cell fix adopted at start). A clearly better fix replaces it outright — measuring
+            // 30-80 m of "movement" between a Wi-Fi position and the first real GPS lock would
+            // be noise, and leaving the poor anchor in place is how a run freezes at 0.00 km.
+            val prevAcc = prevPoint.accuracy
+            val newAcc = newPoint.accuracy
+            if (totalDistance == 0.0 && newAcc != null &&
+                (prevAcc == null || prevAcc > GOOD_ANCHOR_ACCURACY_M) &&
+                (prevAcc == null || newAcc < prevAcc * 0.5f)
+            ) {
+                routePoints[routePoints.lastIndex] = newPoint
+                gpsAnchorReplaced++
+                lastGpsAccuracyM = newAcc
+                Log.d("RunTrackingService", "Anchor replaced before first movement: accuracy " +
+                    "${prevAcc ?: -1f}m → ${newAcc}m (${String.format("%.0f", distanceIncrement)}m away, not credited)")
+                if (hasRoute) checkNavigationProgress(location.latitude, location.longitude, location.accuracy)
+                return
+            }
 
             // Log location info for debugging
             Log.d("RunTrackingService", "Location update - accuracy: ${location.accuracy}m, speed: ${location.speed}m/s, distance: ${distanceIncrement}m, points: ${routePoints.size}")
@@ -3829,8 +3894,17 @@ class RunTrackingService : Service(), SensorEventListener {
                 timeSinceLastPoint > 10 -> 40f                 // If it's been >10s, accept wider accuracy to avoid big gaps
                 else -> 30f                                    // Normal running: accept up to 30m accuracy
             }
-            // Distance sanity: min 2m (GPS drift), max 100m between points (teleport/spike)
-            val isDistanceReasonable = distanceIncrement >= 2.0 && distanceIncrement <= 100.0
+            // Distance sanity: min 2m (GPS drift); max BASE_MAX_JUMP_M between points (teleport/
+            // spike). Anchor-recovery rule (3): the cap grows with the gap since the last accepted
+            // fix — 100 m is only ~35 s of running, so a fixed cap turned every short GPS outage
+            // into a permanent freeze. The activity speed cap below still bounds the credit; past
+            // MAX_GAP_CREDIT_S a straight line is too uncertain to credit, so the base cap returns
+            // and rule (2) re-anchors without credit instead.
+            val maxReasonableSpeedKmh = if (currentActivityType == "walk") 15.0 else 35.0
+            val maxJumpM = if (timeSinceLastPoint in 0.0..MAX_GAP_CREDIT_S)
+                maxOf(BASE_MAX_JUMP_M, (maxReasonableSpeedKmh / 3.6) * timeSinceLastPoint)
+            else BASE_MAX_JUMP_M
+            val isDistanceReasonable = distanceIncrement >= 2.0 && distanceIncrement <= maxJumpM
             // Speed sanity: reject points implying an impossible speed for the activity.
             // Walks: cap at 15 km/h (well above brisk race-walk pace ~7-8 km/h) — a generic
             // 40 km/h cap (tuned for running) let real-world artifacts through undetected on a
@@ -3842,11 +3916,12 @@ class RunTrackingService : Service(), SensorEventListener {
             // (~24 km/h) with headroom for GPS jitter on downhills, but tighter than the old 40
             // km/h ceiling which was closer to sprinting speed than any distance-running pace.
             val impliedSpeedKmh = if (timeSinceLastPoint > 0) (distanceIncrement / timeSinceLastPoint) * 3.6 else 0.0
-            val maxReasonableSpeedKmh = if (currentActivityType == "walk") 15.0 else 35.0
             val isSpeedReasonable = impliedSpeedKmh < maxReasonableSpeedKmh || isFirstLocations
 
             if (location.accuracy <= maxAcceptableAccuracy && isDistanceReasonable && isSpeedReasonable) {
                 lastGpsAccuracyM = location.accuracy  // Track latest accepted GPS accuracy for sensor confidence reporting
+                gpsFixesAccepted++
+                pendingReanchor.clear()
 
                 // ── Stationary-drift gate ────────────────────────────────────────────
                 // The distance/speed filters above reject implausible JUMPS; nothing until
@@ -4134,13 +4209,45 @@ class RunTrackingService : Service(), SensorEventListener {
                 updateNotification()
             } else {
                 // Log rejected point for debugging distance discrepancies
+                val isJump = !isDistanceReasonable && distanceIncrement > maxJumpM
                 val reason = when {
-                    location.accuracy > maxAcceptableAccuracy -> "accuracy ${location.accuracy}m > ${maxAcceptableAccuracy}m"
-                    !isDistanceReasonable -> "distance ${distanceIncrement}m out of range [2-100m]"
-                    !isSpeedReasonable -> "implied speed ${impliedSpeedKmh.toInt()} km/h > 40 km/h"
+                    location.accuracy > maxAcceptableAccuracy -> { gpsRejectedAccuracy++; "accuracy ${location.accuracy}m > ${maxAcceptableAccuracy}m" }
+                    isJump -> { gpsRejectedJump++; "distance ${distanceIncrement.toInt()}m > ${maxJumpM.toInt()}m cap" }
+                    !isDistanceReasonable -> { gpsRejectedDrift++; "distance ${String.format("%.1f", distanceIncrement)}m < 2m" }
+                    !isSpeedReasonable -> { gpsRejectedSpeed++; "implied speed ${impliedSpeedKmh.toInt()} km/h > ${maxReasonableSpeedKmh.toInt()} km/h" }
                     else -> "unknown"
                 }
                 Log.d("RunTrackingService", "GPS point REJECTED: $reason")
+
+                // Anchor-recovery rule (2). A fix rejected only for being too far from the anchor
+                // (or too fast to have come from it) may be right while the ANCHOR is wrong. Keep a
+                // run of such fixes; if REANCHOR_CONFIRM_SAMPLES in a row are plausible relative to
+                // each other — normal step size and speed, decent accuracy — they describe where the
+                // runner really is, and the latest becomes the anchor. The distance between the old
+                // anchor and the new one is deliberately NOT credited.
+                val jumpOnly = location.accuracy <= maxAcceptableAccuracy && (isJump || !isSpeedReasonable)
+                if (jumpOnly && location.accuracy <= REANCHOR_MAX_ACCURACY_M) {
+                    val last = pendingReanchor.lastOrNull()
+                    val coherent = last == null || run {
+                        val d = calculateDistance(last, newPoint)
+                        val dt = (newPoint.timestamp - last.timestamp) / 1000.0
+                        dt > 0 && d <= BASE_MAX_JUMP_M && (d / dt) * 3.6 < maxReasonableSpeedKmh
+                    }
+                    if (!coherent) pendingReanchor.clear()
+                    pendingReanchor.add(newPoint)
+                    if (pendingReanchor.size >= REANCHOR_CONFIRM_SAMPLES) {
+                        routePoints.add(newPoint)
+                        gpsReanchors++
+                        lastGpsAccuracyM = location.accuracy
+                        recentPaceDistances.clear(); recentPaceTimes.clear()
+                        pendingReanchor.clear()
+                        Log.w("RunTrackingService", "Re-anchored GPS track after ${REANCHOR_CONFIRM_SAMPLES} coherent " +
+                            "jump-rejected fixes: ${distanceIncrement.toInt()}m from the previous anchor over " +
+                            "${timeSinceLastPoint.toInt()}s not credited (re-anchor #$gpsReanchors this run)")
+                    }
+                } else {
+                    pendingReanchor.clear()
+                }
             }
 
             // ALWAYS check navigation on every GPS update, even if the point was rejected for distance tracking.
@@ -4151,7 +4258,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 checkNavigationProgress(location.latitude, location.longitude, location.accuracy)
             }
         } else {
+            // First fix of the run is adopted as the anchor whatever its accuracy — rule (1)
+            // above swaps it for a better one before any distance is credited.
             routePoints.add(newPoint)
+            gpsFirstFixAccuracyM = newPoint.accuracy
         }
     }
     
@@ -5612,6 +5722,21 @@ class RunTrackingService : Service(), SensorEventListener {
             worstGpsAccuracy         = (if (watchGpsAccuracyCount > 0) watchGpsAccuracyWorst else phoneGpsAccuracyWorst).takeIf { it > 0f },
             // Power saver mode telemetry — if phone's power saver was active during this run
             powerSaverModeDetected   = powerSaverModeDetected,
+            // GPS filter diagnostics (see the anchor-recovery block near GOOD_ANCHOR_ACCURACY_M).
+            // Counts every fix that reached onNewLocation — on a watch-driven run that includes the
+            // synthetic "garmin" frames, so read it alongside hasGarminData.
+            gpsFilterStats           = if (gpsFixesReceived > 0) mapOf(
+                "fixes" to gpsFixesReceived,
+                "accepted" to gpsFixesAccepted,
+                "rejectedAccuracy" to gpsRejectedAccuracy,
+                "rejectedDrift" to gpsRejectedDrift,
+                "rejectedJump" to gpsRejectedJump,
+                "rejectedSpeed" to gpsRejectedSpeed,
+                "stationaryDrift" to stationaryPointsRejected,
+                "anchorReplaced" to gpsAnchorReplaced,
+                "reanchors" to gpsReanchors,
+                "firstFixAccuracyM" to gpsFirstFixAccuracyM,
+            ) else null,
         )
 
         // Run is final at this point regardless of whether the upload below succeeds now or
