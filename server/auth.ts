@@ -68,6 +68,49 @@ export function optionalAuthMiddleware(req: AuthenticatedRequest, res: Response,
 
 
 /**
+ * Monthly AI-coaching allowance gate for the live-coaching endpoints. Product decision
+ * (2026-09-21, Daniel): the km cap is enforced at the START of a session only. Usage is
+ * recorded once, when a run is saved, so a session that begins under the cap can never be
+ * cut off mid-run — this middleware simply refuses to open a new coached session once the
+ * month's km are used up. The clients check /api/features/aiCoachingKm/available before
+ * starting and offer "run without the coach"; this is the server-side backstop.
+ * Chain after authMiddleware / requireEntitledUser (needs req.user).
+ */
+export async function requireCoachingQuota(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const userId = req.user?.userId;
+  if (!userId) return res.status(401).json({ error: "No token provided" });
+  try {
+    const { storage } = await import("./storage");
+    const { getUsageWithLimits, FEATURE_LABELS } = await import("./usage-service");
+    const user = await storage.getUser(userId);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    const usage = await getUsageWithLimits(
+      userId, user.subscriptionTier, user.trialExpiresAt ?? null, user.createdAt ?? null, user.aiPlansEnabled ?? true,
+    );
+    const limit = usage.limits.aiCoachingKm;
+    const used = usage.usage.aiCoachingKm;
+    if (limit === null || used < limit) return next();
+    const { hasUnlimitedGrant } = await import("./coupon-service");
+    if (await hasUnlimitedGrant(userId, "aiCoachingKm")) return next();
+    const [y, m] = usage.yearMonth.split("-").map(Number);
+    const resetMonth = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1))
+      .toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+    const isFreeUser = usage.tier === "free";
+    return res.status(429).json({
+      error: "monthly_limit_reached",
+      feature: "aiCoachingKm",
+      message: `You've used your ${limit} km of ${FEATURE_LABELS.aiCoachingKm} for this month. ` +
+        (isFreeUser ? "Upgrade to keep the coach with you, or run without the coach." : `Upgrade, run without the coach, or wait until ${resetMonth}.`),
+      limit, used, remaining: 0, resetMonth, isFreeUser,
+    });
+  } catch (err) {
+    // Fail open: a quota lookup failure must never take the coach away mid-flow.
+    console.error("[requireCoachingQuota] lookup failed, allowing:", err);
+    return next();
+  }
+}
+
+/**
  * Requires a signed-in user whose account is currently entitled to AI features: not an
  * expired free trial and not a lapsed paid subscription (both stores' lifecycle handlers
  * write tier NULL + status expired/refunded). Used on the in-run coaching and legacy AI

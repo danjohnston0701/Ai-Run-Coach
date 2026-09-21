@@ -2278,6 +2278,31 @@ class RunSessionViewModel @Inject constructor(
         _runState.update { it.copy(isCoachEnabled = !it.isCoachEnabled) }
     }
 
+    /** The month's AI-coaching km are used up; what to show the runner before they start. */
+    data class CoachingQuotaExhausted(val usedKm: Double, val limitKm: Double, val renewalDate: String?, val message: String?)
+
+    /**
+     * Pre-start check of the monthly AI-coaching km allowance. Returns null when coaching may
+     * proceed — including on any error, because a failed lookup must never take the coach away.
+     * The cap is enforced at session start only (server: requireCoachingQuota); usage is recorded
+     * once at save, so a session that starts under the cap is never cut off mid-run.
+     */
+    suspend fun checkCoachingQuota(): CoachingQuotaExhausted? {
+        return try {
+            val r = apiService.checkCoachingQuota()
+            if (r.isAvailable || r.isUnlimited == true || r.limit == null) null
+            else CoachingQuotaExhausted(r.used ?: 0.0, r.limit, r.renewalDate, r.message)
+        } catch (e: Exception) {
+            Log.w("RunSessionViewModel", "Coaching quota check failed — allowing coach: ${e.message}")
+            null
+        }
+    }
+
+    /** Coach off for this session only; the saved "ai_coach_enabled" preference is untouched. */
+    fun disableCoachForThisSession() {
+        _runState.update { it.copy(isCoachEnabled = false) }
+    }
+
     fun toggleMute() {
         _runState.update { it.copy(isMuted = !it.isMuted) }
     }

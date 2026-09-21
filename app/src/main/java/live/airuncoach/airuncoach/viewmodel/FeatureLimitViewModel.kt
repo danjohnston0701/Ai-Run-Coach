@@ -199,6 +199,17 @@ data class RunRouteAvailability(
 /**
  * Feature Availability Response from API
  */
+/** /api/features/aiCoachingKm/available — km fields are fractional. */
+data class CoachingQuotaResponse(
+    val isAvailable: Boolean,
+    val remaining: Double? = null,
+    val limit: Double? = null,
+    val used: Double? = null,
+    val renewalDate: String? = null,
+    val isUnlimited: Boolean? = false,
+    val message: String? = null
+)
+
 data class FeatureAvailabilityResponse(
     val isAvailable: Boolean,
     val remaining: Int? = null,

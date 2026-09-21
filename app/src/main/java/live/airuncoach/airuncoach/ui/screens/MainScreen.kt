@@ -839,6 +839,7 @@ fun MainScreen(
             composable("run_session") {
                 RunSessionScreen(
                     hasRoute = false,
+                    onUpgrade = { RunConfigHolder.clearConfig(); navController.navigate("subscription") },
                     onEndRun = { runId ->
                         navController.navigateWhenResumed(navCoroutineScope, "run_summary/$runId") {
                             popUpTo("run_session") { inclusive = true }
@@ -858,6 +859,7 @@ fun MainScreen(
                 val routeId = backStackEntry.arguments?.getString("routeId") ?: ""
                 RunSessionScreen(
                     hasRoute = routeId.isNotEmpty(),
+                    onUpgrade = { RunConfigHolder.clearConfig(); navController.navigate("subscription") },
                     onEndRun = { runId ->
                         navController.navigateWhenResumed(navCoroutineScope, "run_summary/$runId") {
                             popUpTo("run_session/{routeId}") { inclusive = true }
@@ -878,6 +880,7 @@ fun MainScreen(
                 RunSessionScreen(
                     hasRoute = false,
                     groupRunId = groupRunId,  // Pass group run context to the session
+                    onUpgrade = { RunConfigHolder.clearConfig(); navController.navigate("subscription") },
                     onEndRun = { runId ->
                         navController.navigateWhenResumed(navCoroutineScope, "run_summary/$runId") {
                             popUpTo("run_session/group/{groupRunId}") { inclusive = true }

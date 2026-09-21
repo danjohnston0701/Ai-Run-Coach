@@ -134,6 +134,7 @@ fun RunSessionScreen(
     hasRoute: Boolean,
     onEndRun: (String) -> Unit,
     onCancel: () -> Unit = {},
+    onUpgrade: () -> Unit = {},  // "Upgrade" from the coaching-allowance prompt
     groupRunId: String? = null,  // Optional group run context
     viewModel: RunSessionViewModel = hiltViewModel()
 ) {
@@ -208,6 +209,7 @@ fun RunSessionScreen(
     // user gets this prompt as early as possible, with the whole setup window to fix it, and
     // again as a hard gate right before the run actually starts — catching Location being
     // switched off again in the gap between, however long that gap is.
+    var coachingQuotaPrompt by remember { mutableStateOf<Pair<RunSessionViewModel.CoachingQuotaExhausted, kotlinx.coroutines.CompletableDeferred<CoachingQuotaChoice>>?>(null) }
     var pendingLocationResolution by remember { mutableStateOf<kotlinx.coroutines.CompletableDeferred<Boolean>?>(null) }
     val locationResolutionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult(),
@@ -305,9 +307,38 @@ fun RunSessionScreen(
             }
         }
 
-        val config = RunConfigHolder.getConfig()
+        var config = RunConfigHolder.getConfig()
         val isCoachedWorkout = config?.trainingPlanId != null
         isWatchMode = config?.isWatchMode == true
+
+        // ── Monthly AI-coaching allowance (enforced at start only) ──────────────────────
+        // Every way into a session passes through here (free run, route, workout, group,
+        // watch), so this is the one place to ask. If the month's km are used up the runner
+        // chooses: run without the coach (this session only), upgrade, or cancel. A session
+        // that starts under the cap is never interrupted — usage is recorded at save.
+        if (config?.aiCoachEnabled == true && !runState.isRunning && !runState.isPaused) {
+            val exhausted = viewModel.checkCoachingQuota()
+            if (exhausted != null) {
+                val choice = kotlinx.coroutines.CompletableDeferred<CoachingQuotaChoice>()
+                coachingQuotaPrompt = exhausted to choice
+                when (choice.await()) {
+                    CoachingQuotaChoice.RunWithoutCoach -> {
+                        config = config.copy(aiCoachEnabled = false)
+                        viewModel.disableCoachForThisSession()
+                    }
+                    CoachingQuotaChoice.Upgrade -> {
+                        viewModel.cancelRunSetup()
+                        onUpgrade()
+                        return@LaunchedEffect
+                    }
+                    CoachingQuotaChoice.Cancel -> {
+                        viewModel.cancelRunSetup()
+                        onCancel()
+                        return@LaunchedEffect
+                    }
+                }
+            }
+        }
 
         config?.let {
             viewModel.setRunConfig(it)
@@ -642,6 +673,35 @@ fun RunSessionScreen(
                 }
             }
         }
+    }
+
+    coachingQuotaPrompt?.let { (quota, choice) ->
+        val resets = quota.renewalDate?.take(10)?.let { iso ->
+            runCatching { java.time.LocalDate.parse(iso).format(java.time.format.DateTimeFormatter.ofPattern("d MMMM")) }.getOrNull()
+        }
+        val used = "%.0f".format(quota.usedKm); val limit = "%.0f".format(quota.limitKm)
+        AlertDialog(
+            onDismissRequest = { /* an explicit choice is required */ },
+            title = { Text("AI coaching allowance used up") },
+            text = {
+                Text(
+                    "You've coached $used of your $limit km this month" +
+                        (resets?.let { " — it resets on $it" } ?: "") +
+                        ". You can still ${if (sessionActivityType == "walk") "walk" else "run"} with full tracking; the coach just won't speak this session."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { coachingQuotaPrompt = null; choice.complete(CoachingQuotaChoice.RunWithoutCoach) }) {
+                    Text(if (sessionActivityType == "walk") "Walk without coach" else "Run without coach")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { coachingQuotaPrompt = null; choice.complete(CoachingQuotaChoice.Cancel) }) { Text("Cancel") }
+                    TextButton(onClick = { coachingQuotaPrompt = null; choice.complete(CoachingQuotaChoice.Upgrade) }) { Text("Upgrade") }
+                }
+            }
+        )
     }
 
     // Dialogs unchanged
@@ -3751,3 +3811,6 @@ fun LiveObserversPanel(
         }
     }
 }
+
+/** Runner's answer to the "AI coaching allowance used up" prompt shown before a session starts. */
+enum class CoachingQuotaChoice { RunWithoutCoach, Upgrade, Cancel }

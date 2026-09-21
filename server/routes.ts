@@ -30,6 +30,7 @@ import {
   authMiddleware, 
   optionalAuthMiddleware,
   requireEntitledUser,
+  requireCoachingQuota,
   type AuthenticatedRequest 
 } from "./auth";
 import {
@@ -5865,7 +5866,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
 
   // ==================== AI ENDPOINTS (Direct OpenAI) ====================
   
-  app.post("/api/ai/coach", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/coach", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const { message, context } = req.body;
       const aiService = await import("./ai-service");
@@ -5877,7 +5878,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/tts", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/tts", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const { text, voice, coachAccent, coachGender } = req.body;
       const aiService = await import("./ai-service");
@@ -5890,7 +5891,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const { message, context } = req.body;
       const aiService = await import("./ai-service");
@@ -5902,7 +5903,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/run-summary", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/run-summary", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const { lat, lng, distance, elevationGain, elevationLoss, difficulty, activityType, targetTime, firstTurnInstruction } = req.body;
       
@@ -5991,7 +5992,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/pre-run-summary", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/pre-run-summary", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const { route, weather } = req.body;
       const aiService = await import("./ai-service");
@@ -6003,7 +6004,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/elevation-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/elevation-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -6026,7 +6027,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/pace-update", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/pace-update", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -6049,7 +6050,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/phase-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/phase-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -6072,7 +6073,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   });
 
-  app.post("/api/ai/struggle-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/ai/struggle-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const aiService = await import("./ai-service");
       
@@ -6104,6 +6105,11 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
       }
+      // Same monthly post-run-analysis allowance as comprehensive-analysis — this endpoint
+      // spends OpenAI on a summary too and was the one generator left uncounted.
+      const insightsUser = await storage.getUser(req.user!.userId);
+      const insightsAllowed = await checkAndEnforceLimit(res, req.user!.userId, insightsUser?.subscriptionTier, "postRunAnalyses", 1, insightsUser?.trialExpiresAt ?? null, insightsUser?.createdAt ?? null, insightsUser?.aiPlansEnabled ?? true);
+      if (!insightsAllowed) return;
       const aiService = await import("./ai-service");
       const insights = await aiService.generateRunSummary({
         ...run,
@@ -6111,6 +6117,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         sessionType: (run as any).sessionType === "walk" ? "walk" : "run",
       }, null, run.userId);
       await storage.updateRun(req.params.id, { aiInsights: JSON.stringify(insights) });
+      recordUsage(req.user!.userId, "postRunAnalyses");
       res.json(insights);
     } catch (error: any) {
       console.error("AI insights error:", error);
@@ -6520,8 +6527,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           : notIncludedInfo
           ? notIncludedInfo.message
           : isAvailable
-          ? `You have ${remaining} of ${limit} ${label} remaining this month`
-          : `You've reached your limit of ${limit} ${label} this month`
+          ? `You have ${remaining} of ${limit}${gated === "aiCoachingKm" ? " km of" : ""} ${label} remaining this month`
+          : `You've reached your limit of ${limit}${gated === "aiCoachingKm" ? " km of" : ""} ${label} this month`
       });
     } catch (error: any) {
       console.error("[Features] GET /api/features/:featureName/available error:", error);
@@ -11518,7 +11525,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   }
 
   // Wellness-aware pre-run briefing with Garmin data
-  app.post("/api/coaching/pre-run-briefing", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/pre-run-briefing", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, targetTime, targetPace, weather, trainingPlanId, planGoalType, planWeekNumber, planTotalWeeks, workoutType, workoutIntensity, workoutDescription } = req.body;
       
@@ -11670,7 +11677,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
 
   // Start Run Audio endpoint
   // Generates Polly TTS audio for motivational start run announcements
-  app.post("/api/coaching/start-run-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/start-run-audio", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { motivationalText } = req.body;
       
@@ -11715,7 +11722,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // ── Start Walk Audio Endpoint (activity-type-specific version) ──
-  app.post("/api/coaching/start-walk-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/start-walk-audio", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { motivationalText } = req.body;
       
@@ -11767,7 +11774,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   //
   // Request body: { texts: string[], accent?: string, gender?: string }
   // Response:     { audios: Array<{ text, audio: string (base64 mp3) | null, format }> }
-  app.post("/api/coaching/batch-tts", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/batch-tts", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { texts, accent: clientAccent, gender: clientGender } = req.body;
 
@@ -11815,7 +11822,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   // Enhanced pre-run briefing with TTS audio
   // Uses AI-powered generateWellnessAwarePreRunBriefing() for intelligent, personalized content,
   // then generates OpenAI TTS audio from the AI response. Best of both worlds.
-  app.post("/api/coaching/pre-run-briefing-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/pre-run-briefing-audio", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, 
               weather: clientWeather, targetPace, targetTime, wellness: clientWellness, 
@@ -11977,7 +11984,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // ── Walk Briefing Endpoint (activity-type-specific version) ──
-  app.post("/api/coaching/pre-walk-briefing-audio", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/pre-walk-briefing-audio", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { distance, elevationGain, elevationLoss, maxGradientDegrees, difficulty, hasRoute, activityType, 
               weather: clientWeather, targetPace, targetTime, wellness: clientWellness, 
@@ -12358,7 +12365,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   }
 
   // Pace Update Coaching with TTS
-  app.post("/api/coaching/pace-update", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/pace-update", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
@@ -12460,7 +12467,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   // surface that RunTrackingService.kt actually uses. The client fires this exactly once,
   // at the moment it detects the crossing, so no isRunCompleted() re-check is done here.
   // ─────────────────────────────────────────────────────────────────────────
-  app.post("/api/coaching/target-reached", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/target-reached", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
 
@@ -12516,7 +12523,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   // Called from Android when a coaching plan session trigger condition becomes true.
   // Unlike the pre-run plan (templates), this generates a bespoke message from live data.
   // ─────────────────────────────────────────────────────────────────────────
-  app.post("/api/coaching/session-trigger-live", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/session-trigger-live", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
 
@@ -12565,7 +12572,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // Struggle Coaching with TTS
-  app.post("/api/coaching/struggle-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/struggle-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       // Accept snake_case aliases for iOS clients — this route had no alias handling at all
@@ -12648,7 +12655,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // Cadence/Stride Coaching with TTS - analyzes overstriding/understriding
-  app.post("/api/coaching/cadence-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/cadence-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('cadence-coaching', req.body, coachingUserId);
@@ -12697,7 +12704,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // Elevation Coaching with TTS
-  app.post("/api/coaching/elevation-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/elevation-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('elevation-coaching', req.body, coachingUserId);
@@ -12746,7 +12753,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // Elite Coaching with TTS — technique, milestones, positive reinforcement, target ETA, pace trends, elevation insights
-  app.post("/api/coaching/elite-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/elite-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
@@ -12837,7 +12844,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // Phase Coaching with TTS
-  app.post("/api/coaching/phase-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/phase-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       normalizeCoachingRequestBody(req.body);
       // Accept snake_case aliases for iOS clients — this route had no alias handling at all
@@ -12937,7 +12944,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
 
   // Interval-specific coaching (work and recovery phases)
   // Note: interval-coaching is always treated as a milestone — every interval transition matters.
-  app.post("/api/coaching/interval-coaching", requireEntitledUser, async (req: Request, res: Response) => {
+  app.post("/api/coaching/interval-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       // interval-coaching is milestone by design — checkCooldown returns allowed:true immediately
@@ -12987,7 +12994,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // Wellness-aware coaching response during run (Talk to Coach) - Updated with TTS
-  app.post("/api/coaching/talk-to-coach", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/talk-to-coach", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { message, context } = req.body;
       
@@ -13084,7 +13091,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   });
 
   // Heart rate zone coaching
-  app.post("/api/coaching/hr-coaching", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  app.post("/api/coaching/hr-coaching", authMiddleware, requireCoachingQuota, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const coachingUserId = req.user?.userId ?? req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('hr-coaching', req.body, coachingUserId);
@@ -16245,6 +16252,11 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         return res.status(403).json({ error: "Not authorized" });
       }
 
+      // Monthly post-run-analysis allowance — this legacy generator was uncounted.
+      const analysisOwner = await storage.getUser(run.userId);
+      const legacyAnalysisAllowed = await checkAndEnforceLimit(res, run.userId, analysisOwner?.subscriptionTier, "postRunAnalyses", 1, analysisOwner?.trialExpiresAt ?? null, analysisOwner?.createdAt ?? null, analysisOwner?.aiPlansEnabled ?? true);
+      if (!legacyAnalysisAllowed) return;
+
       // Persist self-assessment + struggle points (best effort)
       try {
         const userPostRunComments = typeof body.userPostRunComments === "string" ? body.userPostRunComments : undefined;
@@ -16447,7 +16459,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           coachTone,
           coachAccent: user?.coachAccent || body.coachAccent || undefined,
         });
-} catch (e: any) {
+        recordUsage(run.userId, "postRunAnalyses");
+      } catch (e: any) {
         console.error("AI analysis generation failed, falling back to lightweight response:", e);
         ai = {
           summary: `Great run! You covered ${(((body.distance ?? run.distance) || 0) / 1000).toFixed(2)}km in ${Math.round((((body.duration ?? run.duration) || 0) / 1000) / 60)} minutes.`,

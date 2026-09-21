@@ -756,6 +756,13 @@ interface ApiService {
         @Path("featureName") featureName: String
     ): live.airuncoach.airuncoach.viewmodel.FeatureAvailabilityResponse
 
+    /**
+     * Same endpoint for the AI-coaching km allowance. Separate return type because km usage is
+     * fractional (45.7) and Gson refuses a decimal for [FeatureAvailabilityResponse]'s Int fields.
+     */
+    @GET("/api/features/aiCoachingKm/available")
+    suspend fun checkCoachingQuota(): live.airuncoach.airuncoach.viewmodel.CoachingQuotaResponse
+
     // ========== STRAVA INTEGRATION ==========
 
     @POST("/api/strava/auth/authorize")
