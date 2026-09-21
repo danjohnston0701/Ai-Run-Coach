@@ -806,9 +806,10 @@ fun NoWeatherDataBar(time: String) {
 }
 
 /**
- * Free-run target distance. At 0 or 1 dp the slider (over the user's configured min–max window)
- * is the control; at 2 or 3 dp there is no slider and the big number becomes a numeric field,
- * because a slider can't express 21.0975 km and showing both was messy.
+ * Free-run target distance. The big number is always a tappable numeric field (limited to the
+ * user's configured decimal places). At 0 or 1 dp a slider over the user's min–max window sits
+ * under it for quick selection; at 2 or 3 dp there is no slider, because it can't express
+ * 21.0975 km.
  */
 @Composable
 fun TargetDistanceSection(
@@ -820,7 +821,7 @@ fun TargetDistanceSection(
     val textEntry = TargetDistance.usesTextEntry(decimals)
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
-    LaunchedEffect(distance, decimals) {
+    LaunchedEffect(distance, decimals, editing) {
         if (!editing) draft = TargetDistance.format(distance, decimals)
     }
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
@@ -835,34 +836,26 @@ fun TargetDistanceSection(
                 color = Colors.textSecondary
             )
             Row(verticalAlignment = Alignment.Bottom) {
-                if (textEntry) {
-                    BasicTextField(
-                        value = draft,
-                        onValueChange = { raw ->
-                            editing = true
-                            draft = TargetDistance.sanitizeInput(raw, decimals)
-                            draft.toFloatOrNull()
-                                ?.takeIf { it in 0.1f..500f }
-                                ?.let(onDistanceChanged)
-                        },
-                        textStyle = AppTextStyles.h2.copy(color = Colors.primary, textAlign = TextAlign.End),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        keyboardActions = KeyboardActions(onDone = { editing = false }),
-                        cursorBrush = SolidColor(Colors.primary),
-                        modifier = Modifier
-                            .width(110.dp)
-                            .clip(RoundedCornerShape(BorderRadius.sm))
-                            .background(Colors.backgroundSecondary)
-                            .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
-                    )
-                } else {
-                    Text(
-                        text = TargetDistance.format(distance, decimals),
-                        style = AppTextStyles.h2,
-                        color = Colors.primary
-                    )
-                }
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { raw ->
+                        editing = true
+                        draft = TargetDistance.sanitizeInput(raw, decimals)
+                        draft.toFloatOrNull()
+                            ?.takeIf { it in 0.1f..500f } // typed targets aren't bound by the slider window
+                            ?.let(onDistanceChanged)
+                    },
+                    textStyle = AppTextStyles.h2.copy(color = Colors.primary, textAlign = TextAlign.End),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = if (decimals == 0) KeyboardType.Number else KeyboardType.Decimal),
+                    keyboardActions = KeyboardActions(onDone = { editing = false }),
+                    cursorBrush = SolidColor(Colors.primary),
+                    modifier = Modifier
+                        .width(110.dp)
+                        .clip(RoundedCornerShape(BorderRadius.sm))
+                        .background(Colors.backgroundSecondary)
+                        .padding(horizontal = Spacing.sm, vertical = Spacing.xs)
+                )
                 Spacer(modifier = Modifier.width(Spacing.xs))
                 Text(
                     text = "km",
@@ -880,9 +873,14 @@ fun TargetDistanceSection(
                 color = Colors.textMuted
             )
         } else {
+            Text(
+                text = "Slide, or tap the number to type a distance",
+                style = AppTextStyles.caption,
+                color = Colors.textMuted
+            )
             Slider(
                 value = distance.coerceIn(range),
-                onValueChange = onDistanceChanged,
+                onValueChange = { editing = false; onDistanceChanged(it) },
                 valueRange = range,
                 // 0 dp snaps to whole km; 1 dp runs continuously and the view model rounds to tenths.
                 steps = if (decimals == 0) (range.endInclusive - range.start).roundToInt().coerceAtLeast(1) - 1 else 0,

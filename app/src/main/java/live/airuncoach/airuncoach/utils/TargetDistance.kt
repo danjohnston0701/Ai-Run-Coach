@@ -9,7 +9,8 @@ import kotlin.math.roundToInt
  *
  * 0 and 1 places keep the distance slider (whole km, or tenths); 2 and 3 replace it with a
  * numeric field, because a slider can't usefully express 21.0975 km and a 1–50 km range at
- * 0.001 resolution is 49,000 steps.
+ * 0.001 resolution is 49,000 steps. At every precision the value itself is also a tappable
+ * field, for people who would rather type than slide.
  */
 object TargetDistance {
     /** Whether the target-distance control should be a typed field rather than a slider. */
@@ -57,6 +58,7 @@ object TargetDistance {
      * keystrokes instead of being round-tripped through Float and snapping back.
      */
     fun sanitizeInput(raw: String, decimals: Int): String {
+        if (decimals <= 0) return raw.filter { it.isDigit() }
         val cleaned = raw.filter { it.isDigit() || it == '.' }
         val dot = cleaned.indexOf('.')
         return if (dot >= 0) {

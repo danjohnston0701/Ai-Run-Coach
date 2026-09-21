@@ -900,10 +900,11 @@ private fun ModePillToggle(
 ===================================================================================== */
 
 /**
- * @param decimals 0–3 places from the user's profile. At 0 or 1 the slider is the control
- *   (whole km, or tenths); at 2 or 3 the slider is gone entirely and the value is a numeric
- *   field, because a slider cannot express a real race distance — a half marathon is 21.0975 km
- *   and a marathon 42.195 — and mixing both controls was messy.
+ * @param decimals 0–3 places from the user's profile. The value badge is always a tappable
+ *   numeric field limited to that many places. At 0 or 1 a slider (whole km, or tenths over a
+ *   span capped at 25 km) sits under it for quick selection; at 2 or 3 the slider is gone
+ *   entirely, because it cannot express a real race distance — a half marathon is 21.0975 km
+ *   and a marathon 42.195.
  */
 @Composable
 fun TargetDistanceCard(
@@ -916,7 +917,7 @@ fun TargetDistanceCard(
     // Held as text while editing so partial input ("21." on the way to "21.098") survives.
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
-    LaunchedEffect(distance, decimals) {
+    LaunchedEffect(distance, decimals, editing) {
         if (!editing) draft = TargetDistance.format(distance, decimals)
     }
     Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
@@ -944,52 +945,44 @@ fun TargetDistanceCard(
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(Spacing.xs))
-                if (textEntry) {
-                    BasicTextField(
-                        value = draft,
-                        onValueChange = { raw ->
-                            editing = true
-                            draft = TargetDistance.sanitizeInput(raw, decimals)
-                            draft.toFloatOrNull()
-                                ?.takeIf { it in 0.1f..500f } // typed targets aren't bound by the slider window
-                                ?.let(onDistanceChanged)
-                        },
-                        textStyle = AppTextStyles.body.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = Colors.primary,
-                        ),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        keyboardActions = KeyboardActions(onDone = { editing = false }),
-                        cursorBrush = SolidColor(Colors.primary),
-                        modifier = Modifier.width(80.dp),
-                    )
-                    Text(
-                        text = " km goal",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.primary
-                    )
-                } else {
-                    Text(
-                        text = "${TargetDistance.format(distance, decimals)} km goal",
-                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
-                        color = Colors.primary
-                    )
-                }
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { raw ->
+                        editing = true
+                        draft = TargetDistance.sanitizeInput(raw, decimals)
+                        draft.toFloatOrNull()
+                            ?.takeIf { it in 0.1f..500f } // typed targets aren't bound by the slider window
+                            ?.let(onDistanceChanged)
+                    },
+                    textStyle = AppTextStyles.body.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Colors.primary,
+                    ),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = if (decimals == 0) KeyboardType.Number else KeyboardType.Decimal),
+                    keyboardActions = KeyboardActions(onDone = { editing = false }),
+                    cursorBrush = SolidColor(Colors.primary),
+                    modifier = Modifier.width(if (textEntry) 80.dp else 56.dp),
+                )
+                Text(
+                    text = " km goal",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.primary
+                )
             }
         }
-        if (textEntry) {
-            Spacer(modifier = Modifier.height(Spacing.xs))
-            Text(
-                text = "Tap the distance to type an exact target (up to $decimals decimal places)",
-                style = AppTextStyles.caption,
-                color = Colors.textMuted
-            )
-        } else {
-            Spacer(modifier = Modifier.height(Spacing.md))
+        Spacer(modifier = Modifier.height(Spacing.xs))
+        Text(
+            text = if (textEntry) "Tap the distance to type an exact target (up to $decimals decimal places)"
+                   else "Slide, or tap the distance to type it",
+            style = AppTextStyles.caption,
+            color = Colors.textMuted
+        )
+        if (!textEntry) {
+            Spacer(modifier = Modifier.height(Spacing.sm))
             Slider(
                 value = distance.coerceIn(range),
-                onValueChange = onDistanceChanged,
+                onValueChange = { editing = false; onDistanceChanged(it) },
                 valueRange = range,
                 // 0 dp: snap to whole kilometres (N km span = N−1 intermediate steps).
                 // 1 dp: run continuously and let the caller round to tenths — hundreds of tick

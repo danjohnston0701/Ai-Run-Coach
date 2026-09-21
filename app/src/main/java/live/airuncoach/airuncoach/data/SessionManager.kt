@@ -279,14 +279,18 @@ class SessionManager(context: Context) {
     /**
      * Slider window (min..max km) for the target distance, from the cached user. Legacy rows
      * default to 0–50, so a min below 1 km is lifted to 1 and an inverted pair falls back to
-     * the 1–50 default rather than producing an empty slider.
+     * the 1–50 default rather than producing an empty slider. The span is also capped per
+     * [TargetDistance.maxSliderSpanKm] for the user's precision: Personal Details enforces that
+     * on save, but a range stored before the cap existed (or from another client) would
+     * otherwise give a 1–50 km slider at tenths, where a fingertip covers ~1.5 km.
      */
     fun targetDistanceRange(): ClosedFloatingPointRange<Float> {
         val user = cachedUser()
         val min = (user?.distanceMinKm ?: 0f).coerceAtLeast(TargetDistance.DEFAULT_MIN_KM.toFloat())
         val max = user?.distanceMaxKm ?: TargetDistance.DEFAULT_MAX_KM.toFloat()
-        return if (max > min) min..max
-        else TargetDistance.DEFAULT_MIN_KM.toFloat()..TargetDistance.DEFAULT_MAX_KM.toFloat()
+        val span = TargetDistance.maxSliderSpanKm(targetDistanceDecimals()).toFloat()
+        return if (max > min) min..minOf(max, min + span)
+        else TargetDistance.DEFAULT_MIN_KM.toFloat()..minOf(TargetDistance.DEFAULT_MAX_KM.toFloat(), TargetDistance.DEFAULT_MIN_KM + span)
     }
 
     fun hasCompletedOnboardingTour(): Boolean =
