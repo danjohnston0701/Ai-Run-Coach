@@ -385,6 +385,8 @@ class RunTrackingService : Service(), SensorEventListener {
     //     to the fixed cap and lets (2) re-anchor instead.
     //  4. Per-run counters of every rejection reason are uploaded as gpsFilterStats so the
     //     next report of "0 km" can be read straight off the run row.
+    /** A fix worse than this never becomes the run's first anchor — it's Wi-Fi/cell grade, not GPS. */
+    private val ANCHOR_MAX_ACCURACY_M = 30f
     private val GOOD_ANCHOR_ACCURACY_M = 15f
     private val REANCHOR_CONFIRM_SAMPLES = 3
     private val REANCHOR_MAX_ACCURACY_M = 30f
@@ -401,7 +403,9 @@ class RunTrackingService : Service(), SensorEventListener {
     private var gpsRejectedSpeed = 0
     private var gpsAnchorReplaced = 0     // rule (1)
     private var gpsReanchors = 0          // rule (2)
-    private var gpsFirstFixAccuracyM: Float? = null
+    private var gpsFirstFixAccuracyM: Float? = null   // what the OS handed us first
+    private var gpsAnchorAccuracyM: Float? = null     // what we actually anchored on
+    private var gpsFixesBeforeAnchor = 0              // coarse fixes refused before the first anchor
 
     private val START_IDLE_CONFIRM_SAMPLES = 3
     private val START_IDLE_MAX_PACE_SEC_PER_KM = 18.0 * 60.0   // 18 min/km — clearly moving, not drift
@@ -2041,6 +2045,7 @@ class RunTrackingService : Service(), SensorEventListener {
         gpsFixesReceived = 0; gpsFixesAccepted = 0
         gpsRejectedAccuracy = 0; gpsRejectedDrift = 0; gpsRejectedJump = 0; gpsRejectedSpeed = 0
         gpsAnchorReplaced = 0; gpsReanchors = 0; gpsFirstFixAccuracyM = null
+        gpsAnchorAccuracyM = null; gpsFixesBeforeAnchor = 0
         // Only reset the watch-GPS suppression window for phone-only runs.
         // For watch-initiated runs, wasRunStartedByWatch is set TRUE before startTracking() is called,
         // and lastWatchGpsMs was stamped at that moment.  Resetting it here would reopen the phone-GPS
@@ -3736,11 +3741,17 @@ class RunTrackingService : Service(), SensorEventListener {
                 Log.d("RunTrackingService", "Power saver mode: NOT active")
             }
             
-            // Always use PRIORITY_HIGH_ACCURACY to override power saver constraints
-            // setWaitForAccurateLocation(false) ensures we don't wait indefinitely for GPS lock
+            // Always use PRIORITY_HIGH_ACCURACY to override power saver constraints.
+            // setWaitForAccurateLocation(true): the fused provider blends GPS with Wi-Fi/cell and,
+            // with this false, hands over a network-derived position the instant it's asked —
+            // before the satellite receiver has locked. That coarse first fix (27 m / 87 m on the
+            // two 2026-09-20 runs) became the distance anchor and froze the whole session. With
+            // it true the provider holds initial delivery until it has an accurate fix (a few
+            // seconds at most, then it delivers regardless). onNewLocation() additionally refuses
+            // to anchor on anything worse than ANCHOR_MAX_ACCURACY_M, so this is belt and braces.
             val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_UPDATE_INTERVAL).apply { 
                 setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL)
-                setWaitForAccurateLocation(false)
+                setWaitForAccurateLocation(true)
                 // Note: numUpdates(Integer.MAX_VALUE) not used as we control lifecycle via service start/stop
             }.build()
             fusedLocationClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper())
@@ -4193,11 +4204,6 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
                 if (location.speed > maxSpeed) maxSpeed = location.speed
 
-                // Route Memory Engine — emit first GPS fix so ViewModel can call recognize-route
-                if (routePoints.size == 1 && _firstGpsPoint.value == null) {
-                    _firstGpsPoint.value = Pair(newPoint.latitude, newPoint.longitude)
-                }
-
                 updatePaceAndStruggle(smoothedPaceSeconds)
                 checkForKmSplit()
                 // Pace coaching — smart interval checks against target pace
@@ -4258,10 +4264,28 @@ class RunTrackingService : Service(), SensorEventListener {
                 checkNavigationProgress(location.latitude, location.longitude, location.accuracy)
             }
         } else {
-            // First fix of the run is adopted as the anchor whatever its accuracy — rule (1)
-            // above swaps it for a better one before any distance is credited.
+            // First anchor of the run. Only a GPS-grade fix qualifies: the fused provider's
+            // opening fixes are routinely Wi-Fi/cell positions tens of metres off, and anchoring
+            // on one is how a run froze at 0.00 km. Hold out for a fix within
+            // ANCHOR_MAX_ACCURACY_M (iOS applies the same 30 m bar); rule (1) above still swaps
+            // it for a sharper one before any distance is credited. The watch path never comes
+            // through here with a coarse fix, so watch-driven runs are unaffected.
+            if (gpsFirstFixAccuracyM == null) gpsFirstFixAccuracyM = newPoint.accuracy
+            val acc = newPoint.accuracy
+            if (location.provider != "garmin" && (acc == null || acc > ANCHOR_MAX_ACCURACY_M)) {
+                gpsFixesBeforeAnchor++
+                Log.d("RunTrackingService", "Coarse first fix refused as anchor: accuracy ${acc ?: -1f}m > " +
+                    "${ANCHOR_MAX_ACCURACY_M}m (${gpsFixesBeforeAnchor} refused so far)")
+                if (hasRoute) checkNavigationProgress(location.latitude, location.longitude, location.accuracy)
+                return
+            }
             routePoints.add(newPoint)
-            gpsFirstFixAccuracyM = newPoint.accuracy
+            gpsAnchorAccuracyM = acc
+            // Route Memory Engine — first GPS-grade fix, so the ViewModel can call recognize-route.
+            // (Previously emitted from the accepted branch after the add, where size is never 1.)
+            if (_firstGpsPoint.value == null) {
+                _firstGpsPoint.value = Pair(newPoint.latitude, newPoint.longitude)
+            }
         }
     }
     
@@ -5736,6 +5760,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 "anchorReplaced" to gpsAnchorReplaced,
                 "reanchors" to gpsReanchors,
                 "firstFixAccuracyM" to gpsFirstFixAccuracyM,
+                "anchorAccuracyM" to gpsAnchorAccuracyM,
+                "fixesBeforeAnchor" to gpsFixesBeforeAnchor,
             ) else null,
         )
 
