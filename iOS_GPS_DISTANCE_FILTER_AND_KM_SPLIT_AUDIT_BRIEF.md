@@ -145,7 +145,11 @@ Android now (commit pending as of this note):
 4. uploads `gpsFilterStats` (fix counts by outcome, anchor replacements, re-anchors, first-fix
    accuracy) into the new `runs.gps_filter_stats` JSONB column.
 
-iOS: check whether `RunSessionViewModel`'s distance filter has the same "compare against last
-accepted point, never adopt a rejected one" structure. If it does, it has the same permanent
-freeze mode and should get rules 1–3. Rule 4 is optional but cheap — the server accepts any
-JSON object under `gpsFilterStats` on `POST /api/runs`.
+iOS: audited the same day (`HomeScreens.swift` `locationManager(_:didUpdateLocations:)`,
+~3251-3355) — **not affected, no change needed.** `lastLocation = location` is assigned
+unconditionally after every fix that passes the quality guards, accepted delta or not, so the
+reference can never stick on a rejected fix; a jump costs that one delta and tracking continues
+from the new position (equivalent to Android's rule 2). The first-fix guards
+(`horizontalAccuracy < 30`, timestamp within 10 s) also stop a Wi-Fi-grade fix becoming the
+reference at all. Rule 4 is optional but cheap if ever wanted — the server accepts any JSON
+object under `gpsFilterStats` on `POST /api/runs`.
