@@ -44,7 +44,7 @@ const followMsForMeters = (meters: number) => {
 
 // ─── Camera tuning ────────────────────────────────────────────────────────────
 const FOLLOW_ZOOM     = 16.6;  // closer in = lower apparent altitude + more terrain detail
-const FOLLOW_PITCH    = 76;   // near-horizon drone angle so hills read in profile, not top-down
+const FOLLOW_PITCH    = isIOS ? 58 : 76; // iOS uses a stable tilted satellite plane
 const LOOKAHEAD_M     = 95;   // camera centres this far ahead of the marker
 const BRG_LOOKAHEAD_M = 150;  // travel direction sampled over a longer span (smoother turns)
 const POS_SMOOTH      = 0.09; // camera-position easing per frame (lower = smoother/floatier)
@@ -375,7 +375,7 @@ export default function RunVideoShare() {
     // at the correct 9:16 aspect (no stretching). It sits behind the compositor,
     // which is what the user actually sees, so overflow past the preview box is fine.
     const dpr = window.devicePixelRatio || 1;
-    const cssW = Math.round((CW * SUPERSAMPLE) / dpr);
+    const cssW = Math.round((CW * (isIOS ? 1 : SUPERSAMPLE)) / dpr);
     const cssH = Math.round(cssW * (CH / CW)); // enforce exact 9:16 from one dimension
     mapContainerRef.current.style.width  = `${cssW}px`;
     mapContainerRef.current.style.height = `${cssH}px`;
@@ -419,9 +419,15 @@ export default function RunVideoShare() {
     mapRef.current = map;
 
     map.on("load", () => {
-      try {
-        map.setTerrain({ source: "terrain", exaggeration: 2.4 });
-      } catch { /* terrain unsupported — continue flat */ }
+      // The iOS 2D overlay uses map.project(), which samples live DEM tiles.
+      // Tile refinement changes both projected route heights and camera elevation;
+      // waiting for "render" cannot prevent those jumps. Keep its projection flat.
+      // Android retains the original terrain and terrain-aware WebGL route layers.
+      if (!isIOS) {
+        try {
+          map.setTerrain({ source: "terrain", exaggeration: 2.4 });
+        } catch { /* terrain unsupported — continue flat */ }
+      }
 
       try {
         map.setSky({
@@ -1034,6 +1040,7 @@ export default function RunVideoShare() {
     let iosFrameIndex = 0;
     let iosElapsed = 0;
     let iosLastWall = startTsRef.current;
+    let previousTimelineMs = 0;
 
     const tick = (now: number) => {
       if (generation !== animationGenerationRef.current) return;
@@ -1048,6 +1055,12 @@ export default function RunVideoShare() {
       const t = isIOS
         ? (record && useWebCodecsRef.current ? iosFrameIndex * (1000 / 30) : iosElapsed)
         : now - startTsRef.current;
+      // Preserve the same iOS camera response per second in preview and export.
+      // Use logical video time, not encoding wall time, for offline WebCodecs.
+      const frameScale = Math.max(0, t - previousTimelineMs) / (1000 / 60);
+      previousTimelineMs = t;
+      const positionAlpha = isIOS ? 1 - Math.pow(1 - POS_SMOOTH, frameScale) : POS_SMOOTH;
+      const bearingAlpha = isIOS ? 1 - Math.pow(1 - BRG_SMOOTH, frameScale) : BRG_SMOOTH;
       const overall = Math.min(t / totalMs, 1);
       setProgress(overall);
 
@@ -1078,12 +1091,12 @@ export default function RunVideoShare() {
         const brgFrom = interpAt(Math.max(0, d - 20)).pos;
         const brgTo   = interpAt(Math.min(d + BRG_LOOKAHEAD_M, total)).pos;
         const targetBrg = bearing(brgFrom, brgTo);
-        dispBearingRef.current = lerpAngle(dispBearingRef.current, targetBrg, BRG_SMOOTH);
+        dispBearingRef.current = lerpAngle(dispBearingRef.current, targetBrg, bearingAlpha);
 
         // Ease the camera centre toward the look-ahead point (smooth glide, no snapping).
         dispCenterRef.current = [
-          dispCenterRef.current[0] + (ahead[0] - dispCenterRef.current[0]) * POS_SMOOTH,
-          dispCenterRef.current[1] + (ahead[1] - dispCenterRef.current[1]) * POS_SMOOTH,
+          dispCenterRef.current[0] + (ahead[0] - dispCenterRef.current[0]) * positionAlpha,
+          dispCenterRef.current[1] + (ahead[1] - dispCenterRef.current[1]) * positionAlpha,
         ];
 
         map.jumpTo({ center: dispCenterRef.current as any, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
