@@ -12,8 +12,12 @@ const TEAL_GLOW  = "rgba(0,191,255,0.35)";
 const WHITE      = "#ffffff";
 
 // ─── Recording canvas dimensions (9:16 portrait – perfect for stories / reels) ─
-const CW = 1080;
-const CH = 1920;
+// WKWebView has a substantially smaller WebGL/canvas rendering budget. Rendering
+// its 2D fallback at 720p prevents the map + three route strokes from missing
+// multiple consecutive frames; Android keeps its full-resolution WebGL output.
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+const CW = isIOS ? 720 : 1080;
+const CH = isIOS ? 1280 : 1920;
 
 // ─── Free tile sources (no API key) ───────────────────────────────────────────
 // Satellite imagery: ESRI World Imagery (CORS enabled — already used elsewhere).
@@ -54,7 +58,6 @@ const PULSE_MS        = 1600; // marker energy-ring pulse period
 // everything on the 2D compositor canvas instead.  On Android (which supports
 // the full Web Worker API) we use the original MapLibre WebGL layers for the
 // buttery-smooth, perspective-correct "drone follow" experience.
-const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 // ─── Geo helpers ──────────────────────────────────────────────────────────────
 type LngLat = [number, number]; // [lng, lat]
@@ -161,6 +164,7 @@ export default function RunVideoShare() {
   const mapRef          = useRef<maplibregl.Map | null>(null);
   const canvasRef       = useRef<HTMLCanvasElement>(null); // compositor (map + overlays), this is what we record
   const animRef         = useRef<number>(0);
+  const animationGenerationRef = useRef(0);
   const logoImgRef      = useRef<HTMLImageElement | null>(null);
   const recorderRef     = useRef<MediaRecorder | null>(null);
   const chunksRef       = useRef<Blob[]>([]);
@@ -507,6 +511,11 @@ export default function RunVideoShare() {
 
   // ── Draw the 2D overlay: branded intro card cross-fading into the flight HUD ─
   const drawOverlay = useCallback((ctx: CanvasRenderingContext2D, routeProgress: number, tMs: number, run: any, units: "km" | "mi") => {
+    // HUD was designed at 1080×1920. Scale the whole design on iOS instead of
+    // clipping its large title and stat typography in the 720p export.
+    ctx.save();
+    ctx.scale(ctx.canvas.width / 1080, ctx.canvas.height / 1920);
+    const CW = 1080, CH = 1920;
     const runName    = run?.name || run?.routeName || "Run Summary";
     const totalDistM = run?.distance || 0;
     const elevGain   = run?.totalElevationGain || 0;
@@ -659,6 +668,7 @@ export default function RunVideoShare() {
     ctx.shadowColor = TEAL_GLOW; ctx.shadowBlur = 16;
     ctx.fillStyle = g; ctx.fillRect(0, CH - 6, CW * routeProgress, 6);
     ctx.restore();
+    ctx.restore();
   }, []);
 
   // ── Composite the map WebGL canvas + overlay into the recording canvas ──────
@@ -734,14 +744,13 @@ export default function RunVideoShare() {
       };
 
       // Helper: project a list of raw coords (subsampled to maxSeg) to screen pts.
-      const projectCoords = (raw: [number, number][], maxSeg: number): [number, number][] => {
-        const stride = Math.max(1, Math.floor(raw.length / maxSeg));
+      const projectCoords = (raw: [number, number][], stride: number): [number, number][] => {
         const out: [number, number][] = [];
         for (let i = 0; i < raw.length; i += stride) {
           try { out.push(proj([raw[i][0], raw[i][1]])); } catch { /* guard */ }
         }
         // Always include the exact last point
-        if (raw.length > 0) {
+        if (raw.length > 1 && (raw.length - 1) % stride !== 0) {
           try { out.push(proj([raw[raw.length - 1][0], raw[raw.length - 1][1]])); } catch { /* guard */ }
         }
         return out;
@@ -749,7 +758,7 @@ export default function RunVideoShare() {
 
       // Full ghost trace (white, faint) — drawn first so progress line sits on top.
       const allCoords = (coords3dRef.current.length ? coords3dRef.current : coordsRef.current) as [number, number][];
-      const ghostPts = projectCoords(allCoords, 400);
+      const ghostPts = projectCoords(allCoords, Math.max(1, Math.ceil(allCoords.length / 220)));
       if (ghostPts.length >= 2) {
         ctx.save();
         buildClippedPath(ghostPts);
@@ -766,7 +775,9 @@ export default function RunVideoShare() {
       if (routeProgress > 0) {
       const d = routeProgress * (totalRef.current || 0);
       const progressCoords = buildProgressLine(d);
-      const pts = projectCoords(progressCoords as [number, number][], 300);
+      // A fixed stride for the whole run avoids changing every vertex whenever
+      // progress crosses a subsampling threshold (visible as a snapping line).
+      const pts = projectCoords(progressCoords as [number, number][], Math.max(1, Math.ceil(allCoords.length / 220)));
 
       if (pts.length >= 2) {
         const buildPath = () => buildClippedPath(pts);
@@ -894,6 +905,7 @@ export default function RunVideoShare() {
     if (!canvas || !map || coordsRef.current.length < 2) return;
 
     cancelAnimationFrame(animRef.current);
+    const generation = ++animationGenerationRef.current;
     chunksRef.current = [];
     dispBearingRef.current = bearing(coordsRef.current[0], coordsRef.current[1]);
     dispCenterRef.current = interpAt(LOOKAHEAD_M).pos;
@@ -1019,9 +1031,23 @@ export default function RunVideoShare() {
     // Timeline scaled to this run's distance (longer runs → longer, watchable flyovers).
     const followMs = followMsForMeters(run?.distance || 0);
     const totalMs  = INTRO_MS + followMs + OUTRO_MS;
+    let iosFrameIndex = 0;
+    let iosElapsed = 0;
+    let iosLastWall = startTsRef.current;
 
     const tick = (now: number) => {
-      const t = now - startTsRef.current;
+      if (generation !== animationGenerationRef.current) return;
+      // On iOS, advancing the route by wall time skips hundreds of metres when
+      // WKWebView needs more than 33ms to draw a map frame. WebCodecs can encode
+      // at a fixed 30fps timeline regardless of rendering speed. MediaRecorder
+      // uses wall-clock timestamps, so bound each step there instead of jumping.
+      if (isIOS && !(record && useWebCodecsRef.current)) {
+        iosElapsed += Math.min(Math.max(now - iosLastWall, 0), 50);
+        iosLastWall = now;
+      }
+      const t = isIOS
+        ? (record && useWebCodecsRef.current ? iosFrameIndex * (1000 / 30) : iosElapsed)
+        : now - startTsRef.current;
       const overall = Math.min(t / totalMs, 1);
       setProgress(overall);
 
@@ -1102,10 +1128,12 @@ export default function RunVideoShare() {
         }
       }
 
-      compositeFrame(routeProgress, t);
+      const captureFrame = () => {
+        if (generation !== animationGenerationRef.current) return;
+        compositeFrame(routeProgress, t);
 
-      // ── WebCodecs: encode this frame with an explicit timestamp (throttled to ~30fps). ──
-      if (useWebCodecsRef.current && videoEncoderRef.current) {
+        // ── WebCodecs: encode this frame with an explicit timestamp (throttled to ~30fps). ──
+        if (useWebCodecsRef.current && videoEncoderRef.current) {
         const enc = videoEncoderRef.current;
         if (enc.state === "configured" && (lastEncMsRef.current < 0 || t - lastEncMsRef.current >= 33)) {
           try {
@@ -1124,19 +1152,31 @@ export default function RunVideoShare() {
             if (!encErrRef.current) encErrRef.current = `frame: ${e?.message || e}`;
           }
         }
-      }
+        }
 
-      if (t < totalMs) {
-        animRef.current = requestAnimationFrame(tick);
-      } else if (record) {
-        stopTimeoutRef.current = window.setTimeout(() => {
-          if (useWebCodecsRef.current) finishWebCodecs();
-          else if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-          else { setErrorDetail("no recorder was active"); setStatus("error"); } // nothing was saved
-        }, HOLD_MS);
+        if (t < totalMs) {
+          if (isIOS) iosFrameIndex++;
+          animRef.current = requestAnimationFrame(tick);
+        } else if (record) {
+          stopTimeoutRef.current = window.setTimeout(() => {
+            if (generation !== animationGenerationRef.current) return;
+            if (useWebCodecsRef.current) finishWebCodecs();
+            else if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+            else { setErrorDetail("no recorder was active"); setStatus("error"); }
+          }, HOLD_MS);
+        } else {
+          setStatus("idle");
+        }
+      };
+
+      if (isIOS) {
+        // map.jumpTo schedules a WebGL repaint. Projecting the line before that
+        // repaint pairs a new-camera marker with an old-camera satellite frame.
+        // Capture only after MapLibre has rendered this camera position.
+        map.once("render", captureFrame);
+        map.triggerRepaint();
       } else {
-        // Preview finished — nothing was saved, so return to the idle controls.
-        setStatus("idle");
+        captureFrame();
       }
     };
 
@@ -1144,6 +1184,7 @@ export default function RunVideoShare() {
   }, [runId, run, interpAt, buildProgressLine, compositeFrame, finishWebCodecs, triggerDownload]);
 
   const stopAll = useCallback(() => {
+    animationGenerationRef.current++;
     cancelAnimationFrame(animRef.current);
     if (stopTimeoutRef.current !== null) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
@@ -1241,6 +1282,7 @@ export default function RunVideoShare() {
   }, []);
 
   useEffect(() => () => {
+    animationGenerationRef.current++;
     cancelAnimationFrame(animRef.current);
     if (stopTimeoutRef.current !== null) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
     if (recorderRef.current?.state === "recording") { try { recorderRef.current.stop(); } catch { /* already stopped */ } }
