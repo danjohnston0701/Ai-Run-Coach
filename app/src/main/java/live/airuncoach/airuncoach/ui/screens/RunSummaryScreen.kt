@@ -319,6 +319,11 @@ fun RunSummaryScreenFlagship(
                             isLoadingAdaptations = viewModel.isLoadingAdaptations.collectAsState().value,
                             onAcceptAdaptation = { adaptationId -> viewModel.acceptAdaptation(adaptationId) },
                             onDeclineAdaptation = { adaptationId -> viewModel.declineAdaptation(adaptationId) },
+                            endTrim = viewModel.endTrim.collectAsState().value,
+                            isEndTrimBusy = viewModel.isEndTrimBusy.collectAsState().value,
+                            onApplyEndTrim = viewModel::applyEndTrim,
+                            onDismissEndTrim = viewModel::dismissEndTrim,
+                            onUndoEndTrim = viewModel::undoEndTrim,
                         )
 
                         // Tab 1: Group Run leaderboard (only when run is linked to a group run)
@@ -1162,6 +1167,11 @@ internal fun AiInsightsTabContent(
     isLoadingAdaptations: Boolean = false,
     onAcceptAdaptation: (String) -> Unit = {},
     onDeclineAdaptation: (String) -> Unit = {},
+    endTrim: live.airuncoach.airuncoach.network.model.RunEndTrimResponse? = null,
+    isEndTrimBusy: Boolean = false,
+    onApplyEndTrim: () -> Unit = {},
+    onDismissEndTrim: () -> Unit = {},
+    onUndoEndTrim: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -1217,6 +1227,19 @@ internal fun AiInsightsTabContent(
                 lastRunForDelta = lastRunForDelta,
                 onShare = onShareCard
             )
+        }
+
+        // "Forgot to stop" — suggest trimming the walk/standstill recorded after the finish
+        if (endTrim?.status == "suggested" || endTrim?.status == "applied") {
+            item {
+                EndTrimCard(
+                    endTrim = endTrim,
+                    isBusy = isEndTrimBusy,
+                    onApply = onApplyEndTrim,
+                    onDismiss = onDismissEndTrim,
+                    onUndo = onUndoEndTrim
+                )
+            }
         }
 
         // Coaching Plan Badge — show if this run is part of a coaching plan
@@ -9255,6 +9278,120 @@ private fun ErrorViewFlagship(
 }
 
 /* -------------------------------- GARMIN RECOGNITION --------------------------------- */
+
+/** m:ss, or h:mm:ss past an hour. */
+private fun formatEndTrimClock(totalSeconds: Int): String {
+    val s = totalSeconds.coerceAtLeast(0)
+    val h = s / 3600
+    val m = (s % 3600) / 60
+    val sec = s % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
+}
+
+/**
+ * "Forgot to stop" card (server/run-end-trim.ts): the runner kept recording after they'd
+ * finished, so the saved time/pace include a walk or standstill. Suggests trimming to the
+ * detected finish; once trimmed, collapses to a one-line note with Undo.
+ */
+@Composable
+private fun EndTrimCard(
+    endTrim: live.airuncoach.airuncoach.network.model.RunEndTrimResponse,
+    isBusy: Boolean,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+    onUndo: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.45f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            val applied = endTrim.applied
+            val suggestion = endTrim.suggestion
+            if (endTrim.status == "applied" && applied != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "✂️ Trimmed ${formatEndTrimClock(applied.removedSeconds ?: 0)} recorded after you finished" +
+                            (applied.originalDurationSec?.let { " (was ${formatEndTrimClock(it)}" } ?: "") +
+                            (applied.originalAvgPace?.let { ", $it/km)" } ?: if (applied.originalDurationSec != null) ")" else ""),
+                        style = AppTextStyles.small,
+                        color = Colors.textSecondary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onUndo, enabled = !isBusy) {
+                        Text("Undo", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
+                    }
+                }
+            } else if (suggestion != null) {
+                val removed = formatEndTrimClock(suggestion.removedSeconds ?: 0)
+                Text(
+                    text = "Forgot to stop?",
+                    style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+                Text(
+                    text = (if (suggestion.tailKind == "walk") "Looks like you finished running at " else "Looks like you stopped moving at ") +
+                        "${formatEndTrimClock(suggestion.newDurationSec ?: 0)} and kept recording for another $removed. " +
+                        "Trim the run to when you actually finished?",
+                    style = AppTextStyles.small,
+                    color = Colors.textSecondary
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    EndTrimStat("Time", formatEndTrimClock(suggestion.newDurationSec ?: 0), suggestion.originalDurationSec?.let { formatEndTrimClock(it) })
+                    EndTrimStat("Distance", "%.2f km".format(suggestion.newDistanceKm ?: 0.0), suggestion.originalDistanceKm?.let { "%.2f km".format(it) })
+                    EndTrimStat("Avg pace", "${suggestion.newAvgPace ?: "--"}/km", suggestion.originalAvgPace?.let { "$it/km" })
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Keep as recorded", style = AppTextStyles.small, color = Colors.textSecondary)
+                    }
+                    Button(
+                        onClick = onApply,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                    ) {
+                        if (isBusy) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                        } else {
+                            Text("Trim run", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EndTrimStat(label: String, value: String, was: String?) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label.uppercase(), style = AppTextStyles.caption, color = Colors.textMuted)
+        Text(value, style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+        if (was != null) {
+            Text("was $was", style = AppTextStyles.caption, color = Colors.textMuted)
+        }
+    }
+}
 
 @Composable
 private fun GarminEnrichCTACard(

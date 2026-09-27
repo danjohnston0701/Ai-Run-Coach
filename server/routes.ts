@@ -96,6 +96,7 @@ import guestTourRouter, { markGuestTourConverted } from "./routes-guest-tour";
 import { runDistanceKm } from "./utils/run-units";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
+import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
@@ -149,6 +150,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", googlePlayRouter); // Google Play RTDN (Pub/Sub push) — see routes-google-play.ts
   app.use("/api", guestTourRouter); // pre-login "Take a Tour" tracking — see routes-guest-tour.ts
   registerSessionCoachingRoutes(app);
+  registerRunEndTrimRoutes(app, transformRunForAndroid); // "forgot to stop" Run Summary trim
 
   // Version probe — tells us immediately which build is running
   app.get("/api/version", (_req: Request, res: Response) => {

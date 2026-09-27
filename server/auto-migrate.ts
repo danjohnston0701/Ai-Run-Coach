@@ -298,6 +298,12 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.coaching_insight",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS coaching_insight JSONB",
     },
+    {
+      // "Forgot to stop" end-trim state + pre-trim snapshot (2026-09-27). Canonical copy:
+      // migrations/20260927_runs_end_trim.sql
+      name: "runs.end_trim",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS end_trim JSONB",
+    },
 
     // ── live_run_sessions — columns added after initial table creation ────────
     // These columns exist in shared/schema.ts but may be missing from the DB if

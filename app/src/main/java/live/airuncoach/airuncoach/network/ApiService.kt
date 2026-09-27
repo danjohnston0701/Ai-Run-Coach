@@ -370,6 +370,19 @@ interface ApiService {
         @Body request: RenameRunRequest
     ): RunSession
 
+    // "Forgot to stop" end trim — see server/routes-run-end-trim.ts
+    @GET("/api/runs/{id}/end-trim")
+    suspend fun getRunEndTrim(@Path("id") runId: String): RunEndTrimResponse
+
+    @POST("/api/runs/{id}/end-trim/apply")
+    suspend fun applyRunEndTrim(@Path("id") runId: String): RunEndTrimActionResponse
+
+    @POST("/api/runs/{id}/end-trim/dismiss")
+    suspend fun dismissRunEndTrim(@Path("id") runId: String): RunEndTrimResponse
+
+    @POST("/api/runs/{id}/end-trim/undo")
+    suspend fun undoRunEndTrim(@Path("id") runId: String): RunEndTrimActionResponse
+
     @PATCH("/api/runs/{id}/coaching-notes")
     suspend fun patchCoachingNotes(
         @Path("id") runId: String,

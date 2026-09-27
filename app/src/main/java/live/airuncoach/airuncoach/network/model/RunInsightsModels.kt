@@ -221,6 +221,45 @@ data class RenameRunRequest(
 )
 
 /**
+ * "Forgot to stop" end trim — GET /api/runs/{id}/end-trim (server/routes-run-end-trim.ts).
+ * status: "none" | "suggested" | "applied" | "dismissed". [suggestion] is set when "suggested",
+ * [applied] when "applied" (drives the "Trimmed … · Undo" line).
+ */
+data class RunEndTrimResponse(
+    @SerializedName("status") val status: String? = null,
+    @SerializedName("suggestion") val suggestion: RunEndTrimSuggestion? = null,
+    @SerializedName("applied") val applied: RunEndTrimApplied? = null
+)
+
+data class RunEndTrimSuggestion(
+    @SerializedName("finishedAtMs") val finishedAtMs: Long? = null,
+    @SerializedName("newDistanceKm") val newDistanceKm: Double? = null,
+    @SerializedName("newDurationSec") val newDurationSec: Int? = null,
+    @SerializedName("newAvgPace") val newAvgPace: String? = null,
+    @SerializedName("removedSeconds") val removedSeconds: Int? = null,
+    @SerializedName("removedMeters") val removedMeters: Int? = null,
+    /** "walk" (walked after finishing) or "stationary" (stood still). */
+    @SerializedName("tailKind") val tailKind: String? = null,
+    @SerializedName("originalDistanceKm") val originalDistanceKm: Double? = null,
+    @SerializedName("originalDurationSec") val originalDurationSec: Int? = null,
+    @SerializedName("originalAvgPace") val originalAvgPace: String? = null
+)
+
+data class RunEndTrimApplied(
+    @SerializedName("removedSeconds") val removedSeconds: Int? = null,
+    @SerializedName("removedMeters") val removedMeters: Int? = null,
+    @SerializedName("originalDistanceKm") val originalDistanceKm: Double? = null,
+    @SerializedName("originalDurationSec") val originalDurationSec: Int? = null,
+    @SerializedName("originalAvgPace") val originalAvgPace: String? = null
+)
+
+/** POST /api/runs/{id}/end-trim/apply and /undo — the updated run plus its new trim state. */
+data class RunEndTrimActionResponse(
+    @SerializedName("run") val run: live.airuncoach.airuncoach.domain.model.RunSession? = null,
+    @SerializedName("endTrim") val endTrim: RunEndTrimResponse? = null
+)
+
+/**
  * Request: attach locally-accumulated coaching notes to a run the server already created
  * (e.g. via the Garmin companion session/end path) without this device's own coaching context.
  */

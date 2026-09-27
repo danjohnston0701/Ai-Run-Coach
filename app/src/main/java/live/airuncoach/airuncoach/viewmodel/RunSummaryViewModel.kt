@@ -143,6 +143,12 @@ class RunSummaryViewModel @Inject constructor(
     val isLoadingRacePredictions: StateFlow<Boolean> = _isLoadingRacePredictions.asStateFlow()
     // ───────────────────────────────────────────────────────────────────────────
 
+    // ── "Forgot to stop" end trim (server/routes-run-end-trim.ts) ──────────────
+    private val _endTrim = MutableStateFlow<RunEndTrimResponse?>(null)
+    val endTrim: StateFlow<RunEndTrimResponse?> = _endTrim.asStateFlow()
+    private val _isEndTrimBusy = MutableStateFlow(false)
+    val isEndTrimBusy: StateFlow<Boolean> = _isEndTrimBusy.asStateFlow()
+
     // ── Adaptive Plan Updates ──────────────────────────────────────────────────
     private val _pendingAdaptations = MutableStateFlow<List<PendingAdaptation>>(emptyList())
     val pendingAdaptations: StateFlow<List<PendingAdaptation>> = _pendingAdaptations.asStateFlow()
@@ -218,6 +224,9 @@ class RunSummaryViewModel @Inject constructor(
 
                 // Load race predictions (Riegel formula) for this run
                 loadRacePredictions(resolvedId)
+
+                // Did the runner keep recording after they'd finished? (never for watch/imports)
+                if (isExternalRun) _endTrim.value = null else loadEndTrim(resolvedId)
 
                 // Load pending adaptations if this run is linked to a coaching plan
                 Log.d("AdaptationDebug", "🏃 Run loaded: id=$resolvedId linkedPlanId=${session.linkedPlanId}")
@@ -1451,6 +1460,65 @@ class RunSummaryViewModel @Inject constructor(
                 _racePredictions.value = null
             } finally {
                 _isLoadingRacePredictions.value = false
+            }
+        }
+    }
+
+    // ── "Forgot to stop" end trim ─────────────────────────────────────────────
+
+    private fun loadEndTrim(runId: String) {
+        viewModelScope.launch {
+            _endTrim.value = try {
+                apiService.getRunEndTrim(runId)
+            } catch (_: Exception) {
+                null // Not fatal — the card just doesn't show (older server, not the owner, offline)
+            }
+        }
+    }
+
+    /** Trim the run to where the runner actually finished; the server re-detects the point itself. */
+    fun applyEndTrim() = runEndTrimAction { apiService.applyRunEndTrim(it) }
+
+    /** Restore the run exactly as recorded. */
+    fun undoEndTrim() = runEndTrimAction { apiService.undoRunEndTrim(it) }
+
+    /** Keep the run as recorded — the suggestion won't be shown again. */
+    fun dismissEndTrim() {
+        val runId = currentRunId ?: _runSession.value?.id ?: return
+        val previous = _endTrim.value
+        _endTrim.value = RunEndTrimResponse(status = "dismissed")
+        viewModelScope.launch {
+            try {
+                apiService.dismissRunEndTrim(runId)
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Failed to dismiss end trim: ${e.message}", e)
+                _endTrim.value = previous
+            }
+        }
+    }
+
+    private fun runEndTrimAction(call: suspend (String) -> RunEndTrimActionResponse) {
+        val runId = currentRunId ?: _runSession.value?.id ?: return
+        if (_isEndTrimBusy.value) return
+        viewModelScope.launch {
+            _isEndTrimBusy.value = true
+            try {
+                val response = call(runId)
+                response.run?.let { session ->
+                    _runSession.value = session
+                    _strugglePoints.value = session.strugglePoints.ifEmpty { inferStrugglePointsFromSplits(session) }
+                }
+                _endTrim.value = response.endTrim
+                // Distance/time/pace changed — refresh cached copies, PB badges and predictions.
+                runRepository.invalidateRunById(runId)
+                getUserIdFromPrefs()?.let { runRepository.invalidateRunsForUser(it) }
+                checkPersonalBests(runId)
+                loadRacePredictions(runId)
+            } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "End trim action failed: ${e.message}", e)
+                loadEndTrim(runId) // resync the card with the server's actual state
+            } finally {
+                _isEndTrimBusy.value = false
             }
         }
     }

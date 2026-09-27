@@ -444,6 +444,12 @@ export const runs = pgTable("runs", {
   // appropriate/inappropriate, and a concrete recommendation for the runner's next session.
   // Shape: { reason: string, recommendation: string, adjustmentType: string, needsAdjustment: boolean }
   coachingInsight: jsonb("coaching_insight"),
+
+  // ── "Forgot to stop" end trim (server/run-end-trim.ts) ──
+  // null = never actioned. { status: "applied", original: {...pre-trim columns} } after the
+  // runner accepts the Run Summary suggestion (original is restored verbatim by Undo), or
+  // { status: "dismissed" } once they choose to keep the run as recorded.
+  endTrim: jsonb("end_trim"),
 });
 
 // Watch Biometric Samples table
