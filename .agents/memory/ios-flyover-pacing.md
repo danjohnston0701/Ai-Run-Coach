@@ -1,16 +1,15 @@
 ---
 name: iOS flyover frame pacing
-description: Why iOS run-share video capture differs from Android and how to keep its map, route, and video clock synchronized.
+description: Why the iOS run-share video is rendered frame-by-frame (stepped) while Android records in real time, and what not to undo.
 ---
 
-Keep iOS canvas compositing paired with a completed MapLibre repaint after each camera move. On iOS, the route and marker are projected by the 2D canvas fallback rather than MapLibre layers, so projecting them against a new camera while copying the previous WebGL map frame makes the route appear to lag or jump. For WebCodecs recording, use fixed video-time increments per rendered frame, not elapsed wall time; for MediaRecorder fallback, limit route-clock advances when the browser stalls. Preserve Android's WebGL layers and existing real-time timing.
+iOS records the run flyover in **stepped mode** (`STEPPED_RENDER` in `client/src/pages/RunVideoShare.tsx`): for each output frame the timeline advances exactly 1/30s, the camera/route/marker are set, the page waits for MapLibre's `idle` event (camera drawn with every tile loaded, capped by `STEP_FRAME_TIMEOUT_MS`), then composites and encodes that frame via WebCodecs with an explicit timestamp. Output is perfectly smooth at any device speed; slow devices only take longer to generate. iOS uses the SAME renderer as Android: 1080×1920, terrain (exaggeration 2.4), 76° pitch, MapLibre WebGL route/marker layers.
 
-**Why:** WKWebView can take longer than a frame to render satellite terrain and project a dense route. Wall-time animation skips large route distances after slow frames, while immediate post-camera compositing combines mismatched camera frames.
+**Why:** The old real-time recorder drove the camera by wall-clock time and captured whatever frames got drawn. Android renders the 3D scene at ~60fps so it looked smooth; iPhone WebKit drops frames, so the camera lurched between them and half-loaded tiles popped in. The earlier iOS workaround (720p, terrain off, 58° pitch, 2D-canvas route overlay) was rejected: it downgraded iOS to 2D, and its `/iPhone|iPad|iPod/` check never matched inside the iOS app anyway — `RunVideoView.swift` gives the WKWebView a desktop-Mac user agent — so detection is now "iPhone/iPad UA OR Macintosh UA with touch points". The claim that WKWebView blocks MapLibre's blob-URL workers (GeoJSON `setData`) is false — verified 2026-09-27 in iOS Simulator Safari: terrain, route line and marker all render, and a stepped export came out at exactly 30fps with no dropped/duplicated frames.
 
-**How to apply:** When changing video rendering, check both map repaint/canvas projection synchronization and the encoded timeline. Avoid dynamic progress-dependent route subsampling strides because those reshuffle line vertices as the route grows. iOS on-device export still needs real-device verification; a desktop preview does not exercise WKWebView performance.
-
-Keep the iOS canvas-overlay renderer on a non-terrain satellite plane unless replacing its projection strategy. Keep Android's terrain renderer independent.
-
-**Why:** Render-event synchronization alone did not resolve reported iOS jumping. MapLibre's public `project()` samples live DEM elevation when terrain is enabled; tile refinement can shift projected points and camera elevation even when capture follows a completed render. Removing terrain is an intentional stability/visual-detail tradeoff, not a verified on-device cure.
-
-**How to apply:** Do not re-enable raised terrain on iOS just to match Android's appearance without verifying elevation stability on an actual iPhone. Camera smoothing should use logical animation-time deltas so preview and fixed-step encoding have comparable response.
+**How to apply:**
+- Don't reintroduce iOS-specific downgrades (lower resolution, no terrain, flatter pitch, 2D route overlay) to "fix" jank — jank means frames aren't being waited for, not that the scene is too heavy.
+- Satellite `raster-fade-duration` is 0 in stepped mode so tiles aren't captured mid-fade.
+- Android intentionally still records in real time (`STEPPED_RENDER = isIOS`); switching Android to stepped is possible but untested there.
+- The MediaRecorder fallback (no WebCodecs) can't be stepped — it stays real-time on every platform.
+- Still needs confirmation on a real iPhone inside the app (generation time especially — ~5 min in the Simulator, whose WebGL is far slower than a device).

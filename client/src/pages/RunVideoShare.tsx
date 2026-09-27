@@ -12,12 +12,8 @@ const TEAL_GLOW  = "rgba(0,191,255,0.35)";
 const WHITE      = "#ffffff";
 
 // ─── Recording canvas dimensions (9:16 portrait – perfect for stories / reels) ─
-// WKWebView has a substantially smaller WebGL/canvas rendering budget. Rendering
-// its 2D fallback at 720p prevents the map + three route strokes from missing
-// multiple consecutive frames; Android keeps its full-resolution WebGL output.
-const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-const CW = isIOS ? 720 : 1080;
-const CH = isIOS ? 1280 : 1920;
+const CW = 1080;
+const CH = 1920;
 
 // ─── Free tile sources (no API key) ───────────────────────────────────────────
 // Satellite imagery: ESRI World Imagery (CORS enabled — already used elsewhere).
@@ -44,7 +40,7 @@ const followMsForMeters = (meters: number) => {
 
 // ─── Camera tuning ────────────────────────────────────────────────────────────
 const FOLLOW_ZOOM     = 16.6;  // closer in = lower apparent altitude + more terrain detail
-const FOLLOW_PITCH    = isIOS ? 58 : 76; // iOS uses a stable tilted satellite plane
+const FOLLOW_PITCH    = 76;   // near-horizon drone angle so hills read in profile, not top-down
 const LOOKAHEAD_M     = 95;   // camera centres this far ahead of the marker
 const BRG_LOOKAHEAD_M = 150;  // travel direction sampled over a longer span (smoother turns)
 const POS_SMOOTH      = 0.09; // camera-position easing per frame (lower = smoother/floatier)
@@ -53,11 +49,22 @@ const SUPERSAMPLE     = 1.25; // render the map above output res, then downscale
 const PULSE_MS        = 1600; // marker energy-ring pulse period
 
 // ─── Platform detection ───────────────────────────────────────────────────────
-// iOS WKWebView blocks blob-URL Web Workers, which MapLibre uses for GeoJSON
-// setData() processing — so on iOS we skip all MapLibre route layers and draw
-// everything on the 2D compositor canvas instead.  On Android (which supports
-// the full Web Worker API) we use the original MapLibre WebGL layers for the
-// buttery-smooth, perspective-correct "drone follow" experience.
+// The iOS app's WKWebView presents a desktop-Safari user agent (so the server serves
+// the SPA rather than the "open the app" page), so "Macintosh + touch" also means iOS.
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+// Frame-stepped ("offline") recording. The real-time recorder captures whatever frames the
+// device manages to draw, with the camera driven by wall-clock time — fine on Android, where
+// the 3D scene renders at ~60fps, but on iPhone WebKit the heavy terrain scene drops frames,
+// so the recorded camera lurches between them and half-loaded tiles pop in on camera. Stepped
+// mode instead advances time by exactly 1/30s per frame, waits for MapLibre to finish drawing
+// that exact camera (tiles included), then encodes it — perfectly smooth output regardless of
+// device speed; slower devices just take longer to generate. Needs WebCodecs (explicit frame
+// timestamps); the MediaRecorder fallback stays real-time.
+const STEPPED_RENDER = isIOS;
+const STEP_FPS = 30;
+const STEP_FRAME_TIMEOUT_MS = 2500; // never stall a frame forever on a tile that won't load
 
 // ─── Geo helpers ──────────────────────────────────────────────────────────────
 type LngLat = [number, number]; // [lng, lat]
@@ -164,7 +171,6 @@ export default function RunVideoShare() {
   const mapRef          = useRef<maplibregl.Map | null>(null);
   const canvasRef       = useRef<HTMLCanvasElement>(null); // compositor (map + overlays), this is what we record
   const animRef         = useRef<number>(0);
-  const animationGenerationRef = useRef(0);
   const logoImgRef      = useRef<HTMLImageElement | null>(null);
   const recorderRef     = useRef<MediaRecorder | null>(null);
   const chunksRef       = useRef<Blob[]>([]);
@@ -188,6 +194,7 @@ export default function RunVideoShare() {
   const muxStatsRef = useRef<{ added: number; failed: number; firstErr: string }>({ added: 0, failed: 0, firstErr: "" });
   const videoFileRef = useRef<{ blob: Blob; name: string } | null>(null); // finished video, kept so Download/Share can be tapped repeatedly
   const encErrRef       = useRef<string>("");           // first runtime encoder/frame error (surfaced to UI)
+  const recordGenRef    = useRef<number>(0);            // bumped to cancel an in-flight stepped recording
 
   // Route geometry
   const coordsRef  = useRef<LngLat[]>([]);
@@ -375,7 +382,7 @@ export default function RunVideoShare() {
     // at the correct 9:16 aspect (no stretching). It sits behind the compositor,
     // which is what the user actually sees, so overflow past the preview box is fine.
     const dpr = window.devicePixelRatio || 1;
-    const cssW = Math.round((CW * (isIOS ? 1 : SUPERSAMPLE)) / dpr);
+    const cssW = Math.round((CW * SUPERSAMPLE) / dpr);
     const cssH = Math.round(cssW * (CH / CW)); // enforce exact 9:16 from one dimension
     mapContainerRef.current.style.width  = `${cssW}px`;
     mapContainerRef.current.style.height = `${cssH}px`;
@@ -412,22 +419,19 @@ export default function RunVideoShare() {
         },
         layers: [
           { id: "bg", type: "background", paint: { "background-color": "#0a0a0f" } },
-          { id: "satellite", type: "raster", source: "satellite" },
+          // Stepped recording waits for each frame to be fully drawn, so a tile fading in over
+          // real time would be captured half-transparent — show tiles at full opacity instead.
+          { id: "satellite", type: "raster", source: "satellite",
+            ...(STEPPED_RENDER ? { paint: { "raster-fade-duration": 0 } } : {}) },
         ],
       },
     });
     mapRef.current = map;
 
     map.on("load", () => {
-      // The iOS 2D overlay uses map.project(), which samples live DEM tiles.
-      // Tile refinement changes both projected route heights and camera elevation;
-      // waiting for "render" cannot prevent those jumps. Keep its projection flat.
-      // Android retains the original terrain and terrain-aware WebGL route layers.
-      if (!isIOS) {
-        try {
-          map.setTerrain({ source: "terrain", exaggeration: 2.4 });
-        } catch { /* terrain unsupported — continue flat */ }
-      }
+      try {
+        map.setTerrain({ source: "terrain", exaggeration: 2.4 });
+      } catch { /* terrain unsupported — continue flat */ }
 
       try {
         map.setSky({
@@ -443,46 +447,40 @@ export default function RunVideoShare() {
       const coords3d = coords3dRef.current;
       const start3d  = coords3d[0] ?? [start[0], start[1]];
 
-      // On Android (isIOS === false) we use full MapLibre WebGL layers for the
-      // original high-quality perspective-correct drone-follow experience.
-      // On iOS, blob-URL Web Workers are blocked so setData() silently fails;
-      // those platforms fall back to 2D canvas drawing inside compositeFrame.
-      if (!isIOS) {
-        // ── Ghost trace (full route, faint white) ──
-        const fullLine = { type: "Feature", geometry: { type: "LineString", coordinates: coords3d }, properties: {} };
-        map.addSource("routeFull", { type: "geojson", data: fullLine as any });
-        map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
+      // ── Ghost trace (full route, faint white) ──
+      const fullLine = { type: "Feature", geometry: { type: "LineString", coordinates: coords3d }, properties: {} };
+      map.addSource("routeFull", { type: "geojson", data: fullLine as any });
+      map.addLayer({ id: "routeFull", type: "line", source: "routeFull",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-opacity": 0.22, "line-width": 5 } });
 
-        // ── Animated progress line ──
-        const emptyLine = { type: "Feature", geometry: { type: "LineString", coordinates: [start3d, start3d] }, properties: {} };
-        map.addSource("routeProgress", { type: "geojson", data: emptyLine as any });
-        map.addLayer({ id: "routeProgressGlow", type: "line", source: "routeProgress",
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": TEAL, "line-opacity": 0.35, "line-width": 44, "line-blur": 8 } });
-        map.addLayer({ id: "routeProgress", type: "line", source: "routeProgress",
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": TEAL, "line-opacity": 0.9, "line-width": 24 } });
-        map.addLayer({ id: "routeCore", type: "line", source: "routeProgress",
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#eaffff", "line-opacity": 0.9, "line-width": 8 } });
+      // ── Animated progress line ──
+      const emptyLine = { type: "Feature", geometry: { type: "LineString", coordinates: [start3d, start3d] }, properties: {} };
+      map.addSource("routeProgress", { type: "geojson", data: emptyLine as any });
+      map.addLayer({ id: "routeProgressGlow", type: "line", source: "routeProgress",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": TEAL, "line-opacity": 0.35, "line-width": 44, "line-blur": 8 } });
+      map.addLayer({ id: "routeProgress", type: "line", source: "routeProgress",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": TEAL, "line-opacity": 0.9, "line-width": 24 } });
+      map.addLayer({ id: "routeCore", type: "line", source: "routeProgress",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#eaffff", "line-opacity": 0.9, "line-width": 8 } });
 
-        // ── Animated head marker ──
-        const headPt = { type: "Feature", geometry: { type: "Point", coordinates: start3d }, properties: {} };
-        map.addSource("head", { type: "geojson", data: headPt as any });
-        map.addLayer({ id: "headPulse1", type: "circle", source: "head",
-          paint: { "circle-radius": 12, "circle-color": "transparent",
-                   "circle-stroke-width": 2.5, "circle-stroke-color": TEAL, "circle-stroke-opacity": 0.6, "circle-opacity": 0 } });
-        map.addLayer({ id: "headPulse2", type: "circle", source: "head",
-          paint: { "circle-radius": 12, "circle-color": "transparent",
-                   "circle-stroke-width": 2.5, "circle-stroke-color": TEAL, "circle-stroke-opacity": 0.45, "circle-opacity": 0 } });
-        map.addLayer({ id: "headGlow", type: "circle", source: "head",
-          paint: { "circle-radius": 14, "circle-color": TEAL, "circle-opacity": 0.4, "circle-blur": 0.6 } });
-        map.addLayer({ id: "headDot", type: "circle", source: "head",
-          paint: { "circle-radius": 9, "circle-color": WHITE,
-                   "circle-stroke-width": 4, "circle-stroke-color": TEAL, "circle-opacity": 1 } });
-      }
+      // ── Animated head marker ──
+      const headPt = { type: "Feature", geometry: { type: "Point", coordinates: start3d }, properties: {} };
+      map.addSource("head", { type: "geojson", data: headPt as any });
+      map.addLayer({ id: "headPulse1", type: "circle", source: "head",
+        paint: { "circle-radius": 12, "circle-color": "transparent",
+                 "circle-stroke-width": 2.5, "circle-stroke-color": TEAL, "circle-stroke-opacity": 0.6, "circle-opacity": 0 } });
+      map.addLayer({ id: "headPulse2", type: "circle", source: "head",
+        paint: { "circle-radius": 12, "circle-color": "transparent",
+                 "circle-stroke-width": 2.5, "circle-stroke-color": TEAL, "circle-stroke-opacity": 0.45, "circle-opacity": 0 } });
+      map.addLayer({ id: "headGlow", type: "circle", source: "head",
+        paint: { "circle-radius": 14, "circle-color": TEAL, "circle-opacity": 0.4, "circle-blur": 0.6 } });
+      map.addLayer({ id: "headDot", type: "circle", source: "head",
+        paint: { "circle-radius": 9, "circle-color": WHITE,
+                 "circle-stroke-width": 4, "circle-stroke-color": TEAL, "circle-opacity": 1 } });
 
       // Pre-compute the "whole route" overview camera used for the outro.
       const bounds = coords.reduce(
@@ -517,11 +515,6 @@ export default function RunVideoShare() {
 
   // ── Draw the 2D overlay: branded intro card cross-fading into the flight HUD ─
   const drawOverlay = useCallback((ctx: CanvasRenderingContext2D, routeProgress: number, tMs: number, run: any, units: "km" | "mi") => {
-    // HUD was designed at 1080×1920. Scale the whole design on iOS instead of
-    // clipping its large title and stat typography in the 720p export.
-    ctx.save();
-    ctx.scale(ctx.canvas.width / 1080, ctx.canvas.height / 1920);
-    const CW = 1080, CH = 1920;
     const runName    = run?.name || run?.routeName || "Run Summary";
     const totalDistM = run?.distance || 0;
     const elevGain   = run?.totalElevationGain || 0;
@@ -674,7 +667,6 @@ export default function RunVideoShare() {
     ctx.shadowColor = TEAL_GLOW; ctx.shadowBlur = 16;
     ctx.fillStyle = g; ctx.fillRect(0, CH - 6, CW * routeProgress, 6);
     ctx.restore();
-    ctx.restore();
   }, []);
 
   // ── Composite the map WebGL canvas + overlay into the recording canvas ──────
@@ -712,123 +704,8 @@ export default function RunVideoShare() {
     vig.addColorStop(1, "rgba(3,5,12,0.55)");
     ctx.fillStyle = vig; ctx.fillRect(0, 0, CW, CH);
 
-    // ── 2D canvas route lines + head marker (iOS only) ───────────────────────
-    // On iOS WKWebView, blob-URL Web Workers are blocked so MapLibre GeoJSON
-    // setData() silently does nothing.  We draw the route entirely on this 2D
-    // canvas via map.project() instead.  On Android the MapLibre WebGL layers
-    // (added in map init above) handle this with full perspective-correct 3D
-    // rendering — no 2D canvas drawing needed there.
-    if (isIOS && map) {
-      const container = map.getContainer();
-      const cssW = container.offsetWidth  || 1;
-      const cssH = container.offsetHeight || 1;
-      const sx = CW / cssW;
-      const sy = CH / cssH;
-      const proj = (lngLat: [number, number]): [number, number] => {
-        const p = map.project(lngLat as any);
-        return [p.x * sx, p.y * sy];
-      };
-
-      // Margin beyond which a projected point is considered off-screen.
-      // Points outside this box cause the pen to lift so no line is drawn
-      // across the canvas to an out-of-bounds coordinate (pitched cameras
-      // project "behind-horizon" points to extreme pixel values).
-      const PAD = 200;
-      const inBounds = ([x, y]: [number, number]) =>
-        x > -PAD && x < CW + PAD && y > -PAD && y < CH + PAD;
-
-      // Build a canvas path with pen-lift at out-of-bounds points so that
-      // off-screen projections never draw a diagonal slash across the frame.
-      const buildClippedPath = (screenPts: [number, number][]) => {
-        ctx.beginPath();
-        let penDown = false;
-        for (const pt of screenPts) {
-          if (!inBounds(pt)) { penDown = false; continue; }
-          if (!penDown) { ctx.moveTo(pt[0], pt[1]); penDown = true; }
-          else          { ctx.lineTo(pt[0], pt[1]); }
-        }
-      };
-
-      // Helper: project a list of raw coords (subsampled to maxSeg) to screen pts.
-      const projectCoords = (raw: [number, number][], stride: number): [number, number][] => {
-        const out: [number, number][] = [];
-        for (let i = 0; i < raw.length; i += stride) {
-          try { out.push(proj([raw[i][0], raw[i][1]])); } catch { /* guard */ }
-        }
-        // Always include the exact last point
-        if (raw.length > 1 && (raw.length - 1) % stride !== 0) {
-          try { out.push(proj([raw[raw.length - 1][0], raw[raw.length - 1][1]])); } catch { /* guard */ }
-        }
-        return out;
-      };
-
-      // Full ghost trace (white, faint) — drawn first so progress line sits on top.
-      const allCoords = (coords3dRef.current.length ? coords3dRef.current : coordsRef.current) as [number, number][];
-      const ghostPts = projectCoords(allCoords, Math.max(1, Math.ceil(allCoords.length / 220)));
-      if (ghostPts.length >= 2) {
-        ctx.save();
-        buildClippedPath(ghostPts);
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 5;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.globalAlpha = 0.22;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // Progress line + head marker (only once route has started)
-      if (routeProgress > 0) {
-      const d = routeProgress * (totalRef.current || 0);
-      const progressCoords = buildProgressLine(d);
-      // A fixed stride for the whole run avoids changing every vertex whenever
-      // progress crosses a subsampling threshold (visible as a snapping line).
-      const pts = projectCoords(progressCoords as [number, number][], Math.max(1, Math.ceil(allCoords.length / 220)));
-
-      if (pts.length >= 2) {
-        const buildPath = () => buildClippedPath(pts);
-        // Glow — shadowBlur works on iOS (ctx.filter blur does not)
-        ctx.save();
-        ctx.shadowColor = TEAL; ctx.shadowBlur = 44; ctx.globalAlpha = 0.7;
-        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 24; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
-        ctx.restore();
-        // Teal body
-        ctx.save();
-        buildPath(); ctx.strokeStyle = TEAL; ctx.lineWidth = 24; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
-        ctx.restore();
-        // White-hot core
-        ctx.save();
-        ctx.globalAlpha = 0.9;
-        buildPath(); ctx.strokeStyle = "#eaffff"; ctx.lineWidth = 8; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
-        ctx.restore();
-      }
-
-      // Head marker — pulse rings + glow halo + white dot
-      try {
-        const headPos = interpAt(d).pos;
-        const [hx, hy] = proj(headPos);
-        const p1 = (tMs % PULSE_MS) / PULSE_MS;
-        const p2 = ((tMs + PULSE_MS / 2) % PULSE_MS) / PULSE_MS;
-        // Ring 1
-        ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, 10 + p1 * 38, 0, Math.PI * 2);
-        ctx.strokeStyle = TEAL; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.6 * (1 - p1); ctx.stroke(); ctx.restore();
-        // Ring 2
-        ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, 10 + p2 * 38, 0, Math.PI * 2);
-        ctx.strokeStyle = TEAL; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.45 * (1 - p2); ctx.stroke(); ctx.restore();
-        // Glow halo
-        ctx.save(); ctx.shadowColor = TEAL; ctx.shadowBlur = 18;
-        ctx.beginPath(); ctx.arc(hx, hy, 14, 0, Math.PI * 2);
-        ctx.fillStyle = TEAL; ctx.globalAlpha = 0.4; ctx.fill(); ctx.restore();
-        // White dot with teal border
-        ctx.save(); ctx.beginPath(); ctx.arc(hx, hy, 9, 0, Math.PI * 2);
-        ctx.fillStyle = WHITE; ctx.fill();
-        ctx.strokeStyle = TEAL; ctx.lineWidth = 4; ctx.stroke(); ctx.restore();
-      } catch { /* map.project() throws if coordinate is off-screen */ }
-      } // end routeProgress > 0
-    } // end if (map)
-
     drawOverlay(ctx, routeProgress, tMs, run, units);
-  }, [drawOverlay, run, units, buildProgressLine, interpAt]);
+  }, [drawOverlay, run, units]);
 
   // Trigger a file download. The Android WebView bridge intercepts the anchor click and
   // reads the blob ASYNCHRONOUSLY (fetch → FileReader), so the object URL must stay alive
@@ -904,6 +781,65 @@ export default function RunVideoShare() {
     triggerDownload(f.blob, f.name);
   }, [triggerDownload]);
 
+  // ── Stepped recording (see STEPPED_RENDER) ─────────────────────────────────
+  // Resolve once MapLibre has drawn the camera/data just set with every tile loaded ("idle"),
+  // capped so a tile that never arrives can't stall generation.
+  const waitForMapFrame = (map: maplibregl.Map) => new Promise<void>(resolve => {
+    let timer = 0;
+    const done = () => { window.clearTimeout(timer); map.off("idle", done); resolve(); };
+    timer = window.setTimeout(done, STEP_FRAME_TIMEOUT_MS);
+    map.on("idle", done);
+    map.triggerRepaint();
+  });
+
+  const recordStepped = useCallback(async (updateScene: (t: number, easeFrames: number | null) => number, animMs: number) => {
+    const canvas = canvasRef.current;
+    const map    = mapRef.current;
+    const enc    = videoEncoderRef.current;
+    if (!canvas || !map || !enc) return;
+    const gen = ++recordGenRef.current;
+    const frameMs = 1000 / STEP_FPS;
+    // Includes HOLD_MS on the final frame (the outro camera clamps once t passes animMs).
+    const frameCount = Math.ceil((animMs + HOLD_MS) / frameMs);
+
+    for (let i = 0; i < frameCount; i++) {
+      const t = i * frameMs;
+      const routeProgress = updateScene(t, frameMs / (1000 / 60));
+      await waitForMapFrame(map);
+      if (gen !== recordGenRef.current) return; // stopped or restarted meanwhile
+      compositeFrame(routeProgress, t);
+      if (enc.state !== "configured") break;    // encoder error — encErrRef has the reason
+      try {
+        const frame = new (window as any).VideoFrame(canvas, { timestamp: Math.round(t * 1000), duration: Math.round(1_000_000 / STEP_FPS) });
+        enc.encode(frame, { keyFrame: i % 60 === 0 });
+        frame.close();
+        encFrameCountRef.current++;
+      } catch (e: any) {
+        console.error("[VideoFrame encode]", e);
+        if (!encErrRef.current) encErrRef.current = `frame: ${e?.message || e}`;
+        break;
+      }
+      // Keep encoded-but-unflushed frames from piling up on slower hardware encoders.
+      while (enc.encodeQueueSize > 4 && gen === recordGenRef.current) {
+        await new Promise(r => setTimeout(r, 5));
+      }
+      setProgress((i + 1) / frameCount);
+    }
+
+    if (gen !== recordGenRef.current) return;
+    if (encErrRef.current) {
+      // Don't hand back a silently truncated video.
+      try { enc.close(); } catch { /* already closed */ }
+      videoEncoderRef.current = null;
+      muxerRef.current        = null;
+      useWebCodecsRef.current = false;
+      setErrorDetail(`WebCodecs — ${encErrRef.current} (frames: ${encFrameCountRef.current})`);
+      setStatus("error");
+      return;
+    }
+    finishWebCodecs();
+  }, [compositeFrame, finishWebCodecs]);
+
   // ── Animation driver ────────────────────────────────────────────────────────
   const runAnimation = useCallback((record: boolean) => {
     const canvas = canvasRef.current;
@@ -911,7 +847,6 @@ export default function RunVideoShare() {
     if (!canvas || !map || coordsRef.current.length < 2) return;
 
     cancelAnimationFrame(animRef.current);
-    const generation = ++animationGenerationRef.current;
     chunksRef.current = [];
     dispBearingRef.current = bearing(coordsRef.current[0], coordsRef.current[1]);
     dispCenterRef.current = interpAt(LOOKAHEAD_M).pos;
@@ -1037,33 +972,14 @@ export default function RunVideoShare() {
     // Timeline scaled to this run's distance (longer runs → longer, watchable flyovers).
     const followMs = followMsForMeters(run?.distance || 0);
     const totalMs  = INTRO_MS + followMs + OUTRO_MS;
-    let iosFrameIndex = 0;
-    let iosElapsed = 0;
-    let iosLastWall = startTsRef.current;
-    let previousTimelineMs = 0;
 
-    const tick = (now: number) => {
-      if (generation !== animationGenerationRef.current) return;
-      // On iOS, advancing the route by wall time skips hundreds of metres when
-      // WKWebView needs more than 33ms to draw a map frame. WebCodecs can encode
-      // at a fixed 30fps timeline regardless of rendering speed. MediaRecorder
-      // uses wall-clock timestamps, so bound each step there instead of jumping.
-      if (isIOS && !(record && useWebCodecsRef.current)) {
-        iosElapsed += Math.min(Math.max(now - iosLastWall, 0), 50);
-        iosLastWall = now;
-      }
-      const t = isIOS
-        ? (record && useWebCodecsRef.current ? iosFrameIndex * (1000 / 30) : iosElapsed)
-        : now - startTsRef.current;
-      // Preserve the same iOS camera response per second in preview and export.
-      // Use logical video time, not encoding wall time, for offline WebCodecs.
-      const frameScale = Math.max(0, t - previousTimelineMs) / (1000 / 60);
-      previousTimelineMs = t;
-      const positionAlpha = isIOS ? 1 - Math.pow(1 - POS_SMOOTH, frameScale) : POS_SMOOTH;
-      const bearingAlpha = isIOS ? 1 - Math.pow(1 - BRG_SMOOTH, frameScale) : BRG_SMOOTH;
-      const overall = Math.min(t / totalMs, 1);
-      setProgress(overall);
-
+    // Move the camera, route line and marker to timeline position t (ms) and return the
+    // route progress (0..1). The chase-camera easing constants are tuned per ~60fps frame;
+    // real-time playback applies them once per rAF tick (easeFrames = null, unchanged), while
+    // stepped recording passes how many 60fps frames one output frame spans so it glides the same.
+    const updateScene = (t: number, easeFrames: number | null): number => {
+      const posK = easeFrames == null ? POS_SMOOTH : 1 - Math.pow(1 - POS_SMOOTH, easeFrames);
+      const brgK = easeFrames == null ? BRG_SMOOTH : 1 - Math.pow(1 - BRG_SMOOTH, easeFrames);
       let routeProgress: number;
 
       if (t < INTRO_MS) {
@@ -1091,39 +1007,35 @@ export default function RunVideoShare() {
         const brgFrom = interpAt(Math.max(0, d - 20)).pos;
         const brgTo   = interpAt(Math.min(d + BRG_LOOKAHEAD_M, total)).pos;
         const targetBrg = bearing(brgFrom, brgTo);
-        dispBearingRef.current = lerpAngle(dispBearingRef.current, targetBrg, bearingAlpha);
+        dispBearingRef.current = lerpAngle(dispBearingRef.current, targetBrg, brgK);
 
         // Ease the camera centre toward the look-ahead point (smooth glide, no snapping).
         dispCenterRef.current = [
-          dispCenterRef.current[0] + (ahead[0] - dispCenterRef.current[0]) * positionAlpha,
-          dispCenterRef.current[1] + (ahead[1] - dispCenterRef.current[1]) * positionAlpha,
+          dispCenterRef.current[0] + (ahead[0] - dispCenterRef.current[0]) * posK,
+          dispCenterRef.current[1] + (ahead[1] - dispCenterRef.current[1]) * posK,
         ];
 
         map.jumpTo({ center: dispCenterRef.current as any, zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current });
         lastCamRef.current = { center: [dispCenterRef.current[0], dispCenterRef.current[1]], zoom: FOLLOW_ZOOM, pitch: FOLLOW_PITCH, bearing: dispBearingRef.current };
-        if (!isIOS) {
-          map.getSource("routeProgress") && (map.getSource("routeProgress") as any).setData({
-            type: "Feature", geometry: { type: "LineString", coordinates: buildProgressLine(d) }, properties: {},
-          });
-          (map.getSource("head") as any)?.setData({
-            type: "Feature", geometry: { type: "Point", coordinates: head }, properties: {},
-          });
-          pulseMarker(map, t);
-        }
+        map.getSource("routeProgress") && (map.getSource("routeProgress") as any).setData({
+          type: "Feature", geometry: { type: "LineString", coordinates: buildProgressLine(d) }, properties: {},
+        });
+        (map.getSource("head") as any)?.setData({
+          type: "Feature", geometry: { type: "Point", coordinates: head }, properties: {},
+        });
+        pulseMarker(map, t);
       } else {
         // ── Outro: pull up and out to reveal the whole route ──
         routeProgress = 1;
-        if (!isIOS) {
-          const endCoords = coords3dRef.current.length ? coords3dRef.current : coordsRef.current;
-          (map.getSource("routeProgress") as any)?.setData({
-            type: "Feature", geometry: { type: "LineString", coordinates: endCoords }, properties: {},
-          });
-          const end = interpAt(total).pos;
-          (map.getSource("head") as any)?.setData({
-            type: "Feature", geometry: { type: "Point", coordinates: end }, properties: {},
-          });
-          pulseMarker(map, t);
-        }
+        const endCoords = coords3dRef.current.length ? coords3dRef.current : coordsRef.current;
+        (map.getSource("routeProgress") as any)?.setData({
+          type: "Feature", geometry: { type: "LineString", coordinates: endCoords }, properties: {},
+        });
+        const end = interpAt(total).pos;
+        (map.getSource("head") as any)?.setData({
+          type: "Feature", geometry: { type: "Point", coordinates: end }, properties: {},
+        });
+        pulseMarker(map, t);
         const from = lastCamRef.current!;
         const ov   = overviewCamRef.current;
         const k = Math.min((t - INTRO_MS - followMs) / OUTRO_MS, 1);
@@ -1141,12 +1053,24 @@ export default function RunVideoShare() {
         }
       }
 
-      const captureFrame = () => {
-        if (generation !== animationGenerationRef.current) return;
-        compositeFrame(routeProgress, t);
+      return routeProgress;
+    };
 
-        // ── WebCodecs: encode this frame with an explicit timestamp (throttled to ~30fps). ──
-        if (useWebCodecsRef.current && videoEncoderRef.current) {
+    if (record && STEPPED_RENDER && useWebCodecsRef.current) {
+      recordStepped(updateScene, INTRO_MS + followMs + OUTRO_MS);
+      return;
+    }
+
+    const tick = (now: number) => {
+      const t = now - startTsRef.current;
+      const overall = Math.min(t / totalMs, 1);
+      setProgress(overall);
+
+      const routeProgress = updateScene(t, null);
+      compositeFrame(routeProgress, t);
+
+      // ── WebCodecs: encode this frame with an explicit timestamp (throttled to ~30fps). ──
+      if (useWebCodecsRef.current && videoEncoderRef.current) {
         const enc = videoEncoderRef.current;
         if (enc.state === "configured" && (lastEncMsRef.current < 0 || t - lastEncMsRef.current >= 33)) {
           try {
@@ -1165,39 +1089,27 @@ export default function RunVideoShare() {
             if (!encErrRef.current) encErrRef.current = `frame: ${e?.message || e}`;
           }
         }
-        }
+      }
 
-        if (t < totalMs) {
-          if (isIOS) iosFrameIndex++;
-          animRef.current = requestAnimationFrame(tick);
-        } else if (record) {
-          stopTimeoutRef.current = window.setTimeout(() => {
-            if (generation !== animationGenerationRef.current) return;
-            if (useWebCodecsRef.current) finishWebCodecs();
-            else if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-            else { setErrorDetail("no recorder was active"); setStatus("error"); }
-          }, HOLD_MS);
-        } else {
-          setStatus("idle");
-        }
-      };
-
-      if (isIOS) {
-        // map.jumpTo schedules a WebGL repaint. Projecting the line before that
-        // repaint pairs a new-camera marker with an old-camera satellite frame.
-        // Capture only after MapLibre has rendered this camera position.
-        map.once("render", captureFrame);
-        map.triggerRepaint();
+      if (t < totalMs) {
+        animRef.current = requestAnimationFrame(tick);
+      } else if (record) {
+        stopTimeoutRef.current = window.setTimeout(() => {
+          if (useWebCodecsRef.current) finishWebCodecs();
+          else if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+          else { setErrorDetail("no recorder was active"); setStatus("error"); } // nothing was saved
+        }, HOLD_MS);
       } else {
-        captureFrame();
+        // Preview finished — nothing was saved, so return to the idle controls.
+        setStatus("idle");
       }
     };
 
     animRef.current = requestAnimationFrame(tick);
-  }, [runId, run, interpAt, buildProgressLine, compositeFrame, finishWebCodecs, triggerDownload]);
+  }, [runId, run, interpAt, buildProgressLine, compositeFrame, finishWebCodecs, triggerDownload, recordStepped]);
 
   const stopAll = useCallback(() => {
-    animationGenerationRef.current++;
+    recordGenRef.current++;
     cancelAnimationFrame(animRef.current);
     if (stopTimeoutRef.current !== null) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
@@ -1295,7 +1207,7 @@ export default function RunVideoShare() {
   }, []);
 
   useEffect(() => () => {
-    animationGenerationRef.current++;
+    recordGenRef.current++;
     cancelAnimationFrame(animRef.current);
     if (stopTimeoutRef.current !== null) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
     if (recorderRef.current?.state === "recording") { try { recorderRef.current.stop(); } catch { /* already stopped */ } }
