@@ -53,6 +53,9 @@ class RunView extends Ui.View {
     // a connected-but-unprepared user is told to prepare on the phone rather than just
     // "PRESS START", which gives away nothing about the better experience available.
     private var _isPrepared        = false;
+    // Set when the runner chooses "Continue without coaching" on the prepare-on-phone screen
+    // (see isPrepareGateActive()). Reset whenever _isPrepared is, so every new session asks again.
+    private var _prepareGateDismissed = false;
 
     // Prepared-run data
     private var _prepRunType      = "";
@@ -209,6 +212,7 @@ class RunView extends Ui.View {
     private var _totalAscent  = 0.0; // Elevation gain (m)
     private var _totalDescent = 0.0; // Elevation loss (m)
     private var _lastAlt      = null; // Last altitude for delta calc
+    private var _lastAltIsBaro = false; // Which sensor _lastAlt came from (see elevation block)
 
     // ── Offline buffer (standalone runs — no phone) ───────────────────────────
     // Samples every 15 s (OFFLINE_TICK_INTERVAL x 250ms tick = 15 s).
@@ -387,6 +391,43 @@ class RunView extends Ui.View {
     function isPaused()  { return _isPaused; }
     function isRunning() { return _isRunning; }
 
+    // ── Prepare-on-phone screen ───────────────────────────────────────────────
+    // Shown in place of the start screen while the watch is paired but the phone hasn't sent
+    // a prepared session, so it's unmistakable that live AI coaching needs the phone-side
+    // prepare. The runner either prepares on the phone (a "preparedRun" message flips
+    // _isPrepared and the coached start screen takes over) or explicitly continues without
+    // coaching. Hidden on the post-run screen so the final stats stay visible; START from
+    // there brings it back rather than silently starting an uncoached run.
+    function isPrepareGateActive() {
+        return _isAuthenticated && !_isRunning && !_isPaused && !_isPrepared
+            && !_prepareGateDismissed && !_isFinished;
+    }
+
+    // START (or a tap) on the prepare-on-phone screen.
+    function continueWithoutCoaching() {
+        _prepareGateDismissed = true;
+        // Straight through to the run screen. The GPS-wait screen only advances on the
+        // not-ready → ready edge in onPosition(); if GPS locked while this screen was up, that
+        // edge has already passed and the runner would sit on "START disabled" with good GPS.
+        if (_overlayState == OVERLAY_GPS_WAIT && _gpsReady) {
+            _overlayState = (_isCoached || _prepRunType.length() > 0) ? OVERLAY_COACHED : OVERLAY_READY;
+        }
+        _vibeShort();
+        Ui.requestUpdate();
+    }
+
+    // START pressed while idle. Returns true if it was consumed by the prepare-on-phone
+    // screen (shown or dismissed) instead of starting a run.
+    function handleIdleStart() {
+        if (isPrepareGateActive()) { continueWithoutCoaching(); return true; }
+        if (_isFinished && _isAuthenticated && !_isPrepared && !_prepareGateDismissed) {
+            _isFinished = false;    // leave the post-run screen for the prepare screen
+            Ui.requestUpdate();
+            return true;
+        }
+        return false;
+    }
+
     // ── HTTP health callbacks (called by AiRunCoachApp from DataStreamer) ──────
 
     // HTTP POST succeeded — phone relay (Garmin Connect) is reachable.
@@ -470,7 +511,7 @@ class RunView extends Ui.View {
         _sumHR = 0; _maxHR = 0; _sumCadence = 0; _sumPace = 0.0;
         _sumGct = 0.0; _sumVo = 0.0; _sumVr = 0.0; _sumSl = 0.0;
         _sumGcb = 0.0; _sumPower = 0; _sumResp = 0.0; _sampleN = 0;
-        _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null; _baroAlt = null;
+        _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null; _lastAltIsBaro = false; _baroAlt = null;
 
         // Reset offline buffer and HTTP health counter
         _offlineBuffer          = [];
@@ -579,6 +620,7 @@ class RunView extends Ui.View {
         _pendingPauseResumeAction = null;
         _sessionReadySent = false;  // Reset so next session notifies phone again
         _isPrepared       = false;  // Next session is unprepared until the phone says otherwise
+        _prepareGateDismissed = false;
         _overlayState = OVERLAY_READY;
         Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
         _gpsListening = false;
@@ -824,6 +866,29 @@ class RunView extends Ui.View {
             var wt   = data.get("workoutType");
             var tp   = data.get("targetPace");
             var wd   = data.get("workoutDesc");
+            // A new prepare REPLACES the previous one, it doesn't layer on top. The user can
+            // prepare, back out on the phone, change the setup (drop the target time, pick a
+            // free run instead of a workout) and prepare again — fields the second prepare
+            // leaves out must not keep the first one's values, or the watch coaches to a
+            // target pace the runner removed. Only reset while idle, so a stray prepare
+            // landing mid-run can't clear the workout link of the session in progress.
+            if (!_isRunning) {
+                _prepRunDist        = 0.0;
+                _prepRunType        = "";
+                _prepWorkoutType    = "";
+                _prepTargetPace     = "";
+                _prepWorkoutDesc    = "";
+                _coachTargetPace    = "";
+                _coachTargetPaceSec = 0.0;
+                _isCoached          = false;
+                // Read by DataStreamer's session/start + session/end to link the workout.
+                var pwid = data.get("plannedWorkoutId");
+                if (pwid != null) {
+                    App.Storage.setValue("plannedWorkoutId", pwid);
+                } else {
+                    App.Storage.deleteValue("plannedWorkoutId");
+                }
+            }
             if (dist != null) { _prepRunDist     = dist.toFloat(); }
             if (rt   != null) { _prepRunType     = rt; }
             if (wt   != null) { _prepWorkoutType = wt; }
@@ -848,6 +913,28 @@ class RunView extends Ui.View {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
             }
             Ui.requestUpdate();
+
+        } else if (t.equals("preparedRunCancelled")) {
+            // The runner backed out of the prepared session on the phone before starting it.
+            // Drop it so the prepare-on-phone screen comes back instead of a coached start
+            // screen for a session that no longer exists. Ignored mid-run.
+            if (!_isRunning && !_isPaused) {
+                _isPrepared         = false;
+                _prepareGateDismissed = false;
+                _prepRunDist        = 0.0;
+                _prepRunType        = "";
+                _prepWorkoutType    = "";
+                _prepTargetPace     = "";
+                _prepWorkoutDesc    = "";
+                _coachTargetPace    = "";
+                _coachTargetPaceSec = 0.0;
+                _isCoached          = false;
+                App.Storage.deleteValue("plannedWorkoutId");
+                if (_overlayState == OVERLAY_COACHED) {
+                    _overlayState = _gpsReady ? OVERLAY_READY : OVERLAY_GPS_WAIT;
+                }
+                Ui.requestUpdate();
+            }
 
         } else if (t.equals("sessionType")) {
             // Lightweight companion to "preparedRun" above — sent as soon as the phone's
@@ -956,6 +1043,7 @@ class RunView extends Ui.View {
             _isFinishing      = true;   // Block in-flight runUpdates during cleanup
             _sessionReadySent = false;  // Allow next session to send sessionReady again
             _isPrepared       = false;  // Next session is unprepared until the phone says otherwise
+            _prepareGateDismissed = false;
             _overlayState     = OVERLAY_READY;
             if (_gpsListening) {
                 Pos.enableLocationEvents(Pos.LOCATION_DISABLE, method(:onPosition));
@@ -998,7 +1086,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.5"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.9"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");
@@ -1282,11 +1370,21 @@ class RunView extends Ui.View {
             // the gate, bank the whole delta at once, and re-anchor there. Noise still cannot
             // accumulate: it oscillates around the anchor without ever clearing it. Thresholds
             // are unchanged -- they were never the problem, the anchor handling was.
-            var altSrc       = (_baroAlt != null) ? _baroAlt : _lastGpsAlt;
-            var altThreshold = (_baroAlt != null) ? 1.5 : 5.0;
+            //
+            // The anchor must come from the SAME sensor as the sample it's compared with.
+            // _baroAlt is reset to null at session start, so the first ticks anchor on GPS
+            // altitude and the source flips to the barometer when its first reading lands.
+            // GPS and barometric altitude routinely disagree by tens of metres, and that gap
+            // was banked as real climb/descent in one step. Real case (2026-09-29, Forerunner
+            // 965): two stationary sessions, 51 s and 0 s, each saved ~42.4 m of descent.
+            // A source change now just re-anchors.
+            var altIsBaro    = (_baroAlt != null);
+            var altSrc       = altIsBaro ? _baroAlt : _lastGpsAlt;
+            var altThreshold = altIsBaro ? 1.5 : 5.0;
             if (altSrc != null) {
-                if (_lastAlt == null) {
+                if (_lastAlt == null || _lastAltIsBaro != altIsBaro) {
                     _lastAlt = altSrc;
+                    _lastAltIsBaro = altIsBaro;
                 } else {
                     var altDelta = altSrc - _lastAlt;
                     if (altDelta > altThreshold) {
@@ -1578,8 +1676,9 @@ class RunView extends Ui.View {
         // Smooth anti-aliased rendering (SDK 3.2+, supported on Fenix 7)
         if (dc has :setAntiAlias) { dc.setAntiAlias(true); }
 
-        if (_overlayState == OVERLAY_GPS_WAIT) { _drawGpsWait(dc, cx, cy, w, h); return; }
         if (_overlayState == OVERLAY_WAITING)  { _drawWaiting(dc, cx, cy, w, h); return; }
+        if (isPrepareGateActive())             { _drawPrepareGate(dc, cx, cy, w, h); return; }
+        if (_overlayState == OVERLAY_GPS_WAIT) { _drawGpsWait(dc, cx, cy, w, h); return; }
 
         // Route to the correct screen layout
         if (_screenPage == 1) {
@@ -1840,7 +1939,7 @@ class RunView extends Ui.View {
             // Guard with grace period so the label does not flash before auth arrives
             dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "OFFLINE", Gfx.TEXT_JUSTIFY_CENTER);
-        } else if (!_isRunning && _isConnected && _isAuthenticated && !_isPrepared) {
+        } else if (!_isRunning && _isConnected && _isAuthenticated && !_isPrepared && !_prepareGateDismissed) {
             // Connected to the phone but nothing prepared. "PRESS START" here is a dead end:
             // it works, but it silently gives up coaching, the session target and the richer
             // charts the phone adds. Point at the better path instead.
@@ -1864,6 +1963,118 @@ class RunView extends Ui.View {
             dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "PRESS START", Gfx.TEXT_JUSTIFY_CENTER);
         }
+    }
+
+    // ── Prepare-on-phone Screen ──────────────────────────────────────────────
+    // Deliberately plain — no run instruments — so the one thing to do is obvious.
+    private function _drawPrepareGate(dc, cx, cy, w, h) {
+        dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
+        dc.drawCircle(cx, cy, (w / 2) - 4);
+        dc.drawCircle(cx, cy, (w / 2) - 5);
+
+        // Laid out from both ends — font sizes vary hugely across the fleet (FONT_TINY on a
+        // 454 px Forerunner 965 is taller than FONT_SMALL on a 208 px Forerunner 55), so fixed
+        // fractions overlap on one device or waste space on another.
+        //   bottom-up: START hint, then the button above it, kept clear of the narrowing rim
+        //   top-down:  the message; the phone-status line only if there's room left for it
+        var isTouch = Sys.getDeviceSettings().isTouchScreen;
+        var fh      = Gfx.getFontHeight(Gfx.FONT_XTINY);
+        var btnW    = (w * 0.72).toNumber();
+        var btnText = "Continue without coaching";
+        var oneLine = dc.getTextWidthInPixels(btnText, Gfx.FONT_XTINY) <= btnW - 12;
+        var btnH    = (oneLine ? fh : fh * 2) + 10;
+        var hintY   = (h * 0.84).toNumber() - fh;
+        var btnY    = hintY - 3 - btnH;
+
+        // The message must clear the button; the "AI RUN COACH" title is the first thing to go
+        // when it wouldn't (Forerunner 55-size screens).
+        var msgH = _wrappedHeight(dc, (w * 0.78).toNumber(), Gfx.FONT_XTINY, "Prepare on your phone")
+            + _wrappedHeight(dc, (w * 0.84).toNumber(), Gfx.FONT_XTINY, "for live AI coaching");
+        var y = (h * 0.09).toNumber();
+        if (y + fh + 6 + msgH <= btnY - 4) {
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "AI RUN COACH", Gfx.TEXT_JUSTIFY_CENTER);
+            y += fh + 6;
+        }
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        y = _drawWrapped(dc, cx, y, (w * 0.78).toNumber(), Gfx.FONT_XTINY, "Prepare on your phone");
+        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        y = _drawWrapped(dc, cx, y, (w * 0.84).toNumber(), Gfx.FONT_XTINY, "for live AI coaching");
+
+        if (y + 2 + fh <= btnY - 4) {
+            var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
+            var statusY = y + ((btnY - 4 - y - fh) / 2);   // centred in the gap
+            if (_isConnected) {
+                dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+                dc.drawText(cx, statusY, Gfx.FONT_XTINY, "Waiting for phone" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+            } else {
+                dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
+                dc.drawText(cx, statusY, Gfx.FONT_XTINY, "Phone not connected", Gfx.TEXT_JUSTIFY_CENTER);
+            }
+        }
+
+        // "Continue without coaching" — tappable on touch watches; START works everywhere
+        // (and is the only way on button-only models), so the hint says which.
+        // Solid teal (the app's accent) with black text. Teal survives the 8/64-colour MIP
+        // palettes (Forerunner 55 etc.) as cyan, where a custom dark grey rounds to black.
+        dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(cx - btnW / 2, btnY, btnW, btnH, 10);
+        dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_TRANSPARENT);
+        if (oneLine) {
+            dc.drawText(cx, btnY + 5, Gfx.FONT_XTINY, btnText, Gfx.TEXT_JUSTIFY_CENTER);
+        } else {
+            dc.drawText(cx, btnY + 5,      Gfx.FONT_XTINY, "Continue without", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, btnY + 5 + fh, Gfx.FONT_XTINY, "coaching",         Gfx.TEXT_JUSTIFY_CENTER);
+        }
+        dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(cx, hintY, Gfx.FONT_XTINY, isTouch ? "Tap or press START" : "Press START",
+            Gfx.TEXT_JUSTIFY_CENTER);
+    }
+
+    // Height _drawWrapped() would use for this text, without drawing it.
+    private function _wrappedHeight(dc, maxW, font, text) {
+        var lines = 0;
+        var line = "";
+        var rest = text;
+        while (rest.length() > 0) {
+            var sp = rest.find(" ");
+            var word = (sp == null) ? rest : rest.substring(0, sp);
+            rest = (sp == null) ? "" : rest.substring(sp + 1, rest.length());
+            var trial = (line.length() == 0) ? word : line + " " + word;
+            if (line.length() > 0 && dc.getTextWidthInPixels(trial, font) > maxW) {
+                lines += 1;
+                line = word;
+            } else {
+                line = trial;
+            }
+        }
+        if (line.length() > 0) { lines += 1; }
+        return lines * Gfx.getFontHeight(font);
+    }
+
+    // Word-wraps text into centred lines no wider than maxW. Returns the y below the last line.
+    private function _drawWrapped(dc, cx, y, maxW, font, text) {
+        var lh = Gfx.getFontHeight(font);
+        var line = "";
+        var rest = text;
+        while (rest.length() > 0) {
+            var sp = rest.find(" ");
+            var word = (sp == null) ? rest : rest.substring(0, sp);
+            rest = (sp == null) ? "" : rest.substring(sp + 1, rest.length());
+            var trial = (line.length() == 0) ? word : line + " " + word;
+            if (line.length() > 0 && dc.getTextWidthInPixels(trial, font) > maxW) {
+                dc.drawText(cx, y, font, line, Gfx.TEXT_JUSTIFY_CENTER);
+                y += lh;
+                line = word;
+            } else {
+                line = trial;
+            }
+        }
+        if (line.length() > 0) {
+            dc.drawText(cx, y, font, line, Gfx.TEXT_JUSTIFY_CENTER);
+            y += lh;
+        }
+        return y;
     }
 
     // ── GPS Wait Screen ──────────────────────────────────────────────────────
@@ -2169,7 +2380,7 @@ class RunDelegate extends Ui.BehaviorDelegate {
         if (key == Ui.KEY_ENTER || key == Ui.KEY_START) {
             if (_view == null) { return true; }
             Sys.println(">>> onKey: START button pressed, isRunning=" + _view.isRunning() + " isPaused=" + _view.isPaused());
-            if (!_view.isRunning())     { _view.startRun();  }
+            if (!_view.isRunning())     { if (!_view.handleIdleStart()) { _view.startRun(); } }
             else if (_view.isPaused())  { _view.resumeRun(); }
             else                        { _view.pauseRun();  }
             return true;
@@ -2187,6 +2398,14 @@ class RunDelegate extends Ui.BehaviorDelegate {
         // CIQ type safety: all timer values are Long (toLong() + 0l/400l literals) so
         // Long-Long arithmetic is always safe across every CIQ version.
         try {
+            // Prepare-on-phone screen: a tap on (or below) its button continues without
+            // coaching. Upper part of the screen is text only, so ignore taps there.
+            if (_view != null && _view.isPrepareGateActive()) {
+                var coords = clickEvent.getCoordinates();
+                var sh = Sys.getDeviceSettings().screenHeight;
+                if (coords[1] >= (sh * 0.60).toNumber()) { _view.continueWithoutCoaching(); }
+                return true;
+            }
             if (_view != null && _view.isRunning() && !_view.isPaused()) {
                 var now = Sys.getTimer().toLong();  // toLong() ensures Long on ALL CIQ versions
                 var elapsed = now - _lastTapTimeMs; // Long - Long = Long ✓
