@@ -1,0 +1,7 @@
+# ~1.5 s hold (waits for text that never appears).
+appId: live.airuncoach.Ai-Run-Coach
+---
+- extendedWaitUntil:
+    visible: "zz-never-present-zz"
+    timeout: 1500
+    optional: true

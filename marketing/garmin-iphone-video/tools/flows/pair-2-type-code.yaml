@@ -1,0 +1,44 @@
+# Scene 3 (phone): type the watch's code and link. Continues pair-1.
+# (The field's placeholder is "482913", which is also the video watch build's fixed code.)
+appId: live.airuncoach.Ai-Run-Coach
+---
+- tapOn: "482913"
+- tapOn:
+    text: "482913"
+    optional: true
+- runFlow: pause.yaml
+- inputText: "4"
+- extendedWaitUntil:
+    visible: "zz-never-present-zz"
+    timeout: 300
+    optional: true
+- inputText: "8"
+- extendedWaitUntil:
+    visible: "zz-never-present-zz"
+    timeout: 300
+    optional: true
+- inputText: "2"
+- extendedWaitUntil:
+    visible: "zz-never-present-zz"
+    timeout: 300
+    optional: true
+- inputText: "9"
+- extendedWaitUntil:
+    visible: "zz-never-present-zz"
+    timeout: 300
+    optional: true
+- inputText: "1"
+- extendedWaitUntil:
+    visible: "zz-never-present-zz"
+    timeout: 300
+    optional: true
+- inputText: "3"
+- extendedWaitUntil:
+    visible: "zz-never-present-zz"
+    timeout: 300
+    optional: true
+- runFlow: pause.yaml
+- tapOn: "Link Garmin Watch"
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- runFlow: pause.yaml

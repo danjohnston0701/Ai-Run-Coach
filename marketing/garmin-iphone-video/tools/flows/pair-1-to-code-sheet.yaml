@@ -1,0 +1,32 @@
+# Scene 2–3 (phone): Dashboard → Profile → Connected Devices → Garmin card → Pair → Enter Code.
+# App must be launched with -ARCVideoDemo -ARCVideoDemoUnpaired. Pauses are holds for the edit.
+appId: live.airuncoach.Ai-Run-Coach
+---
+- runFlow: pause.yaml
+- tapOn: "Profile"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Connected Devices"
+    speed: 30
+- runFlow: pause.yaml
+- tapOn: "Connected Devices"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Download from Connect IQ Store"
+    centerElement: true
+    speed: 25
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Pair Garmin Device"
+    centerElement: true
+    speed: 25
+- runFlow: pause.yaml
+- tapOn: "Pair Garmin Device"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Enter Code From Watch Instead"
+    speed: 30
+- runFlow: pause.yaml
+- tapOn: "Enter Code From Watch Instead"
+- runFlow: pause.yaml
