@@ -28,9 +28,22 @@ data class RunScreenState(
     val batteryPct: Int? = null,
     val statusMessage: String? = null,
     val screenPage: Int = 0,
-    val sessionType: String = "run"
+    val sessionType: String = "run",
+    /** The phone has sent a prepared session ("preparedRun") for the next run. */
+    val isPrepared: Boolean = false,
+    /** The runner chose "Continue without coaching" on the prepare-on-phone screen. */
+    val prepareGateDismissed: Boolean = false
 ) {
     val isWalk: Boolean get() = sessionType == "walk"
+
+    /**
+     * Show the prepare-on-phone screen instead of the start screen: paired, idle, nothing
+     * prepared, and the runner hasn't opted out. Hidden on the post-run screen so the final
+     * stats stay visible. Mirrors RunView.mc's isPrepareGateActive().
+     */
+    val showPrepareGate: Boolean
+        get() = isAuthenticated && !isRunning && !isPaused && !isPrepared &&
+            !prepareGateDismissed && !isFinished
 }
 
 /** Three-way BACK-button branch — mirrors RunView.mc's `onBack()` truth table exactly. */

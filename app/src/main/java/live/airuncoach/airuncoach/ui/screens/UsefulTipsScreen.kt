@@ -110,6 +110,18 @@ private val usefulTips = listOf(
     ),
     Tip(
         icon = Icons.Default.Watch,
+        title = "Getting live AI coaching with your watch",
+        summary = "Your watch and phone work as a team: the watch controls the session and streams its sensors, the phone does the coaching.",
+        bullets = listOf(
+            TipBullet("For real-time AI coaching: prepare your session on your phone, keep your phone with you for the whole session, then press Start on your watch."),
+            TipBullet("Coaching is created on your phone and plays through its speaker or your headphones — the watch can't coach on its own."),
+            TipBullet("Your phone can stay locked in your pocket or armband the whole time; coaching keeps playing in the background."),
+            TipBullet("Watch only is fine too: leave your phone at home and press Start on your watch. You won't get live coaching, but the run syncs afterwards for the full post-run AI analysis."),
+        ),
+        note = "If you open the app on your watch and see \"Prepare on your phone\", that's your cue — prepare the session on your phone for live coaching, or choose \"Continue without coaching\" for a watch-only session.",
+    ),
+    Tip(
+        icon = Icons.Default.Watch,
         title = "Keeping your Garmin or Wear watch connected",
         summary = "Watch dropouts mid-run are usually a Bluetooth or background-permission issue on the phone side, not the watch.",
         bullets = listOf(

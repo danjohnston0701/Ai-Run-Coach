@@ -824,12 +824,29 @@ class RunSessionViewModel @Inject constructor(
     /** Expose wake word detector state to the UI */
     val wakeWordState: StateFlow<WakeWordDetector.State> = wakeWordDetector.state
 
+    // This instance's watch-command handler, kept so onCleared() can unregister it. Declared
+    // before the init block below so it isn't reset to null after init assigns it.
+    private var registeredWatchCommandHandler: ((String) -> Unit)? = null
+
+    /**
+     * Marks this instance as the one behind the visible run screen. Several instances can be
+     * alive at once (WorkoutDetailScreen's stays on the back stack under RunSessionScreen's),
+     * and run-wide reactions like the watch talk-to-coach tap must happen exactly once.
+     */
+    fun claimRunScreen() {
+        runScreenOwner = java.lang.ref.WeakReference(this)
+    }
+
+    private fun isRunScreenOwner(): Boolean {
+        val owner = runScreenOwner?.get()
+        return owner == null || owner === this
+    }
+
     // Observe watch-initiated talk-to-coach requests
     init {
         viewModelScope.launch {
             RunTrackingService.watchTalkToCoachRequest.collect { requested ->
-                if (requested) {
-                    RunTrackingService.clearWatchTalkToCoachRequest()
+                if (requested && isRunScreenOwner() && RunTrackingService.consumeWatchTalkToCoachRequest()) {
                     Log.d("RunSessionViewModel", "⌚ Watch tap → triggering talk-to-coach")
                     onWakeWordDetected() // reuses the same flow as the phone wake word
                 }
@@ -902,6 +919,7 @@ class RunSessionViewModel @Inject constructor(
         }
         garminWatchManager.onWatchCommand = watchCommandHandler
         samsungWatchManager.onWatchCommand = watchCommandHandler
+        registeredWatchCommandHandler = watchCommandHandler
     }
     private val weatherRepository = WeatherRepository(context)
     // SessionCoachingHelper retained for future logCoachingEvent usage (currently unused after legacy path retirement)
@@ -2311,8 +2329,12 @@ class RunSessionViewModel @Inject constructor(
      * Cancel the run setup. Stops all AI audio, clears the coaching message,
      * resets state ready for a new run, and cancels any ongoing prepareRun operations.
      * Called when user taps Cancel before starting a run, or when auth validation fails.
+     *
+     * [cancelWatchStandby] = false keeps a Prepare-for-Watch standby alive — for the screen
+     * being torn down only by an Activity configuration change (rotation), not by the user
+     * leaving it.
      */
-    fun cancelRunSetup() {
+    fun cancelRunSetup(cancelWatchStandby: Boolean = true) {
         Log.d("RunSessionViewModel", "Cancelling run setup - stopping all audio and clearing pending operations")
         // Set flag FIRST to prevent any pending coroutines from updating UI
         isSetupCancelled = true
@@ -2347,7 +2369,10 @@ class RunSessionViewModel @Inject constructor(
         // If the service was pre-started in standby (ACTION_PREPARE_FOR_WATCH) and the run has
         // not yet begun, tell it to stop.  The service will ignore this if tracking is already
         // active (i.e. the user pressed START on the watch before tapping Cancel here).
-        if (isServicePreparedForWatch) {
+        // Checks the service's own flag too: the setup screen's ViewModel instance is usually
+        // the one that prepared, not this one, so isServicePreparedForWatch alone was false here
+        // and the abandoned standby (with its target and coaching plan) outlived the back-out.
+        if (cancelWatchStandby && (isServicePreparedForWatch || RunTrackingService.isInWatchStandby)) {
             try {
                 val cancelIntent = Intent(context, RunTrackingService::class.java).apply {
                     action = RunTrackingService.ACTION_CANCEL_PREPARE_FOR_WATCH
@@ -2359,8 +2384,16 @@ class RunSessionViewModel @Inject constructor(
             }
             isServicePreparedForWatch = false
         }
-        garminWatchManager.clearPendingPreparedRun()
-        samsungWatchManager.clearPendingPreparedRun()
+        if (cancelWatchStandby) {
+            // Un-prepare the watch too (it goes back to its prepare-on-phone screen) — but
+            // never while a run is live: this also runs when the run screen is disposed.
+            if (RunTrackingService.currentRunSession.value?.isActive != true) {
+                garminWatchManager.cancelPreparedRun()
+                samsungWatchManager.cancelPreparedRun()
+            }
+            garminWatchManager.clearPendingPreparedRun()
+            samsungWatchManager.clearPendingPreparedRun()
+        }
     }
 
     /**
@@ -2388,9 +2421,21 @@ class RunSessionViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        // Unregister our watch-command handler if it's still the live one. Left in place, watch
+        // commands went to this dead instance (whose startRun() launches into a cancelled scope)
+        // instead of the watch managers' no-listener path, which starts/stops the service itself.
+        registeredWatchCommandHandler?.let { handler ->
+            if (garminWatchManager.onWatchCommand === handler) garminWatchManager.onWatchCommand = null
+            if (samsungWatchManager.onWatchCommand === handler) samsungWatchManager.onWatchCommand = null
+        }
+        if (runScreenOwner?.get() === this) runScreenOwner = null
         textToSpeechHelper.destroy()
         wakeWordDetector.stopWatching()
         speechRecognizerHelper.destroy()
     }
-}
 
+    companion object {
+        @Volatile
+        private var runScreenOwner: java.lang.ref.WeakReference<RunSessionViewModel>? = null
+    }
+}

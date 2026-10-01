@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.ui.components.WatchPhoneHowItWorks
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.Image
@@ -72,7 +73,7 @@ fun GarminCompanionPromptScreen(
 
         // Title
         Text(
-            text = "Get AI Coaching on Your Garmin Watch!",
+            text = "Run with AI Run Coach on Your Garmin",
             style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
             color = Colors.textPrimary,
             textAlign = TextAlign.Center
@@ -82,7 +83,7 @@ fun GarminCompanionPromptScreen(
 
         // Subtitle
         Text(
-            text = "Install our companion app on your watch for the ultimate running experience",
+            text = "Install our companion app on your watch to start sessions from your wrist, with your watch's sensors feeding your AI coach",
             style = AppTextStyles.body,
             color = Colors.textSecondary,
             textAlign = TextAlign.Center
@@ -110,8 +111,8 @@ fun GarminCompanionPromptScreen(
 
         BenefitCard(
             icon = "🗣️",
-            title = "AI Coaching on Watch",
-            description = "Get personalized audio and text coaching without looking at your phone"
+            title = "Live AI Coaching (with your phone)",
+            description = "Prepare on your phone and keep it with you — coaching plays through your phone or headphones while you control the session from your watch"
         )
 
         Spacer(modifier = Modifier.height(Spacing.sm))
@@ -126,8 +127,8 @@ fun GarminCompanionPromptScreen(
 
         BenefitCard(
             icon = "🎯",
-            title = "Single Activity",
-            description = "No need to run both apps - watch and phone sync automatically"
+            title = "One Session, Watch + Phone",
+            description = "Start on your watch and your phone follows automatically — one session, no need to start it twice"
         )
 
         Spacer(modifier = Modifier.height(Spacing.sm))
@@ -141,6 +142,10 @@ fun GarminCompanionPromptScreen(
         Spacer(modifier = Modifier.height(Spacing.xl))
 
         // Data comparison
+        WatchPhoneHowItWorks()
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -270,7 +275,7 @@ fun SamsungCompanionPromptScreen(
         Spacer(modifier = Modifier.height(Spacing.lg))
 
         Text(
-            text = "Get AI Coaching on Your Galaxy Watch!",
+            text = "Run with AI Run Coach on Your Galaxy Watch",
             style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold),
             color = Colors.textPrimary,
             textAlign = TextAlign.Center
@@ -279,7 +284,7 @@ fun SamsungCompanionPromptScreen(
         Spacer(modifier = Modifier.height(Spacing.sm))
 
         Text(
-            text = "Install our companion app on your Wear OS watch for the ultimate running experience",
+            text = "Install our companion app on your Wear OS watch to start sessions from your wrist, with your watch's sensors feeding your AI coach",
             style = AppTextStyles.body,
             color = Colors.textSecondary,
             textAlign = TextAlign.Center
@@ -305,8 +310,8 @@ fun SamsungCompanionPromptScreen(
 
         BenefitCard(
             icon = "🗣️",
-            title = "AI Coaching on Watch",
-            description = "Get personalized audio and text coaching without looking at your phone"
+            title = "Live AI Coaching (with your phone)",
+            description = "Prepare on your phone and keep it with you — coaching plays through your phone or headphones while you control the session from your watch"
         )
 
         Spacer(modifier = Modifier.height(Spacing.sm))
@@ -321,9 +326,13 @@ fun SamsungCompanionPromptScreen(
 
         BenefitCard(
             icon = "🎯",
-            title = "Single Activity",
-            description = "No need to run both apps - watch and phone sync automatically"
+            title = "One Session, Watch + Phone",
+            description = "Start on your watch and your phone follows automatically — one session, no need to start it twice"
         )
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
+        WatchPhoneHowItWorks()
 
         Spacer(modifier = Modifier.height(Spacing.xl))
 

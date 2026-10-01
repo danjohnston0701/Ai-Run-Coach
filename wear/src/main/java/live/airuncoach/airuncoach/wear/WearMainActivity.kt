@@ -61,7 +61,7 @@ class WearMainActivity : ComponentActivity() {
             KeyEvent.KEYCODE_STEM_1 -> {
                 val state = controller.state.value
                 when {
-                    !state.isRunning -> controller.startRun()
+                    !state.isRunning -> controller.onIdleStartPressed()
                     state.isPaused -> controller.resumeRun()
                     else -> controller.pauseRun()
                 }

@@ -604,6 +604,18 @@ class GarminWatchManager(
     }
 
     /**
+     * The runner backed out of a prepared session on the phone before starting it: tell the
+     * watch, so it drops the coached start screen and returns to prepare-on-phone rather than
+     * offering a session that no longer exists. No-op if nothing was prepared.
+     */
+    fun cancelPreparedRun() {
+        if (cachedPreparedRunPayload == null) return
+        cachedPreparedRunPayload = null
+        sendToWatch(mapOf("type" to "preparedRunCancelled"))
+        Log.d(TAG, "preparedRunCancelled sent to watch")
+    }
+
+    /**
      * Push the current activity type ("run" | "walk") to the watch as early as the phone
      * knows it — i.e. from setRunConfig(), not only from the explicit "Prepare Run on Watch"
      * flow (sendPreparedRun). Without this, a user who configures a walk on the phone but

@@ -45,7 +45,7 @@ class PhoneLink {
         // Only register the BT listener once — calling it on every onShow() is
         // wasteful and on some firmware versions creates duplicate message deliveries.
         if (!_registered) {
-            Comm.registerForPhoneAppMessages(method(:_onRawMessage));
+            if (!_videoNoPhone()) { Comm.registerForPhoneAppMessages(method(:_onRawMessage)); }
             _registered = true;
             Sys.println("PhoneLink registered");
         } else {
@@ -149,6 +149,7 @@ class PhoneLink {
     function _transmit(payload) {
         // Comm.transmit() throws (e.g. BLE_ERROR, CONNECTION_UNAVAILABLE) when the
         // companion phone app is not running — catch so the watch never crashes.
+        if (_videoNoPhone()) { return; }
         _pendingTransmits += 1;
         try {
             Comm.transmit(payload, null, new TransmitListener(method(:_onTransmitDone)));
@@ -158,6 +159,12 @@ class PhoneLink {
             Sys.println("PhoneLink: transmit exception (no phone?) — " + e.toString());
         }
     }
+
+    // Video recording build (monkey_video.jungle) only: there is no phone in the simulator,
+    // and a Comm.transmit()/registration that never completes can freeze the simulator VM
+    // (timers stop firing), so the recording build never touches the phone link.
+    (:video)   function _videoNoPhone() { return true; }
+    (:novideo) function _videoNoPhone() { return false; }
 
     // Raw message from Comm — forward to registered callback
     function _onRawMessage(msg as Comm.PhoneAppMessage) as Void {

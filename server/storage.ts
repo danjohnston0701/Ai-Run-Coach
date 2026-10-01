@@ -15,8 +15,18 @@ import {
 } from "@shared/schema";
 import { MEANINGFUL_RUN_SQL } from "./utils/run-units";
 import { db } from "./db";
-import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min } from "drizzle-orm";
+import { sweepDependents, deleteRowsIfUnreferenced } from "./fk-cleanup";
+import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
+import { ensureRunWeather, runStartPoint } from "./run-weather";
+
+// Keys of `runs` columns stored as Postgres integers — clients sometimes send fractional values
+// for these (see convertDateFields), which would otherwise fail the whole insert.
+const RUN_INTEGER_COLUMNS = new Set(
+  Object.entries(getTableColumns(runs))
+    .filter(([, col]) => col.dataType === "number" && /Integer|SmallInt|Serial/.test(col.columnType))
+    .map(([key]) => key)
+);
 
 // Aggregated run statistics — computed via SQL, not JavaScript
 export interface UserRunStats {
@@ -237,6 +247,17 @@ export class DatabaseStorage implements IStorage {
       }
     };
 
+    // Captured up front: routes generated from these runs can only be cleaned up *after*
+    // the runs are deleted (runs.route_id references routes), by which point the runs are
+    // no longer there to look them up from.
+    let userRunIds: string[] = [];
+    try {
+      const res: any = await db.execute(sql`SELECT id FROM runs WHERE user_id = ${userId}`);
+      userRunIds = (res?.rows ?? res ?? []).map((r: any) => r.id).filter(Boolean);
+    } catch (e: any) {
+      console.warn(`[Storage] Could not list runs for user ${userId} (non-fatal):`, e.message);
+    }
+
     // ── Phase 1: Null out FK references INTO runs we're about to delete ──────
     await tryCleanup('group_run_participants.run_id → user runs',
       sql`UPDATE group_run_participants SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
@@ -290,10 +311,15 @@ export class DatabaseStorage implements IStorage {
       sql`DELETE FROM activity_merge_log WHERE ai_run_coach_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
     await tryCleanup('run_analyses',
       sql`DELETE FROM run_analyses WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
-    await tryCleanup('device_data',
+    await tryCleanup('device_data (run-linked)',
       sql`DELETE FROM device_data WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
-    await tryCleanup('routes (source_run_id)',
-      sql`DELETE FROM routes WHERE source_run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('watch_biometric_samples (run-linked)',
+      sql`DELETE FROM watch_biometric_samples WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    await tryCleanup('garmin_data (run-linked)',
+      sql`DELETE FROM garmin_data WHERE run_id IN (SELECT id FROM runs WHERE user_id = ${userId})`);
+    // NOTE: routes derived from these runs are removed after the runs themselves — see the
+    // end of this function. `runs.route_id` references `routes`, so deleting the route
+    // first fails with 23503.
     await tryCleanup('runs',
       sql`DELETE FROM runs WHERE user_id = ${userId}`);
 
@@ -330,8 +356,14 @@ export class DatabaseStorage implements IStorage {
       sql`DELETE FROM notification_preferences WHERE user_id = ${userId}`);
     await tryCleanup('goals',
       sql`DELETE FROM goals WHERE user_id = ${userId}`);
-    await tryCleanup('routes (user-owned)',
-      sql`DELETE FROM routes WHERE user_id = ${userId}`);
+    // Only routes nothing else points at — a route can be shared with a public `events`
+    // entry or another user's live session, and hard-deleting it there fails on the FK.
+    // Anything still referenced keeps existing; the Phase 10 sweep unlinks its user_id.
+    try {
+      await deleteRowsIfUnreferenced('routes', 'user_id = $1', [userId]);
+    } catch (e: any) {
+      console.warn(`[Storage] Could not delete user-owned routes for ${userId}:`, e.message);
+    }
     await tryCleanup('daily_fitness',
       sql`DELETE FROM daily_fitness WHERE user_id = ${userId}`);
     await tryCleanup('segment_stars',
@@ -362,6 +394,24 @@ export class DatabaseStorage implements IStorage {
       sql`DELETE FROM garmin_companion_sessions WHERE user_id = ${userId}`);
     await tryCleanup('connected_devices',
       sql`DELETE FROM connected_devices WHERE user_id = ${userId}`);
+    // Pairing-flow tables. `garmin_pairing_diagnostics` is written by the iOS "Pair Garmin
+    // Device" flow only, and its user_id FK has no ON DELETE action — with no cleanup here
+    // the final DELETE FROM users failed with 23503 for any iOS user who had ever attempted
+    // pairing, which is why account deletion worked on Android but not on iOS.
+    await tryCleanup('garmin_pairing_diagnostics',
+      sql`DELETE FROM garmin_pairing_diagnostics WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_pairing_codes',
+      sql`DELETE FROM garmin_pairing_codes WHERE user_id = ${userId}`);
+    await tryCleanup('garmin_data (user-owned)',
+      sql`DELETE FROM garmin_data WHERE user_id = ${userId}`);
+    await tryCleanup('device_data (user-owned)',
+      sql`DELETE FROM device_data WHERE user_id = ${userId}`);
+    await tryCleanup('watch_biometric_samples (user-owned)',
+      sql`DELETE FROM watch_biometric_samples WHERE user_id = ${userId}`);
+    await tryCleanup('coaching_cooldown_state',
+      sql`DELETE FROM coaching_cooldown_state WHERE user_id = ${userId}`);
+    await tryCleanup('push_subscriptions',
+      sql`DELETE FROM push_subscriptions WHERE user_id = ${userId}`);
 
     // ── Phase 8: Usage tracking + promo redemptions ───────────────────────────
     await tryCleanup('monthly_usage',
@@ -381,13 +431,29 @@ export class DatabaseStorage implements IStorage {
     await tryCleanup('user_stats',
       sql`DELETE FROM user_stats WHERE user_id = ${userId}`);
 
-    // ── Phase 10: Delete the user row itself ──────────────────────────────────
+    // ── Phase 10: Safety net for tables the list above doesn't know about ─────
+    // Reads the live FK graph and resolves whatever still points at this user, so a newly
+    // added table can never silently break account deletion again (server/fk-cleanup.ts).
+    await sweepDependents('users', 'id = $1', [userId]);
+
+    // ── Phase 11: Delete the user row itself ──────────────────────────────────
     try {
       await db.execute(sql`DELETE FROM users WHERE id = ${userId}`);
       console.log(`[Storage] Successfully deleted user ${userId} and all associated data`);
     } catch (e) {
       console.error(`[Storage] Error deleting user ${userId}:`, e);
       throw new Error(`Failed to delete user: ${e}`);
+    }
+
+    // ── Phase 12: Routes generated by the now-deleted runs ────────────────────
+    // Deferred to here because runs.route_id references routes. Only removes routes that
+    // nothing else still points at; best-effort, the account is already gone.
+    if (userRunIds.length > 0) {
+      try {
+        await deleteRowsIfUnreferenced('routes', 'source_run_id = ANY($1)', [userRunIds]);
+      } catch (e: any) {
+        console.warn(`[Storage] Could not clean up routes for user ${userId} (non-fatal):`, e.message);
+      }
     }
   }
 
@@ -634,8 +700,16 @@ export class DatabaseStorage implements IStorage {
       console.log('[createRun] String date fields found:', dateFieldsBeforeConversion.join(', '));
     }
     const sanitized = this.convertDateFields(run);
+    // iOS uploads have no start_lat/start_lng (its upload model has no such field) — take the
+    // start from the first GPS point so route memory and location features see iOS runs too.
+    if (sanitized.startLat == null || sanitized.startLng == null) {
+      const start = runStartPoint({ gpsTrack: sanitized.gpsTrack });
+      if (start) [sanitized.startLat, sanitized.startLng] = start;
+    }
     try {
       const [newRun] = await db.insert(runs).values(sanitized).returning();
+      // iOS uploads carry no weatherData object (and imports none) — fill it server-side.
+      if (newRun.weatherData == null) void ensureRunWeather(newRun.id);
       return newRun;
     } catch (err: any) {
       // PostgreSQL unique-constraint violation (code 23505).
@@ -695,15 +769,31 @@ export class DatabaseStorage implements IStorage {
     await tryCleanup('activity_merge_log', sql`DELETE FROM activity_merge_log WHERE ai_run_coach_run_id = ${id}`);
     await tryCleanup('run_analyses',       sql`DELETE FROM run_analyses       WHERE run_id = ${id}`);
     await tryCleanup('device_data',        sql`DELETE FROM device_data        WHERE run_id = ${id}`);
-    await tryCleanup('routes',             sql`DELETE FROM routes             WHERE source_run_id = ${id}`);
 
-    // Finally delete the run itself — this one must succeed
+    // NOTE: routes derived from this run (routes.source_run_id) are cleaned up *after* the
+    // run row is gone, not here — `runs.route_id` has an FK to `routes`, so deleting the
+    // route first fails with 23503 for every run that has a recognised route.
+
+    // Safety net: resolve any FK into this run that the explicit list above doesn't know
+    // about yet (see server/fk-cleanup.ts) so a newly-added table can't 500 the delete.
+    await sweepDependents('runs', 'id = $1', [id]);
+
+    // Delete the run itself — this one must succeed
     try {
       await db.execute(sql`DELETE FROM runs WHERE id = ${id}`);
       console.log(`[Storage] Successfully deleted run ${id}`);
     } catch (e) {
       console.error(`[Storage] Error deleting run ${id}:`, e);
       throw new Error(`Failed to delete run: ${e}`);
+    }
+
+    // Now that the run is gone, drop any route it generated — but only if nothing else
+    // (another run, a live session, a public event) still points at it. Best-effort: the
+    // run is already deleted, so a leftover route must not fail the request.
+    try {
+      await deleteRowsIfUnreferenced('routes', 'source_run_id = $1', [id]);
+    } catch (e: any) {
+      console.warn(`[Storage] Could not clean up routes for run ${id} (non-fatal):`, e.message);
     }
   }
 
@@ -715,6 +805,10 @@ export class DatabaseStorage implements IStorage {
       if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
         console.log(`[convertDateFields] Converting string to Date for key: ${key}`);
         result[key] = new Date(val);
+      } else if (typeof val === 'number' && !Number.isInteger(val) && RUN_INTEGER_COLUMNS.has(key)) {
+        // Postgres rejects a fractional value for an integer column and the whole insert fails
+        // (iOS sends Garmin average running power as a Double, e.g. 274.51 W → HTTP 500).
+        result[key] = Math.round(val);
       }
     }
     return result;

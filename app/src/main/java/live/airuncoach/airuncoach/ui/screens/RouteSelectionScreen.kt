@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -33,6 +34,7 @@ import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RouteDifficulty
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
+import live.airuncoach.airuncoach.ui.components.WatchNeedsPhoneCaption
 import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.math.roundToInt
@@ -61,6 +63,8 @@ fun RouteSelectionScreen(
     
     // Get activity type label
     val activityTypeLabel = if (activityType == PhysicalActivityType.WALK) "WALK" else "RUN"
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var actionBarHeightPx by remember { mutableIntStateOf(0) }
 
     Scaffold(
         topBar = {
@@ -102,7 +106,9 @@ fun RouteSelectionScreen(
                     start = 16.dp,
                     top = 16.dp,
                     end = 16.dp,
-                    bottom = 132.dp
+                    // Clears the bottom action bar, measured below (taller when the watch
+                    // options are stacked in it).
+                    bottom = with(density) { actionBarHeightPx.toDp() }.coerceAtLeast(132.dp)
                 ),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -161,6 +167,7 @@ fun RouteSelectionScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .onSizeChanged { actionBarHeightPx = it.height }
                     .background(
                         Brush.verticalGradient(
                             listOf(Color.Transparent, Color(0xFF0A1628))
@@ -169,19 +176,17 @@ fun RouteSelectionScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // "Prepare for Watch" (primary filled, left) and "Start on Phone"
-                // (secondary outlined, right) side by side — shown only once a route is
-                // selected AND the companion app is installed; otherwise a single full-width
-                // phone button (also covers "companion installed but no route picked yet",
-                // which previously rendered the half-width row with dead space instead of the
-                // full-width disabled button).
+                // "Prepare for Watch", the "take your phone" caption, then "Start on Phone",
+                // stacked full width — shown only once a route is selected AND the companion
+                // app is installed; otherwise a single full-width phone button (also covers
+                // "companion installed but no route picked yet").
                 val selectedRoute = routes.find { it.id == selectedRouteId }
                 if (companionInstalled && selectedRouteId != null) {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Box(modifier = Modifier.weight(1f)) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             PrepareRunOnWatchButton(
                                 companionInstalled = true,
                                 sendState = watchSendState,
@@ -204,9 +209,10 @@ fun RouteSelectionScreen(
                                 }
                             )
                         }
-                        Box(modifier = Modifier.weight(1f)) {
+                        WatchNeedsPhoneCaption(isWalk = activityTypeLabel == "WALK")
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             OutlinedCtaButton(
-                                text = "START $activityTypeLabel",
+                                text = "START $activityTypeLabel ON PHONE",
                                 leadingIconRes = null,
                                 enabled = true,
                                 onClick = onStartRun

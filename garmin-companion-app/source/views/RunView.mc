@@ -272,6 +272,7 @@ class RunView extends Ui.View {
         _isSmallScreen = (ds.screenWidth <= 218);
         if (_isSmallScreen) { _screenPage = 1; }
         _initSimulatorMode();   // no-op in release, seeds preview data in simulator
+        _videoInit();           // no-op outside the (:video) recording build
 
         // Real Garmin hardware exposes no crash log to sideloaded/dev-mode apps —
         // Sys.println only reaches a USB/simulator console. Surface any breadcrumb
@@ -333,6 +334,149 @@ class RunView extends Ui.View {
     private function _initSimulatorMode() {
         // Stripped from production build — do not add code here
     }
+
+    // ── Video recording mode ──────────────────────────────────────────────────
+    // Built only by monkey_video.jungle (every other jungle excludes :video), for recording
+    // the Garmin + iPhone how-to video in the simulator (marketing/garmin-iphone-video).
+    // The simulator has no phone and no Activity data, so this plays the real screens in
+    // sequence on a timer: pairing code (a real one, from the server) → linked, prepare on
+    // phone → session prepared from the phone → GPS lock → START → a 5 km run fed by the
+    // same deterministic formula as the iOS app's VideoDemoMode.swift, so the watch and the
+    // phone show identical numbers at the same elapsed second → FINISHED.
+
+    private var _videoOn      = false;
+    private var _videoStep    = 0;
+    private var _videoDueMs   = -1;     // next scripted step (Sys.getTimer ms); -1 = none. Driven
+                                        // from onTick — the app is already at the device's timer limit.
+    private var _videoStartMs = 0;
+    private var _videoSec     = 0;
+    private var _videoDist    = 0.0;
+    // Seconds to fast-forward the scripted run at START (0 = real time from 00:00). Set to e.g.
+    // 1590 to record the finish without a 27-minute take — the numbers are deterministic, so
+    // the FINISHED screen is identical either way.
+    private const VIDEO_SKIP_SEC = 0;
+
+    (:video)
+    private function _videoInit() {
+        _videoOn = true;
+        App.Storage.deleteValue("authToken");
+        _isAuthenticated = false;
+        _isRunning       = false;
+        _overlayState    = OVERLAY_WAITING;
+    }
+
+    // Shows a fixed code instead of requesting one: Comm.makeWebRequest intermittently hangs
+    // the whole simulator VM (white screen, never draws) and the video only needs a code the
+    // phone recording then types in. Returns true so onShow() skips the real request.
+    (:video)
+    private function _videoFakeCode() {
+        _onPairingCodeReceived("482913");
+        return true;
+    }
+
+    (:video)
+    private function _videoOnCode() {
+        if (_videoStep != 0 || _videoDueMs >= 0) { return; }
+        Sys.println("VIDEO: code shown, scheduling link");
+        _videoSchedule(20000);   // hold on the pairing code while the phone types it in
+    }
+
+    (:video)
+    private function _videoSchedule(ms) {
+        _videoDueMs = Sys.getTimer() + ms;
+    }
+
+    (:video)
+    private function _videoAdvance() {
+        _videoDueMs = -1;
+        Sys.println("VIDEO: step " + _videoStep);
+        if (_videoStep == 0) {
+            // Phone confirmed the code → linked, waiting for a prepare.
+            _isAuthenticated  = true;
+            _isConnected      = true;
+            _connectWaitTicks = CONNECT_WAIT_MAX;
+            _pairingCode      = null;
+            if (_pairingCodeManager != null) { _pairingCodeManager.cancel(); }
+            _overlayState     = OVERLAY_GPS_WAIT;
+            _videoStep = 1;
+            _videoSchedule(14000);
+        } else if (_videoStep == 1) {
+            // "Prepare for Watch" tapped on the phone — the real message path.
+            _onPhoneMessageInner({ "type" => "preparedRun", "distance" => 5.0, "runType" => "free",
+                                   "targetPace" => "5:20", "sessionType" => "run" });
+            _videoStep = 2;
+            _videoSchedule(7000);
+        } else if (_videoStep == 2) {
+            _gpsReady   = true;
+            _gpsQuality = 4;
+            _overlayState = OVERLAY_COACHED;
+            _videoStep = 3;
+            _videoSchedule(8000);
+        } else if (_videoStep == 3) {
+            _videoStartMs = Sys.getTimer() - VIDEO_SKIP_SEC * 1000;
+            _videoSec  = 0;
+            _videoDist = 0.0;
+            _videoStep = 4;
+            startRun();
+        }
+        Ui.requestUpdate();
+    }
+
+    (:video)
+    private function _videoTick() {
+        if (!_videoOn) { return; }
+        if (_videoDueMs >= 0 && Sys.getTimer() >= _videoDueMs) { _videoAdvance(); }
+        if (!_isRunning || _isPaused) { return; }
+        var sec = (Sys.getTimer() - _videoStartMs) / 1000;
+        var n = 0;   // bounded per tick so a fast-forward catches up over a few ticks (watchdog)
+        while (_videoSec < sec && n < 200) {
+            _videoSec += 1;
+            _videoDist += _videoSpeed(_videoSec);
+            n += 1;
+        }
+        var t = _videoSec.toFloat();
+        var spd = _videoSpeed(_videoSec);
+        _distance      = _videoDist;
+        _pace          = 1000.0 / spd;
+        _elapsedTime   = _videoSec;
+        _elapsedMs     = _videoSec * 1000;
+        var ramp  = (t / 240.0 < 1.0) ? t / 240.0 : 1.0;
+        var drift = (t / 1800.0 < 1.0) ? t / 1800.0 : 1.0;
+        _heartRate     = (128 + 30 * ramp + 6 * drift + 1.5 * Math.sin(t * 0.37)).toNumber();
+        _heartRateZone = _hrZone(_heartRate);
+        _cadence       = 170 + Math.round(2 * Math.sin(t * 0.9)).toNumber();
+        _gpsLostTicks  = 0;
+        _isConnected   = true;
+        if (_videoDist >= 5000.0 && !_isFinished) { Sys.println("VIDEO: finished"); finishRun(); }
+    }
+
+    // Show exactly what the phone shows at the same elapsed second, instead of the watch's
+    // eased display values: distance and HR/cadence unsmoothed, pace = 1000 / mean of the last
+    // five 1 Hz speeds (the phone's recentSpeeds window). Lets side-by-side shots match.
+    (:video)
+    private function _videoDisplay() {
+        if (!_videoOn || !_isRunning || _videoSec < 1) { return; }
+        _dispDistance = _videoDist;
+        _dispHR       = _heartRate;
+        _dispCadence  = _cadence;
+        var n = (_videoSec < 5) ? _videoSec : 5;
+        var sum = 0.0;
+        for (var i = 0; i < n; i++) { sum += _videoSpeed(_videoSec - i); }
+        _dispPace = 1000.0 / (sum / n);
+    }
+
+    // Shared with VideoDemoMode.swift — change both together.
+    (:video)
+    private function _videoSpeed(sec) {
+        var t = sec.toFloat();
+        return 3.12 + 0.09 * Math.sin(t / 55.0) + 0.03 * Math.sin(t * 1.7);
+    }
+
+    (:novideo) private function _videoInit() {}
+    (:novideo) private function _videoFakeCode() { return false; }
+    (:novideo) private function _videoOnCode() {}
+    (:novideo) private function _videoTick() {}
+    (:novideo) private function _videoDisplay() {}
 
     function setPhoneControlled(v) { _phoneControlled = v; }
 
@@ -763,7 +907,7 @@ class RunView extends Ui.View {
         // Kick off the pairing-code fallback in parallel with the BLE "auth" path —
         // whichever completes first wins (see _applyAuthToken). No-ops if already
         // authenticated or already started. Comm subsystem is guaranteed ready here.
-        if (!_isAuthenticated && _pairingCodeManager != null) {
+        if (!_isAuthenticated && _pairingCodeManager != null && !_videoFakeCode()) {
             _pairingCodeManager.start();
         }
         if (!_phoneControlled && _isRunning) {
@@ -1149,6 +1293,7 @@ class RunView extends Ui.View {
         _pairingCode = code;
         Sys.println("RunView: pairing code displayed — " + code);
         Ui.requestUpdate();
+        _videoOnCode();
     }
 
     function _onPairingCodeConfirmed(token) {
@@ -1280,6 +1425,8 @@ class RunView extends Ui.View {
             }
         }
 
+        _videoTick();
+
         // ── Smoothed display values ────────────────────────────────────────────
         // Pace uses the 5-second rolling history buffer to suppress GPS jitter
         // spikes.  Previously _dispPace was set directly from raw _pace which
@@ -1315,6 +1462,7 @@ class RunView extends Ui.View {
         _dispDistance = _dispDistance + (_distance - _dispDistance) * 0.20;
         _dispHR       = (_dispHR + (_heartRate - _dispHR) * 0.30).toNumber();
         _dispCadence  = (_dispCadence + (_cadence  - _dispCadence) * 0.30).toNumber();
+        _videoDisplay();
 
         if (_statusTicks > 0) {
             _statusTicks -= 1;
@@ -1689,7 +1837,7 @@ class RunView extends Ui.View {
             var ringR = (w * 0.255).toNumber();
             var circR = (w * 0.168).toNumber();
             _drawRing(dc, cx - ringR, cy, circR, 0x00BFA8, "KM",   (_dispDistance / 1000.0).format("%.2f"));
-            _drawRing(dc, cx + ringR, cy, circR, 0xFFDD00, "PACE", _fmtPaceDec(_dispPace));
+            _drawRing(dc, cx + ringR, cy, circR, 0xFFDD00, "PACE", _fmtPace(_dispPace));
             // Only show a zone number / zone-coloured ring once we have BOTH a real
             // personalised max HR (user has a known age/DOB) AND a live HR reading —
             // without either, a shown zone would just be a guess dressed up as fact.
@@ -1702,7 +1850,7 @@ class RunView extends Ui.View {
             }
             _drawRing(dc, cx, cy + ringR, circR, hrColor, hrLabel, _dispHR > 0 ? _dispHR.format("%d") : "--");
             _drawBattery(dc, cx, cy, ringR, circR);
-            _drawStatusBar(dc, cx, w, h);
+            _drawStatusBar(dc, cx, w, h, cy + ringR + circR);
         }
 
         // Paused banner (both screens)
@@ -1749,7 +1897,9 @@ class RunView extends Ui.View {
             dc.drawText(cx, (h * 0.09).toNumber(), timerFont, _fmtClock(), Gfx.TEXT_JUSTIFY_CENTER);
         }
         // Cadence metric (value) above SPM label — FONT_SMALL on all device sizes.
-        // Shows "--" until cadence sensor data arrives.
+        // Shows "--" until cadence sensor data arrives. Before a run the prepare hint uses
+        // this slot instead (see _drawStatusBar).
+        if (_showPrepareHint()) { return; }
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         var cadStr = _dispCadence > 0 ? _dispCadence.format("%d") : "--";
         dc.drawText(cx, cadY, Gfx.FONT_SMALL, cadStr, Gfx.TEXT_JUSTIFY_CENTER);
@@ -1787,7 +1937,7 @@ class RunView extends Ui.View {
         dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
         dc.drawText(rx, (h * 0.17).toNumber(), Gfx.FONT_XTINY, "PACE", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.23).toNumber(), metricFont, _fmtPaceDec(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.23).toNumber(), metricFont, _fmtPace(_dispPace), Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider top row
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
@@ -1826,7 +1976,7 @@ class RunView extends Ui.View {
         dc.setColor(0xFFDD00, Gfx.COLOR_TRANSPARENT);
         dc.drawText(rx, (h * 0.66).toNumber(), Gfx.FONT_XTINY, "AVG PACE", Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(rx, (h * 0.74).toNumber(), metricFont, _fmtPaceDec(avgPace), Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(rx, (h * 0.74).toNumber(), metricFont, _fmtPace(avgPace), Gfx.TEXT_JUSTIFY_CENTER);
 
         // Vertical divider row 2
         dc.setColor(0x444444, Gfx.COLOR_TRANSPARENT);
@@ -1834,7 +1984,7 @@ class RunView extends Ui.View {
 
         // Battery icon removed from grid screen — grid shifted down so top row clears the bezel
 
-        _drawStatusBar(dc, cx, w, h);
+        _drawStatusBar(dc, cx, w, h, -1);
     }
 
     // Two small dots at the bottom showing which screen is active
@@ -1864,15 +2014,70 @@ class RunView extends Ui.View {
         dc.drawCircle(x, y, r - 1);
         dc.drawCircle(x, y, r);
         dc.drawCircle(x, y, r + 1);
+        // Label above value, stacked by measured font heights and centred on the ring. The old
+        // fixed y-21 / y-7 offsets were tuned on small screens; on large ones (454 px FR965)
+        // the value's taller font overlapped its label. Fonts carry internal top/bottom
+        // padding, so the two lines are pulled together by a fraction of the label height.
+        var hLabel  = Gfx.getFontHeight(Gfx.FONT_XTINY);
+        var hValue  = Gfx.getFontHeight(Gfx.FONT_MEDIUM);
+        var overlap = (hLabel * 0.25).toNumber();
+        var top     = y - ((hLabel + hValue - overlap) / 2).toNumber();
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(x, y - 21, Gfx.FONT_XTINY, label, Gfx.TEXT_JUSTIFY_CENTER);
-        dc.drawText(x, y - 7,  Gfx.FONT_MEDIUM, value, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(x, top, Gfx.FONT_XTINY, label, Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(x, top + hLabel - overlap, Gfx.FONT_MEDIUM, value, Gfx.TEXT_JUSTIFY_CENTER);
     }
 
+    // Rings screen battery: a compact icon over its percentage, in the empty pocket at the
+    // lower right between the PACE and HR rings, scaled to the screen. It used to sit at a
+    // fixed cx+circR+8 offset with a fixed 22x12 px icon, which on large screens (454 px
+    // FR965) put the percentage on top of the HR ring.
     private function _drawBattery(dc, cx, cy, ringR, circR) {
-        var bx = (cx + circR + 8).toNumber();
-        var by = (cy + ringR - 6).toNumber();
-        _drawBatteryAt(dc, bx, by);
+        if (!(Sys has :getSystemStats)) { return; }
+        var stats = Sys.getSystemStats();
+        if (stats == null || stats.battery == null) { return; }
+        var bat = stats.battery.toNumber();
+        if (bat < 0)   { bat = 0; }
+        if (bat > 100) { bat = 100; }
+
+        var w  = dc.getWidth();
+        var bw = (w * 0.062).toNumber();
+        if (bw < 18) { bw = 18; }
+        var bh = (bw * 0.52).toNumber();
+        var tw = (bw * 0.10).toNumber(); if (tw < 2) { tw = 2; }
+        var th = (bh * 0.45).toNumber();
+        var hTiny = Gfx.getFontHeight(Gfx.FONT_XTINY);
+
+        // Pocket centre: on the diagonal between the PACE ring (cx+ringR, cy) and the HR
+        // ring (cx, cy+ringR), pushed out towards the bezel until it clears both.
+        var px = cx + (w * 0.305).toNumber();
+        var py = cy + (w * 0.290).toNumber();
+        var bx = px - (bw + tw) / 2;
+        var by = py - (bh + hTiny) / 2;
+
+        var col = 0x00CC66;
+        if (bat < 50) { col = 0xFFAA00; }
+        if (bat < 20) { col = 0xFF4444; }
+        var r = (bh / 4).toNumber();
+
+        dc.setColor(0x777777, Gfx.COLOR_TRANSPARENT);
+        if (dc has :drawRoundedRectangle) {
+            dc.drawRoundedRectangle(bx, by, bw, bh, r);
+        } else {
+            dc.drawRectangle(bx, by, bw, bh);
+        }
+        dc.fillRectangle(bx + bw, by + (bh - th) / 2, tw, th);
+        var inset = (bh / 6).toNumber(); if (inset < 2) { inset = 2; }
+        var fillW = ((bw - 2 * inset) * bat / 100).toNumber();
+        if (fillW > 0) {
+            dc.setColor(col, Gfx.COLOR_TRANSPARENT);
+            if (dc has :fillRoundedRectangle) {
+                dc.fillRoundedRectangle(bx + inset, by + inset, fillW, bh - 2 * inset, (r / 2).toNumber());
+            } else {
+                dc.fillRectangle(bx + inset, by + inset, fillW, bh - 2 * inset);
+            }
+        }
+        dc.setColor(0x999999, Gfx.COLOR_TRANSPARENT);
+        dc.drawText(px, by + bh + 1, Gfx.FONT_XTINY, bat.format("%d") + "%", Gfx.TEXT_JUSTIFY_CENTER);
     }
 
     // Draw just the battery icon outline+fill, no percentage text.
@@ -1908,28 +2113,24 @@ class RunView extends Ui.View {
         }
     }
 
-    // Draw battery icon + percentage text. Used on the rings screen where there
-    // is dedicated space below the bottom ring for the battery status block.
-    private function _drawBatteryAt(dc, bx, by) {
-        _drawBatteryIcon(dc, bx, by);
-        if (!(Sys has :getSystemStats)) { return; }
-        var stats = Sys.getSystemStats();
-        if (stats == null || stats.battery == null) { return; }
-        var bat = stats.battery.toNumber();
-        if (bat < 0)   { bat = 0; }
-        if (bat > 100) { bat = 100; }
-        var bw = 22;
-        var bh = 12;
-        dc.setColor(0x888888, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(bx + bw / 2, by + bh + 2, Gfx.FONT_XTINY, bat.format("%d") + "%", Gfx.TEXT_JUSTIFY_CENTER);
+    // "Prepare on Phone" nudge: connected, nothing prepared, before a run (not after one —
+    // finishRun() clears _isPrepared, and the nudge used to land on the FINISHED screen).
+    private function _showPrepareHint() {
+        return !_isRunning && !_isPaused && !_isFinished && _isConnected && _isAuthenticated
+            && !_isPrepared && !_prepareGateDismissed;
     }
 
-
-    private function _drawStatusBar(dc, cx, w, h) {
-        var y = (h * 0.82).toNumber();
+    // ringBottom: the HR ring's bottom edge on the rings page (-1 on the grid page). A fixed
+    // 0.82h lands inside the HR ring there (it spans ~0.59h–0.92h on every size), so short
+    // messages go in the band under the ring and the long prepare hint takes the cadence slot,
+    // which is empty before a run (_drawTimeTop skips it then).
+    private function _drawStatusBar(dc, cx, w, h, ringBottom) {
+        var y = (ringBottom > 0) ? ringBottom + 2 : (h * 0.82).toNumber();
         if (_statusMessage.length() > 0) {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y, Gfx.FONT_XTINY, _statusMessage, Gfx.TEXT_JUSTIFY_CENTER);
+            // Arbitrary text: under the ring if it fits the round face there, else the old spot.
+            var sy = (ringBottom > 0 && !_fitsRoundBand(dc, _statusMessage, y, w, h)) ? (h * 0.82).toNumber() : y;
+            dc.drawText(cx, sy, Gfx.FONT_XTINY, _statusMessage, Gfx.TEXT_JUSTIFY_CENTER);
         } else if (_isRunning && _gpsLostTicks >= GPS_LOST_THRESHOLD) {
             // GPS signal lost during an active run — amber warning
             dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
@@ -1939,7 +2140,7 @@ class RunView extends Ui.View {
             // Guard with grace period so the label does not flash before auth arrives
             dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
             dc.drawText(cx, y, Gfx.FONT_XTINY, "OFFLINE", Gfx.TEXT_JUSTIFY_CENTER);
-        } else if (!_isRunning && _isConnected && _isAuthenticated && !_isPrepared && !_prepareGateDismissed) {
+        } else if (_showPrepareHint()) {
             // Connected to the phone but nothing prepared. "PRESS START" here is a dead end:
             // it works, but it silently gives up coaching, the session target and the richer
             // charts the phone adds. Point at the better path instead.
@@ -1952,7 +2153,12 @@ class RunView extends Ui.View {
             dc.setColor(0x00BFA8, Gfx.COLOR_TRANSPARENT);
             var hint  = "Prepare on Phone for AI coaching";
             var maxW  = (w * 0.88).toNumber();
-            if (dc.getTextWidthInPixels(hint, Gfx.FONT_XTINY) <= maxW) {
+            if (ringBottom > 0) {
+                var lh2 = Gfx.getFontHeight(Gfx.FONT_XTINY);
+                var cy2 = (h * 0.26).toNumber();
+                dc.drawText(cx, cy2,       Gfx.FONT_XTINY, "Prepare on Phone", Gfx.TEXT_JUSTIFY_CENTER);
+                dc.drawText(cx, cy2 + lh2, Gfx.FONT_XTINY, "for AI coaching",  Gfx.TEXT_JUSTIFY_CENTER);
+            } else if (dc.getTextWidthInPixels(hint, Gfx.FONT_XTINY) <= maxW) {
                 dc.drawText(cx, y, Gfx.FONT_XTINY, hint, Gfx.TEXT_JUSTIFY_CENTER);
             } else {
                 var lh = Gfx.getFontHeight(Gfx.FONT_XTINY);
@@ -1961,8 +2167,19 @@ class RunView extends Ui.View {
             }
         } else if (!_isRunning) {
             dc.setColor(0x555555, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, y, Gfx.FONT_XTINY, "PRESS START", Gfx.TEXT_JUSTIFY_CENTER);
+            var ps = "PRESS START";
+            if (ringBottom > 0 && !_fitsRoundBand(dc, ps, y, w, h)) { ps = "START"; }
+            dc.drawText(cx, y, Gfx.FONT_XTINY, ps, Gfx.TEXT_JUSTIFY_CENTER);
         }
+    }
+
+    // True if `text` (FONT_XTINY, top at y) fits inside the round face with a small margin.
+    private function _fitsRoundBand(dc, text, y, w, h) {
+        var r   = w / 2.0 - 6;
+        var dy  = (y + Gfx.getFontHeight(Gfx.FONT_XTINY) * 0.6) - h / 2.0;
+        if (dy >= r) { return false; }
+        var half = Math.sqrt(r * r - dy * dy);
+        return dc.getTextWidthInPixels(text, Gfx.FONT_XTINY) <= 2 * half;
     }
 
     // ── Prepare-on-phone Screen ──────────────────────────────────────────────
@@ -2131,26 +2348,88 @@ class RunView extends Ui.View {
         dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
         dc.drawLine((w * 0.2).toNumber(), (h * 0.22).toNumber(), (w * 0.8).toNumber(), (h * 0.22).toNumber());
 
+        // Stacked by measured font heights, not fixed offsets: the old cy±N pixel positions
+        // were tuned on ~240 px screens and overlapped badly on large ones (on a 454 px
+        // Forerunner 965 "Waiting" sat on the instructions and the footer ran through the
+        // pairing code). The block is centred in the space below the divider; if it can't fit
+        // (small screens with a big number font) the "Waiting" line is dropped first.
         var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy - 44, Gfx.FONT_SMALL, "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+        var hSmall = Gfx.getFontHeight(Gfx.FONT_SMALL);
+        var hTiny  = Gfx.getFontHeight(Gfx.FONT_XTINY);
+        var gap    = (hTiny / 3).toNumber();
+        var top    = (h * 0.24).toNumber();
+        var bottom = (h * 0.84).toNumber();   // lower than this the round bezel clips the footer
+
+        // Code font: the big number font where it fits the width (large screens), stepping
+        // down on small ones (208 px FR55), where NUMBER_MEDIUM ran off both sides.
+        var codeFont = Gfx.FONT_NUMBER_MEDIUM;
+        if (_pairingCode != null) {
+            var codeText = _formatPairingCode(_pairingCode);
+            if (dc.getTextWidthInPixels(codeText, codeFont) > (w * 0.78).toNumber()) {
+                codeFont = Gfx.FONT_NUMBER_MILD;
+                if (dc.getTextWidthInPixels(codeText, codeFont) > (w * 0.78).toNumber()) {
+                    codeFont = Gfx.FONT_MEDIUM;
+                }
+            }
+        }
+        var hCode = Gfx.getFontHeight(codeFont);
+
+        // The footer sits low on a round face where the usable width shrinks — wrap it to two
+        // lines unless it comfortably fits (it doesn't on the 454 px FR965's larger fonts).
+        var footer    = "You only need to do this once.";
+        var footerTwo = dc.getTextWidthInPixels(footer, Gfx.FONT_XTINY) > (w * 0.66).toNumber();
+        var hFooter   = footerTwo ? 2 * hTiny : hTiny;
+
+        // Drop the least important lines until the block fits: "Waiting" first, then the footer.
+        var body   = (_pairingCode != null) ? (2 * hTiny + hCode) : (2 * hTiny);
+        var showWaiting = true;
+        var showFooter  = true;
+        var total  = hSmall + gap + body + gap + hFooter;
+        if (total > bottom - top) { showWaiting = false; total = body + gap + hFooter; }
+        if (total > bottom - top) { showFooter  = false; total = body; }
+        var y = top + ((bottom - top - total) / 2).toNumber();
+        if (y < top) { y = top; }
+
+        if (showWaiting) {
+            dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_SMALL, "Waiting" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+            y += hSmall + gap;
+        }
 
         if (_pairingCode != null) {
             // Pairing-code fallback got a code before the ConnectIQ BLE auth arrived —
             // show it so the user can type it into the phone app directly instead of
             // waiting on a device pairing hand-off that may never complete.
-            dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy - 18, Gfx.FONT_XTINY, "Or enter this code in", Gfx.TEXT_JUSTIFY_CENTER);
-            dc.drawText(cx, cy - 4,  Gfx.FONT_XTINY, "Ai Run Coach on your phone:", Gfx.TEXT_JUSTIFY_CENTER);
+            // Shorter wording where the full line would run off a small round face (FR55).
+            var l1 = "Or enter this code in";
+            var l2 = "Ai Run Coach on your phone:";
+            if (dc.getTextWidthInPixels(l2, Gfx.FONT_XTINY) > (w * 0.80).toNumber()) {
+                l1 = "Or enter this code";
+                l2 = "in the phone app:";
+            }
+            dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, l1, Gfx.TEXT_JUSTIFY_CENTER);
+            y += hTiny;
+            dc.drawText(cx, y, Gfx.FONT_XTINY, l2, Gfx.TEXT_JUSTIFY_CENTER);
+            y += hTiny;
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 12, Gfx.FONT_NUMBER_MEDIUM, _formatPairingCode(_pairingCode), Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, y, codeFont, _formatPairingCode(_pairingCode), Gfx.TEXT_JUSTIFY_CENTER);
+            y += hCode;
         } else {
-            dc.setColor(Gfx.COLOR_DK_GRAY, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 8,  Gfx.FONT_XTINY, "Open Ai Run Coach on your", Gfx.TEXT_JUSTIFY_CENTER);
-            dc.drawText(cx, cy + 22, Gfx.FONT_XTINY, "phone to connect.", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "Open Ai Run Coach on your", Gfx.TEXT_JUSTIFY_CENTER);
+            y += hTiny;
+            dc.drawText(cx, y, Gfx.FONT_XTINY, "phone to connect.", Gfx.TEXT_JUSTIFY_CENTER);
+            y += hTiny;
         }
+        if (!showFooter) { return; }
         dc.setColor(0x00AA55, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy + 52, Gfx.FONT_XTINY, "You only need to do this once.", Gfx.TEXT_JUSTIFY_CENTER);
+        if (footerTwo) {
+            dc.drawText(cx, y + gap,         Gfx.FONT_XTINY, "You only need to", Gfx.TEXT_JUSTIFY_CENTER);
+            dc.drawText(cx, y + gap + hTiny, Gfx.FONT_XTINY, "do this once.",    Gfx.TEXT_JUSTIFY_CENTER);
+        } else {
+            dc.drawText(cx, y + gap, Gfx.FONT_XTINY, footer, Gfx.TEXT_JUSTIFY_CENTER);
+        }
     }
 
     // "482913" -> "482 913" — easier to read/type accurately on a small round screen.
@@ -2222,9 +2501,13 @@ class RunView extends Ui.View {
     }
 
     // Format pace as M.D min/km (1 decimal place)
-    private function _fmtPaceDec(secPerKm) {
+    // Minutes:seconds per km ("5:17"), the way runners — and the phone app — read pace. This
+    // used to print decimal minutes ("5.29" for 5:17), which reads as 5:29 and disagreed with
+    // the phone showing the same run. Seconds truncate, matching the phone's formatting.
+    private function _fmtPace(secPerKm) {
         if (secPerKm <= 0 || secPerKm > 1200) { return "--" ; }
-        return (secPerKm / 60.0).format("%.2f");
+        var total = secPerKm.toNumber();
+        return (total / 60).format("%d") + ":" + (total % 60).format("%02d");
     }
 
     private function _parsePace(str) {

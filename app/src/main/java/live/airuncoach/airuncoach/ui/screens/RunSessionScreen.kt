@@ -2,6 +2,7 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.ui.components.WatchNeedsPhoneCaption
 import android.Manifest
 import android.content.pm.PackageManager
 import android.util.Log
@@ -31,6 +32,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.with
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -40,6 +42,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Scaffold
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.ExploreOff
@@ -340,6 +343,7 @@ fun RunSessionScreen(
             }
         }
 
+        viewModel.claimRunScreen()
         config?.let {
             viewModel.setRunConfig(it)
             routePolyline = it.route?.polyline
@@ -382,7 +386,12 @@ fun RunSessionScreen(
     DisposableEffect(Unit) {
         onDispose {
             Log.d("RunSessionScreen", "Screen disposed - stopping any ongoing briefing")
-            viewModel.cancelRunSetup()
+            // A rotation disposes this screen too — it must not take a Prepare-for-Watch standby
+            // down with it (the runner hasn't left; the watch is still waiting for START).
+            var ctx: android.content.Context? = context
+            while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) ctx = ctx.baseContext
+            val changingConfig = (ctx as? android.app.Activity)?.isChangingConfigurations == true
+            viewModel.cancelRunSetup(cancelWatchStandby = !changingConfig)
         }
     }
 
@@ -511,6 +520,7 @@ fun RunSessionScreen(
                 ) {
                     WatchStandbyBanner(
                         isSamsungWatch = connectedWatchIsSamsung,
+                        isWalk = sessionActivityType == "walk",
                         modifier = Modifier
                             .padding(horizontal = Spacing.md)
                             .padding(top = Spacing.sm)
@@ -2328,7 +2338,7 @@ fun BreathingWave(active: Boolean, glow: Boolean, modifier: Modifier = Modifier)
 ===================================================================================== */
 
 @Composable
-fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier) {
+fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier, isWalk: Boolean = false) {
     val watchName = if (isSamsungWatch) "Samsung" else "Garmin"
 
     val infiniteTransition = rememberInfiniteTransition(label = "watchStandbyPulse")
@@ -2409,6 +2419,11 @@ fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier) {
                 WatchInstructionStep(number = "3", text = "Press START on your watch — your phone begins automatically")
             }
 
+            // Keep-your-phone-with-you — the single most important thing on this screen. Live
+            // coaching is generated and played by the PHONE; a runner who leaves it behind gets a
+            // watch-only session (still fully analysed afterwards, but no real-time coaching).
+            WatchNeedsPhoneCaption(isWalk = isWalk)
+
             // Lock screen tip
             Row(
                 modifier = Modifier
@@ -2425,7 +2440,7 @@ fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier) {
                     tint = Colors.textMuted
                 )
                 Text(
-                    text = "You can lock your phone screen — AI coaching will continue playing in the background",
+                    text = "You can lock your phone screen and keep it in your pocket — AI coaching keeps playing through your phone or headphones",
                     style = AppTextStyles.caption.copy(color = Colors.textMuted)
                 )
             }
@@ -2724,7 +2739,33 @@ fun ControlButtons(
                     "walk" -> "Start Walk"
                     else   -> "Start Run"
                 }
-                Button(
+                if (isWatchRun) {
+                    // Prepared for the watch: the session must start from the watch so the
+                    // watch owns it. A phone Start here would begin a phone-GPS session the
+                    // watch knows nothing about, so it's an instruction, not a button.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .border(1.dp, Colors.primary, RoundedCornerShape(28.dp))
+                            .semantics(mergeDescendants = true) {},
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.icon_watch_vector),
+                            contentDescription = null,
+                            tint = Colors.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Press START on your watch to begin",
+                            style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                            color = Colors.primary
+                        )
+                    }
+                } else Button(
                     onClick = onStart,
                     modifier = Modifier
                         .fillMaxWidth()

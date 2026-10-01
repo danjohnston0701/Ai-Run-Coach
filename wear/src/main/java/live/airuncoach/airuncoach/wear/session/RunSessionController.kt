@@ -63,6 +63,8 @@ class RunSessionController(
 ) {
     companion object {
         private const val TAG = "RunSessionController"
+        /** Elevation quantiser threshold for GPS altitude — see the elevation block in the tick. */
+        private const val GPS_ALT_THRESHOLD_M = 5.0
         private const val APP_VERSION = "1.0.0"
         private const val START_RETRY_MAX = 3
         private const val START_RETRY_INTERVAL_MS = 5000L
@@ -186,6 +188,27 @@ class RunSessionController(
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    /** "Continue without coaching" on the prepare-on-phone screen. */
+    fun continueWithoutCoaching() {
+        _state.update { it.copy(prepareGateDismissed = true) }
+        vibeShort()
+    }
+
+    /**
+     * Top button while idle. On the prepare-on-phone screen it continues without coaching; on
+     * the post-run screen of an unprepared session it brings that screen back rather than
+     * silently starting an uncoached run; otherwise it starts the run.
+     */
+    fun onIdleStartPressed() {
+        val s = _state.value
+        when {
+            s.showPrepareGate -> continueWithoutCoaching()
+            s.isFinished && s.isAuthenticated && !s.isPrepared && !s.prepareGateDismissed ->
+                _state.update { it.copy(isFinished = false) }
+            else -> startRun()
+        }
+    }
+
     fun startRun() {
         val s = _state.value
         if (s.isRunning) return
@@ -253,7 +276,8 @@ class RunSessionController(
     fun finishRun() {
         isFinishing = true
         val s = _state.value
-        _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE) }
+        _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE,
+                isPrepared = false, prepareGateDismissed = false) }
         startRetry.cancel()
         pauseRetry.cancel()
         resumeRetry.cancel()
@@ -402,6 +426,19 @@ class RunSessionController(
                 coachWorkoutDesc = payload["workoutDesc"] as? String
                 plannedWorkoutId = payload["plannedWorkoutId"] as? String
                 scope.launch { prefs.setPlannedWorkoutId(plannedWorkoutId) }
+                // Leaves the prepare-on-phone screen for the start screen.
+                if (!_state.value.isRunning) _state.update { it.copy(isPrepared = true) }
+            }
+            "preparedRunCancelled" -> {
+                // Runner backed out of the prepared session on the phone — back to the
+                // prepare-on-phone screen. Ignored mid-run.
+                if (!_state.value.isRunning && !_state.value.isPaused) {
+                    coachTargetPace = null
+                    coachWorkoutDesc = null
+                    plannedWorkoutId = null
+                    scope.launch { prefs.setPlannedWorkoutId(null) }
+                    _state.update { it.copy(isPrepared = false, prepareGateDismissed = false) }
+                }
             }
             "sessionType" -> {
                 val sType = payload["sessionType"] as? String
@@ -458,7 +495,8 @@ class RunSessionController(
                 pauseRetry.cancel()
                 resumeRetry.cancel()
                 isFinishing = true
-                _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE) }
+                _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE,
+                isPrepared = false, prepareGateDismissed = false) }
                 phoneControlled = false
                 sessionReadySent = false
                 health.endExercise()
@@ -500,13 +538,22 @@ class RunSessionController(
             if (pace > 0) sumPace += pace
             sampleN++
 
+            // lastAlt is an ANCHOR, not the previous sample: it only moves once a change clears
+            // the threshold. Re-anchoring on every sample turned the threshold into a per-sample
+            // filter — a runner climbs ~0.1 m/s, so a real climb never cleared it one second at
+            // a time and was discarded, while single-sample GPS spikes still got counted. Same
+            // fix as the Garmin app (RunView.mc). 5 m because altM is GPS altitude (Health
+            // Services LOCATION), whose noise is several metres; noise oscillates around the
+            // anchor without ever clearing it, a genuine climb builds until it does.
             m.altM?.let { alt ->
-                lastAlt?.let { prev ->
-                    val delta = alt - prev
-                    if (delta > 1.5) sumAscent += delta
-                    if (delta < -1.5) sumDescent += -delta
+                val anchor = lastAlt
+                if (anchor == null) {
+                    lastAlt = alt
+                } else {
+                    val delta = alt - anchor
+                    if (delta > GPS_ALT_THRESHOLD_M) { sumAscent += delta; lastAlt = alt }
+                    else if (delta < -GPS_ALT_THRESHOLD_M) { sumDescent += -delta; lastAlt = alt }
                 }
-                lastAlt = alt
             }
 
             _state.update {

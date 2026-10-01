@@ -74,6 +74,10 @@ data class RunSession(
 
     // AI coaching notes captured during the run (optional)
     val aiCoachingNotes: List<AiCoachingNote> = emptyList(),
+    // Whether the AI coach was on for this session. Null when the phone never took part (a run
+    // saved by the watch on its own) — the phone always records true/false, including when it
+    // patches its context onto a watch-saved run. See isWatchOnlySession.
+    val aiCoachEnabled: Boolean? = null,
 
     // Run goals for target tracking (optional)
     val targetDistance: Double? = null, // kilometers
@@ -256,3 +260,20 @@ enum class TerrainType {
     @SerializedName("MOUNTAINOUS", alternate = ["mountainous", "Mountainous"])
     MOUNTAINOUS     // > 10% average gradient
 }
+
+/**
+ * Recorded on a watch with no phone-side session: no live coaching happened, but the run is
+ * fully analysed after sync. Garmin / Wear OS: saved by the watch's own session/end with nothing
+ * from the phone patched on (the phone always sets aiCoachEnabled and adds coaching notes when it
+ * took part). Apple Watch: the iPhone uploads an un-mirrored standalone workout as
+ * workoutType "watch_standalone".
+ */
+val RunSession.isWatchOnlySession: Boolean
+    get() {
+        if (workoutType == "watch_standalone") return true
+        val watchSaved = externalSource == "garmin_companion" || externalSource == "wearos_companion"
+        // Gson leaves absent lists null despite the Kotlin default, hence the null-safe check.
+        @Suppress("SENSELESS_COMPARISON")
+        val noNotes = aiCoachingNotes == null || aiCoachingNotes.isEmpty()
+        return watchSaved && aiCoachEnabled == null && noNotes
+    }

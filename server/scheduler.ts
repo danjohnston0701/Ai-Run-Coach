@@ -8,6 +8,7 @@ import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '
 import { eq, and, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { reconcileGooglePlaySubscriptions } from './google-play-billing';
+import { backfillRunWeather, backfillRunStartPoints } from './run-weather';
 import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek, correctImplausibleHRZoneBPMs } from './session-enrichment-service';
 
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
@@ -355,6 +356,29 @@ export function startScheduler(): void {
     }
   });
   console.log('[Scheduler] Google Play subscription reconcile scheduled (hourly at :15)');
+
+  // Run weather: fill runs that arrived without weather_data (iOS uploads, Strava/Garmin imports,
+  // anything the per-insert hook missed) — hourly, plus once shortly after startup, which also
+  // backfills the historical gap. See run-weather.ts.
+  const sweepRunWeather = async () => {
+    try {
+      const r = await backfillRunWeather();
+      if (r.checked > 0) console.log(`[Scheduler] Run weather: filled ${r.filled}/${r.checked} run(s)`);
+    } catch (err) {
+      console.error('[Scheduler] Run weather sweep error:', err);
+    }
+  };
+  cron.schedule('40 * * * *', sweepRunWeather);
+  setTimeout(async () => {
+    try {
+      const n = await backfillRunStartPoints(); // runs saved without a start point (iOS)
+      if (n > 0) console.log(`[Scheduler] Run start points: filled ${n} run(s) from their GPS track`);
+    } catch (err) {
+      console.error('[Scheduler] Run start-point backfill error:', err);
+    }
+    await sweepRunWeather();
+  }, 90_000);
+  console.log('[Scheduler] Run weather backfill scheduled (hourly at :40)');
 
   // Run BPM self-heal once on startup to fix any existing wrong values immediately
   setImmediate(async () => {

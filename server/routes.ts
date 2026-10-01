@@ -1,9 +1,11 @@
 import type { Express, Request, Response } from "express";
+import { ensureRunWeather, weatherCodeToCondition } from "./run-weather";
 import { createServer, type Server } from "node:http";
 import { eq, and, or, gte, gt, lt, desc, asc, lte, count, isNull, isNotNull, inArray } from "drizzle-orm";
 import { storage } from "./storage";
 import { toClientUser, normalizeSessionType } from "./user-serializer";
 import { db } from "./db";
+import { onWatchCompanionSeen, onRunSavedForWatchOnboarding } from "./watch-onboarding";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
 import { getRunForReader, getRunForOwner, ONBOARDING_TOUR_DEMO_RUN_ID } from "./run-access";
 import { getRunnerProfile, runnerProfileBlock, persistCoachingObservation, refreshRunnerProfile } from "./runner-profile-service";
@@ -3554,6 +3556,8 @@ function transformRunForAndroid(run: any) {
       }
 
       // ⚡ Update user stats cache asynchronously (don't block response)
+      // First standalone Apple Watch run → the one-off watch welcome email.
+      void onRunSavedForWatchOnboarding(userId, (run as any).workoutType);
       onRunSaved(userId, run).catch(err =>
         console.error('[UserStatsCache] onRunSaved failed:', err)
       );
@@ -5918,17 +5922,6 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           const data = await weatherRes.json();
           const current = data.current;
           
-          const weatherCodeToCondition = (code: number): string => {
-            if (code === 0) return "Clear";
-            if (code <= 3) return "Partly Cloudy";
-            if (code <= 49) return "Foggy";
-            if (code <= 59) return "Drizzle";
-            if (code <= 69) return "Rain";
-            if (code <= 79) return "Snow";
-            if (code <= 84) return "Showers";
-            if (code <= 94) return "Thunderstorm";
-            return "Unknown";
-          };
           
           weatherData = {
             temp: current.temperature_2m,
@@ -6147,18 +6140,6 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       const data = await response.json();
       const current = data.current;
       
-      // Map WMO weather codes to conditions
-      const weatherCodeToCondition = (code: number): string => {
-        if (code === 0) return "Clear";
-        if (code <= 3) return "Partly Cloudy";
-        if (code <= 49) return "Foggy";
-        if (code <= 59) return "Drizzle";
-        if (code <= 69) return "Rain";
-        if (code <= 79) return "Snow";
-        if (code <= 84) return "Showers";
-        if (code <= 94) return "Thunderstorm";
-        return "Unknown";
-      };
       
       res.json({
         temp: current.temperature_2m,
@@ -6229,17 +6210,6 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       const data = await response.json();
       const current = data.current;
       
-      const weatherCodeToCondition = (code: number): string => {
-        if (code === 0) return "Clear";
-        if (code <= 3) return "Partly Cloudy";
-        if (code <= 49) return "Foggy";
-        if (code <= 59) return "Drizzle";
-        if (code <= 69) return "Rain";
-        if (code <= 79) return "Snow";
-        if (code <= 84) return "Showers";
-        if (code <= 94) return "Thunderstorm";
-        return "Unknown";
-      };
       
       res.json({
         temp: current.temperature_2m,
@@ -8364,6 +8334,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
                 gpsTrack: detailedMetrics.gpsTrack,
                 elevationProfile: detailedMetrics.elevationProfile,
               }).returning();
+              void ensureRunWeather(newRun.id);
 
               runId = newRun.id;
               notificationType = 'new_activity';
@@ -13361,6 +13332,10 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       
       console.log(`[Companion] User ${user.email} authenticated from device ${deviceModel || deviceId}`);
 
+      // First genuine watch use → welcome email (no-op after the first time). Before the update
+      // below, which would otherwise flip has_garmin_watch_app first.
+      await onWatchCompanionSeen(user.id, deviceModel);
+
       // Mark this user as a Garmin watch app user (for update broadcast targeting)
       const now = new Date();
       const watchAppUpdate: Record<string, any> = {
@@ -13641,6 +13616,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
 
       // Mirror the legacy /api/garmin-companion/auth bookkeeping so hasGarminWatchApp-based
       // targeting (notification-service.ts) and firstSeenAt stay accurate for this new flow too.
+      // First genuine watch use → welcome email (no-op after the first time).
+      await onWatchCompanionSeen(userId, row.watchModel);
       const [user] = await db.select({ hasGarminWatchApp: users.hasGarminWatchApp }).from(users).where(eq(users.id, userId)).limit(1);
       const watchAppUpdate: Record<string, any> = { hasGarminWatchApp: true, garminWatchAppLastSeenAt: new Date() };
       if (user && !user.hasGarminWatchApp) { watchAppUpdate.garminWatchAppFirstSeenAt = new Date(); }
@@ -13749,6 +13726,10 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       }).returning();
       
       console.log(`[Companion] Session ${sessionId} started for user ${userId} (${activityType || "running"})`);
+
+      // First genuine watch use → mark the user as a watch-app user and send the one-off
+      // "how your watch and phone work together" email (no-op after the first time).
+      void onWatchCompanionSeen(userId, deviceModel);
 
       // ── Phase 2 FCM fallback: wake phone even if BT "start" was dropped ──────
       // ConnectIQ Comm.transmit() is fire-and-forget. On constrained devices like
@@ -14425,6 +14406,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             // GPS track built from garminRealtimeData per-second points (standalone runs)
             gpsTrack: gpsTrackFromData,
           }).returning();
+          void ensureRunWeather(newRun.id); // companion runs carry no weather of their own
 
           newRunId = newRun.id;
 
@@ -14660,6 +14642,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             garminDeviceName: await resolveRunDeviceName(userId, batchDeviceModel ?? batchSession?.deviceModel),
             watchAppVersion,
           }).returning();
+          void ensureRunWeather(created.id); // no phone → no weather from a client
           existingRun = created;
           console.log(`[Offline Batch] Created new run record ${existingRun.id} for phone-less session ${sessionId} (${distKm.toFixed(2)}km)`);
         } catch (insertError: any) {
@@ -16211,8 +16194,19 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       
       res.json({ success: true, message: "Run deleted successfully" });
     } catch (error: any) {
-      console.error("Delete run error:", error);
-      res.status(500).json({ error: "Failed to delete run" });
+      // Log the Postgres specifics too — a bare "Failed to delete run" made a real
+      // client-side report impossible to diagnose from the Replit logs.
+      console.error(
+        `Delete run error (run=${req.params.id} user=${req.user?.userId}):`,
+        error?.message,
+        error?.code ? `[pg ${error.code}] ${error.detail ?? ""} ${error.table ?? ""} ${error.constraint ?? ""}` : "",
+        error,
+      );
+      res.status(500).json({
+        error: "Failed to delete run",
+        detail: error?.message ?? String(error),
+        code: error?.code,
+      });
     }
   });
   

@@ -1253,12 +1253,24 @@ class RunSummaryViewModel @Inject constructor(
      * Delete this run
      */
     fun deleteRun(onSuccess: () -> Unit, onError: (String) -> Unit) {
-        val session = _runSession.value ?: return
-        
+        // Deliberately NOT gated on `_runSession.value`: a run whose summary failed to load
+        // is exactly the one the user most wants gone. A 0-distance run is the reproducer —
+        // when the detail fetch fails, loadRunById's local fallback is skipped (it requires
+        // `localSession.distance > 0`), so _runSession stays null, the screen shows the error
+        // view, and the old `?: return` here made Delete a no-op with no feedback at all.
+        //
+        // `currentRunId` first for the same reason every other call in this file uses it:
+        // `session.id` is the *local* run ID whenever we fell back to RunTrackingService's
+        // copy or SyncWorker hasn't uploaded yet, which the server has never heard of.
+        val runId = currentRunId ?: _runSession.value?.id ?: run {
+            onError("This run has no ID to delete.")
+            return
+        }
+
         viewModelScope.launch {
             try {
-                apiService.deleteRun(session.id)
-                
+                apiService.deleteRun(runId)
+
                 // ⚡ Invalidate the cached runs for this user so dashboard refreshes immediately
                 val userId = sharedPrefs.getString("user_id", null)
                 if (userId != null) {
@@ -1267,12 +1279,25 @@ class RunSummaryViewModel @Inject constructor(
                 }
                 
                 onSuccess()
+            } catch (e: retrofit2.HttpException) {
+                if (e.code() == 404) {
+                    // The server has no such run (never uploaded, or already deleted).
+                    // Nothing to delete remotely — treat it as done rather than trapping
+                    // the user on a run they can't get rid of.
+                    Log.w("RunSummaryViewModel", "Run $runId not on server (404) — treating delete as complete")
+                    sharedPrefs.getString("user_id", null)?.let { runRepository.invalidateRunsForUser(it) }
+                    onSuccess()
+                } else {
+                    Log.e("RunSummaryViewModel", "Delete run $runId failed: HTTP ${e.code()}", e)
+                    onError("Couldn't delete this run (server error ${e.code()}). Please try again.")
+                }
             } catch (e: Exception) {
+                Log.e("RunSummaryViewModel", "Delete run $runId failed", e)
                 onError(e.message ?: "Failed to delete run")
             }
         }
     }
-    
+
     /**
      * Generate share text for social media
      */

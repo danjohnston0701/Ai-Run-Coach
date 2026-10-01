@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.ui.components.WatchPhoneHowItWorks
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -151,10 +152,15 @@ fun ConnectedDevicesScreen(
             // ── Page subtitle ─────────────────────────────────────────────────
             item {
                 Text(
-                    "Connect your Ai Run Coach app to your fitness devices and services. Get real-time coaching with your Garmin watch, and import your historic Strava runs so your AI coach has full context from day one.",
+                    "Connect your Ai Run Coach app to your fitness devices and services. Control sessions from your Garmin or Wear OS watch while your phone coaches you, and import your historic Strava runs so your AI coach has full context from day one.",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary
                 )
+            }
+
+            // ── How watch + phone work together ───────────────────────────────
+            item {
+                WatchPhoneHowItWorks()
             }
 
             // ── Section: Garmin Watch App ─────────────────────────────────────

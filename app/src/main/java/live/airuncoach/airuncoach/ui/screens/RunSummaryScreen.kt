@@ -3,6 +3,8 @@
 package live.airuncoach.airuncoach.ui.screens
 
 
+import live.airuncoach.airuncoach.ui.components.WatchOnlyRunNotice
+import live.airuncoach.airuncoach.domain.model.isWatchOnlySession
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -261,7 +263,15 @@ fun RunSummaryScreenFlagship(
     ) { padding ->
         when {
             isLoadingRun -> CenterLoading(padding)
-            loadError != null -> ErrorViewFlagship(loadError!!, onNavigateBack, onNavigateToLogin)
+            loadError != null -> ErrorViewFlagship(
+                error = loadError!!,
+                onBack = onNavigateBack,
+                onLogin = onNavigateToLogin,
+                // A run that won't load is the one users most want rid of (a 0-distance
+                // aborted start, for instance). Without this the error view is a dead end:
+                // the whole summary — Delete included — is replaced by it.
+                onDelete = { showDeleteConfirm = true }
+            )
             runSession != null -> {
                 // Store in local variable to avoid delegated property smart cast issue
                 val session = runSession
@@ -438,65 +448,6 @@ fun RunSummaryScreenFlagship(
                     )
                 }
 
-                // Delete confirmation dialog
-                if (showDeleteConfirm) {
-                    AlertDialog(
-                        onDismissRequest = { showDeleteConfirm = false },
-                        containerColor = Colors.backgroundSecondary,
-                        title = {
-                            Text(
-                                "Delete Run?",
-                                style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
-                                color = Colors.textPrimary
-                            )
-                        },
-                        text = {
-                            Text(
-                                "This will permanently delete this run and all associated data. This cannot be undone.",
-                                style = AppTextStyles.body,
-                                color = Colors.textSecondary
-                            )
-                        },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    showDeleteConfirm = false
-                                    viewModel.deleteRun(
-                                        onSuccess = { onNavigateBack() },
-                                        onError = { error ->
-                                            deleteError = error
-                                            Log.e("RunSummaryScreen", "Delete error: $error")
-                                        }
-                                    )
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Colors.error)
-                            ) {
-                                Text("Delete", color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold)
-                            }
-                        },
-                        dismissButton = {
-                            OutlinedButton(onClick = { showDeleteConfirm = false }) {
-                                Text("Cancel", color = Colors.textSecondary)
-                            }
-                        }
-                    )
-                }
-
-                // Delete error snackbar
-                if (deleteError != null) {
-                    AlertDialog(
-                        onDismissRequest = { deleteError = null },
-                        containerColor = Colors.backgroundSecondary,
-                        title = { Text("Delete Failed", color = Colors.error, style = AppTextStyles.h3) },
-                        text = { Text(deleteError ?: "Unknown error", color = Colors.textSecondary, style = AppTextStyles.body) },
-                        confirmButton = {
-                            Button(onClick = { deleteError = null }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
-                                Text("OK")
-                            }
-                        }
-                    )
-                }
-
                 if (showRenameDialog) {
                     RenameDialogFlagship(
                         runNameDraft = runNameDraft,
@@ -545,6 +496,66 @@ fun RunSummaryScreenFlagship(
                 }
             }
         }
+    }
+
+    // Delete dialogs live outside the `when` above so they also render over the
+    // error view — a run that failed to load still has to be deletable.
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = Colors.backgroundSecondary,
+            title = {
+                Text(
+                    "Delete Run?",
+                    style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
+                    color = Colors.textPrimary
+                )
+            },
+            text = {
+                Text(
+                    "This will permanently delete this run and all associated data. This cannot be undone.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirm = false
+                        viewModel.deleteRun(
+                            onSuccess = { onNavigateBack() },
+                            onError = { error ->
+                                deleteError = error
+                                Log.e("RunSummaryScreen", "Delete error: $error")
+                            }
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.error)
+                ) {
+                    Text("Delete", color = androidx.compose.ui.graphics.Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", color = Colors.textSecondary)
+                }
+            }
+        )
+    }
+
+    // Delete error snackbar
+    if (deleteError != null) {
+        AlertDialog(
+            onDismissRequest = { deleteError = null },
+            containerColor = Colors.backgroundSecondary,
+            title = { Text("Delete Failed", color = Colors.error, style = AppTextStyles.h3) },
+            text = { Text(deleteError ?: "Unknown error", color = Colors.textSecondary, style = AppTextStyles.body) },
+            confirmButton = {
+                Button(onClick = { deleteError = null }, colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)) {
+                    Text("OK")
+                }
+            }
+        )
     }
 
     // AI Consent sheet — shown when user taps "Generate AI Insights" without consent
@@ -1227,6 +1238,14 @@ internal fun AiInsightsTabContent(
                 lastRunForDelta = lastRunForDelta,
                 onShare = onShareCard
             )
+        }
+
+        // Recorded on the watch with no phone session — explain why there was no live coaching
+        // (and that the analysis here is complete), and how to get it next time.
+        if (run.isWatchOnlySession) {
+            item {
+                WatchOnlyRunNotice(isWalk = run.sessionType == "walk")
+            }
         }
 
         // "Forgot to stop" — suggest trimming the walk/standstill recorded after the finish
@@ -9242,7 +9261,8 @@ private fun CenterLoading(padding: PaddingValues) {
 private fun ErrorViewFlagship(
     error: String,
     onBack: () -> Unit,
-    onLogin: () -> Unit
+    onLogin: () -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -9272,6 +9292,18 @@ private fun ErrorViewFlagship(
                     color = Colors.backgroundRoot,
                     style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
                 )
+            }
+            // Only offer deletion when this isn't a sign-in problem — deleting a run
+            // needs a valid session anyway, and the run is fine, it just can't be read.
+            if (onDelete != null && !error.contains("log in", ignoreCase = true)) {
+                Spacer(modifier = Modifier.height(Spacing.md))
+                TextButton(onClick = onDelete) {
+                    Text(
+                        text = "Delete This Run",
+                        color = Colors.error,
+                        style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
             }
         }
     }

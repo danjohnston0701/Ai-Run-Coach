@@ -1,0 +1,13 @@
+# Garmin Connect IQ Build Configuration (video recording, simulator only)
+# Builds the (:video) recording mode in RunView.mc for the Garmin + iPhone how-to video
+# (marketing/garmin-iphone-video). Never upload a build from this jungle.
+#
+#   monkeyc -f monkey_video.jungle -d fr965 -o bin/AiRunCoach_video.prg -y developer_key.der -r
+# (-r is required: non-release builds auto-drop the :release _initSimulatorMode twin.)
+
+project.manifest = manifest.xml
+
+base.sourcePath = source
+base.resourcePath = resources
+base.lang = eng
+base.excludeAnnotations = debug;background;novideo

@@ -13,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -23,7 +24,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -157,5 +161,45 @@ fun PrepareRunOnWatchButton(
                 }
             }
         }
+    }
+}
+
+/**
+ * Sits directly under "Prepare for Watch" on the session-setup screens. Live AI coaching and
+ * feedback come from the PHONE (the watch only relays them), so a runner who leaves the phone
+ * at home, or starts on the watch alone, silently gets no coaching at all — the single most
+ * common mismatch between what people expect and what they get. Stated as plainly as possible.
+ */
+@Composable
+fun WatchNeedsPhoneCaption(isWalk: Boolean, modifier: Modifier = Modifier) {
+    val teal = Color(0xFF00E5FF)
+    val session = if (isWalk) "walk" else "run"
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(teal.copy(alpha = 0.08f))
+            .border(1.dp, teal.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.PhoneAndroid,
+            contentDescription = null,
+            tint = teal,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)) {
+                    append("Take your phone and keep it connected for the whole $session.")
+                }
+                append(" Real-time AI coaching and feedback come from your phone — the watch can't coach on its own.")
+            },
+            fontSize = 13.sp,
+            lineHeight = 17.sp,
+            color = Color(0xFFB0BEC5)
+        )
     }
 }

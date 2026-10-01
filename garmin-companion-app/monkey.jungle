@@ -7,7 +7,7 @@ base.resourcePath = resources
 base.lang = eng
 # Exclude :debug and :background from the foreground watch-app build.
 # (:gui) annotated classes (RunView, DataStreamer, PhoneLink) are included in foreground.
-base.excludeAnnotations = debug;background
+base.excludeAnnotations = debug;background;video
 
 # All supported devices - must match manifest.xml product list exactly
 # Last updated: 2026-08-07 (87 devices, API 3.2.0+)

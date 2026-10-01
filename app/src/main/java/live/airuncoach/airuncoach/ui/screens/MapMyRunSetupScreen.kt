@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
@@ -37,6 +38,7 @@ import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.ui.dialogs.FriendPickerDialog
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
+import live.airuncoach.airuncoach.ui.components.WatchNeedsPhoneCaption
 import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
@@ -230,9 +232,12 @@ fun MapMyRunSetupScreen(
     val secondsInt = targetSeconds.toIntOrNull() ?: 0
     val isKeyboardVisible = WindowInsets.isImeVisible
     val density = LocalDensity.current
-    // 140.dp covers the fixed PREPARE RUN button bar (~56dp button + 2×Spacing.lg padding + text)
-    // so the Social / Group Run section can always be scrolled fully above it.
-    val ctaBarHeight = 140.dp
+    // Bottom padding = the fixed CTA bar's height, so the Social / Group Run section can always be
+    // scrolled fully above it (140.dp floor = one button + padding + the target caption).
+    // Measured, not fixed: the bar is roughly twice as tall when the watch options (Prepare for
+    // Watch + the "take your phone" caption + Prepare on Phone) are stacked in it.
+    var ctaBarHeightPx by remember { mutableIntStateOf(0) }
+    val ctaBarHeight = with(density) { ctaBarHeightPx.toDp() }.coerceAtLeast(140.dp)
     val bottomContentPadding = if (isKeyboardVisible) {
         with(density) { WindowInsets.ime.getBottom(this).toDp() } + ctaBarHeight
     } else {
@@ -388,6 +393,7 @@ fun MapMyRunSetupScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                .onSizeChanged { ctaBarHeightPx = it.height }
                 .background(Colors.backgroundRoot)
                 .padding(Spacing.lg)
         ) {
@@ -439,13 +445,14 @@ fun MapMyRunSetupScreen(
                 } else {
                     // no_route mode: conditional layout based on watch availability
                     if (companionInstalled) {
-                        // Side-by-side when watch is available
-                        Row(
+                        // Stacked when a watch is available: Prepare for Watch, then the "take your
+                        // phone" caption, then Prepare on Phone — so nobody reads the watch option
+                        // as "the watch does it all" and leaves the phone behind.
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                         ) {
-                            // Left: Prepare for Watch button — primary filled action
-                            Box(modifier = Modifier.weight(1f)) {
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 PrepareRunOnWatchButton(
                                     companionInstalled = companionInstalled,
                                     sendState = watchSendState,
@@ -511,14 +518,16 @@ fun MapMyRunSetupScreen(
                                 )
                             }
 
-                            // Right: Prepare for Phone button — secondary outlined action
-                            Box(modifier = Modifier.weight(1f)) {
+                            WatchNeedsPhoneCaption(isWalk = activityMode == ActivityMode.WALK)
+
+                            // Prepare on Phone — secondary outlined action
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 OutlinedCtaButton(
                                     text = when {
-                                        !hasLocationPermission -> "GRANT"
-                                        isGettingLocation -> "GPS…"
-                                        currentLocation == null -> "WAITING"
-                                        else -> "Prepare ${if (activityMode == ActivityMode.WALK) "Walk" else "Run"}"
+                                        !hasLocationPermission -> "GRANT LOCATION"
+                                        isGettingLocation -> "ACQUIRING GPS…"
+                                        currentLocation == null -> "WAITING FOR GPS SIGNAL"
+                                        else -> "Prepare ${if (activityMode == ActivityMode.WALK) "Walk" else "Run"} on Phone"
                                     },
                                     leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                                         R.drawable.icon_navigation_vector else null,

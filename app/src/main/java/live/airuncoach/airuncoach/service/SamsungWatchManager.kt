@@ -325,6 +325,18 @@ class SamsungWatchManager(
         Log.d(TAG, "Pending prepared-run cache cleared")
     }
 
+    /**
+     * The runner backed out of a prepared session on the phone before starting it: tell the
+     * watch, so it drops the coached start screen and returns to prepare-on-phone rather than
+     * offering a session that no longer exists. No-op if nothing was prepared.
+     */
+    fun cancelPreparedRun() {
+        if (cachedPreparedRunPayload == null) return
+        cachedPreparedRunPayload = null
+        sendToWatch(mapOf("type" to "preparedRunCancelled"))
+        Log.d(TAG, "preparedRunCancelled sent to watch")
+    }
+
     fun sendSessionType(sessionType: String) {
         cachedSessionType = sessionType
         pendingSessionType = sessionType

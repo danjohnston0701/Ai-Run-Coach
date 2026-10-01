@@ -30,7 +30,7 @@ import live.airuncoach.airuncoach.wear.ui.theme.WearColors
 /**
  * Root screen — the single reachable destination in this app (mirroring RunView.mc being the
  * only reachable Garmin watch screen; there is no separate "StartView" here). Selects between
- * the Waiting/GPS-wait overlays and the Diamond/Grid dashboard, wires input, and hosts the
+ * the Waiting/prepare-on-phone/GPS-wait overlays and the Diamond/Grid dashboard, wires input, and hosts the
  * finish/exit confirmation dialogs. Run control is button-only (top button = start/pause/
  * resume, bottom button = back, both handled in WearMainActivity.onKeyDown); [confirmDialog]
  * is driven by [RunSessionController.pendingConfirm] so both the physical bottom button and
@@ -56,10 +56,17 @@ fun RunScreen(controller: RunSessionController, onExit: () -> Unit) {
             )
             .runScreenSwipeToggle(onToggle = { controller.toggleScreen() })
     ) {
-        when (state.overlay) {
-            Overlay.WAITING -> WaitingOverlay()
-            Overlay.GPS_WAIT -> GpsWaitOverlay(quality = state.gpsQuality)
-            Overlay.NONE -> if (state.screenPage == 0) DiamondDashboard(state) else GridDashboard(state)
+        when {
+            state.overlay == Overlay.WAITING -> WaitingOverlay()
+            // Ahead of GPS wait: GPS keeps acquiring behind it, and the prepare step is the
+            // thing the runner needs to see first.
+            state.showPrepareGate -> PrepareGateOverlay(
+                isPhoneConnected = state.isPhoneConnected,
+                onContinueWithoutCoaching = { controller.continueWithoutCoaching() }
+            )
+            state.overlay == Overlay.GPS_WAIT -> GpsWaitOverlay(quality = state.gpsQuality)
+            state.screenPage == 0 -> DiamondDashboard(state)
+            else -> GridDashboard(state)
         }
     }
 

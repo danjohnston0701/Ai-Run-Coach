@@ -2,6 +2,7 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.ui.components.WatchNeedsPhoneCaption
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -1082,7 +1083,7 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 // Same clearance the real screen reserves above its fixed CTA bar.
-                contentPadding = PaddingValues(bottom = 140.dp),
+                contentPadding = PaddingValues(bottom = if (hasWatch) 280.dp else 140.dp),
             ) {
                 item { SetupHeader(title = title, subtitle = subtitle, gpsLocked = gpsLocked, onClose = {}) }
                 item {
@@ -1150,8 +1151,8 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     val verb = if (activityMode == ActivityMode.WALK) "Walk" else "Run"
                     when {
-                        hasWatch -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                            Box(modifier = Modifier.weight(1f)) {
+                        hasWatch -> Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 TourHighlight(highlightColor = Colors.buttonText) {
                                     PrepareRunOnWatchButton(
                                         companionInstalled = true,
@@ -1161,9 +1162,10 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
                                     )
                                 }
                             }
-                            Box(modifier = Modifier.weight(1f)) {
+                            WatchNeedsPhoneCaption(isWalk = activityMode == ActivityMode.WALK)
+                            Box(modifier = Modifier.fillMaxWidth()) {
                                 OutlinedCtaButton(
-                                    text = if (gpsLocked) "Prepare $verb" else "GPS…",
+                                    text = if (gpsLocked) "Prepare $verb on Phone" else "WAITING FOR GPS SIGNAL",
                                     leadingIconRes = if (gpsLocked) R.drawable.icon_navigation_vector else null,
                                     enabled = gpsLocked,
                                     onClick = onProceed,
@@ -1195,7 +1197,7 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
             TourPromptBanner(
                 when {
                     !gpsLocked -> "Locking on to GPS, just like the real thing…"
-                    hasWatch -> "That's the setup screen. Tap \"Prepare for Watch\" (or \"Prepare Run\") to open the run screen."
+                    hasWatch -> "Tap \"Prepare for Watch\" to open the run screen. For live coaching, take your phone with you — the watch on its own still records your run for AI analysis afterwards."
                     else -> "That's the setup screen. Tap \"PREPARE RUN\" to open the run screen."
                 }
             )

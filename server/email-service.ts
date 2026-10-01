@@ -516,3 +516,83 @@ export async function sendUsageThresholdAlert(opts: {
 
   console.log(`[Email] Usage ${pct}% alert sent to ${opts.email} for ${opts.feature} (${opts.yearMonth})`);
 }
+
+/**
+ * Sent once, the first time we see a user genuinely using a watch with AI Run Coach (see
+ * watch-onboarding.ts). The single most common mismatch between expectation and experience is
+ * a runner who assumes the watch coaches on its own, leaves the phone at home, and gets no live
+ * coaching — so this spells out both ways to run, framing watch-only as a real option (full
+ * post-run analysis) rather than a mistake. Same message as the in-app WatchPhoneHowItWorks card.
+ */
+export async function sendWatchWelcomeEmail(opts: {
+  email: string;
+  name: string | null;
+  watchLabel: string; // "Garmin watch" | "Galaxy Watch" | "Apple Watch"
+}): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const firstName = (opts.name || "").trim().split(" ")[0] || "there";
+  const phone = opts.watchLabel === "Apple Watch" ? "iPhone" : "phone";
+
+  const step = (n: number, text: string) => `
+    <tr>
+      <td style="width: 28px; vertical-align: top; padding: 6px 0;">
+        <div style="width: 22px; height: 22px; border-radius: 11px; background: rgba(0,229,255,0.18); color: #00E5FF; font-size: 12px; font-weight: 700; text-align: center; line-height: 22px;">${n}</div>
+      </td>
+      <td style="padding: 6px 0 6px 8px; color: #e2e8f0; font-size: 14px; line-height: 1.5;">${text}</td>
+    </tr>`;
+
+  await client.emails.send({
+    from: `AI Run Coach <${fromEmail}>`,
+    to: opts.email,
+    subject: `Getting the most from AI Run Coach on your ${opts.watchLabel}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #0A0A1A; color: #ffffff; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #00E5FF 0%, #0099CC 100%); padding: 32px; text-align: center;">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #0A0A1A;">Your watch + AI Run Coach</h1>
+        </div>
+        <div style="padding: 36px 32px;">
+          <p style="margin: 0 0 16px; color: #e2e8f0; line-height: 1.6;">Hi ${firstName},</p>
+          <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">Great to see you running with AI Run Coach on your ${opts.watchLabel}. There are two ways to use it — here's how each works so you get exactly the experience you want.</p>
+
+          <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #00E5FF; margin-bottom: 16px;">
+            <p style="margin: 0 0 8px; color: #00E5FF; font-weight: 700;">Watch + ${phone}: live AI coaching</p>
+            <table style="border-collapse: collapse;">
+              ${step(1, `Prepare your session on your ${phone}`)}
+              ${step(2, `<strong style="color:#ffffff;">Keep your ${phone} with you</strong> for the whole session`)}
+              ${step(3, "Press Start on your watch")}
+            </table>
+            <p style="margin: 10px 0 0; color: #94a3b8; font-size: 13px; line-height: 1.5;">Your coaching is created on your ${phone} and plays through its speaker or your headphones — the watch can't coach on its own, so without your ${phone} there's no live coaching.</p>
+          </div>
+
+          <div style="background: #1a1a2e; border-radius: 8px; padding: 20px; border-left: 3px solid #00E676;">
+            <p style="margin: 0 0 8px; color: #00E676; font-weight: 700;">Watch only: full analysis afterwards</p>
+            <table style="border-collapse: collapse;">
+              ${step(1, `Leave your ${phone} at home and press Start on your watch`)}
+              ${step(2, "Your run syncs to AI Run Coach when you're back")}
+            </table>
+            <p style="margin: 10px 0 0; color: #94a3b8; font-size: 13px; line-height: 1.5;">You still get the full post-run AI analysis — just no real-time coaching during the session.</p>
+          </div>
+
+          <p style="margin: 24px 0 0; color: #94a3b8; font-size: 14px; line-height: 1.6;">Tip: if you open AI Run Coach on your watch and see <strong style="color:#ffffff;">“Prepare on your phone”</strong>, that's your cue — prepare the session on your ${phone} for live coaching, or choose “Continue without coaching” for a watch-only session.</p>
+          <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">You can find this any time in the app under Profile → Connected Devices. Happy running!</p>
+        </div>
+      </div>
+    `,
+    text:
+      `Hi ${firstName},\n\n` +
+      `Great to see you running with AI Run Coach on your ${opts.watchLabel}. There are two ways to use it:\n\n` +
+      `WATCH + ${phone.toUpperCase()}: LIVE AI COACHING\n` +
+      `1. Prepare your session on your ${phone}\n` +
+      `2. Keep your ${phone} with you for the whole session\n` +
+      `3. Press Start on your watch\n` +
+      `Your coaching is created on your ${phone} and plays through its speaker or your headphones — the watch can't coach on its own.\n\n` +
+      `WATCH ONLY: FULL ANALYSIS AFTERWARDS\n` +
+      `1. Leave your ${phone} at home and press Start on your watch\n` +
+      `2. Your run syncs to AI Run Coach when you're back\n` +
+      `You still get the full post-run AI analysis — just no real-time coaching during the session.\n\n` +
+      `Tip: if your watch shows "Prepare on your phone", prepare the session on your ${phone} for live coaching, or choose "Continue without coaching" for a watch-only session.\n\n` +
+      `You can find this any time under Profile → Connected Devices. Happy running!`,
+  });
+
+  console.log(`[Email] Watch welcome email sent to ${opts.email} (${opts.watchLabel})`);
+}

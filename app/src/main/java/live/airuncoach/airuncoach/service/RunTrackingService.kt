@@ -1108,6 +1108,15 @@ class RunTrackingService : Service(), SensorEventListener {
             _watchTalkToCoachRequest.value = false
         }
 
+        /**
+         * Atomically claims a pending watch talk-to-coach request: true for exactly one caller.
+         * More than one RunSessionViewModel can be collecting at once (WorkoutDetailScreen's
+         * instance stays on the back stack under RunSessionScreen's), and a separate
+         * check-then-clear let both see `true` and each play its own AI reply.
+         */
+        fun consumeWatchTalkToCoachRequest(): Boolean =
+            _watchTalkToCoachRequest.compareAndSet(true, false)
+
         // Route Memory Engine — emits (lat, lng) on the first GPS fix once a run is active.
         // Observed by RunSessionViewModel to trigger route recognition asynchronously.
         // Reset to null at the start of each new run.
@@ -1124,6 +1133,17 @@ class RunTrackingService : Service(), SensorEventListener {
          * Picked up by the Service when building PaceUpdate requests for km-split coaching.
          * Nullable — when null, standard coaching applies without route context.
          */
+        /**
+         * True while the service sits in the ACTION_PREPARE_FOR_WATCH standby, waiting for the
+         * watch's START. Process-wide rather than per-ViewModel because the screen that prepares
+         * (MapMyRunSetupScreen / RouteSelectionScreen, each with its own RunSessionViewModel) is
+         * not the screen that cancels (RunSessionScreen, a different instance) — a per-instance
+         * flag meant backing out never cancelled the standby at all.
+         */
+        @Volatile
+        var isInWatchStandby: Boolean = false
+            private set
+
         @Volatile
         var routeIntelligenceContext: live.airuncoach.airuncoach.network.model.RouteIntelligenceContext? = null
 
@@ -1683,6 +1703,16 @@ class RunTrackingService : Service(), SensorEventListener {
             ACTION_START_NAV_SIMULATION
         )
 
+        // A new "Prepare for Watch" replaces any previous, un-started one rather than being
+        // merged into it. Every field below is only overwritten when the new intent carries a
+        // value (so follow-up start intents can't wipe the prepared config) — which also meant a
+        // user who prepared, backed out, changed the setup (target time off, free run instead of
+        // a workout) and prepared again kept the FIRST prepare's target and coaching plan. Only
+        // while idle: a prepare arriving mid-run must never touch the session in progress.
+        if (intent?.action == ACTION_PREPARE_FOR_WATCH && !isTracking && pauseStartTime == 0L) {
+            resetPreparedSessionConfig()
+        }
+
         if (isStartAction) {
             // targetDistance comes from RunSetupConfig.targetDistance which is in KILOMETERS.
             // Normalize to METRES here so all internal calculations use metres consistently.
@@ -1717,7 +1747,11 @@ class RunTrackingService : Service(), SensorEventListener {
             // is what RunSessionScreen reads, so it is the same source of truth, just one that
             // outlives a single intent. Only consulted when we'd otherwise have nothing, so it
             // can never override a target the intent or an earlier Prepare already supplied.
-            if (targetDistance == null || targetTime == null) {
+            // Not for ACTION_PREPARE_FOR_WATCH itself: that intent always carries the complete
+            // config, so "no target time" there is the runner's choice — and the setup screens
+            // send it BEFORE they update RunConfigHolder, which at that moment still holds the
+            // previous (backed-out-of) session's config.
+            if (intent?.action != ACTION_PREPARE_FOR_WATCH && (targetDistance == null || targetTime == null)) {
                 RunConfigHolder.getConfig()?.let { cfg ->
                     if (targetDistance == null) {
                         cfg.targetDistance?.toDouble()?.takeIf { it > 0 }?.let { km ->
@@ -1914,11 +1948,31 @@ class RunTrackingService : Service(), SensorEventListener {
                 NOTIFICATION_ID,
                 createNotification("Watch Ready", "Press START on your watch to begin")
             )
+            isInWatchStandby = true
             Log.d("RunTrackingService", "⌚ Service in standby — foreground started, waiting for watch START")
         } catch (e: Exception) {
             Log.e("RunTrackingService", "prepareForWatch: startForeground failed: $e")
             stopSelf()
         }
+    }
+
+    /** Clears the per-session config a Prepare delivers — see the call site in onStartCommand(). */
+    private fun resetPreparedSessionConfig() {
+        targetDistance = null
+        targetTime = null
+        planTrainingPlanId = null
+        planWorkoutId = null
+        planWorkoutType = null
+        planWorkoutIntensity = null
+        planWorkoutDescription = null
+        planGoalType = null
+        planWeekNumber = null
+        planTotalWeeks = null
+        groupRunId = null
+        sessionInstructions = null
+        sessionCoachingTone = null
+        sessionCoachingIntensity = null
+        dynamicCoachingPlan = null
     }
 
     private fun startTracking() {
@@ -1989,6 +2043,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
         // Now safely initialize everything else
         isTracking = true
+        isInWatchStandby = false
         preCacheSystemAudio()  // Warm the pause/resume audio cache before any pause can happen
         _currentRunSession.value = null  // Clear stale data from previous run
         _uploadComplete.value = null
@@ -6660,6 +6715,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        isInWatchStandby = false
         releaseWakeLock()
         stopTimer()  // Stop the periodic timer
         unregisterPowerSaverModeReceiver()  // Clean up power saver broadcast receiver

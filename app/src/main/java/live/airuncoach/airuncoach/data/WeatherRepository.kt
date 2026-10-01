@@ -49,6 +49,12 @@ class WeatherRepository(private val context: Context) {
                 longitude = lng
             )
             
+            // The backend answers a failed Open-Meteo call with all-null fields rather than an
+            // error. Defaulting those to 0.0 would save "0°C, 0% humidity, Unknown" as the run's
+            // weather and skew the weather-impact insights — report no weather instead (the
+            // server fills it from Open-Meteo history after upload; see server/run-weather.ts).
+            if (response.temp == null) return null
+
             // Convert API response to domain model
             WeatherData(
                 temperature = response.temp ?: 0.0,

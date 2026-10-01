@@ -8,7 +8,7 @@ base.resourcePath = resources
 base.lang = eng
 # For debug builds, include :debug annotations (simulator preview mode)
 # Exclude only :background and :release annotations
-base.excludeAnnotations = background;release
+base.excludeAnnotations = background;release;video
 
 # All supported devices - must match manifest.xml product list exactly
 fenix6.sourcePath = $(base.sourcePath)
