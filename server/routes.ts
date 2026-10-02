@@ -102,6 +102,7 @@ import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
+import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES } from "./utils/run-derivation";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -2668,6 +2669,9 @@ function transformRunForAndroid(run: any) {
     try {
       const userId = req.user!.userId;
       const runData = req.body;
+      // iOS sends every time series as a JSON string; the array-only extractions below dropped
+      // them (heart_rate_data, cadence_data, altitude_data … NULL on every iOS run).
+      normalizeSeriesFields(runData);
       // Garmin/Wear companion session ID, when this run was started via "Prepare for
       // Watch" — lets Case 2 below (and the later /session/end handler) deterministically
       // link the phone's upload to the watch's companion session instead of guessing from
@@ -2910,6 +2914,13 @@ function transformRunForAndroid(run: any) {
         ];
         for (const field of fields) {
           if (incoming[field] != null && existing[field] == null) target[field] = incoming[field];
+        }
+        // The phone knows it took part; a watch-only classification inferred for the
+        // companion-created record is superseded by the phone's phone+watch value.
+        const inSource = incoming.recordingSource;
+        if (typeof inSource === "string" && RECORDING_SOURCES.has(inSource) &&
+            (existing.recordingSource == null || (inSource.startsWith("phone_") && !String(existing.recordingSource).startsWith("phone")))) {
+          target.recordingSource = inSource;
         }
         const seriesFields = [
           "groundContactTimeData", "groundContactBalanceData", "verticalOscillationData",
@@ -4088,7 +4099,8 @@ function transformRunForAndroid(run: any) {
         linkedPlanId: run.linkedPlanId || undefined,
         planProgressWeek: run.planProgressWeek || undefined,
         planProgressWeeks: run.planProgressWeeks || undefined,
-        workoutType: run.workoutType || undefined,
+        // "free" / "watch_standalone" mark a run outside any plan — not plan context.
+        workoutType: run.workoutType && !NON_PLAN_WORKOUT_TYPES.has(run.workoutType) ? run.workoutType : undefined,
         workoutIntensity: run.workoutIntensity || undefined,
         workoutDescription: run.workoutDescription || undefined,
         // NEW: Session coaching context (Phase 2 Enhancement)

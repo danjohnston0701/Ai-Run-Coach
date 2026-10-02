@@ -127,4 +127,7 @@ data class UploadRunRequest(
     // Counts of received / accepted / rejected-by-reason fixes and anchor recoveries for the
     // run (RunTrackingService.onNewLocation). Stored as-is in runs.gps_filter_stats.
     val gpsFilterStats: Map<String, Any?>? = null,
+    // Where the session was recorded: "phone" | "phone_garmin_watch" | "phone_wear_os_watch"
+    // (runs.recording_source; the server infers it when absent, e.g. SyncWorker retries).
+    val recordingSource: String? = null,
 )

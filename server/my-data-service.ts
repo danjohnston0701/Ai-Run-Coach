@@ -12,6 +12,7 @@
  */
 
 import { db } from './db';
+import { NON_PLAN_WORKOUT_TYPES } from "./utils/run-derivation";
 import { MEANINGFUL_RUN_SQL } from "./utils/run-units";
 import { runs, userStats, goals } from '@shared/schema';
 import { eq, gte, and, desc, asc, count, sum, avg, max, min, sql, isNotNull, isNull, or, lt, inArray } from 'drizzle-orm';
@@ -535,8 +536,9 @@ export async function getCoachingPlanSummary(userId: string, days: number) {
 
     const workoutTypeBreakdown: Record<string, number> = {};
     for (const row of typeRows) {
-      const label = row.workoutType ?? 'other';
-      workoutTypeBreakdown[label] = Number(row.cnt ?? 0);
+      // "free" / "watch_standalone" (non-plan runs) count as "other", like NULL always did.
+      const label = row.workoutType && !NON_PLAN_WORKOUT_TYPES.has(row.workoutType) ? row.workoutType : 'other';
+      workoutTypeBreakdown[label] = (workoutTypeBreakdown[label] ?? 0) + Number(row.cnt ?? 0);
     }
 
     // ── 5. Progression trend (compare first half vs second half of period) ───

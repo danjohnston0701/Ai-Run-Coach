@@ -19,6 +19,7 @@ import { sweepDependents, deleteRowsIfUnreferenced } from "./fk-cleanup";
 import { eq, or, and, desc, asc, ilike, sql, inArray, gte, lte, isNotNull, count, sum, avg, max, min, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
 import { ensureRunWeather, runStartPoint } from "./run-weather";
+import { fillDerivedRunFields, writeLegacyRunColumns } from "./run-derived-fields";
 
 // Keys of `runs` columns stored as Postgres integers — clients sometimes send fractional values
 // for these (see convertDateFields), which would otherwise fail the whole insert.
@@ -706,10 +707,19 @@ export class DatabaseStorage implements IStorage {
       const start = runStartPoint({ gpsTrack: sanitized.gpsTrack });
       if (start) [sanitized.startLat, sanitized.startLng] = start;
     }
+    // Everything else the client left NULL that the run's own data can supply (terrain,
+    // steepest grade, moving time, calories, run date, AI-coach flag, workout type, recording
+    // source, struggle points …) — see utils/run-derivation.ts. Client values always win.
+    const legacy = await fillDerivedRunFields(sanitized);
+    for (const key of Object.keys(sanitized)) {
+      const v = sanitized[key];
+      if (typeof v === 'number' && !Number.isInteger(v) && RUN_INTEGER_COLUMNS.has(key)) sanitized[key] = Math.round(v);
+    }
     try {
       const [newRun] = await db.insert(runs).values(sanitized).returning();
       // iOS uploads carry no weatherData object (and imports none) — fill it server-side.
       if (newRun.weatherData == null) void ensureRunWeather(newRun.id);
+      void writeLegacyRunColumns(newRun.id, legacy);
       return newRun;
     } catch (err: any) {
       // PostgreSQL unique-constraint violation (code 23505).

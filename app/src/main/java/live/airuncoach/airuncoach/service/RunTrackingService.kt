@@ -5681,6 +5681,11 @@ class RunTrackingService : Service(), SensorEventListener {
         val uploadRequest = UploadRunRequest(
             routeId = null, // TODO: Add if user selected a saved route
             garminCompanionSessionId = runSession.garminCompanionSessionId,
+            recordingSource = when {
+                isSamsungWatchRun -> "phone_wear_os_watch"
+                isGarminWatchRun || hasGarminData -> "phone_garmin_watch"
+                else -> "phone"
+            },
             startTime = runSession.startTime,
             sessionType = currentActivityType,
             distance = runSession.distance / 1000.0, // Convert meters to km

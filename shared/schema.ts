@@ -450,6 +450,11 @@ export const runs = pgTable("runs", {
   // runner accepts the Run Summary suggestion (original is restored verbatim by Undo), or
   // { status: "dismissed" } once they choose to keep the run as recorded.
   endTrim: jsonb("end_trim"),
+
+  // Where the session was recorded: "phone" | "apple_watch" | "garmin_watch" | "wear_os_watch" |
+  // "phone_apple_watch" | "phone_garmin_watch" | "phone_wear_os_watch" | "strava_import".
+  // Sent by the clients; inferred server-side otherwise (server/utils/run-derivation.ts).
+  recordingSource: text("recording_source"),
 });
 
 // Watch Biometric Samples table

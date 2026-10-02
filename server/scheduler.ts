@@ -9,6 +9,7 @@ import { eq, and, gte, lt } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { reconcileGooglePlaySubscriptions } from './google-play-billing';
 import { backfillRunWeather, backfillRunStartPoints } from './run-weather';
+import { backfillRunDerivedFields } from './run-derived-fields';
 import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek, correctImplausibleHRZoneBPMs } from './session-enrichment-service';
 
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
@@ -379,6 +380,22 @@ export function startScheduler(): void {
     await sweepRunWeather();
   }, 90_000);
   console.log('[Scheduler] Run weather backfill scheduled (hourly at :40)');
+
+  // Run derived fields: terrain, steepest grade, moving/elapsed time, calories, run date/time,
+  // AI-coach flag, workout type, recording source, struggle points … for runs that arrived
+  // without them (iOS uploads, watch companion sessions, imports) and for runs saved before
+  // this existed; also repairs time series stored as JSON strings. See run-derived-fields.ts.
+  const sweepRunDerived = async () => {
+    try {
+      const r = await backfillRunDerivedFields();
+      if (r.checked > 0) console.log(`[Scheduler] Run derived fields: updated ${r.filled}/${r.checked} run(s)`);
+    } catch (err) {
+      console.error('[Scheduler] Run derived-fields sweep error:', err);
+    }
+  };
+  cron.schedule('50 * * * *', sweepRunDerived);
+  setTimeout(sweepRunDerived, 120_000);
+  console.log('[Scheduler] Run derived-fields backfill scheduled (hourly at :50)');
 
   // Run BPM self-heal once on startup to fix any existing wrong values immediately
   setImmediate(async () => {
