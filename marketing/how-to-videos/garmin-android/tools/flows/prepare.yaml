@@ -1,0 +1,14 @@
+# Scene 4 (phone): dashboard → Run Without Route → Prepare for Watch → Waiting for Watch.
+# The 26:40 target is preset in the app's user_prefs (see RECORDING.md).
+appId: live.airuncoach.airuncoach
+---
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- tapOn: "RUN WITHOUT ROUTE"
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- tapOn: "Prepare for Watch"
+- runFlow: pause.yaml
+- extendedWaitUntil:
+    visible: "Waiting for Watch"
+    timeout: 30000

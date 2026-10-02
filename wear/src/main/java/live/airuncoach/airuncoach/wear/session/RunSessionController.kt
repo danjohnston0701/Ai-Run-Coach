@@ -102,10 +102,20 @@ class RunSessionController(
      */
     fun debugInjectAuth(token: String, runnerName: String) {
         if (!BuildConfig.DEBUG) return
-        scope.launch { prefs.setAuth(token, runnerName, 185) }
-        _state.update {
-            it.copy(isAuthenticated = true, overlay = if (it.gpsQuality > 0) Overlay.GPS_WAIT else it.overlay)
-        }
+        scope.launch { prefs.setAuth(token, runnerName, null) }
+        _state.update { it.copy(isAuthenticated = true, overlay = overlayAfterAuth(it)) }
+    }
+
+    /**
+     * Linked: leave the "open the phone app" screen for GPS wait — or straight past it if GPS is
+     * already good (RunView.mc's _applyAuthToken). This used to move on only when the GPS
+     * quality happened to be above zero at that instant, so pairing indoors or before the first
+     * fix left an authenticated watch stuck on the pairing screen.
+     */
+    private fun overlayAfterAuth(s: RunScreenState): Overlay = when {
+        s.isRunning || s.overlay != Overlay.WAITING -> s.overlay
+        s.gpsQuality >= (if (s.isPhoneConnected) 2 else 3) -> Overlay.NONE
+        else -> Overlay.GPS_WAIT
     }
 
     private val startRetry = RetryLoop(scope, START_RETRY_MAX, START_RETRY_INTERVAL_MS) {
@@ -167,9 +177,27 @@ class RunSessionController(
     fun start() {
         scope.launch {
             val token = prefs.getAuthTokenOnce()
-            _state.update { it.copy(isAuthenticated = !token.isNullOrBlank(), overlay = if (!token.isNullOrBlank()) Overlay.GPS_WAIT else Overlay.WAITING) }
+            val storedMaxHr = prefs.getMaxHrOnce()
+            _state.update { it.copy(isAuthenticated = !token.isNullOrBlank(), overlay = if (!token.isNullOrBlank()) Overlay.GPS_WAIT else Overlay.WAITING,
+                maxHr = storedMaxHr) }
         }
         connectStartMs = System.currentTimeMillis()
+
+        // The Data Layer's view of the phone is the connection state. This was never wired up,
+        // so isPhoneConnected stayed false forever: the prepare screen always read "Phone not
+        // connected", idle showed OFFLINE, and watch data was never streamed to the phone.
+        scope.launch {
+            dataLayer.isPhoneConnected.collect { connected ->
+                val s = _state.value
+                if (connected && !s.isPhoneConnected && s.isRunning && !phoneControlled) {
+                    showStatus("Connected - streaming live", 4000L)
+                }
+                if (!connected && s.isPhoneConnected && s.isRunning && !phoneControlled) {
+                    showStatus("Phone lost - saving offline", 5000L)
+                }
+                _state.update { it.copy(isPhoneConnected = connected) }
+            }
+        }
 
         val pendingCrash = CrashBreadcrumb.consumePending(context)
         dataLayer.onMessage = { type, payload -> handleMessage(type, payload) }
@@ -203,10 +231,15 @@ class RunSessionController(
         val s = _state.value
         when {
             s.showPrepareGate -> continueWithoutCoaching()
-            s.isFinished && s.isAuthenticated && !s.isPrepared && !s.prepareGateDismissed ->
-                _state.update { it.copy(isFinished = false) }
+            s.isFinished -> dismissFinished()
             else -> startRun()
         }
+    }
+
+    /** "Done" on the post-run screen: back to the prepare screen (or the ready screen). */
+    fun dismissFinished() {
+        _state.update { it.copy(isFinished = false, elapsedMs = 0, distanceM = 0.0, paceSecPerKm = 0.0,
+            heartRate = 0, cadence = 0, avgPaceSecPerKm = 0.0, screenPage = 0) }
     }
 
     fun startRun() {
@@ -230,6 +263,12 @@ class RunSessionController(
             it.copy(isRunning = true, isPaused = false, isFinished = false, overlay = Overlay.NONE)
         }
 
+        if (videoDemo) {
+            vibeShort()
+            showStatus("Back button pauses", 4000L)
+            return
+        }
+
         health.startExercise(isWalk = s.isWalk)
         health.setCallbackActive(true)
 
@@ -251,6 +290,8 @@ class RunSessionController(
         dataLayer.sendHello(APP_VERSION)
         startRetry.start()
         vibeShort()
+        // The one control mid-run is the bottom button, which nothing on screen points at.
+        showStatus("Back button pauses", 4000L)
     }
 
     fun pauseRun() {
@@ -259,7 +300,7 @@ class RunSessionController(
         _state.update { it.copy(isPaused = true) }
         resumeRetry.cancel() // only one of pause/resume should ever be retrying at once
         pauseRetry.start()
-        health.pauseExercise()
+        if (!videoDemo) health.pauseExercise()
         vibeShort()
     }
 
@@ -269,7 +310,7 @@ class RunSessionController(
         _state.update { it.copy(isPaused = false) }
         pauseRetry.cancel()
         resumeRetry.start()
-        health.resumeExercise()
+        if (!videoDemo) health.resumeExercise()
         vibeShort()
     }
 
@@ -277,11 +318,17 @@ class RunSessionController(
         isFinishing = true
         val s = _state.value
         _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE,
-                isPrepared = false, prepareGateDismissed = false) }
+                isPrepared = false, prepareGateDismissed = false, preparedDistanceKm = null,
+                preparedTargetPace = null, statusMessage = null, screenPage = 0) }
+        statusClearJob?.cancel()
         startRetry.cancel()
         pauseRetry.cancel()
         resumeRetry.cancel()
         sessionReadySent = false
+        if (videoDemo) {
+            vibeLong()
+            return
+        }
 
         dataLayer.sendCommand("stop")
         stopRetry.start()
@@ -369,12 +416,17 @@ class RunSessionController(
         showStatus("Asking coach...", 2000L)
     }
 
+    /** FINISH on the paused screen — the same confirmation the bottom button opens. */
+    fun requestFinish() {
+        _pendingConfirm.value = live.airuncoach.airuncoach.wear.ui.BackAction.ConfirmFinish
+    }
+
     fun onBackPressed(): live.airuncoach.airuncoach.wear.ui.BackAction {
         val s = _state.value
         val action = when {
             s.isRunning && !s.isPaused -> {
-                toggleScreen()
-                live.airuncoach.airuncoach.wear.ui.BackAction.ToggleScreen
+                pauseRun()
+                live.airuncoach.airuncoach.wear.ui.BackAction.Pause
             }
             s.isPaused -> live.airuncoach.airuncoach.wear.ui.BackAction.ConfirmFinish
             else -> live.airuncoach.airuncoach.wear.ui.BackAction.ConfirmExit
@@ -394,13 +446,15 @@ class RunSessionController(
             "auth" -> {
                 val token = payload["authToken"] as? String
                 val runnerName = payload["runnerName"] as? String ?: ""
-                val maxHrValue = (payload["maxHr"] as? Number)?.toInt() ?: 185
+                // Absent unless the phone knows the runner's age — then no zone is shown.
+                val maxHrValue = (payload["maxHr"] as? Number)?.toInt()?.takeIf { it > 0 }
                 if (!token.isNullOrBlank()) {
                     scope.launch { prefs.setAuth(token, runnerName, maxHrValue) }
                     _state.update {
                         it.copy(
                             isAuthenticated = true,
-                            overlay = if (it.gpsQuality > 0) Overlay.GPS_WAIT else it.overlay
+                            maxHr = maxHrValue ?: it.maxHr,
+                            overlay = overlayAfterAuth(it)
                         )
                     }
                     dataLayer.sendHello(APP_VERSION)
@@ -422,12 +476,17 @@ class RunSessionController(
                     _state.update { it.copy(sessionType = sType) }
                     dataLayer.sendCommand("sessionTypeAck")
                 }
-                coachTargetPace = payload["targetPace"] as? String
+                coachTargetPace = (payload["targetPace"] as? String)?.takeIf { it.isNotBlank() }
                 coachWorkoutDesc = payload["workoutDesc"] as? String
                 plannedWorkoutId = payload["plannedWorkoutId"] as? String
                 scope.launch { prefs.setPlannedWorkoutId(plannedWorkoutId) }
-                // Leaves the prepare-on-phone screen for the start screen.
-                if (!_state.value.isRunning) _state.update { it.copy(isPrepared = true) }
+                // Leaves the prepare-on-phone screen for the ready screen, which shows what was
+                // prepared. A new preparedRun replaces the last one entirely (Garmin 3.4.9).
+                val dist = (payload["distance"] as? Number)?.toDouble()?.takeIf { it > 0 }
+                if (!_state.value.isRunning) _state.update {
+                    it.copy(isPrepared = true, isFinished = false, preparedDistanceKm = dist,
+                        preparedTargetPace = coachTargetPace)
+                }
             }
             "preparedRunCancelled" -> {
                 // Runner backed out of the prepared session on the phone — back to the
@@ -437,7 +496,8 @@ class RunSessionController(
                     coachWorkoutDesc = null
                     plannedWorkoutId = null
                     scope.launch { prefs.setPlannedWorkoutId(null) }
-                    _state.update { it.copy(isPrepared = false, prepareGateDismissed = false) }
+                    _state.update { it.copy(isPrepared = false, prepareGateDismissed = false,
+                        preparedDistanceKm = null, preparedTargetPace = null) }
                 }
             }
             "sessionType" -> {
@@ -496,7 +556,8 @@ class RunSessionController(
                 resumeRetry.cancel()
                 isFinishing = true
                 _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE,
-                isPrepared = false, prepareGateDismissed = false) }
+                isPrepared = false, prepareGateDismissed = false, preparedDistanceKm = null,
+                preparedTargetPace = null, screenPage = 0) }
                 phoneControlled = false
                 sessionReadySent = false
                 health.endExercise()
@@ -523,7 +584,7 @@ class RunSessionController(
 
         // GPS quality from the FusedLocationProviderClient listener.
         val fixAge = lastGpsFixMs?.let { now - it }
-        val quality = resolveGpsQuality(lastGpsAccuracyM, fixAge)
+        val quality = if (videoDemo) demoGpsQuality else resolveGpsQuality(lastGpsAccuracyM, fixAge)
         val gpsLost = s.isRunning && !s.isPaused && quality < 2 &&
             (now - lastGpsLostMs).let { it > GPS_LOST_THRESHOLD_MS }
         if (quality >= 2) lastGpsLostMs = now
@@ -531,7 +592,7 @@ class RunSessionController(
         val offlineGraceElapsed = (now - connectStartMs) >= CONNECT_WAIT_GRACE_MS
 
         if (s.isRunning && !s.isPaused) {
-            val m = health.metrics.value
+            val m = if (videoDemo) videoDemoMetrics(now) else health.metrics.value
             val pace = if (m.speedMs != null && m.speedMs > 0.3 && m.speedMs <= 5.5) 1000.0 / m.speedMs else s.paceSecPerKm
             if (m.heartRate > 0) { sumHr += m.heartRate; if (m.heartRate > maxHr) maxHr = m.heartRate }
             if (m.cadenceSpm > 0) sumCadence += m.cadenceSpm
@@ -570,9 +631,13 @@ class RunSessionController(
                 )
             }
 
-            maybeCaptureOfflinePoint(now, m)
-            maybeSendWatchData(now, m)
-            maybeSendHttpData(now, m)
+            if (videoDemo) {
+                if (m.distanceM >= 5000.0) finishRun()
+            } else {
+                maybeCaptureOfflinePoint(now, m)
+                maybeSendWatchData(now, m)
+                maybeSendHttpData(now, m)
+            }
         } else {
             // Mirrors RunView.mc: once GPS becomes ready while idle+authenticated, the watch
             // moves off the GPS_WAIT overlay into the normal idle dashboard (StartHintArc +
@@ -652,6 +717,71 @@ class RunSessionController(
                 )
             )
         }
+    }
+
+    // ── Video recording mode (debug builds only) — see WearVideoDemoMode.kt ─────
+
+    private var videoDemo = false
+    private var demoGpsQuality = 0
+    private var demoStartMs = 0L
+    private var demoSec = 0
+    private var demoDistanceM = 0.0
+
+    /** Back to a fresh, unpaired watch: the pairing screen. */
+    internal fun videoDemoEnable() {
+        if (!BuildConfig.DEBUG) return
+        videoDemo = true
+        demoGpsQuality = 0
+        phoneControlled = false
+        isFinishing = false
+        _pendingConfirm.value = null
+        _state.value = RunScreenState(overlay = Overlay.WAITING)
+    }
+
+    /** The phone app pushed its token: linked, prepare-on-phone screen, "Waiting for phone…"
+     * ([phone] false: paired earlier, phone not around — "Phone not connected"). */
+    internal fun videoDemoLink(phone: Boolean) {
+        if (!videoDemo) return
+        // maxHr: what the phone sends for a 36-year-old (208 − 0.7 × 36), so the HR label shows a zone.
+        _state.update { it.copy(isAuthenticated = true, isPhoneConnected = phone, offlineGraceElapsed = true,
+            maxHr = 183, overlay = overlayAfterAuth(it)) }
+    }
+
+    /** "Prepare for Watch" on the phone, then GPS locking over ~8 s into the ready screen. */
+    internal fun videoDemoPrepare() {
+        if (!videoDemo) return
+        handleMessage("preparedRun", mapOf("type" to "preparedRun", "distance" to 5.0, "runType" to "free",
+            "targetPace" to "5:20", "sessionType" to "run"))
+        videoDemoGpsLock()
+    }
+
+    internal fun videoDemoGpsLock() {
+        if (!videoDemo) return
+        scope.launch {
+            for ((delayMs, q) in listOf(1500L to 1, 3500L to 2, 2000L to 3, 2000L to 4)) {
+                delay(delayMs)
+                demoGpsQuality = q
+            }
+        }
+    }
+
+    /** Watch START. [skipSec] starts the run that far in, for re-takes of the finish. */
+    internal fun videoDemoStart(skipSec: Int) {
+        if (!videoDemo) return
+        demoStartMs = System.currentTimeMillis() - skipSec * 1000L
+        demoSec = 0
+        demoDistanceM = 0.0
+        startRun()
+    }
+
+    /** Paced by the wall clock; missed seconds are caught up in one go, as on the phone. */
+    private fun videoDemoMetrics(now: Long): live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics {
+        val due = ((now - demoStartMs) / 1000).toInt()
+        while (demoSec < due && demoDistanceM < 5000.0) {
+            demoSec += 1
+            demoDistanceM += WearVideoDemoMode.speed(demoSec)
+        }
+        return WearVideoDemoMode.metrics(demoSec, demoDistanceM)
     }
 
     // ── GPS ───────────────────────────────────────────────────────────────────

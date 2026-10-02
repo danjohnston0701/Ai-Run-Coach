@@ -11,6 +11,7 @@ import live.airuncoach.airuncoach.network.model.GroupRunResultsResponse
 import live.airuncoach.airuncoach.network.model.GroupRunLookupResponse
 import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.network.model.AppVersionCheckResponse
+import live.airuncoach.airuncoach.network.model.HowToVideosResponse
 import live.airuncoach.airuncoach.network.model.GeneratePlanRequest
 import live.airuncoach.airuncoach.network.model.GeneratePlanResponse
 import live.airuncoach.airuncoach.network.model.TrainingPlanSummary
@@ -780,6 +781,10 @@ interface ApiService {
 
     @POST("/api/strava/auth/authorize")
     suspend fun initiateStravaAuth(@Body body: Map<String, String> = emptyMap()): StravaAuthResponse
+
+    /** Watch + phone demo videos for the Connected Devices tiles (public, published ones only). */
+    @GET("/api/how-to-videos")
+    suspend fun getHowToVideos(@Query("platform") platform: String = "android"): HowToVideosResponse
 
     // Force a fresh network fetch — bypass OkHttp's HTTP cache entirely.
     // Without this, OkHttp serves the last cached response (e.g. connected=false)

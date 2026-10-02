@@ -11,8 +11,9 @@ class StatusResolverTest {
         gpsLost: Boolean = false,
         isAuthenticated: Boolean = true,
         isConnected: Boolean = false,
-        offlineGraceElapsed: Boolean = true
-    ) = StatusBarInput(ephemeralMessage, isRunning, gpsLost, isAuthenticated, isConnected, offlineGraceElapsed)
+        offlineGraceElapsed: Boolean = true,
+        isFinished: Boolean = false
+    ) = StatusBarInput(ephemeralMessage, isRunning, gpsLost, isAuthenticated, isConnected, offlineGraceElapsed, isFinished)
 
     @Test
     fun `ephemeral message always wins, even while running with GPS lost`() {
@@ -33,7 +34,7 @@ class StatusResolverTest {
     @Test
     fun `OFFLINE only shown after the connect grace period elapses`() {
         val stillWaiting = resolveStatus(input(isRunning = false, isConnected = false, offlineGraceElapsed = false))
-        assertEquals("PRESS START", stillWaiting.text)
+        assertEquals(null, stillWaiting.text)
 
         val graceOver = resolveStatus(input(isRunning = false, isConnected = false, offlineGraceElapsed = true))
         assertEquals("OFFLINE", graceOver.text)
@@ -42,13 +43,19 @@ class StatusResolverTest {
     @Test
     fun `OFFLINE never shown while connected to phone`() {
         val result = resolveStatus(input(isRunning = false, isConnected = true, offlineGraceElapsed = true))
-        assertEquals("PRESS START", result.text)
+        assertEquals(null, result.text)
     }
 
     @Test
-    fun `unauthenticated idle watch shows PRESS START not OFFLINE`() {
+    fun `unauthenticated idle watch never shows OFFLINE`() {
         val result = resolveStatus(input(isRunning = false, isAuthenticated = false, isConnected = false, offlineGraceElapsed = true))
-        assertEquals("PRESS START", result.text)
+        assertEquals(null, result.text)
+    }
+
+    @Test
+    fun `FINISHED screen shows no prompts, not even OFFLINE or a late message`() {
+        val result = resolveStatus(input(isFinished = true, isConnected = false, ephemeralMessage = "Asking coach..."))
+        assertEquals(null, result.text)
     }
 
     @Test

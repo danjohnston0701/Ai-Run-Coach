@@ -51,5 +51,6 @@ class WearApplication : Application() {
             offlineBuffer = offlineBuffer
         )
         runSessionController.start()
+        live.airuncoach.airuncoach.wear.session.WearVideoDemoMode.install(this, runSessionController)
     }
 }

@@ -22,24 +22,30 @@ class WearPreferences(context: Context) {
     private object Keys {
         val AUTH_TOKEN = stringPreferencesKey("auth_token")
         val RUNNER_NAME = stringPreferencesKey("runner_name")
-        val MAX_HR = intPreferencesKey("max_hr")
+        // Not "max_hr": older phone builds always sent 185 when the age was unknown, so a value
+        // stored under that key can't be trusted as personalised.
+        val MAX_HR = intPreferencesKey("personal_max_hr")
         val SESSION_TYPE = stringPreferencesKey("session_type")
         val PLANNED_WORKOUT_ID = stringPreferencesKey("planned_workout_id")
     }
 
     val authToken: Flow<String?> = dataStore.data.map { it[Keys.AUTH_TOKEN] }
     val runnerName: Flow<String> = dataStore.data.map { it[Keys.RUNNER_NAME] ?: "" }
-    val maxHr: Flow<Int> = dataStore.data.map { it[Keys.MAX_HR] ?: 185 }
+    /** Null until the phone has sent a real personalised max HR. */
+    val maxHr: Flow<Int?> = dataStore.data.map { it[Keys.MAX_HR] }
     val sessionType: Flow<String?> = dataStore.data.map { it[Keys.SESSION_TYPE] }
 
     suspend fun getAuthTokenOnce(): String? = authToken.first()
     suspend fun getSessionTypeOnce(): String? = sessionType.first()
 
-    suspend fun setAuth(token: String, runnerName: String, maxHr: Int) {
+    suspend fun getMaxHrOnce(): Int? = maxHr.first()
+
+    /** A null maxHr keeps whatever was stored before (an auth without one isn't "unknown now"). */
+    suspend fun setAuth(token: String, runnerName: String, maxHr: Int?) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTH_TOKEN] = token
             prefs[Keys.RUNNER_NAME] = runnerName
-            prefs[Keys.MAX_HR] = maxHr
+            if (maxHr != null) prefs[Keys.MAX_HR] = maxHr
         }
     }
 

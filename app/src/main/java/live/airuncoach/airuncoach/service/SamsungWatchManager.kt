@@ -107,6 +107,9 @@ class SamsungWatchManager(
         val api = apiService ?: return
         companionSessionFetchJob?.cancel()
         activeCompanionSessionId = null
+        // Video recording mode has no real watch — never adopt a stale "active" companion
+        // session (see GarminWatchManager: a demo once merged into a real half marathon).
+        if (videoDemoDeviceName != null) return
         companionSessionFetchJob = CoroutineScope(Dispatchers.IO).launch {
             for (attempt in 1..retries) {
                 try {
@@ -157,7 +160,10 @@ class SamsungWatchManager(
     // ── Cached auth / prepared-run / session-type state (resent on "watchReady") ───────
     private var cachedAuthToken: String? = null
     private var cachedRunnerName: String = ""
-    private var cachedUserMaxHr: Int = 185
+    // Null until the user's real age is known — the watch treats a missing "maxHr" as "can't
+    // personalise HR zones" (neutral HR ring) rather than trusting a guessed number. Same as
+    // GarminWatchManager.
+    private var cachedUserMaxHr: Int? = null
     private var cachedPreparedRunPayload: Map<String, Any>? = null
     private var cachedSessionType: String? = null
 
@@ -230,7 +236,7 @@ class SamsungWatchManager(
     }
 
     fun getConnectedDeviceName(): String? =
-        connectedNodeId?.let { id ->
+        videoDemoDeviceName ?: connectedNodeId?.let { id ->
             try {
                 Tasks.await(Wearable.getNodeClient(context).connectedNodes)
                     .firstOrNull { it.id == id }?.displayName
@@ -247,12 +253,13 @@ class SamsungWatchManager(
         if (userAge != null && userAge > 0) {
             cachedUserMaxHr = (208 - (0.7 * userAge).toInt()).coerceIn(155, 210)
         }
-        sendToWatch(mapOf(
+        val payload = mutableMapOf<String, Any>(
             "type" to "auth",
             "authToken" to authToken,
-            "runnerName" to runnerName,
-            "maxHr" to cachedUserMaxHr
-        ))
+            "runnerName" to runnerName
+        )
+        cachedUserMaxHr?.let { payload["maxHr"] = it }
+        sendToWatch(payload)
     }
 
     fun sendRunUpdate(
@@ -449,10 +456,26 @@ class SamsungWatchManager(
         }
     }
 
+    // ── Video recording mode (debug builds only) — see VideoDemoMode.kt ───────
+    internal var videoDemoDeviceName: String? = null
+    internal fun videoDemoSetLinked(linked: Boolean) {
+        if (_isWatchConnected.value != linked) _isWatchConnected.value = linked
+        if (_isCompanionAppInstalled.value != linked) _isCompanionAppInstalled.value = linked
+    }
+    /** Feeds a scripted message through the real watch → phone handler. */
+    internal fun videoDemoDeliver(message: Map<String, Any?>) = dispatchWatchMessage(message)
+
     private fun handleWatchMessage(data: ByteArray?) {
         try {
             if (data == null) return
-            val map = jsonToMap(JSONObject(String(data, Charsets.UTF_8)))
+            dispatchWatchMessage(jsonToMap(JSONObject(String(data, Charsets.UTF_8))))
+        } catch (e: Exception) {
+            Log.w(TAG, "handleWatchMessage: ${e.message}")
+        }
+    }
+
+    private fun dispatchWatchMessage(map: Map<String, Any?>) {
+        try {
             val type = map["type"] as? String ?: return
             when (type) {
                 "hello" -> {

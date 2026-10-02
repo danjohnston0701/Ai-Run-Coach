@@ -99,6 +99,7 @@ import { runDistanceKm } from "./utils/run-units";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
+import { registerHowToVideoRoutes } from "./routes-how-to-videos";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
@@ -154,6 +155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", guestTourRouter); // pre-login "Take a Tour" tracking — see routes-guest-tour.ts
   registerSessionCoachingRoutes(app);
   registerRunEndTrimRoutes(app, transformRunForAndroid); // "forgot to stop" Run Summary trim
+  registerHowToVideoRoutes(app); // Connected Devices "watch the demo" videos
 
   // Version probe — tells us immediately which build is running
   app.get("/api/version", (_req: Request, res: Response) => {
@@ -14889,10 +14891,16 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     try {
       const userId = req.user!.userId;
 
+      // Only a session started in the last 12 h counts as live. A session the watch never
+      // ended stays "active" indefinitely (one from a 2026-09-20 race was still active on
+      // 10-01); handing that back meant the next phone upload carried its ID and POST /api/runs
+      // Case 2 merged the new run's data into the old session's run.
+      const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
       const [session] = await db.select().from(garminCompanionSessions)
         .where(and(
           eq(garminCompanionSessions.userId, userId),
-          eq(garminCompanionSessions.status, "active")
+          eq(garminCompanionSessions.status, "active"),
+          gte(garminCompanionSessions.startedAt, twelveHoursAgo)
         ))
         .orderBy(sql`started_at DESC`)
         .limit(1);

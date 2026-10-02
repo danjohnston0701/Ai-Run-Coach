@@ -49,6 +49,13 @@ class ConnectedDevicesViewModel @Inject constructor(
     private val _stravaLoading = MutableStateFlow(false)
     val stravaLoading: StateFlow<Boolean> = _stravaLoading
 
+    // ── Demo videos ───────────────────────────────────────────────────────────
+
+    /** Published watch + phone demo videos; a tile shows its "Watch the demo" link only when its
+     *  watch has one. Empty (no links) when offline or the request fails. */
+    private val _howToVideos = MutableStateFlow<List<live.airuncoach.airuncoach.network.model.HowToVideo>>(emptyList())
+    val howToVideos: StateFlow<List<live.airuncoach.airuncoach.network.model.HowToVideo>> = _howToVideos
+
     companion object {
         private const val TAG = "ConnectedDevicesVM"
     }
@@ -56,6 +63,7 @@ class ConnectedDevicesViewModel @Inject constructor(
     init {
         checkGarminConnection()
         checkStravaConnection()
+        loadHowToVideos()
 
         // Re-check whenever MainActivity signals a successful Garmin OAuth callback
         viewModelScope.launch {
@@ -70,6 +78,16 @@ class ConnectedDevicesViewModel @Inject constructor(
         viewModelScope.launch {
             StravaConnectionState.refreshTick.collect { tick ->
                 if (tick > 0) onStravaOAuthSuccess()
+            }
+        }
+    }
+
+    private fun loadHowToVideos() {
+        viewModelScope.launch {
+            try {
+                _howToVideos.value = apiService.getHowToVideos().videos
+            } catch (e: Exception) {
+                Log.w(TAG, "How-to videos unavailable: ${e.message}")
             }
         }
     }

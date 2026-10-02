@@ -1,0 +1,19 @@
+# Scene 2 (phone): Dashboard → Profile → Connected Devices → Apple Watch card → setup guide.
+appId: live.airuncoach.Ai-Run-Coach
+---
+- runFlow: pause.yaml
+- tapOn: "Profile"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Connected Devices"
+    speed: 30
+- runFlow: pause.yaml
+- tapOn: "Connected Devices"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Apple Watch App"
+    centerElement: true
+    speed: 25
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- runFlow: pause.yaml

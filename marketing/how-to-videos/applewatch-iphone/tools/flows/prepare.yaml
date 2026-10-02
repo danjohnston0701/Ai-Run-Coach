@@ -1,0 +1,20 @@
+# Scene 4 (phone): 5 km / 26:40 preset on the dashboard → Run Without Route → Prepare for Watch
+# → Waiting for Watch. Target time is preset in the app's
+# container prefs (see RECORDING.md).
+appId: live.airuncoach.Ai-Run-Coach
+---
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "RUN WITHOUT ROUTE"
+    centerElement: true
+    speed: 25
+- runFlow: pause.yaml
+- tapOn: "RUN WITHOUT ROUTE"
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- tapOn: "Prepare for Watch"
+- runFlow: pause.yaml
+- extendedWaitUntil:
+    visible: "Waiting for Watch"
+    timeout: 30000

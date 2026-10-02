@@ -16,7 +16,6 @@ object WearColors {
     // Metric rings
     val TealKm = Color(0xFF00BFA8)
     val YellowPace = Color(0xFFFFDD00)
-    val RedHr = Color(0xFFFF3355)
     val OrangeCadence = Color(0xFFFF8800) // grid screen's cadence label color
 
     // Duration label states
@@ -48,6 +47,10 @@ object WearColors {
     val BatteryLow = Color(0xFFFFAA00)
     val BatteryCritical = Color(0xFFFF4444)
 
-    // Start hint arc / play icon
-    val StartHintGreen = Color(0xFF00E676)
+    // START button (green) — gold when the phone has prepared a coached session
+    val StartGreen = Color(0xFF00E676)
+    val CoachedGold = Color(0xFFFFC94D)
+
+    // Heart rate — the HR ring and grid label, same red as the Garmin app
+    val RedHr = Color(0xFFFF3355)
 }

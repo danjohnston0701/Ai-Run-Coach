@@ -405,6 +405,7 @@ fun RunSessionScreen(
                 isPaused = runState.isPaused,
                 isStopping = runState.isStopping,
                 isWatchRun = isWatchMode,
+                isSamsungWatch = connectedWatchIsSamsung,
                 onStart = startRunIfLocationEnabled,
                 onPause = { showPauseConfirm = true },
                 onResume = { viewModel.resumeRun() },
@@ -2416,7 +2417,11 @@ fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier, i
             ) {
                 WatchInstructionStep(number = "1", text = "Open the Ai Run Coach app on your $watchName watch")
                 WatchInstructionStep(number = "2", text = "Wait for GPS to lock — shown on the watch screen")
-                WatchInstructionStep(number = "3", text = "Press START on your watch — your phone begins automatically")
+                WatchInstructionStep(
+                    number = "3",
+                    text = if (isSamsungWatch) "Tap Start Run on your watch — your phone begins automatically"
+                           else "Press START on your watch — your phone begins automatically"
+                )
             }
 
             // Keep-your-phone-with-you — the single most important thing on this screen. Live
@@ -2658,6 +2663,7 @@ fun ControlButtons(
     isPaused: Boolean,
     isStopping: Boolean = false,
     isWatchRun: Boolean = false,
+    isSamsungWatch: Boolean = false,  // a Galaxy Watch starts from an on-screen button, not a START key
     onStart: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -2760,7 +2766,8 @@ fun ControlButtons(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Press START on your watch to begin",
+                            text = if (isSamsungWatch) "Tap Start Run on your watch to begin"
+                                   else "Press START on your watch to begin",
                             style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                             color = Colors.primary
                         )

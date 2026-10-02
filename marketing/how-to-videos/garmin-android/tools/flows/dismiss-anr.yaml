@@ -1,0 +1,6 @@
+# Taps "Wait" on an Android "isn't responding" dialog if one is showing.
+appId: live.airuncoach.airuncoach
+---
+- tapOn:
+    text: "Wait"
+    optional: true

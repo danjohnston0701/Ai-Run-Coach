@@ -1,0 +1,36 @@
+# Scene 8 (phone): the saved run's Run Insights — tabs, splits, charts, then the coach's AI review.
+appId: live.airuncoach.Ai-Run-Coach
+---
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- tapOn: "Summary"
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- scroll
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- scroll
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- tapOn: "Graphs"
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- scroll
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- scroll
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- tapOn: "AI Insights"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Generate AI Insights"
+    centerElement: true
+- runFlow: pause.yaml
+- tapOn: "Generate AI Insights"
+- extendedWaitUntil:
+    notVisible: "Generate AI Insights"
+    timeout: 60000
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- runFlow: pause.yaml

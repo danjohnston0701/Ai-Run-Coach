@@ -6,7 +6,11 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,7 +28,6 @@ import live.airuncoach.airuncoach.wear.ui.RunScreenState
 import live.airuncoach.airuncoach.wear.ui.StatusBarInput
 import live.airuncoach.airuncoach.wear.ui.components.MetricRing
 import live.airuncoach.airuncoach.wear.ui.components.PageDots
-import live.airuncoach.airuncoach.wear.ui.components.StartHintArc
 import live.airuncoach.airuncoach.wear.ui.components.StatusBar
 import live.airuncoach.airuncoach.wear.ui.formatDistanceKm
 import live.airuncoach.airuncoach.wear.ui.formatElapsed
@@ -37,18 +40,15 @@ import java.util.Locale
 
 /**
  * The default main screen — mirrors RunView.mc's Diamond Grid Dashboard: timer+cadence top
- * block, 3 metric rings (KM/PACE/HR), battery, status bar, paused banner, page dots, idle
- * start-hint arc.
+ * block, 3 metric rings (KM/PACE/HR), battery, status bar, page dots. Shown during a run and as
+ * the FINISHED screen afterwards (with a Done button, since there's no START button to leave it
+ * with on a Galaxy Watch); before a run the ready screen takes its place.
  */
 @Composable
-fun DiamondDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
+fun DiamondDashboard(state: RunScreenState, onDone: () -> Unit, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val w = maxWidth
         val h = maxHeight
-
-        if (!state.isRunning && !state.isPaused) {
-            StartHintArc(modifier = Modifier.fillMaxSize())
-        }
 
         // ── Top block: timer + cadence ──
         val timerLabel: String
@@ -86,39 +86,52 @@ fun DiamondDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
             style = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
             modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.12f)
         )
-        Text(
-            text = formatIntOrDash(state.cadence),
-            color = WearColors.White,
-            style = TextStyle(fontSize = 14.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.24f)
-        )
-        Text(
-            text = "SPM",
-            color = WearColors.White,
-            style = TextStyle(fontSize = 9.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.34f)
-        )
+        val finished = state.isFinished && !state.isRunning
+        if (finished) {
+            // The cadence slot is the one place with room for it on a round face.
+            DoneButton(onDone, Modifier.align(Alignment.TopCenter).offset(y = h * 0.25f))
+        } else {
+            Text(
+                text = formatIntOrDash(state.cadence),
+                color = WearColors.White,
+                style = TextStyle(fontSize = 14.sp, textAlign = TextAlign.Center),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.24f)
+            )
+            Text(
+                text = "SPM",
+                color = WearColors.White,
+                style = TextStyle(fontSize = 9.sp, textAlign = TextAlign.Center),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.34f)
+            )
+        }
 
-        // ── Rings: KM (left), PACE (right), HR (bottom) ──
-        val ringDiameter = w * 0.34f
+        // ── Rings: KM (left), PACE (right), HR (bottom) — RunView.mc's geometry (side ring
+        // centres at cx ± 0.255w), slightly smaller and with the HR ring a touch higher so the
+        // status line and page dots fit under it.
+        val ringDiameter = w * 0.30f
+        val ringOffset = w * 0.255f
         MetricRing(
             label = "KM", value = formatDistanceKm(state.distanceM), color = WearColors.TealKm,
             diameter = ringDiameter,
-            modifier = Modifier.align(Alignment.CenterStart).offset(x = w * 0.02f)
+            modifier = Modifier.align(Alignment.Center).offset(x = -ringOffset)
         )
         MetricRing(
             label = "PACE", value = formatPace(state.paceSecPerKm), color = WearColors.YellowPace,
             diameter = ringDiameter,
-            modifier = Modifier.align(Alignment.CenterEnd).offset(x = -w * 0.02f)
+            modifier = Modifier.align(Alignment.Center).offset(x = ringOffset)
         )
+        // Always heart-rate red, as on Garmin. The zone number shows only with a personalised
+        // max HR and a live reading — never a guess dressed up as fact (RunView.mc).
+        val zone = state.hrZone
         MetricRing(
-            label = "HR", value = formatIntOrDash(state.heartRate), color = WearColors.RedHr,
+            label = if (zone != null) "HR $zone" else "HR", value = formatIntOrDash(state.heartRate),
+            color = WearColors.RedHr,
             diameter = ringDiameter,
-            modifier = Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.14f)
+            modifier = Modifier.align(Alignment.Center).offset(y = w * 0.235f)
         )
 
         // ── Battery ──
-        BatteryIndicator(modifier = Modifier.align(Alignment.CenterEnd).offset(x = -w * 0.22f, y = h * 0.30f))
+        BatteryIndicator(modifier = Modifier.align(Alignment.Center).offset(x = w * 0.27f, y = h * 0.23f))
 
         // ── Status bar ──
         StatusBar(
@@ -128,20 +141,11 @@ fun DiamondDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
                 gpsLost = state.gpsLost,
                 isAuthenticated = state.isAuthenticated,
                 isConnected = state.isPhoneConnected,
-                offlineGraceElapsed = state.offlineGraceElapsed
+                offlineGraceElapsed = state.offlineGraceElapsed,
+                isFinished = state.isFinished
             ),
-            modifier = Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.04f)
+            modifier = Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.065f)
         )
-
-        // ── Paused banner ──
-        if (state.isPaused) {
-            Text(
-                text = "PAUSED",
-                color = WearColors.OrangePaused,
-                style = TextStyle(fontSize = 11.sp, textAlign = TextAlign.Center),
-                modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.02f)
-            )
-        }
 
         // ── Page dots ──
         if (state.isRunning || state.isPaused) {
@@ -176,4 +180,19 @@ private fun readBatteryPercent(context: Context): Int? = try {
     bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
 } catch (e: Exception) {
     null
+}
+
+/** Leaves the FINISHED screen. An action, not a nudge — the screen still carries no prompts. */
+@Composable
+internal fun DoneButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Box(
+        modifier = modifier
+            .size(width = 64.dp, height = 26.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(13.dp))
+            .background(WearColors.DividerGray)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = "DONE", color = WearColors.White, style = TextStyle(fontSize = 10.sp, letterSpacing = 1.sp))
+    }
 }

@@ -337,7 +337,7 @@ class RunView extends Ui.View {
 
     // ── Video recording mode ──────────────────────────────────────────────────
     // Built only by monkey_video.jungle (every other jungle excludes :video), for recording
-    // the Garmin + iPhone how-to video in the simulator (marketing/garmin-iphone-video).
+    // the Garmin + iPhone how-to video in the simulator (marketing/how-to-videos).
     // The simulator has no phone and no Activity data, so this plays the real screens in
     // sequence on a timer: pairing code (a real one, from the server) → linked, prepare on
     // phone → session prepared from the phone → GPS lock → START → a 5 km run fed by the
@@ -395,6 +395,10 @@ class RunView extends Ui.View {
             _isAuthenticated  = true;
             _isConnected      = true;
             _connectWaitTicks = CONNECT_WAIT_MAX;
+            // The phone's auth carries the runner's max HR (208 − 0.7 × age); without it the
+            // HR ring stays neutral with no zone. Same value the phone sends for a 36-year-old.
+            _maxHr            = 183;
+            _maxHrKnown       = true;
             _pairingCode      = null;
             if (_pairingCodeManager != null) { _pairingCodeManager.cancel(); }
             _overlayState     = OVERLAY_GPS_WAIT;
@@ -1841,14 +1845,10 @@ class RunView extends Ui.View {
             // Only show a zone number / zone-coloured ring once we have BOTH a real
             // personalised max HR (user has a known age/DOB) AND a live HR reading —
             // without either, a shown zone would just be a guess dressed up as fact.
+            // The HR ring is always the app's heart-rate red; the zone shows as a number only.
             var hrLabel = "HR";
-            var hrColor = 0xFF3355; // unpersonalised fallback — plain red, no zone shown
-            if (_maxHrKnown && _dispHR > 0) {
-                var hrZone = _hrZone(_dispHR);
-                hrLabel = "HR " + hrZone;
-                hrColor = _hrZoneColor(hrZone);
-            }
-            _drawRing(dc, cx, cy + ringR, circR, hrColor, hrLabel, _dispHR > 0 ? _dispHR.format("%d") : "--");
+            if (_maxHrKnown && _dispHR > 0) { hrLabel = "HR " + _hrZone(_dispHR); }
+            _drawRing(dc, cx, cy + ringR, circR, 0xFF3355, hrLabel, _dispHR > 0 ? _dispHR.format("%d") : "--");
             _drawBattery(dc, cx, cy, ringR, circR);
             _drawStatusBar(dc, cx, w, h, cy + ringR + circR);
         }
@@ -1967,8 +1967,11 @@ class RunView extends Ui.View {
         dc.drawLine((w * 0.08).toNumber(), (h * 0.63).toNumber(), (w * 0.92).toNumber(), (h * 0.63).toNumber());
 
         // -- Bottom row: HR (left) | Average pace (right) --
+        // Same as the rings page: heart-rate red, zone number only with a personalised max HR.
+        var gridHrLabel = "HR";
+        if (_maxHrKnown && _dispHR > 0) { gridHrLabel = "HR " + _hrZone(_dispHR); }
         dc.setColor(0xFF3355, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(lx, (h * 0.66).toNumber(), Gfx.FONT_XTINY, "HR", Gfx.TEXT_JUSTIFY_CENTER);
+        dc.drawText(lx, (h * 0.66).toNumber(), Gfx.FONT_XTINY, gridHrLabel, Gfx.TEXT_JUSTIFY_CENTER);
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         dc.drawText(lx, (h * 0.74).toNumber(), metricFont, _dispHR > 0 ? _dispHR.format("%d") : "--", Gfx.TEXT_JUSTIFY_CENTER);
 
@@ -2125,6 +2128,10 @@ class RunView extends Ui.View {
     // messages go in the band under the ring and the long prepare hint takes the cadence slot,
     // which is empty before a run (_drawTimeTop skips it then).
     private function _drawStatusBar(dc, cx, w, h, ringBottom) {
+        // The FINISHED screen is the runner's result — no prompts or nudges on it ("PRESS
+        // START", "OFFLINE", "Prepare on Phone", a late coaching line). The next press of START
+        // still leaves it for the prepare screen (see handleIdleStart).
+        if (_isFinished && !_isRunning && !_isPaused) { return; }
         var y = (ringBottom > 0) ? ringBottom + 2 : (h * 0.82).toNumber();
         if (_statusMessage.length() > 0) {
             dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
@@ -2530,16 +2537,6 @@ class RunView extends Ui.View {
         if (pct < 80) { return 3; }
         if (pct < 90) { return 4; }
         return 5;
-    }
-
-    // Same 5-zone palette used on the phone app's HR zone charts (RunSummaryScreen.kt),
-    // so the ring color means the same thing across Android/iOS/Garmin.
-    private function _hrZoneColor(zone) {
-        if (zone <= 1) { return 0x42A5F5; }  // Zone 1 - blue   (recovery)
-        if (zone == 2) { return 0x4CAF50; }  // Zone 2 - green  (easy/base aerobic)
-        if (zone == 3) { return 0xFFC107; }  // Zone 3 - amber  (aerobic/tempo)
-        if (zone == 4) { return 0xFF9800; }  // Zone 4 - orange (threshold)
-        return 0xE53935;                     // Zone 5 - red    (max effort)
     }
 
     private function _haversineMeters(lat1, lon1, lat2, lon2) {

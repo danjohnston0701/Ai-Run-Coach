@@ -477,6 +477,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             garminWatchManager.initialize()
+            live.airuncoach.airuncoach.service.VideoDemoMode.install(this, garminWatchManager, samsungWatchManager)
             Log.d("MainActivity", "✅ GarminWatchManager initialized at app startup")
         } catch (e: Exception) {
             // Non-fatal: Garmin Connect app may not be installed on this device

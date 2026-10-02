@@ -14,7 +14,6 @@ import androidx.wear.compose.material.Text
 import live.airuncoach.airuncoach.wear.ui.RunScreenState
 import live.airuncoach.airuncoach.wear.ui.StatusBarInput
 import live.airuncoach.airuncoach.wear.ui.components.PageDots
-import live.airuncoach.airuncoach.wear.ui.components.StartHintArc
 import live.airuncoach.airuncoach.wear.ui.components.StatusBar
 import live.airuncoach.airuncoach.wear.ui.formatDistanceKm
 import live.airuncoach.airuncoach.wear.ui.formatElapsed
@@ -31,14 +30,10 @@ import java.util.Locale
  * horizontal-drag toggle (see input/GestureHandler.kt).
  */
 @Composable
-fun GridDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
+fun GridDashboard(state: RunScreenState, onDone: () -> Unit, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val w = maxWidth
         val h = maxHeight
-
-        if (!state.isRunning && !state.isPaused) {
-            StartHintArc(modifier = Modifier.fillMaxSize())
-        }
 
         val timerText = if (state.isRunning || state.isPaused || state.isFinished) {
             formatElapsed(state.elapsedMs)
@@ -52,7 +47,8 @@ fun GridDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
         }
 
         // Row 1: Duration | Pace
-        GridCell("DURATION", timerText, timerColor, alignStart = true, modifier = Modifier.align(Alignment.TopStart).offset(x = w * 0.16f, y = h * 0.22f))
+        val timerLabel = if (state.isFinished && !state.isRunning && !state.isPaused) "FINISHED" else "DURATION"
+        GridCell(timerLabel, timerText, timerColor, alignStart = true, modifier = Modifier.align(Alignment.TopStart).offset(x = w * 0.16f, y = h * 0.22f))
         GridCell("PACE", formatPace(state.paceSecPerKm), WearColors.YellowPace, alignStart = false, modifier = Modifier.align(Alignment.TopEnd).offset(x = -w * 0.16f, y = h * 0.22f))
 
         // Row 2: Distance | Cadence
@@ -60,7 +56,7 @@ fun GridDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
         GridCell("SPM", formatIntOrDash(state.cadence), WearColors.OrangeCadence, alignStart = false, modifier = Modifier.align(Alignment.CenterEnd).offset(x = -w * 0.16f, y = -h * 0.04f))
 
         // Row 3: HR | Avg Pace
-        GridCell("HR", formatIntOrDash(state.heartRate), WearColors.RedHr, alignStart = true, modifier = Modifier.align(Alignment.BottomStart).offset(x = w * 0.16f, y = -h * 0.24f))
+        GridCell(state.hrZone?.let { "HR $it" } ?: "HR", formatIntOrDash(state.heartRate), WearColors.RedHr, alignStart = true, modifier = Modifier.align(Alignment.BottomStart).offset(x = w * 0.16f, y = -h * 0.24f))
         GridCell("AVG PACE", formatPace(state.avgPaceSecPerKm), WearColors.YellowPace, alignStart = false, modifier = Modifier.align(Alignment.BottomEnd).offset(x = -w * 0.16f, y = -h * 0.24f))
 
         // Divider lines
@@ -78,21 +74,17 @@ fun GridDashboard(state: RunScreenState, modifier: Modifier = Modifier) {
                 gpsLost = state.gpsLost,
                 isAuthenticated = state.isAuthenticated,
                 isConnected = state.isPhoneConnected,
-                offlineGraceElapsed = state.offlineGraceElapsed
+                offlineGraceElapsed = state.offlineGraceElapsed,
+                isFinished = state.isFinished
             ),
-            modifier = Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.02f)
+            modifier = Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.10f)
         )
 
-        if (state.isPaused) {
-            Text(
-                text = "PAUSED",
-                color = WearColors.OrangePaused,
-                style = TextStyle(fontSize = 11.sp, textAlign = TextAlign.Center),
-                modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.02f)
-            )
+        if (state.isFinished && !state.isRunning) {
+            DoneButton(onDone, Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.06f))
         }
         if (state.isRunning || state.isPaused) {
-            PageDots(activePage = 1, modifier = Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.10f))
+            PageDots(activePage = 1, modifier = Modifier.align(Alignment.BottomCenter).offset(y = -h * 0.02f))
         }
     }
 }

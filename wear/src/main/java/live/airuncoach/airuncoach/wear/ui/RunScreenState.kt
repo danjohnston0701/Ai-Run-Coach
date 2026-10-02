@@ -32,9 +32,35 @@ data class RunScreenState(
     /** The phone has sent a prepared session ("preparedRun") for the next run. */
     val isPrepared: Boolean = false,
     /** The runner chose "Continue without coaching" on the prepare-on-phone screen. */
-    val prepareGateDismissed: Boolean = false
+    val prepareGateDismissed: Boolean = false,
+    /** The prepared session's details, shown on the ready screen (null/blank = not sent). */
+    val preparedDistanceKm: Double? = null,
+    val preparedTargetPace: String? = null,
+    /** Runner's max HR (208 − 0.7 × age), known only once the phone has sent a real one — a
+     * guessed value must never be dressed up as a heart-rate zone. Mirrors RunView.mc's
+     * _maxHr / _maxHrKnown. */
+    val maxHr: Int? = null
 ) {
     val isWalk: Boolean get() = sessionType == "walk"
+
+    /** Before a run, after GPS lock and the prepare step: the ready screen with START. */
+    val showReady: Boolean
+        get() = !isRunning && !isPaused && !isFinished && overlay == Overlay.NONE
+
+    /** Heart-rate zone 1–5, or null when there's no reading or no personalised max HR. */
+    val hrZone: Int?
+        get() {
+            val max = maxHr ?: return null
+            if (heartRate <= 0) return null
+            val pct = heartRate * 100.0 / max
+            return when {
+                pct < 60 -> 1
+                pct < 70 -> 2
+                pct < 80 -> 3
+                pct < 90 -> 4
+                else -> 5
+            }
+        }
 
     /**
      * Show the prepare-on-phone screen instead of the start screen: paired, idle, nothing
@@ -46,5 +72,10 @@ data class RunScreenState(
             !prepareGateDismissed && !isFinished
 }
 
-/** Three-way BACK-button branch — mirrors RunView.mc's `onBack()` truth table exactly. */
-enum class BackAction { ToggleScreen, ConfirmFinish, ConfirmExit, None }
+/**
+ * What BACK (the Galaxy Watch's bottom button, or the swipe-back gesture) does. Unlike Garmin's
+ * BACK, which pages the screens mid-run, here it pauses: a Galaxy Watch's top button is the
+ * system Home key and never reaches the app, so BACK is the only hardware control there is.
+ * Paging is a horizontal swipe instead.
+ */
+enum class BackAction { Pause, ConfirmFinish, ConfirmExit, None }

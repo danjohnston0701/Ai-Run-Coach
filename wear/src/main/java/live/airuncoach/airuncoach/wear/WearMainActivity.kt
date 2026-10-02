@@ -45,15 +45,14 @@ class WearMainActivity : ComponentActivity() {
     }
 
     /**
-     * The physical side buttons are delivered to the foreground app as raw key events rather
-     * than routing through the Compose back-stack — left unhandled, Wear OS's default action
-     * exits straight to the watch face with no confirmation. Mirrors RunView.mc's onKey()/
-     * onBack() 1:1 (RunDelegate doc-comment: "Physical START button (top-right) → start /
-     * pause / resume", "BACK button (bottom-right) → exit / pause / finish-confirm"):
-     *   - KEYCODE_STEM_1 (top button)    → start / resume / pause, same 3-way toggle as Garmin.
-     *   - KEYCODE_STEM_2 (bottom button) → same branch as the system back-gesture: toggles
-     *     screen while running unpaused, prompts "Finish run?" while paused, prompts
-     *     "Exit app?" while idle — never a silent, unconfirmed exit.
+     * Extra multifunction buttons, on watches that have them, arrive here as raw key events —
+     * left unhandled, Wear OS's default action exits straight to the watch face with no
+     * confirmation. A Galaxy Watch has none: its top button is the system Home key (never
+     * delivered) and its bottom button is BACK (RunScreen's BackHandler), which is why START,
+     * RESUME and FINISH are also on screen.
+     *   - KEYCODE_STEM_1 → start / resume / pause, the same 3-way toggle as Garmin's START.
+     *   - KEYCODE_STEM_2 → same as BACK: pauses while running, prompts "Finish run?" while
+     *     paused, prompts "Exit app?" while idle — never a silent, unconfirmed exit.
      */
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         android.util.Log.d("WearMainActivity", "onKeyDown keyCode=$keyCode (${KeyEvent.keyCodeToString(keyCode)})")

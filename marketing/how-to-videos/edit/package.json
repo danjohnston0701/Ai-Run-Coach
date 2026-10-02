@@ -1,0 +1,22 @@
+{
+  "name": "how-to-videos-edit",
+  "private": true,
+  "description": "Remotion edit for the watch + phone how-to videos (see ../*/SCRIPT.md)",
+  "scripts": {
+    "studio": "remotion studio",
+    "render:long": "remotion render Long out/garmin-iphone-long.mp4 --concurrency=2",
+    "render:short": "remotion render Short out/garmin-iphone-short.mp4 --concurrency=2",
+    "render:garmin-android": "remotion render GarminAndroid out/garmin-android.mp4 --concurrency=2",
+    "render:applewatch-iphone": "remotion render AppleWatchIphone out/applewatch-iphone.mp4 --concurrency=2",
+    "render:galaxywatch-android": "remotion render GalaxyWatchAndroid out/galaxywatch-android.mp4 --concurrency=2"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.531",
+    "@remotion/media-utils": "^4.0.531",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.531",
+    "typescript": "^7.0.2"
+  }
+}

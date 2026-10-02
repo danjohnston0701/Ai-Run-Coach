@@ -7,10 +7,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 
 /**
  * Double-tap → talk-to-coach, gated by the caller to only fire while running+unpaused,
- * mirroring RunView.mc's `onTap()` exactly. Single tap is intentionally NOT wired to any
- * run-state action — Garmin's `onTap()` consumes single taps and does nothing with them
- * ("screen touches must NEVER start/pause a run"); all run control is button-only, via
- * WearMainActivity.onKeyDown (KEYCODE_STEM_1 = start/pause/resume, KEYCODE_STEM_2 = back).
+ * mirroring RunView.mc's `onTap()`. A stray touch on the run dashboards never starts or pauses
+ * a run (Garmin's rule); run control is the bottom/BACK button (pause) and the explicit START /
+ * RESUME / FINISH buttons on the ready and paused screens.
  */
 fun Modifier.runScreenDoubleTapGesture(onDoubleTap: () -> Unit): Modifier = this.pointerInput(Unit) {
     detectTapGestures(onDoubleTap = { onDoubleTap() })

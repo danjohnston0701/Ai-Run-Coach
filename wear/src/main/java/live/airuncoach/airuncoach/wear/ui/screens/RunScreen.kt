@@ -17,8 +17,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.wear.compose.material.Button
-import androidx.wear.compose.material.ButtonDefaults
 import androidx.wear.compose.material.Text
 import live.airuncoach.airuncoach.wear.input.runScreenDoubleTapGesture
 import live.airuncoach.airuncoach.wear.input.runScreenSwipeToggle
@@ -30,11 +28,15 @@ import live.airuncoach.airuncoach.wear.ui.theme.WearColors
 /**
  * Root screen — the single reachable destination in this app (mirroring RunView.mc being the
  * only reachable Garmin watch screen; there is no separate "StartView" here). Selects between
- * the Waiting/prepare-on-phone/GPS-wait overlays and the Diamond/Grid dashboard, wires input, and hosts the
- * finish/exit confirmation dialogs. Run control is button-only (top button = start/pause/
- * resume, bottom button = back, both handled in WearMainActivity.onKeyDown); [confirmDialog]
- * is driven by [RunSessionController.pendingConfirm] so both the physical bottom button and
- * the system back-gesture (BackHandler below) share one source of truth for the dialog.
+ * the Waiting / prepare-on-phone / GPS-wait / ready / paused screens and the Diamond/Grid
+ * dashboard, wires input, and hosts the finish/exit confirmation dialogs.
+ *
+ * Run control: a Galaxy Watch's top button is the system Home key and never reaches the app,
+ * so START, RESUME and FINISH are on-screen buttons (ready and paused screens), and the bottom
+ * button (BACK) pauses mid-run. Watches with an extra app-usable button (KEYCODE_STEM_1) can
+ * also start/pause/resume with it — see WearMainActivity.onKeyDown. [confirmDialog] is driven
+ * by [RunSessionController.pendingConfirm] so the physical bottom button, the system
+ * back-gesture (BackHandler below) and the FINISH button share one source of truth.
  */
 @Composable
 fun RunScreen(controller: RunSessionController, onExit: () -> Unit) {
@@ -65,8 +67,14 @@ fun RunScreen(controller: RunSessionController, onExit: () -> Unit) {
                 onContinueWithoutCoaching = { controller.continueWithoutCoaching() }
             )
             state.overlay == Overlay.GPS_WAIT -> GpsWaitOverlay(quality = state.gpsQuality)
-            state.screenPage == 0 -> DiamondDashboard(state)
-            else -> GridDashboard(state)
+            state.showReady -> ReadyOverlay(state, onStart = { controller.startRun() })
+            state.isPaused -> PausedOverlay(
+                state,
+                onResume = { controller.resumeRun() },
+                onFinish = { controller.requestFinish() }
+            )
+            state.screenPage == 0 -> DiamondDashboard(state, onDone = { controller.dismissFinished() })
+            else -> GridDashboard(state, onDone = { controller.dismissFinished() })
         }
     }
 
@@ -103,13 +111,9 @@ private fun ConfirmDialog(message: String, onConfirm: () -> Unit, onDismiss: () 
                 style = TextStyle(fontSize = 14.sp, textAlign = TextAlign.Center)
             )
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onConfirm, colors = ButtonDefaults.primaryButtonColors()) {
-                Text("Yes")
-            }
+            PillButton("YES", WearColors.StartGreen, WearColors.Background, onConfirm)
             androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onDismiss, colors = ButtonDefaults.secondaryButtonColors()) {
-                Text("Cancel")
-            }
+            PillButton("CANCEL", WearColors.DividerGray, WearColors.White, onDismiss)
         }
     }
 }

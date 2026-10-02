@@ -8,7 +8,8 @@ data class StatusBarInput(
     val gpsLost: Boolean,
     val isAuthenticated: Boolean,
     val isConnected: Boolean,
-    val offlineGraceElapsed: Boolean
+    val offlineGraceElapsed: Boolean,
+    val isFinished: Boolean = false
 )
 
 enum class StatusTone { NEUTRAL, WARNING, DIM }
@@ -16,20 +17,21 @@ enum class StatusTone { NEUTRAL, WARNING, DIM }
 data class ResolvedStatus(val text: String?, val tone: StatusTone)
 
 /**
- * Priority-ordered status-bar text resolution — mirrors the Garmin Connect IQ watch app's
- * `_drawStatusBar()` (RunView.mc) exactly:
+ * Priority-ordered status-bar text for the run dashboards — mirrors the Garmin Connect IQ watch
+ * app's `_drawStatusBar()` (RunView.mc):
+ *   0. blank on the FINISHED screen — it's the runner's result, no prompts or nudges on it
  *   1. Ephemeral status message (e.g. "Asking coach...", "Connected - streaming live")
  *   2. "GPS LOST" — while running and GPS quality has been below threshold for the grace window
  *   3. "OFFLINE" — idle, authenticated, not connected to phone, past the connect grace period
- *   4. "PRESS START" — idle, otherwise nothing to report
- *   5. blank — running with nothing else to show
+ *   4. blank otherwise. Garmin's idle "PRESS START" has no equivalent: before a run the
+ *      dashboards give way to the ready screen and its START button.
  */
 fun resolveStatus(input: StatusBarInput): ResolvedStatus = with(input) {
     when {
+        isFinished && !isRunning -> ResolvedStatus(null, StatusTone.DIM)
         !ephemeralMessage.isNullOrBlank() -> ResolvedStatus(ephemeralMessage, StatusTone.NEUTRAL)
         isRunning && gpsLost -> ResolvedStatus("GPS LOST", StatusTone.WARNING)
         !isRunning && isAuthenticated && !isConnected && offlineGraceElapsed -> ResolvedStatus("OFFLINE", StatusTone.WARNING)
-        !isRunning -> ResolvedStatus("PRESS START", StatusTone.DIM)
         else -> ResolvedStatus(null, StatusTone.DIM)
     }
 }

@@ -1,6 +1,9 @@
 package live.airuncoach.airuncoach.ui.screens
 
 import live.airuncoach.airuncoach.ui.components.WatchPhoneHowItWorks
+import live.airuncoach.airuncoach.ui.components.HowToVideoLink
+import live.airuncoach.airuncoach.ui.components.HowToVideoPlayerDialog
+import live.airuncoach.airuncoach.network.model.HowToVideo
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -66,6 +69,10 @@ fun ConnectedDevicesScreen(
     val stravaAthleteName by viewModel.stravaAthleteName.collectAsState()
     val stravaLoading by viewModel.stravaLoading.collectAsState()
     val stravaImportStatus by viewModel.stravaImportStatus.collectAsState()
+
+    val howToVideos by viewModel.howToVideos.collectAsState()
+    var playingVideo by remember { mutableStateOf<HowToVideo?>(null) }
+    playingVideo?.let { HowToVideoPlayerDialog(video = it, onDismiss = { playingVideo = null }) }
 
     // Refresh both Garmin and Strava status whenever this screen is foregrounded.
     // This covers the OAuth callback case: Chrome may block airuncoach:// redirects, so the
@@ -172,7 +179,11 @@ fun ConnectedDevicesScreen(
             }
 
             item {
-                GarminWatchAppCard(onSetUp = onNavigateToGarminWatchApp)
+                GarminWatchAppCard(
+                    onSetUp = onNavigateToGarminWatchApp,
+                    demoVideo = howToVideos.firstOrNull { it.watch == "garmin" },
+                    onPlayDemo = { playingVideo = it }
+                )
             }
 
             // ── Section: Samsung / Wear OS Watch App ──────────────────────────
@@ -184,7 +195,11 @@ fun ConnectedDevicesScreen(
             }
 
             item {
-                SamsungWatchAppCard(onSetUp = onNavigateToSamsungWatchApp)
+                SamsungWatchAppCard(
+                    onSetUp = onNavigateToSamsungWatchApp,
+                    demoVideo = howToVideos.firstOrNull { it.watch == "wear_os" },
+                    onPlayDemo = { playingVideo = it }
+                )
             }
 
             // ── Section: Strava Integration ───────────────────────────────────
@@ -292,7 +307,11 @@ private fun SectionHeader(title: String, accentColor: Color, subtitle: String? =
 // Connect account required.
 
 @Composable
-private fun GarminWatchAppCard(onSetUp: () -> Unit) {
+private fun GarminWatchAppCard(
+    onSetUp: () -> Unit,
+    demoVideo: HowToVideo? = null,
+    onPlayDemo: (HowToVideo) -> Unit = {}
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -439,12 +458,21 @@ private fun GarminWatchAppCard(onSetUp: () -> Unit) {
                     style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
                 )
             }
+
+            // Demo video — only once the server lists a published Garmin + Android video
+            demoVideo?.let { video ->
+                HowToVideoLink(video = video, onClick = { onPlayDemo(video) })
+            }
         }
     }
 }
 
 @Composable
-private fun SamsungWatchAppCard(onSetUp: () -> Unit) {
+private fun SamsungWatchAppCard(
+    onSetUp: () -> Unit,
+    demoVideo: HowToVideo? = null,
+    onPlayDemo: (HowToVideo) -> Unit = {}
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -580,6 +608,11 @@ private fun SamsungWatchAppCard(onSetUp: () -> Unit) {
                     "Get Watch App",
                     style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold)
                 )
+            }
+
+            // Demo video — only once the server lists a published Galaxy Watch + Android video
+            demoVideo?.let { video ->
+                HowToVideoLink(video = video, onClick = { onPlayDemo(video) })
             }
         }
     }

@@ -101,6 +101,11 @@ class GarminWatchManager(
         val api = apiService ?: return
         companionSessionFetchJob?.cancel()
         activeCompanionSessionId = null
+        // Video recording mode has no real watch, so no companion session is started for this
+        // run — the server would hand back whatever stale "active" session the account has, and
+        // the phone's upload would then be merged into that session's old run (it happened on
+        // 2026-10-01: demo running-dynamics data landed in a real half marathon).
+        if (videoDemoDeviceName != null) return
         companionSessionFetchJob = CoroutineScope(Dispatchers.IO).launch {
             for (attempt in 1..retries) {
                 try {
@@ -468,6 +473,7 @@ class GarminWatchManager(
      * @return Device name (e.g., "VivoActive 4") or null if no device connected
      */
     fun getConnectedDeviceName(): String? {
+        videoDemoDeviceName?.let { return it }
         return try {
             connectedDevice?.friendlyName
         } catch (e: Exception) {
@@ -475,6 +481,15 @@ class GarminWatchManager(
             null
         }
     }
+
+    // ── Video recording mode (debug builds only) — see VideoDemoMode.kt ───────
+    internal var videoDemoDeviceName: String? = null
+    internal fun videoDemoSetLinked(linked: Boolean) {
+        if (_isWatchConnected.value != linked) _isWatchConnected.value = linked
+        if (_isCompanionAppInstalled.value != linked) _isCompanionAppInstalled.value = linked
+    }
+    /** Feeds a scripted message through the real watch → phone handler. */
+    internal fun videoDemoDeliver(message: Map<String, Any>) = handleWatchMessage(listOf(message))
 
     // ── Phone → Watch ─────────────────────────────────────────────────────────
 

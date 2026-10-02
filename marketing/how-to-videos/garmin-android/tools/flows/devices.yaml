@@ -1,0 +1,26 @@
+# Scene 2 (phone): Dashboard → Profile → Connected Devices → Garmin card → Get Watch App.
+appId: live.airuncoach.airuncoach
+---
+- runFlow: pause.yaml
+- tapOn: "Profile"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Connected Devices"
+    speed: 30
+- runFlow: pause.yaml
+- tapOn: "Connected Devices"
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Get Watch App"
+    centerElement: true
+    speed: 25
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- tapOn: "Get Watch App"
+- runFlow: pause.yaml
+- runFlow: pause.yaml
+- scrollUntilVisible:
+    element: "Install on Garmin Watch"
+    speed: 25
+- runFlow: pause.yaml
+- runFlow: pause.yaml
