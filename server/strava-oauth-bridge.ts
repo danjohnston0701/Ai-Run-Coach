@@ -416,6 +416,17 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
     // e.g. a 403 here could be a real app-level issue ({resource:'Application',
     // field:'Status', code:'Inactive'}) rather than anything user/token-specific.
     console.error('[Strava Import] Error:', error.response?.data ?? error.message);
+    // Strava has switched our API application off (an account-level status on Strava's
+    // developer dashboard) — every athlete's import fails until it's reactivated there. Tell the
+    // runner that plainly rather than "Import failed". Sent as a handled { success:false } reply
+    // because both apps show its message (Android: `error`, iOS: `message`) but only a generic
+    // line for a 5xx.
+    const stravaErrors: any[] = error.response?.data?.errors ?? [];
+    if (error.response?.status === 403 && stravaErrors.some((e) => e?.resource === 'Application' && e?.code === 'Inactive')) {
+      const msg = "Strava importing is temporarily unavailable on Strava's side. Your Strava account is fine — please try again later.";
+      res.json({ success: false, imported: 0, skipped: 0, code: 'strava_app_inactive', error: msg, message: msg });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Failed to import Strava history' });
   }
 });

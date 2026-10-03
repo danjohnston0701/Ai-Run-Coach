@@ -65,6 +65,16 @@ const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
 const STEPPED_RENDER = isIOS;
 const STEP_FPS = 30;
 const STEP_FRAME_TIMEOUT_MS = 2500; // never stall a frame forever on a tile that won't load
+const STEP_FRAME_SETTLE_MS  = 60;   // after a frame is drawn, give in-flight tiles this long
+
+// ?debug=1 (the iOS app's local test mode) — timing lines for the stepped recorder, sent to the
+// app's console through its "native" message handler.
+const DEBUG_TIMING = typeof location !== "undefined" && new URLSearchParams(location.search).has("debug");
+function dbg(msg: string) {
+  if (!DEBUG_TIMING) return;
+  console.log("[run-video]", msg);
+  try { (window as any).webkit?.messageHandlers?.native?.postMessage("log:" + msg); } catch { /* not in the app */ }
+}
 
 // ─── Geo helpers ──────────────────────────────────────────────────────────────
 type LngLat = [number, number]; // [lng, lat]
@@ -218,6 +228,11 @@ export default function RunVideoShare() {
   const [probeDone, setProbeDone] = useState(false); // WebCodecs self-test finished (record gated on this)
   const probeReasonRef = useRef<string>(""); // why WebCodecs was rejected (surfaced for on-device diagnosis)
   const [progress, setProgress] = useState(0);
+  // Stepped (iOS) mode only: the finished MP4, played back in the preview box. Frames are built
+  // slower than real time there, so the live canvas during generation is a slow-motion version
+  // of the video — it's covered while generating, and the real-speed result is shown after.
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  useEffect(() => () => { if (resultUrl) URL.revokeObjectURL(resultUrl); }, [resultUrl]);
   const [hasRoute, setHasRoute] = useState(false);
   const [units] = useState<"km" | "mi">(() => {
     try {
@@ -744,6 +759,7 @@ export default function RunVideoShare() {
       if (!buffer || buffer.byteLength === 0) throw new Error("empty output buffer");
       const blob = new Blob([buffer], { type: "video/mp4" });
       videoFileRef.current = { blob, name: `run-summary-${runId || "video"}.mp4` };
+      if (STEPPED_RENDER) setResultUrl(URL.createObjectURL(blob));
       ok = true;
     } catch (e: any) {
       console.error("[finishWebCodecs]", e);
@@ -781,14 +797,43 @@ export default function RunVideoShare() {
     triggerDownload(f.blob, f.name);
   }, [triggerDownload]);
 
+  // Keep the screen on while a video is generating: if the phone auto-locks, the page is
+  // suspended and generation stops where it was — which reads as a freeze. (The iOS app also
+  // disables its idle timer on this screen; this covers browsers and newer web views.)
+  useEffect(() => {
+    if (status !== "recording") return;
+    let lock: any = null;
+    let released = false;
+    const nav: any = navigator;
+    nav.wakeLock?.request?.("screen").then((l: any) => {
+      if (released) { l.release?.(); } else { lock = l; }
+    }).catch(() => { /* unsupported or refused — the app-side idle timer still covers iOS */ });
+    return () => { released = true; try { lock?.release?.(); } catch { /* already released */ } };
+  }, [status]);
+
   // ── Stepped recording (see STEPPED_RENDER) ─────────────────────────────────
   // Resolve once MapLibre has drawn the camera/data just set with every tile loaded ("idle"),
   // capped so a tile that never arrives can't stall generation.
   const waitForMapFrame = (map: maplibregl.Map) => new Promise<void>(resolve => {
-    let timer = 0;
-    const done = () => { window.clearTimeout(timer); map.off("idle", done); resolve(); };
+    let timer = 0, settle = 0, finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timer); window.clearTimeout(settle);
+      map.off("idle", done); map.off("render", onRender);
+      resolve();
+    };
+    // Drawn is enough once a short settle has passed: waiting for "idle" (every tile out to the
+    // horizon loaded) cost ~0.5s a frame even on a fast network — a 5 km run took 7 minutes, long
+    // enough for the iPhone to auto-lock and stall it. The camera moves a few metres per frame,
+    // so everything near it is already loaded; only the far horizon is still streaming in.
+    const onRender = () => {
+      map.off("render", onRender);
+      settle = window.setTimeout(done, STEP_FRAME_SETTLE_MS);
+    };
     timer = window.setTimeout(done, STEP_FRAME_TIMEOUT_MS);
     map.on("idle", done);
+    map.on("render", onRender);
     map.triggerRepaint();
   });
 
@@ -802,11 +847,17 @@ export default function RunVideoShare() {
     // Includes HOLD_MS on the final frame (the outro camera clamps once t passes animMs).
     const frameCount = Math.ceil((animMs + HOLD_MS) / frameMs);
 
+    const t0 = performance.now();
+    let waitSum = 0, workSum = 0, slow = 0;
     for (let i = 0; i < frameCount; i++) {
       const t = i * frameMs;
       const routeProgress = updateScene(t, frameMs / (1000 / 60));
+      const w0 = performance.now();
       await waitForMapFrame(map);
+      const w = performance.now() - w0;
+      waitSum += w; if (w >= STEP_FRAME_TIMEOUT_MS - 50) slow++;
       if (gen !== recordGenRef.current) return; // stopped or restarted meanwhile
+      const c0 = performance.now();
       compositeFrame(routeProgress, t);
       if (enc.state !== "configured") break;    // encoder error — encErrRef has the reason
       try {
@@ -823,8 +874,13 @@ export default function RunVideoShare() {
       while (enc.encodeQueueSize > 4 && gen === recordGenRef.current) {
         await new Promise(r => setTimeout(r, 5));
       }
+      workSum += performance.now() - c0;
       setProgress((i + 1) / frameCount);
+      if (DEBUG_TIMING && (i + 1) % 60 === 0) {
+        dbg(`frame ${i + 1}/${frameCount} — avg wait ${Math.round(waitSum / (i + 1))}ms, avg draw+encode ${Math.round(workSum / (i + 1))}ms, timeouts ${slow}, elapsed ${Math.round((performance.now() - t0) / 1000)}s`);
+      }
     }
+    dbg(`done — ${frameCount} frames in ${Math.round((performance.now() - t0) / 1000)}s (avg wait ${Math.round(waitSum / frameCount)}ms, timeouts ${slow})`);
 
     if (gen !== recordGenRef.current) return;
     if (encErrRef.current) {
@@ -857,6 +913,7 @@ export default function RunVideoShare() {
       encFrameCountRef.current = 0;
       encErrRef.current       = "";
       videoFileRef.current    = null; // starting a fresh recording invalidates the previous video
+      setResultUrl(null);
       setErrorDetail("");
       const W = window as any;
       const canWebCodecs = webCodecsSupportedRef.current && typeof W.VideoFrame === "function";
@@ -1266,6 +1323,29 @@ export default function RunVideoShare() {
             className="absolute inset-0 w-full h-full"
             data-testid="canvas-run-video"
           />
+          {STEPPED_RENDER && status === "recording" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#0a0a0f]/90 px-8 text-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <div className="text-white text-base font-semibold">Creating your video</div>
+              <div className="text-white text-4xl font-bold tabular-nums">{Math.round(progress * 100)}%</div>
+              <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${Math.round(progress * 100)}%`, background: TEAL }} />
+              </div>
+              <div className="text-white/50 text-xs">Keep this screen open — it plays at full speed when it's ready</div>
+            </div>
+          )}
+          {STEPPED_RENDER && status === "done" && resultUrl && (
+            <video
+              src={resultUrl}
+              className="absolute inset-0 w-full h-full object-cover bg-black"
+              autoPlay
+              muted
+              loop
+              playsInline
+              data-testid="video-result"
+              onLoadedMetadata={e => dbg(`result video ${e.currentTarget.duration.toFixed(2)}s (run ${((run?.distance || 0) / 1000).toFixed(2)} km)`)}
+            />
+          )}
           {!mapReady && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/60">
               <div className="flex flex-col items-center gap-3">
@@ -1321,13 +1401,15 @@ export default function RunVideoShare() {
           {status === "done" && mapReady && (
             <>
               <Button
-                onClick={downloadVideo}
+                // iOS's web view ignores file downloads, so "Download" did nothing there; its
+                // share sheet has Save Video, so use that instead.
+                onClick={isIOS ? shareVideo : downloadVideo}
                 className="w-full font-bold"
                 style={{ background: TEAL, color: "#000" }}
                 data-testid="button-download"
               >
                 <Download className="w-4 h-4 mr-2" />
-                Download Video
+                {isIOS ? "Save Video" : "Download Video"}
               </Button>
               <Button
                 onClick={shareVideo}
