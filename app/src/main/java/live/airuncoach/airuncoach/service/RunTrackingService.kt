@@ -2056,6 +2056,16 @@ class RunTrackingService : Service(), SensorEventListener {
         lastSplitTime = startTime
         lastSplitWatchElapsedSeconds = 0
 
+        // user_activity log: "Started run with/without route" — every start (phone or watch) passes here.
+        if (::apiService.isInitialized) {
+            live.airuncoach.airuncoach.data.UserActivityReporter.report(
+                apiService,
+                if (hasRoute) live.airuncoach.airuncoach.data.UserActivityReporter.STARTED_RUN_WITH_ROUTE
+                else live.airuncoach.airuncoach.data.UserActivityReporter.STARTED_RUN_WITHOUT_ROUTE,
+                mapOf("startedFrom" to (if (wasRunStartedByWatch) "watch" else "phone"), "sessionType" to currentActivityType)
+            )
+        }
+
         // Flip observers from "Waiting for X to start" to the live map. Done here — in the one
         // place every run passes through — rather than only in RunSessionViewModel.startRun(),
         // because a watch-started ("Prepare for Watch") run never calls startRun(): the watch's

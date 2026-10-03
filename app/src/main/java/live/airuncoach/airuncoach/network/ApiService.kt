@@ -807,6 +807,10 @@ interface ApiService {
     @POST("/api/strava/import-history")
     suspend fun importStravaHistory(): StravaImportHistoryResponse
 
+    /** App-side actions for the user_activity log — see UserActivityReporter. */
+    @POST("/api/user-activity")
+    suspend fun reportUserActivity(@Body body: Map<String, @JvmSuppressWildcards Any?>): okhttp3.ResponseBody
+
     /**
      * Request a fresh 365-day companion JWT for the watch.
      * Called by the phone on every app open / watch connect, so the token on

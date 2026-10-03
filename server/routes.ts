@@ -100,6 +100,7 @@ import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
 import { registerHowToVideoRoutes } from "./routes-how-to-videos";
+import { registerUserActivityRoutes } from "./user-activity";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
@@ -156,6 +157,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerSessionCoachingRoutes(app);
   registerRunEndTrimRoutes(app, transformRunForAndroid); // "forgot to stop" Run Summary trim
   registerHowToVideoRoutes(app); // Connected Devices "watch the demo" videos
+  registerUserActivityRoutes(app); // POST /api/user-activity — app-side actions for the user_activity log
 
   // Version probe — tells us immediately which build is running
   app.get("/api/version", (_req: Request, res: Response) => {

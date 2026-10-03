@@ -242,6 +242,26 @@ export default function RunVideoShare() {
   });
 
   // ── Fetch run ───────────────────────────────────────────────────────────────
+  // Report each finished or failed generation to the user_activity log (Generated share video).
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    if (prev !== "recording" || (status !== "done" && status !== "error")) return;
+    const token = (() => { try { return JSON.parse(localStorage.getItem("userProfile") || "{}").token; } catch { return null; } })();
+    if (!token) return;
+    fetch("/api/user-activity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        action: "Generated share video",
+        outcome: status === "done" ? "success" : "error",
+        error: status === "error" ? (errorDetail || "generation failed") : undefined,
+        details: { runId, platform: isIOS ? "ios" : /Android/i.test(navigator.userAgent) ? "android" : "web" },
+      }),
+    }).catch(() => { /* best effort */ });
+  }, [status, errorDetail, runId]);
+
   // ── Preload brand logo for canvas overlay ────────────────────────────────────
   useEffect(() => {
     const img = new Image();

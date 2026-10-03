@@ -65,7 +65,7 @@ class RunSessionController(
         private const val TAG = "RunSessionController"
         /** Elevation quantiser threshold for GPS altitude — see the elevation block in the tick. */
         private const val GPS_ALT_THRESHOLD_M = 5.0
-        private const val APP_VERSION = "1.0.0"
+        private val APP_VERSION = BuildConfig.VERSION_NAME
         private const val START_RETRY_MAX = 3
         private const val START_RETRY_INTERVAL_MS = 5000L
         private const val STOP_RETRY_MAX = 6

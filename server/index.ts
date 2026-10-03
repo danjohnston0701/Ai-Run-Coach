@@ -5,6 +5,7 @@ import compression from "compression";  // ⚡ For gzip response compression
 import { registerRoutes } from "./routes";
 import { startScheduler } from "./scheduler";
 import { runAutoMigrations } from "./auto-migrate";
+import { userActivityMiddleware } from "./user-activity";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -380,6 +381,9 @@ function setupErrorHandler(app: express.Application) {
 
   // Run schema auto-migrations before anything else touches the DB
   await runAutoMigrations();
+
+  // Log key user actions (user_activity) — must sit in front of the routes it watches.
+  app.use(userActivityMiddleware);
 
   // Register API routes BEFORE static file serving
   const server = await registerRoutes(app);

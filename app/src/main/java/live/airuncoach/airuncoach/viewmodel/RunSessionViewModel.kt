@@ -691,6 +691,11 @@ class RunSessionViewModel @Inject constructor(
         intervalDurSecs: Int?     = null
     ) {
         val sessionType = runConfig?.activityType?.name?.lowercase() ?: "run"
+        live.airuncoach.airuncoach.data.UserActivityReporter.report(
+            apiService,
+            live.airuncoach.airuncoach.data.UserActivityReporter.PREPARED_RUN_FOR_WATCH,
+            mapOf("runType" to runType, "sessionType" to sessionType, "distanceKm" to distanceKm, "workoutType" to workoutType)
+        )
         garminWatchManager.sendPreparedRun(
             distanceKm        = distanceKm,
             runType           = runType,
@@ -1077,6 +1082,22 @@ class RunSessionViewModel @Inject constructor(
         )
         
         isPrepareRunInProgress = true
+
+        // user_activity log: "Prepared run with/without route"
+        run {
+            val route = runConfig?.route
+            val withRoute = route != null && route.distance > 0
+            live.airuncoach.airuncoach.data.UserActivityReporter.report(
+                apiService,
+                if (withRoute) live.airuncoach.airuncoach.data.UserActivityReporter.PREPARED_RUN_WITH_ROUTE
+                else live.airuncoach.airuncoach.data.UserActivityReporter.PREPARED_RUN_WITHOUT_ROUTE,
+                mapOf(
+                    "sessionType" to (runConfig?.activityType?.name?.lowercase() ?: "run"),
+                    "distanceKm" to (route?.distance ?: runConfig?.targetDistance?.toDouble()),
+                    "aiCoach" to _runState.value.isCoachEnabled
+                )
+            )
+        }
 
         // ── Live Tracking: send observer invites immediately ──────────────────
         // Invites go out as soon as the user taps "Prepare Run", before the

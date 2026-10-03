@@ -170,14 +170,19 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
             val request = chain.request()
             val token = sessionManager.getAuthToken()
             
+            // Which app/version made the call — recorded with each user_activity row.
+            val tagged = request.newBuilder()
+                .header("X-App-Platform", "android")
+                .header("X-App-Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                .build()
             val newRequest = if (!token.isNullOrEmpty()) {
                 android.util.Log.d("RetrofitClient", "🔑 Adding Bearer token to ${request.url.encodedPath}")
-                request.newBuilder()
+                tagged.newBuilder()
                     .addHeader("Authorization", "Bearer $token")
                     .build()
             } else {
                 android.util.Log.d("RetrofitClient", "⚠️ No token for ${request.url.encodedPath}")
-                request
+                tagged
             }
             
             val response = chain.proceed(newRequest)
@@ -322,6 +327,8 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                     .addInterceptor { chain ->
                         val originalRequest = chain.request()
                         val requestBuilder = originalRequest.newBuilder()
+                            .header("X-App-Platform", "android")
+                            .header("X-App-Version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                         
                         // Add auth token if available
                         val token = _sessionManager?.getAuthToken()

@@ -82,6 +82,41 @@ export async function runAutoMigrations(): Promise<void> {
     // ── Route Memory Engine ───────────────────────────────────────────────────
     // known_routes: fingerprints of recurring routes per user.
     // Auto-populated after a user runs the same location 2+ times.
+    // ── user_activity — key user actions + whether they worked (server/user-activity.ts) ──
+    {
+      name: "user_activity.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS user_activity (
+          id             BIGSERIAL PRIMARY KEY,
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          user_id        VARCHAR,
+          user_email     TEXT,
+          action         TEXT NOT NULL,
+          outcome        TEXT NOT NULL,
+          error_message  TEXT,
+          http_status    INTEGER,
+          platform       TEXT,
+          app_version    TEXT,
+          details        JSONB
+        )
+      `,
+    },
+    {
+      name: "idx_user_activity_created",
+      sql: "CREATE INDEX IF NOT EXISTS idx_user_activity_created ON user_activity(created_at DESC)",
+    },
+    {
+      name: "idx_user_activity_user",
+      sql: "CREATE INDEX IF NOT EXISTS idx_user_activity_user ON user_activity(user_id, created_at DESC)",
+    },
+    {
+      name: "idx_user_activity_action",
+      sql: "CREATE INDEX IF NOT EXISTS idx_user_activity_action ON user_activity(action, created_at DESC)",
+    },
+    {
+      name: "idx_user_activity_errors",
+      sql: "CREATE INDEX IF NOT EXISTS idx_user_activity_errors ON user_activity(created_at DESC) WHERE outcome = 'error'",
+    },
     {
       name: "known_routes.create_table",
       sql: `
