@@ -6,10 +6,13 @@ package live.airuncoach.airuncoach.domain.model
  * @param latitude GPS latitude of this instruction point
  * @param longitude GPS longitude of this instruction point
  * @param distance Cumulative distance in kilometers at this instruction
+ * @param streetName Street the instruction leads onto, when OpenStreetMap names it (used to say
+ *                   where to rejoin after going off route)
  */
 data class TurnInstruction(
     val instruction: String,
     val latitude: Double,
     val longitude: Double,
-    val distance: Double
+    val distance: Double,
+    val streetName: String? = null
 )

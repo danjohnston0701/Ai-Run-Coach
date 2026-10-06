@@ -51,6 +51,9 @@ import live.airuncoach.airuncoach.utils.RunSimulator
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
 import live.airuncoach.airuncoach.utils.AudioPlayerHelper
 import live.airuncoach.airuncoach.domain.model.TurnInstruction
+import live.airuncoach.airuncoach.navigation.RouteNavigator
+import live.airuncoach.airuncoach.network.model.GenerateTtsRequest
+import kotlinx.coroutines.withTimeoutOrNull
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.domain.model.StrugglePoint
 import live.airuncoach.airuncoach.util.NavigationRouteHolder
@@ -774,38 +777,10 @@ class RunTrackingService : Service(), SensorEventListener {
 
     // ==================== NAVIGATION ENGINE ====================
     // Turn-by-turn navigation state for route-guided runs — see the engine section below.
-    private var navTurnInstructions: List<TurnInstruction> = emptyList()
-    private var navPolylinePoints: List<com.google.android.gms.maps.model.LatLng> = emptyList()
-    private var navCumulativeMeters: DoubleArray = DoubleArray(0)      // metres along route at each polyline vertex
-    private var navInstructionRouteMeters: DoubleArray = DoubleArray(0) // each instruction's along-route position
-    private var navInstructionRouteIndex: IntArray = IntArray(0)
-    private var navRouteTotalMeters: Double = 0.0
-    private var navCurrentInstructionIndex: Int = 0  // Index of the NEXT instruction to deliver
-    private var navLastAnnouncedIndex: Int = -1      // Prevents double "now" cue for the same instruction
-    private var navLastWarningIndex: Int = -1        // Prevents double warning for the same instruction
-    private var navMissedWaypointCount: Int = 0
-    private var navLastCheckTime: Long = 0
-    private var navProgressIndex: Int = 0            // polyline segment the runner was last projected onto
-    private var navProgressMeters: Double = 0.0      // metres along the route (monotonic)
-    private var navOffRoute: Boolean = false
-    private var navOffRouteStrikes: Int = 0
-    private var navReachedFixes: Int = 0             // consecutive fixes at the turn (needs 2)
+    // Turn-by-turn navigation — see navigation/RouteNavigator.kt
+    private var routeNavigator: RouteNavigator? = null
     private var navPendingCue: String? = null        // cue deferred by the post-coaching gap
-    private var navCompletionAnnounced: Boolean = false
-    private val NAV_CHECK_INTERVAL_MS = 2_000L
-    private val NAV_WAYPOINT_REACHED_RADIUS_M = 45.0 // radial "at the turn" fallback (phone GPS)
-    private val NAV_TURN_NOW_M = 30.0                // along-route distance for the "now" cue
-    private val NAV_WARNING_LEAD_SECONDS = 25.0      // warn this many seconds ahead at current pace…
-    private val NAV_WARNING_MIN_M = 70.0             // …but never closer than this
-    private val NAV_WARNING_MAX_M = 160.0            // …or further than this
-    private val NAV_SKIP_DISTANCE_BEHIND_M = 60.0    // instruction is "behind" once the runner is 60 m past it along the route
-    private val NAV_OFF_ROUTE_M = 50.0               // cross-track distance that counts as off-route
-    private val NAV_REJOIN_M = 30.0                  // …and that counts as back on it (hysteresis)
-    private val NAV_OFF_ROUTE_STRIKES = 3            // consecutive off-route checks before announcing (~6 s)
-    private val NAV_MAX_ACCURACY_M = 40f             // ignore fixes worse than this for nav
-    private val NAV_SEARCH_BACK_SEGMENTS = 5
-    private val NAV_SEARCH_AHEAD_SEGMENTS = 60
-    private val NAV_COMPLETION_M = 30.0
+    private val NAV_TTS_TIMEOUT_MS = 2_500L        // coach-voice warning: fall back to device TTS after this
     
     // Weather and terrain
     private var weatherAtStart: WeatherData? = null
@@ -2447,157 +2422,67 @@ class RunTrackingService : Service(), SensorEventListener {
         return RouteFollowingSimulator.createBelfastTestRoute()
     }
 
-    // ==================== NAVIGATION ENGINE ====================
+    // ==================== NAVIGATION ====================
     //
-    // Progress is measured ALONG THE ROUTE, not by radial distance to the next waypoint.
-    // Every check projects the runner onto the nearest polyline segment (cross-track distance +
-    // metres along the route) and:
-    //   • advances past any instruction whose route position is behind the runner — so cutting
-    //     a corner or running the far pavement can never leave the coach stuck on a turn behind
-    //     you (the previous engine only skipped a turn once you were >150 m past it AND moving
-    //     away, or 2× closer to the next one — on a suburban grid that rarely triggered);
-    //   • warns at a pace-scaled distance (a 4:00/km runner covers 100 m in ~24 s, most of
-    //     which the LLM round-trip used to eat), then gives a short device-TTS "now" cue at the
-    //     turn with no network round-trip;
-    //   • detects off-route by cross-track distance to the nearest SEGMENT (not vertex), announces
-    //     it once, mutes turn cues while off, and re-syncs on rejoin;
-    //   • defers cues blocked by the post-coaching gap instead of dropping them;
-    //   • ignores fixes worse than NAV_MAX_ACCURACY_M rather than letting a 40 m jump fake a turn.
+    // The engine is RouteNavigator (navigation/RouteNavigator.kt — pure Kotlin, replayed against
+    // simulated runs in RouteNavigatorSimulationTest; iOS runs a line-for-line port). This service
+    // feeds it every fix and voices its cues:
+    //   • advance warnings ("In 100 metres, turn left onto King Street") in the coach's voice via
+    //     /api/tts/generate — the literal instruction, never reworded (the LLM used to rephrase
+    //     turns, adding a network round-trip and occasionally changing them); device TTS if that
+    //     is slow or fails;
+    //   • everything time-critical ("turn now", off route, back on route) on device TTS through the
+    //     priority queue, no network round-trip;
+    //   • cues blocked by the post-coaching gap are deferred, not dropped.
     // The map HUD reads the same state (navUiState) so screen and voice agree.
 
-    /**
-     * Load route navigation data from the static holder.
-     * Called once when tracking starts. If a route is available, sets up the
-     * turn instruction list, decodes the polyline and precomputes each instruction's
-     * along-route position.
-     */
+    /** Build the navigator from the route the ViewModel left in NavigationRouteHolder. */
     private fun loadNavigationData() {
         val navData = NavigationRouteHolder.consume()
-        if (navData != null) {
-            val (polyline, instructions) = navData
-            navTurnInstructions = instructions
-            navPolylinePoints = if (polyline != null) {
-                try { PolyUtil.decode(polyline) } catch (e: Exception) {
-                    Log.e("Navigation", "Failed to decode polyline", e)
-                    emptyList()
-                }
-            } else emptyList()
-            navCurrentInstructionIndex = 0
-            navLastAnnouncedIndex = -1
-            navLastWarningIndex = -1
-            navMissedWaypointCount = 0
-            navProgressIndex = 0
-            navProgressMeters = 0.0
-            navOffRoute = false
-            navOffRouteStrikes = 0
-            navReachedFixes = 0
-            navPendingCue = null
-            navCompletionAnnounced = false
-            buildNavRouteGeometry()
-            Log.d("Navigation", "Loaded ${navTurnInstructions.size} turn instructions, ${navPolylinePoints.size} polyline points, route ${navRouteTotalMeters.toInt()}m")
-            navTurnInstructions.forEachIndexed { i, inst ->
-                Log.d("Navigation", "  [$i] ${inst.instruction} @ (${inst.latitude}, ${inst.longitude}) route=${navInstructionRouteMeters.getOrNull(i)?.toInt()}m")
-            }
-            publishNavUiState()
-        } else {
+        if (navData == null) {
             Log.d("Navigation", "No navigation data available")
-        }
-    }
-
-    /** Cumulative metres at each polyline vertex + each instruction's along-route position. */
-    private fun buildNavRouteGeometry() {
-        val pts = navPolylinePoints
-        navCumulativeMeters = DoubleArray(pts.size)
-        for (i in 1 until pts.size) {
-            navCumulativeMeters[i] = navCumulativeMeters[i - 1] + SphericalUtil.computeDistanceBetween(pts[i - 1], pts[i])
-        }
-        navRouteTotalMeters = navCumulativeMeters.lastOrNull() ?: 0.0
-        navInstructionRouteMeters = DoubleArray(navTurnInstructions.size)
-        navInstructionRouteIndex = IntArray(navTurnInstructions.size)
-        if (pts.isEmpty()) {
-            // No polyline: fall back to the instruction's own cumulative km field.
-            navTurnInstructions.forEachIndexed { i, inst -> navInstructionRouteMeters[i] = inst.distance * 1000.0 }
             return
         }
-        // Instructions come from polyline vertices server-side, so the nearest vertex is exact;
-        // search forward from the previous instruction so a loop that revisits a street resolves
-        // to the correct (later) pass.
-        var searchFrom = 0
-        navTurnInstructions.forEachIndexed { i, inst ->
-            val p = com.google.android.gms.maps.model.LatLng(inst.latitude, inst.longitude)
-            var bestIdx = searchFrom
-            var bestDist = Double.MAX_VALUE
-            for (j in searchFrom until pts.size) {
-                val d = SphericalUtil.computeDistanceBetween(p, pts[j])
-                if (d < bestDist) { bestDist = d; bestIdx = j }
+        val (polyline, instructions) = navData
+        val points = if (polyline != null) {
+            try {
+                PolyUtil.decode(polyline).map { RouteNavigator.GeoPoint(it.latitude, it.longitude) }
+            } catch (e: Exception) {
+                Log.e("Navigation", "Failed to decode polyline", e)
+                emptyList()
             }
-            navInstructionRouteIndex[i] = bestIdx
-            navInstructionRouteMeters[i] = navCumulativeMeters[bestIdx]
-            searchFrom = bestIdx
+        } else emptyList()
+        val turns = instructions.map {
+            RouteNavigator.NavTurn(
+                text = it.instruction, lat = it.latitude, lng = it.longitude,
+                routeMetersHint = it.distance * 1000.0,   // TurnInstruction.distance is km from the start
+                streetName = it.streetName,
+            )
         }
+        routeNavigator = RouteNavigator(points, turns)
+        navPendingCue = null
+        Log.d("Navigation", "Loaded ${turns.size} turn instructions, ${points.size} polyline points, route ${routeNavigator?.totalMeters?.toInt()}m")
+        turns.forEachIndexed { i, t -> Log.d("Navigation", "  [$i] ${t.text}") }
+        publishNavUiState()
     }
 
-    /** Result of projecting the runner onto the route polyline. */
-    private data class NavProjection(val segmentIndex: Int, val crossTrackM: Double, val routeMeters: Double)
-
-    /**
-     * Nearest-segment projection. Searches a window ahead of the current progress first (so a
-     * loop that passes the same spot twice resolves to the pass the runner is actually on), and
-     * only falls back to a whole-route search when the windowed result is clearly off-route.
-     */
-    private fun projectOntoRoute(pos: com.google.android.gms.maps.model.LatLng): NavProjection? {
-        val pts = navPolylinePoints
-        if (pts.size < 2) return null
-        fun search(from: Int, to: Int): NavProjection {
-            var best = NavProjection(from, Double.MAX_VALUE, 0.0)
-            for (i in from until minOf(to, pts.size - 1)) {
-                val a = pts[i]; val b = pts[i + 1]
-                val d = PolyUtil.distanceToLine(pos, a, b)
-                if (d < best.crossTrackM) {
-                    // Fraction along the segment via an equirectangular projection (segments are short).
-                    val latRad = Math.toRadians(a.latitude)
-                    val ax = 0.0; val ay = 0.0
-                    val bx = Math.toRadians(b.longitude - a.longitude) * Math.cos(latRad)
-                    val by = Math.toRadians(b.latitude - a.latitude)
-                    val px = Math.toRadians(pos.longitude - a.longitude) * Math.cos(latRad)
-                    val py = Math.toRadians(pos.latitude - a.latitude)
-                    val segLen2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay)
-                    val t = if (segLen2 > 0) (((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / segLen2).coerceIn(0.0, 1.0) else 0.0
-                    val segMeters = navCumulativeMeters[i + 1] - navCumulativeMeters[i]
-                    best = NavProjection(i, d, navCumulativeMeters[i] + t * segMeters)
-                }
-            }
-            return best
-        }
-        val windowed = search(maxOf(0, navProgressIndex - NAV_SEARCH_BACK_SEGMENTS), navProgressIndex + NAV_SEARCH_AHEAD_SEGMENTS)
-        if (windowed.crossTrackM <= NAV_OFF_ROUTE_M) return windowed
-        // Clearly off the expected stretch — maybe a shortcut that rejoined further along, or a
-        // genuine wander. Only accept a global match that is AHEAD of current progress (never
-        // rewind the runner onto an earlier lap) and genuinely on the line.
-        val global = search(0, pts.size - 1)
-        return if (global.crossTrackM <= NAV_REJOIN_M && global.routeMeters >= navProgressMeters - NAV_SKIP_DISTANCE_BEHIND_M) global else windowed
-    }
-
-    private fun currentSpeedMpsForNav(): Double {
+    private fun currentSpeedMpsForNav(): Double? {
         val s = routePoints.lastOrNull()?.speed
         if (s != null && s > 0.5f) return s.toDouble()
         val paceSec = parsePaceToSeconds(_currentRunSession.value?.averagePace ?: "")
-        return if (paceSec > 0) 1000.0 / paceSec else 2.8 // ~6:00/km default
+        return if (paceSec > 0) 1000.0 / paceSec else null
     }
 
     /**
-     * Core navigation check — called on every location update (including ones rejected for
-     * distance tracking). Runs at most every NAV_CHECK_INTERVAL_MS.
+     * Called on every location update (including ones rejected for distance tracking — under
+     * tree cover navigation must keep going). RouteNavigator throttles to one check every 2 s.
      */
     private fun checkNavigationProgress(currentLat: Double, currentLng: Double, accuracyM: Float) {
         if (!coachingFeaturePrefs.routeNavigationEnabled) return
-        if (navTurnInstructions.isEmpty()) return
+        val nav = routeNavigator ?: return
+        if (!nav.hasRoute) return
 
-        val now = System.currentTimeMillis()
-        if (now - navLastCheckTime < NAV_CHECK_INTERVAL_MS) return
-        navLastCheckTime = now
-
-        // A pending cue that was blocked by the post-coaching gap last time — say it now if we can.
+        // A cue that was blocked by the post-coaching gap last time — say it now if we can.
         navPendingCue?.let { cue ->
             if (!isMuted && canFireCoaching(isNavigation = true)) {
                 navPendingCue = null
@@ -2605,147 +2490,18 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Noisy fix: don't let a 40 m jump fake a turn or an off-route. Skip, don't stop.
-        if (accuracyM > NAV_MAX_ACCURACY_M) {
-            Log.d("Navigation", "Skipping nav check — accuracy ${accuracyM.toInt()}m")
-            return
-        }
-
-        val currentPos = com.google.android.gms.maps.model.LatLng(currentLat, currentLng)
-        val projection = projectOntoRoute(currentPos)
-
-        if (projection != null) {
-            handleOffRouteState(projection)
-            if (!navOffRoute) {
-                navProgressIndex = projection.segmentIndex
-                navProgressMeters = maxOf(navProgressMeters, projection.routeMeters)
-            }
-        }
-
-        if (navCurrentInstructionIndex >= navTurnInstructions.size) {
-            checkRouteCompletion()
-            publishNavUiState()
-            return
-        }
-        if (navOffRoute) { publishNavUiState(); return }
-
-        // ── Advance past anything the runner is already beyond (along the route) ──
-        var skipped = 0
-        while (navCurrentInstructionIndex < navTurnInstructions.size &&
-               navInstructionRouteMeters[navCurrentInstructionIndex] < navProgressMeters - NAV_SKIP_DISTANCE_BEHIND_M) {
-            if (navLastAnnouncedIndex != navCurrentInstructionIndex) { navMissedWaypointCount++; skipped++ }
-            advanceToNextInstruction(if (navLastAnnouncedIndex == navCurrentInstructionIndex) "passed" else "missed")
-        }
-        if (navCurrentInstructionIndex >= navTurnInstructions.size) { publishNavUiState(); return }
-        val nextInstruction = navTurnInstructions[navCurrentInstructionIndex]
-        if (skipped > 0) {
-            // Re-orient the runner on the instruction that now applies.
-            val ahead = (navInstructionRouteMeters[navCurrentInstructionIndex] - navProgressMeters).toInt().coerceAtLeast(0)
-            announceNavigationNow("Next: in about $ahead metres, ${nextInstruction.instruction}")
-            navLastWarningIndex = navCurrentInstructionIndex
-            publishNavUiState()
-            return
-        }
-
-        val alongToTurn = navInstructionRouteMeters[navCurrentInstructionIndex] - navProgressMeters
-        val waypointPos = com.google.android.gms.maps.model.LatLng(nextInstruction.latitude, nextInstruction.longitude)
-        val radialToTurn = SphericalUtil.computeDistanceBetween(currentPos, waypointPos)
-        val distanceToTurn = if (projection != null) alongToTurn else radialToTurn
-        val speed = currentSpeedMpsForNav()
-        val warnDistance = (speed * NAV_WARNING_LEAD_SECONDS).coerceIn(NAV_WARNING_MIN_M, NAV_WARNING_MAX_M)
-
-        Log.d("Navigation", "Check: idx=$navCurrentInstructionIndex along=${alongToTurn.toInt()}m radial=${radialToTurn.toInt()}m xtrack=${projection?.crossTrackM?.toInt()}m warnAt=${warnDistance.toInt()}m '${nextInstruction.instruction}'")
-
-        // ── "Now" cue: at the turn. Two consecutive in-radius fixes so one jump can't trigger it. ──
-        val atTurn = distanceToTurn <= NAV_TURN_NOW_M || radialToTurn <= NAV_WAYPOINT_REACHED_RADIUS_M
-        if (atTurn) navReachedFixes++ else navReachedFixes = 0
-        if (navReachedFixes >= 2 || (atTurn && projection != null && alongToTurn <= 0.0)) {
-            if (navLastAnnouncedIndex != navCurrentInstructionIndex) {
-                navLastAnnouncedIndex = navCurrentInstructionIndex
-                announceNavigationNow(nextInstruction.instruction)
-            }
-            navReachedFixes = 0
-            advanceToNextInstruction("reached")
-            publishNavUiState()
-            return
-        }
-
-        // ── Advance warning: pace-scaled lead, coach-voiced via the LLM (it has time here). ──
-        if (distanceToTurn <= warnDistance && navLastWarningIndex != navCurrentInstructionIndex) {
-            navLastWarningIndex = navCurrentInstructionIndex
-            val rounded = ((distanceToTurn / 10.0).toInt() * 10).coerceAtLeast(10)
-            val warningText = "In $rounded metres, ${nextInstruction.instruction}"
-            Log.d("Navigation", "WARNING: $warningText")
-            announceNavigationText(warningText)
+        val cues = nav.update(currentLat, currentLng, accuracyM.toDouble(), currentSpeedMpsForNav(), System.currentTimeMillis())
+        for (cue in cues) {
+            Log.d("Navigation", "${cue.kind}: ${cue.text}")
+            if (cue.kind == RouteNavigator.CueKind.WARNING) announceNavigationInCoachVoice(cue.text)
+            else announceNavigationNow(cue.text)
         }
         publishNavUiState()
     }
 
-    /** Cross-track → off-route state machine. 3 consecutive bad fixes to trip, hysteresis to clear. */
-    private fun handleOffRouteState(projection: NavProjection) {
-        if (!navOffRoute) {
-            if (projection.crossTrackM > NAV_OFF_ROUTE_M) {
-                navOffRouteStrikes++
-                if (navOffRouteStrikes >= NAV_OFF_ROUTE_STRIKES) {
-                    navOffRoute = true
-                    navOffRouteStrikes = 0
-                    Log.d("Navigation", "OFF ROUTE (${projection.crossTrackM.toInt()}m from route)")
-                    announceNavigationNow("You're off the route. Head back towards it and I'll pick up the directions.")
-                }
-            } else {
-                navOffRouteStrikes = 0
-            }
-        } else if (projection.crossTrackM <= NAV_REJOIN_M) {
-            navOffRoute = false
-            navOffRouteStrikes = 0
-            navProgressIndex = projection.segmentIndex
-            navProgressMeters = maxOf(navProgressMeters, projection.routeMeters)
-            // Skip anything the detour bypassed, then re-orient.
-            while (navCurrentInstructionIndex < navTurnInstructions.size &&
-                   navInstructionRouteMeters[navCurrentInstructionIndex] < navProgressMeters - NAV_SKIP_DISTANCE_BEHIND_M) {
-                advanceToNextInstruction("bypassed while off route")
-            }
-            val next = navTurnInstructions.getOrNull(navCurrentInstructionIndex)
-            val text = if (next != null) {
-                val ahead = (navInstructionRouteMeters[navCurrentInstructionIndex] - navProgressMeters).toInt().coerceAtLeast(0)
-                navLastWarningIndex = navCurrentInstructionIndex
-                "Back on route. Next: in about $ahead metres, ${next.instruction}"
-            } else "Back on route."
-            Log.d("Navigation", "REJOINED route at ${navProgressMeters.toInt()}m")
-            announceNavigationNow(text)
-        }
-    }
-
-    private fun checkRouteCompletion() {
-        if (navCompletionAnnounced) return
-        if (navRouteTotalMeters > 0 && navProgressMeters >= navRouteTotalMeters - NAV_COMPLETION_M) {
-            navCompletionAnnounced = true
-            announceNavigationNow("That's the whole route. Keep going to the finish!")
-        }
-    }
-
-    /**
-     * Advance to the next turn instruction.
-     */
-    private fun advanceToNextInstruction(reason: String) {
-        val prev = navCurrentInstructionIndex
-        navCurrentInstructionIndex++
-        navReachedFixes = 0
-        if (navCurrentInstructionIndex < navTurnInstructions.size) {
-            Log.d("Navigation", "Advanced: $prev -> $navCurrentInstructionIndex ($reason). " +
-                    "Next: '${navTurnInstructions[navCurrentInstructionIndex].instruction}'")
-        } else {
-            Log.d("Navigation", "All ${navTurnInstructions.size} instructions completed ($reason)")
-            if (!navCompletionAnnounced) {
-                navCompletionAnnounced = true
-                announceNavigationNow("You've completed all the turns. Head to the finish!")
-            }
-        }
-    }
-
     /**
      * Time-critical cue (at the turn, off-route, rejoin): device TTS through the PRIORITY queue,
-     * no LLM round-trip. Deferred — not dropped — if the post-coaching gap blocks it.
+     * no network round-trip. Deferred — not dropped — if the post-coaching gap blocks it.
      */
     private fun announceNavigationNow(text: String) {
         if (isMuted) { Log.d("Navigation", "Muted — skipping: $text"); return }
@@ -2769,124 +2525,53 @@ class RunTrackingService : Service(), SensorEventListener {
     }
 
     /**
-     * Announce navigation text (advance warnings) via LLM coach voice. Deferred if gated.
+     * Advance warning in the coach's voice: Polly audio of the LITERAL instruction (there is ~30 s
+     * of running before the turn, so a short round-trip is fine). Device TTS if it takes longer
+     * than NAV_TTS_TIMEOUT_MS or fails. Deferred if gated.
      */
-    private fun announceNavigationText(text: String) {
-        Log.d("Navigation", "ANNOUNCE text via LLM: $text")
-        requestNavigationCoachingFromLLM(text, null)
-    }
-
-    private fun publishNavUiState() {
-        val idx = navCurrentInstructionIndex
-        val next = navTurnInstructions.getOrNull(idx)
-        _navUiState.value = NavUiState(
-            hasRoute = navTurnInstructions.isNotEmpty(),
-            nextInstructionIndex = idx,
-            nextInstruction = next?.instruction,
-            distanceToNextTurnM = next?.let { (navInstructionRouteMeters.getOrElse(idx) { 0.0 } - navProgressMeters).coerceAtLeast(0.0) },
-            routeProgressIndex = navProgressIndex,
-            routeProgressMeters = navProgressMeters,
-            isOffRoute = navOffRoute
-        )
-    }
-
-    /**
-     * Request navigation coaching from the LLM backend.
-     * Sends the navigation instruction as context and gets back AI-generated audio
-     * in the user's chosen coach voice. Falls back to device TTS on failure.
-     */
-    private fun requestNavigationCoachingFromLLM(navigationText: String, distanceMeters: Int?) {
-        if (isMuted) {
-            Log.d("Navigation", "Muted — skipping: $navigationText")
-            return
-        }
+    private fun announceNavigationInCoachVoice(text: String) {
+        if (isMuted) { Log.d("Navigation", "Muted — skipping: $text"); return }
         if (!canFireCoaching(isNavigation = true)) {
-            // Deferred, not dropped — a km split a few seconds before a turn used to silently
-            // kill the turn call. The next nav check replays it (device TTS, no LLM).
-            Log.d("Navigation", "Deferred (too soon after other coaching): $navigationText")
-            navPendingCue = navigationText
+            Log.d("Navigation", "Deferred (too soon after other coaching): $text")
+            navPendingCue = text
             return
         }
         recordCoachingFired()
-
-        // Show text in UI immediately while we wait for audio
-        _latestCoachingText.value = navigationText
-        
-        coachingHistory.add(AiCoachingNote(
-            time = getActiveRunDuration(),
-            message = "Nav: $navigationText"
-        ))
-        
+        _latestCoachingText.value = text
+        coachingHistory.add(AiCoachingNote(time = getActiveRunDuration(), message = "Nav: $text"))
         serviceScope.launch {
-            try {
-                val update = PhaseCoachingUpdate(
-                    phase = _currentRunSession.value?.phase?.name ?: "STEADY",
-                    distance = totalDistance / 1000.0,
-                    targetDistance = targetDistance?.let { it / 1000.0 },  // Convert metres to km
-                    elapsedTime = getActiveRunDuration() / 1000,  // Convert ms to seconds
-                    currentPace = _currentRunSession.value?.averagePace ?: "0:00",
-                    currentGrade = calculateAverageGradient().toDouble(),
-                    totalElevationGain = totalElevationGain,
-                    heartRate = currentHeartRate.takeIf { it > 0 },
-                    cadence = currentCadence.takeIf { it > 0 },
-                    coachName = currentUser?.coachName,
-                    coachTone = currentUser?.coachTone,
-                    coachGender = currentUser?.coachGender,
-                    coachAccent = currentUser?.coachAccent,
-                    fitnessLevel = currentUser?.fitnessLevel,
-                    runnerName = currentUser?.name,
-                    activityType = currentActivityType,
-                    hasRoute = true,
-                    triggerType = "navigation_turn",
-                    navigationInstruction = navigationText,
-                    navigationDistance = distanceMeters,
-                    // ========== NEW: Session Coaching Context ==========
-                    linkedWorkoutId = planWorkoutId,
-                    sessionStructure = sessionInstructions?.sessionStructure,
-                    userId = currentUser?.id,
-                    garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
-                )
-                
-                val response = apiService.getPhaseCoaching(update)
-                Log.d("Navigation", "LLM navigation response: ${response.message}")
-                
-                coachingHistory.add(AiCoachingNote(
-                    time = getActiveRunDuration(),
-                    message = "Nav LLM: ${response.message}"
-                ))
-                
-                // Update UI with LLM's natural phrasing
-                _latestCoachingText.value = response.message
-                
-                // Play via PRIORITY queue — interrupts any coaching audio
-                CoachingAudioQueue.enqueueNavigation(
-                    context = this@RunTrackingService,
-                    base64Audio = response.audio,
-                    format = response.format,
-                    fallbackText = response.message,
-                    accent = currentUser?.coachAccent,
-                    gender = currentUser?.coachGender,
-                    onComplete = {
-                        _latestCoachingText.value = null
-                    }
-                )
-                
+            val tts = try {
+                withTimeoutOrNull(NAV_TTS_TIMEOUT_MS) {
+                    apiService.generateTts(GenerateTtsRequest(text = text, coachGender = currentUser?.coachGender, coachAccent = currentUser?.coachAccent))
+                }
             } catch (e: Exception) {
-                Log.w("Navigation", "LLM navigation request failed, falling back to device TTS: ${e.message}")
-                // Fallback: use device TTS via PRIORITY queue
-                CoachingAudioQueue.enqueueNavigation(
-                    context = this@RunTrackingService,
-                    base64Audio = null,
-                    format = null,
-                    fallbackText = navigationText,
-                    accent = currentUser?.coachAccent,
-                    gender = currentUser?.coachGender,
-                    onComplete = {
-                        _latestCoachingText.value = null
-                    }
-                )
+                Log.w("Navigation", "Coach-voice TTS failed, using device TTS: ${e.message}")
+                null
             }
+            CoachingAudioQueue.enqueueNavigation(
+                context = this@RunTrackingService,
+                base64Audio = tts?.audio,
+                format = tts?.format,
+                fallbackText = text,
+                accent = currentUser?.coachAccent,
+                gender = currentUser?.coachGender,
+                onComplete = { _latestCoachingText.value = null }
+            )
         }
+    }
+
+    private fun publishNavUiState() {
+        val nav = routeNavigator
+        val st = nav?.state()
+        _navUiState.value = if (nav == null || st == null) NavUiState() else NavUiState(
+            hasRoute = nav.hasRoute,
+            nextInstructionIndex = st.nextTurnIndex,
+            nextInstruction = st.nextInstruction,
+            distanceToNextTurnM = st.distanceToNextTurnM,
+            routeProgressIndex = st.progressIndex,
+            routeProgressMeters = st.progressMeters,
+            isOffRoute = st.isOffRoute
+        )
     }
 
     // ==================== PACE COACHING ENGINE ====================

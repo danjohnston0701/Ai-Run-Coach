@@ -326,7 +326,8 @@ class RouteGenerationViewModel @Inject constructor(
                     instruction = text,
                     latitude = point.latitude,
                     longitude = point.longitude,
-                    distance = (ghInst.distance ?: 0.0) / 1000.0 // Convert meters to km
+                    distance = (ghInst.distance ?: 0.0) / 1000.0, // metres from start → km
+                    streetName = ghInst.streetName
                 )
             } else {
                 // Fallback: use distance-based position (less accurate)

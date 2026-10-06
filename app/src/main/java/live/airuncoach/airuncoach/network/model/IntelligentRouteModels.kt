@@ -110,7 +110,7 @@ data class GraphHopperTurnInstruction(
     val text: String?,  // e.g. "Turn left onto Oak Street"
     
     @SerializedName("distance")
-    val distance: Double?,  // meters from start to this instruction
+    val distance: Double?,  // metres from the route start to this instruction (server/route-instructions.ts)
     
     @SerializedName("time")
     val time: Double?,  // milliseconds from start
@@ -119,5 +119,8 @@ data class GraphHopperTurnInstruction(
     val interval: List<Int>?,  // [startIndex, endIndex] into polyline points
     
     @SerializedName("sign")
-    val sign: Int?  // GraphHopper turn sign (0=straight, -2=left, 2=right, etc.)
+    val sign: Int?,  // GraphHopper turn sign (0=straight, -2=left, 2=right, etc.)
+
+    @SerializedName("streetName")
+    val streetName: String? = null
 )

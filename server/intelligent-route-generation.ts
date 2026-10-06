@@ -20,6 +20,7 @@
  * ✅ Scores: Scenic (20%) + Shape (20%) + Quality (20%) + Backtrack (15%) + Popularity (10%) + Loop (15%)
  */
 
+import { buildSpokenInstructions, type SpokenInstruction } from "./route-instructions";
 import axios from "axios";
 import { getRoutePopularityScore, analyzeRouteCharacteristics } from "./osm-segment-intelligence";
 
@@ -69,7 +70,7 @@ interface GeneratedRoute {
   difficulty: string; // "easy", "moderate", "hard"
   popularityScore: number; // 0-1
   qualityScore: number; // 0-1
-  turnInstructions: TurnInstruction[];
+  turnInstructions: SpokenInstruction[];
 }
 
 interface TurnInstruction {
@@ -1265,7 +1266,7 @@ export async function generateIntelligentRoute(request: RouteRequest & { userId?
       elevationProfile,
       duration: r.time / 1000, difficulty: diff, popularityScore: c.popularityScore,
       qualityScore: c.validation.qualityScore, loopQuality: c.loopQuality, backtrackRatio: c.backtrackRatio,
-      turnInstructions: finalInstructions,
+      turnInstructions: buildSpokenInstructions(finalInstructions, finalCoords),
     };
   });
 }
