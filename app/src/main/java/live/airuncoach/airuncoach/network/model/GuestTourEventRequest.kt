@@ -10,10 +10,11 @@ import com.google.gson.annotations.SerializedName
  */
 data class GuestTourEventRequest(
     @SerializedName("deviceId") val deviceId: String,
-    @SerializedName("event") val event: String,          // started | step | left | skipped | completed | create_account
+    @SerializedName("event") val event: String,          // started | step | left | skipped | skip_prompt | completed | create_account
     @SerializedName("step") val step: Int? = null,
     @SerializedName("totalSteps") val totalSteps: Int? = null,
     @SerializedName("stepName") val stepName: String? = null,
+    @SerializedName("watchChoice") val watchChoice: String? = null, // garmin_watch | samsung_watch | phone_only, once picked
     @SerializedName("platform") val platform: String = "android",
     @SerializedName("timezone") val timezone: String? = null,
     @SerializedName("country") val country: String? = null,

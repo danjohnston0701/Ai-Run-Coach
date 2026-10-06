@@ -115,6 +115,17 @@ import kotlin.math.absoluteValue
  * tracking, pulsing each control and scrolling it into view. Route generation is still
  * mentioned in the closing page's copy. Kept 1:1 with iOS's OnboardingTourScreen.swift.
  *
+ * Fourth pass (2026-10-05), from the guest-tour funnel (guest_tour_sessions): ~75% of visitors
+ * left within the first three pages, which were Dashboard → Profile → Connected Devices — setup
+ * chores — while the coach briefing, live cue and AI debrief sat at pages 8-9 that almost nobody
+ * reached. The tour now leads with the value: Dashboard (auto-advances) → run setup → run
+ * session → run summary → AI Plans → closing page, six pages shown as "Step X of 6". The
+ * Profile / Connected Devices / Health & Injuries steps were removed (the watch explanation
+ * now lives in the watch-mode run session; pairing is mentioned on the closing page), and the
+ * run summary no longer forces the Data → GPX → Strava path before letting you continue. In
+ * the pre-login tour every page carries a "Create account" shortcut, and Skip asks whether to
+ * create an account, keep touring or go back to the welcome screen. Kept 1:1 with iOS.
+ *
  * Interactive steps use a self-contained mock screen driven by tapping the highlighted element
  * exactly as a real user would, matching a scripted guided-tour convention (Duolingo-style)
  * rather than free exploration. See MainScreen.kt's "onboarding_tour" route for how this is
@@ -127,7 +138,9 @@ import kotlin.math.absoluteValue
  * can skip whichever watch-brand page doesn't apply, and the Run Without a Route step can
  * correctly show "Prepare for Watch" only for users who have a watch to prepare for.
  */
-private enum class TourWatchChoice { GARMIN_WATCH, SAMSUNG_WATCH, PHONE_ONLY }
+private enum class TourWatchChoice(val wireName: String) {
+    GARMIN_WATCH("garmin_watch"), SAMSUNG_WATCH("samsung_watch"), PHONE_ONLY("phone_only")
+}
 
 private data class InfoPage(
     val icon: ImageVector,
@@ -136,28 +149,25 @@ private data class InfoPage(
 )
 
 /** Step 0 is the watch-choice screen; the paged tour is 1..TOUR_TOTAL_STEPS. */
-private const val TOUR_TOTAL_STEPS = 0 + 10 + 1 // leadPages + INTERACTIVE_STEP_COUNT + tailPages
+private const val TOUR_TOTAL_STEPS = 0 + 5 + 1 // leadPages + INTERACTIVE_STEP_COUNT + tailPages
 private const val TOUR_WATCH_CHOICE_STEP = 0
 
 /**
  * Stable page names sent with each tour event so "furthest step" reads as a screen, not a
  * number. Keep in lockstep with leadPages()/InteractiveStep()/tailPages() and with the iOS
- * `tourStepName` — the two apps share the same 11-page tour. Pre-2026-09-20 rows carry the
- * retired "goals_intro"/"ai_plans_intro" names and step numbers shifted +2 from these.
+ * `tourStepName` — the two apps share the same 6-page tour. Compare across versions by NAME,
+ * not number: the 2026-09-20..10-05 tour had 11 pages (dashboard_profile_tab,
+ * profile_connected_devices, connected_devices, profile_injuries, injury_management, then these
+ * at 6-11), and pre-2026-09-20 rows also carry the retired "goals_intro"/"ai_plans_intro".
  */
 private fun tourStepName(step: Int): String = when (step) {
     TOUR_WATCH_CHOICE_STEP -> "watch_choice"
-    1 -> "dashboard_profile_tab"
-    2 -> "profile_connected_devices"
-    3 -> "connected_devices"
-    4 -> "profile_injuries"
-    5 -> "injury_management"
-    6 -> "dashboard_run_without_route"
-    7 -> "run_setup"
-    8 -> "run_session"
-    9 -> "run_summary"
-    10 -> "ai_plans"
-    11 -> "ready_to_run"
+    1 -> "dashboard_run_without_route"
+    2 -> "run_setup"
+    3 -> "run_session"
+    4 -> "run_summary"
+    5 -> "ai_plans"
+    6 -> "ready_to_run"
     else -> "step_$step"
 }
 
@@ -180,6 +190,10 @@ private data class GuestTourContext(
 
 @Volatile
 private var guestTourContext: GuestTourContext? = null
+
+/** The device the guest picked on the watch-choice screen, sent with every later guest event. */
+@Volatile
+private var guestTourWatchChoice: TourWatchChoice? = null
 
 private fun buildGuestTourContext(context: android.content.Context): GuestTourContext = GuestTourContext(
     deviceId = live.airuncoach.airuncoach.util.InstallIdentity.id(context),
@@ -208,6 +222,7 @@ private fun recordTourEvent(event: String, step: Int? = null) {
                         step = step,
                         totalSteps = TOUR_TOTAL_STEPS,
                         stepName = step?.let(::tourStepName),
+                        watchChoice = guestTourWatchChoice?.wireName,
                         timezone = guest.timezone,
                         country = guest.country,
                         device = guest.device,
@@ -261,6 +276,7 @@ fun OnboardingTourScreen(
         guestTourContext = remember { buildGuestTourContext(context) }
     }
     var watchChoice by remember { mutableStateOf<TourWatchChoice?>(null) }
+    guestTourWatchChoice = watchChoice
     // Where the user currently is, for the "left" event below. 0 until a watch is chosen.
     var currentStep by remember { mutableIntStateOf(TOUR_WATCH_CHOICE_STEP) }
 
@@ -269,6 +285,29 @@ fun OnboardingTourScreen(
     // the tap and this screen mounting). Server preserves the first occurrence, so this is safe
     // to call every time the screen mounts.
     LaunchedEffect(Unit) { recordTourEvent("started", TOUR_WATCH_CHOICE_STEP) }
+
+    // Skip. Signed in, it just ends the tour. Pre-login, it first offers the account (the
+    // whole point of the preview) — "skip_prompt" records that the offer was seen, and only
+    // "Back to welcome" counts as the visitor actually skipping.
+    var showLeavePrompt by remember { mutableStateOf(false) }
+    val skipTour: () -> Unit = {
+        AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TOUR_SKIPPED)
+        recordTourEvent("skipped", currentStep)
+        onFinish()
+    }
+    val requestSkip: () -> Unit = {
+        if (isPreLogin) {
+            recordTourEvent("skip_prompt", currentStep)
+            showLeavePrompt = true
+        } else {
+            skipTour()
+        }
+    }
+    // Pre-login "Create account" shortcut, available on every page.
+    val createAccountNow: () -> Unit = {
+        recordTourEvent("create_account", currentStep)
+        onCreateAccount()
+    }
 
     // "left": the app was backgrounded or closed mid-tour. ON_STOP fires for home/recents/
     // swipe-away (a hard kill can pre-empt the request — the server then shows the last
@@ -286,10 +325,7 @@ fun OnboardingTourScreen(
     if (watchChoice == null) {
         WatchChoiceScreen(
             onChoose = { watchChoice = it },
-            onSkip = {
-                recordTourEvent("skipped", TOUR_WATCH_CHOICE_STEP)
-                onFinish()
-            },
+            topBar = { TourTopBar(progress = null, isPreLogin = isPreLogin, onCreateAccount = createAccountNow, onSkip = requestSkip) },
         )
     } else {
         TourStepController(
@@ -298,28 +334,83 @@ fun OnboardingTourScreen(
             onFinish = onFinish,
             isPreLogin = isPreLogin,
             onCreateAccount = onCreateAccount,
+            topBar = { progress ->
+                TourTopBar(progress = progress, isPreLogin = isPreLogin, onCreateAccount = createAccountNow, onSkip = requestSkip)
+            },
         )
+    }
+
+    if (showLeavePrompt) {
+        AlertDialog(
+            onDismissRequest = { showLeavePrompt = false },
+            containerColor = Colors.backgroundSecondary,
+            title = { Text("Leave the tour?", color = Colors.textPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Create a free account and your AI coach will be ready for your next run.",
+                    color = Colors.textSecondary,
+                )
+            },
+            confirmButton = {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    Button(
+                        onClick = { showLeavePrompt = false; createAccountNow() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Colors.primary, contentColor = Colors.buttonText),
+                        shape = RoundedCornerShape(BorderRadius.lg),
+                    ) { Text("Create a Free Account", fontWeight = FontWeight.Bold) }
+                    TextButton(onClick = { showLeavePrompt = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Keep touring", color = Colors.primary, fontWeight = FontWeight.SemiBold)
+                    }
+                    TextButton(onClick = { showLeavePrompt = false; skipTour() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Back to welcome", color = Colors.textSecondary)
+                    }
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Top bar shared by the watch-choice screen and every tour page: progress on the left ("Step 2
+ * of 6" — eleven dots read as "lots more to go"), Skip on the right, and in the pre-login tour a
+ * "Create account" shortcut beside it so a visitor who's already convinced never has to sit
+ * through the rest to sign up.
+ */
+@Composable
+private fun TourTopBar(progress: String?, isPreLogin: Boolean, onCreateAccount: () -> Unit, onSkip: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(progress ?: "", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (isPreLogin) {
+                OutlinedButton(
+                    onClick = onCreateAccount,
+                    border = BorderStroke(1.dp, Colors.primary),
+                    shape = RoundedCornerShape(percent = 50),
+                    contentPadding = PaddingValues(horizontal = Spacing.md, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp),
+                ) {
+                    Text("Create account", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Colors.primary)
+                }
+            }
+            TextButton(onClick = onSkip) {
+                Text("Skip", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Colors.textSecondary)
+            }
+        }
     }
 }
 
 @Composable
 private fun WatchChoiceScreen(
     onChoose: (TourWatchChoice) -> Unit,
-    onSkip: () -> Unit,
+    topBar: @Composable () -> Unit,
 ) {
-    val context = LocalContext.current
     Column(modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = {
-                AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TOUR_SKIPPED)
-                onSkip()
-            }) {
-                Text("Skip", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Colors.textSecondary)
-            }
-        }
+        topBar()
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = Spacing.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -375,17 +466,23 @@ private fun WatchChoiceOption(iconRes: Int, label: String, onClick: () -> Unit) 
 // same and a lead page can be reintroduced without restructuring. Kept 1:1 with iOS.
 private fun leadPages(): List<InfoPage> = emptyList()
 
-private fun tailPages(): List<InfoPage> = listOf(
+private fun tailPages(watchChoice: TourWatchChoice): List<InfoPage> = listOf(
     // Closing page — reached only after the interactive sequence. Its button
     // reads "Finish Tour" (InfoPageContent's isLast), which is what actually ends the tour.
+    // Watch users get the pairing pointer here now that the Connected Devices step is gone.
     InfoPage(
         Icons.AutoMirrored.Filled.DirectionsRun, "You're Ready to Run",
-        "That's the tour. Set a goal, start a free run, or generate a route from your Dashboard whenever you're ready — your AI coach will be with you every step of the way.",
+        "That's the tour. Set a goal, start a free run, or generate a route from your Dashboard whenever you're ready — your AI coach will be with you every step of the way." +
+            when (watchChoice) {
+                TourWatchChoice.GARMIN_WATCH -> "\n\nPair your Garmin from Profile → Connected Devices and the app walks you through installing the watch app."
+                TourWatchChoice.SAMSUNG_WATCH -> "\n\nPair your Galaxy Watch from Profile → Connected Devices."
+                TourWatchChoice.PHONE_ONLY -> ""
+            },
     ),
 )
 
 /** Total interactive steps between the lead and tail info pages — see the `when` in TourStepController. */
-private const val INTERACTIVE_STEP_COUNT = 10
+private const val INTERACTIVE_STEP_COUNT = 5
 
 @Composable
 private fun TourStepController(
@@ -395,10 +492,12 @@ private fun TourStepController(
     onFinish: () -> Unit,
     isPreLogin: Boolean = false,
     onCreateAccount: () -> Unit = onFinish,
+    /** [TourTopBar], given the "Step X of N" label. */
+    topBar: @Composable (String) -> Unit,
 ) {
     val context = LocalContext.current
     val lead = remember { leadPages() }
-    val tail = remember { tailPages() }
+    val tail = remember { tailPages(watchChoice) }
     val totalSteps = lead.size + INTERACTIVE_STEP_COUNT + tail.size
     var step by remember { mutableIntStateOf(0) }
 
@@ -432,20 +531,7 @@ private fun TourStepController(
     }
 
     Column(modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TourProgressDots(current = step, total = totalSteps)
-            TextButton(onClick = {
-                AppAnalytics.logEvent(context, AppAnalytics.Event.ONBOARDING_TOUR_SKIPPED)
-                recordTourEvent("skipped", step + 1)
-                onFinish()
-            }) {
-                Text("Skip", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Colors.textSecondary)
-            }
-        }
+        topBar("Step ${step + 1} of $totalSteps")
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val interactiveIndex = step - lead.size
@@ -464,23 +550,6 @@ private fun TourStepController(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TourProgressDots(current: Int, total: Int) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        repeat(total) { i ->
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 2.dp)
-                    .size(if (i == current) 8.dp else 6.dp)
-                    .background(
-                        color = if (i == current) Colors.primary else Colors.textMuted.copy(alpha = 0.35f),
-                        shape = CircleShape,
-                    ),
-            )
         }
     }
 }
@@ -525,16 +594,11 @@ private fun InfoPageContent(page: InfoPage, onNext: () -> Unit, isLast: Boolean,
 @Composable
 private fun InteractiveStep(index: Int, watchChoice: TourWatchChoice, onAdvance: () -> Unit) {
     when (index) {
-        0 -> MockDashboardScreen(highlight = DashboardHighlight.PROFILE_TAB, onHighlightTapped = onAdvance)
-        1 -> MockProfileScreen(highlight = ProfileHighlight.CONNECTED_DEVICES, onHighlightTapped = onAdvance)
-        2 -> MockConnectedDevicesScreen(watchChoice = watchChoice, onBack = onAdvance)
-        3 -> MockProfileScreen(highlight = ProfileHighlight.INJURIES, onHighlightTapped = onAdvance)
-        4 -> MockInjuryManagementScreen(onBack = onAdvance)
-        5 -> MockDashboardScreen(highlight = DashboardHighlight.RUN_WITHOUT_ROUTE, onHighlightTapped = onAdvance)
-        6 -> MockRunSetupScreen(watchChoice = watchChoice, onProceed = onAdvance)
-        7 -> MockRunSessionScreen(onFinished = onAdvance)
-        8 -> MockRunSummaryScreen(onFinished = onAdvance)
-        9 -> MockAiPlansScreen(onAdvance = onAdvance)
+        0 -> MockDashboardScreen(onRunWithoutRoute = onAdvance)
+        1 -> MockRunSetupScreen(watchChoice = watchChoice, onProceed = onAdvance)
+        2 -> MockRunSessionScreen(watchChoice = watchChoice, onFinished = onAdvance)
+        3 -> MockRunSummaryScreen(onFinished = onAdvance)
+        4 -> MockAiPlansScreen(onAdvance = onAdvance)
     }
 }
 
@@ -624,11 +688,9 @@ private fun TourPromptBannerWithNext(text: String, nextLabel: String, onNext: ()
     }
 }
 
-// Mock bottom nav bar shared by the Dashboard/Profile mock screens.
-private enum class MockTab { HOME, PROFILE }
-
+// Mock bottom nav bar for the Dashboard mock screen (Home selected; nothing else navigates).
 @Composable
-private fun MockBottomNav(selected: MockTab, highlightProfile: Boolean, onProfileTapped: () -> Unit) {
+private fun MockBottomNav() {
     // Matches the real 5-tab bar exactly — Screen.Home/History/Goals/AiPlans/Profile in
     // MainScreen.kt, including their actual drawable resources (icon_target_vector is Goals'
     // real icon, NOT Home's — a previous version of this mock got that wrong).
@@ -641,7 +703,7 @@ private fun MockBottomNav(selected: MockTab, highlightProfile: Boolean, onProfil
         windowInsets = WindowInsets(0),
     ) {
         NavigationBarItem(
-            selected = selected == MockTab.HOME,
+            selected = true,
             onClick = {},
             icon = { Icon(painterResource(id = R.drawable.icon_home_vector), contentDescription = "Home") },
             label = { Text("Home") },
@@ -649,20 +711,27 @@ private fun MockBottomNav(selected: MockTab, highlightProfile: Boolean, onProfil
         NavigationBarItem(selected = false, onClick = {}, icon = { Icon(painterResource(id = R.drawable.icon_chart_vector), contentDescription = "History") }, label = { Text("History") })
         NavigationBarItem(selected = false, onClick = {}, icon = { Icon(painterResource(id = R.drawable.icon_target_vector), contentDescription = "Goals") }, label = { Text("Goals") })
         NavigationBarItem(selected = false, onClick = {}, icon = { Icon(painterResource(id = R.drawable.icon_calendar_vector), contentDescription = "AI Plans") }, label = { Text("AI Plans") })
-        val profileIcon: @Composable () -> Unit = { Icon(painterResource(id = R.drawable.icon_profile_vector), contentDescription = "Profile") }
-        NavigationBarItem(
-            selected = selected == MockTab.PROFILE,
-            onClick = onProfileTapped,
-            icon = { if (highlightProfile) TourHighlight { profileIcon() } else profileIcon() },
-            label = { Text("Profile") },
-        )
+        NavigationBarItem(selected = false, onClick = {}, icon = { Icon(painterResource(id = R.drawable.icon_profile_vector), contentDescription = "Profile") }, label = { Text("Profile") })
     }
 }
 
-private enum class DashboardHighlight { PROFILE_TAB, RUN_WITHOUT_ROUTE }
+/** How long the Dashboard is shown before the tour "taps" RUN WITHOUT ROUTE itself. */
+private const val TOUR_DASHBOARD_AUTO_ADVANCE_MS = 3500L
 
+/**
+ * The Dashboard, as orientation only: it shows where every run starts, then moves on to the
+ * run setup by itself after [TOUR_DASHBOARD_AUTO_ADVANCE_MS] (tapping the highlighted button
+ * goes sooner). A forced tap on a pure navigation step was costing visitors before they'd seen
+ * anything worth staying for.
+ */
 @Composable
-private fun MockDashboardScreen(highlight: DashboardHighlight, onHighlightTapped: () -> Unit) {
+private fun MockDashboardScreen(onRunWithoutRoute: () -> Unit) {
+    var advanced by remember { mutableStateOf(false) }
+    val advanceOnce: () -> Unit = { if (!advanced) { advanced = true; onRunWithoutRoute() } }
+    LaunchedEffect(Unit) {
+        delay(TOUR_DASHBOARD_AUTO_ADVANCE_MS)
+        advanceOnce()
+    }
     val context = LocalContext.current
     // Real user name (from the session, not a fake placeholder) — same source the real
     // Dashboard reads for WelcomeSection. Goal is deliberately null: this tour runs during
@@ -685,13 +754,7 @@ private fun MockDashboardScreen(highlight: DashboardHighlight, onHighlightTapped
         // Same reasoning as MockBottomNav's windowInsets: MainScreen's Scaffold already applies
         // the status/navigation bar insets, so the default here double-padded top and bottom.
         contentWindowInsets = WindowInsets(0),
-        bottomBar = {
-            MockBottomNav(
-                selected = MockTab.HOME,
-                highlightProfile = highlight == DashboardHighlight.PROFILE_TAB,
-                onProfileTapped = { if (highlight == DashboardHighlight.PROFILE_TAB) onHighlightTapped() },
-            )
-        },
+        bottomBar = { MockBottomNav() },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = Spacing.lg)) {
@@ -718,15 +781,11 @@ private fun MockDashboardScreen(highlight: DashboardHighlight, onHighlightTapped
                     ActionButtons(
                         sessionType = "RUN",
                         onMapMyRun = {},
-                        onRunWithoutRoute = { if (highlight == DashboardHighlight.RUN_WITHOUT_ROUTE) onHighlightTapped() },
+                        onRunWithoutRoute = advanceOnce,
                         isEnabled = true,
                     )
                 }
-                if (highlight == DashboardHighlight.RUN_WITHOUT_ROUTE) {
-                    TourHighlight(highlightColor = Colors.buttonText) { actionButtons() }
-                } else {
-                    actionButtons()
-                }
+                TourHighlight(highlightColor = Colors.buttonText) { actionButtons() }
                 Spacer(modifier = Modifier.height(Spacing.md))
 
                 // recentRun = null — a new user genuinely has no previous sessions yet, so the
@@ -734,256 +793,8 @@ private fun MockDashboardScreen(highlight: DashboardHighlight, onHighlightTapped
                 PreviousRunsCard(recentRun = null, onClick = {})
                 Spacer(modifier = Modifier.height(Spacing.xl))
             }
-            TourPromptBanner(
-                when (highlight) {
-                    DashboardHighlight.PROFILE_TAB -> "This is your Dashboard. Tap the Profile tab below to keep going."
-                    DashboardHighlight.RUN_WITHOUT_ROUTE -> "Tap \"RUN WITHOUT ROUTE\" to see how a free run starts."
-                }
-            )
+            TourPromptBanner("This is your Dashboard — every run starts here. Let's start a free run…")
         }
-    }
-}
-
-private enum class ProfileHighlight { CONNECTED_DEVICES, INJURIES }
-
-@Composable
-private fun MockProfileScreen(highlight: ProfileHighlight, onHighlightTapped: () -> Unit) {
-    val scrollState = rememberScrollState()
-    // Connected Devices sits under "Settings," near the bottom of the real Profile screen —
-    // confirmed on-device that it's off-screen by default, so the prompt below ("Tap Connected
-    // Devices") pointed at something not currently visible. Health & Injuries, under "Profile,"
-    // is high enough to already be on-screen and doesn't need this.
-    LaunchedEffect(highlight) {
-        if (highlight == ProfileHighlight.CONNECTED_DEVICES) {
-            delay(300)
-            scrollState.animateScrollTo(scrollState.maxValue)
-        }
-    }
-    // Real user name — same session source the real ProfileScreen header and the Dashboard
-    // mock above use. Falls back to the real screen's own placeholder, never a fake name.
-    val context = LocalContext.current
-    val userName = remember { SessionManager(context).getUserName()?.takeIf { it.isNotBlank() } ?: "Runner" }
-    Scaffold(
-        containerColor = Colors.backgroundRoot,
-        contentWindowInsets = WindowInsets(0), // see MockDashboardScreen
-        bottomBar = { MockBottomNav(selected = MockTab.PROFILE, highlightProfile = false, onProfileTapped = {}) },
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Column(modifier = Modifier.weight(1f).verticalScroll(scrollState).padding(top = Spacing.xl)) {
-                // ── ProfileHeader — real avatar circle + name + subscription pill ──
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(85.dp)
-                            .background(Colors.primary.copy(alpha = 0.2f), CircleShape)
-                            .border(4.dp, Colors.primary, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(painterResource(id = R.drawable.icon_profile_vector), contentDescription = null, tint = Colors.primary, modifier = Modifier.size(50.dp))
-                    }
-                    Spacer(modifier = Modifier.height(Spacing.sm))
-                    Text(userName, style = AppTextStyles.h2.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
-                    Spacer(modifier = Modifier.height(Spacing.xs))
-                    Box(
-                        modifier = Modifier
-                            .background(Colors.primary.copy(alpha = 0.1f), RoundedCornerShape(BorderRadius.full))
-                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                    ) {
-                        Text("FREE", style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.primary)
-                    }
-                }
-                Spacer(modifier = Modifier.height(Spacing.xl))
-
-                ProfileSectionTitle("Social")
-                ProfileSection {
-                    ProfileRow(R.drawable.icon_people_vector, "Friends", null, false) {}
-                    ProfileRow(R.drawable.icon_people_vector, "Group Runs", null, false) {}
-                }
-                Spacer(modifier = Modifier.height(Spacing.md))
-
-                ProfileSectionTitle("Ai Coach")
-                ProfileSection {
-                    ProfileRow(R.drawable.icon_ai_vector, "Ai Coach Settings", null, false) {}
-                    ProfileRow(R.drawable.icon_calendar_vector, "Coaching Programme", null, false) {}
-                }
-                Spacer(modifier = Modifier.height(Spacing.md))
-
-                ProfileSectionTitle("Profile")
-                ProfileSection {
-                    ProfileRow(R.drawable.icon_profile_vector, "Personal Details", null, false) {}
-                    ProfileRow(R.drawable.icon_heart_vector, "Health & Injuries", null, highlight == ProfileHighlight.INJURIES) {
-                        if (highlight == ProfileHighlight.INJURIES) onHighlightTapped()
-                    }
-                    ProfileRow(R.drawable.icon_target_vector, "Goals", null, false) {}
-                }
-                Spacer(modifier = Modifier.height(Spacing.md))
-
-                ProfileSectionTitle("Settings")
-                ProfileSection {
-                    ProfileRow(R.drawable.icon_watch_vector, "Connected Devices", null, highlight == ProfileHighlight.CONNECTED_DEVICES) {
-                        if (highlight == ProfileHighlight.CONNECTED_DEVICES) onHighlightTapped()
-                    }
-                    ProfileRow(R.drawable.icon_watch_vector, "My Account", "Free", false) {}
-                }
-                Spacer(modifier = Modifier.height(Spacing.xl))
-            }
-            TourPromptBanner(
-                if (highlight == ProfileHighlight.CONNECTED_DEVICES) "Tap \"Connected Devices\" to see how pairing a watch works."
-                else "Tap \"Health & Injuries\" to see how AI Plans train around an injury."
-            )
-        }
-    }
-}
-
-@Composable
-private fun ProfileSectionTitle(title: String) {
-    Text(
-        title, style = AppTextStyles.caption.copy(fontWeight = FontWeight.Bold), color = Colors.textMuted,
-        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm),
-    )
-}
-
-@Composable
-private fun ProfileSection(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg),
-        shape = RoundedCornerShape(BorderRadius.md),
-        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-    ) {
-        Column { content() }
-    }
-}
-
-@Composable
-private fun ProfileRow(iconRes: Int, label: String, value: String?, highlighted: Boolean, onClick: () -> Unit) {
-    val row: @Composable () -> Unit = {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(Spacing.lg),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(painterResource(id = iconRes), contentDescription = null, tint = Colors.textMuted, modifier = Modifier.size(24.dp))
-                Spacer(modifier = Modifier.width(Spacing.md))
-                Text(label, style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium), color = Colors.textPrimary)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (value != null) {
-                    Text(value, style = AppTextStyles.body, color = Colors.textSecondary)
-                    Spacer(modifier = Modifier.width(Spacing.sm))
-                }
-                Icon(painterResource(id = R.drawable.icon_chevron_right_vector), contentDescription = null, tint = Colors.textMuted, modifier = Modifier.size(16.dp))
-            }
-        }
-    }
-    if (highlighted) TourHighlight(modifier = Modifier.fillMaxWidth()) { row() } else row()
-}
-
-@Composable
-private fun MockConnectedDevicesScreen(watchChoice: TourWatchChoice, onBack: () -> Unit) {
-    // The REAL screen, not a hand-copied clone — a new onboarding user genuinely has no
-    // devices connected yet, so its default hiltViewModel() state is truthful here, and the
-    // "Get Watch App"/"Connect Strava" buttons' default no-op callbacks keep the tour from
-    // wandering into a real OAuth flow or Play Store link.
-    Box(modifier = Modifier.fillMaxSize()) {
-        ConnectedDevicesScreen(onNavigateBack = onBack)
-        Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-            TourPromptBanner("Tap the back arrow above to return to your Profile.")
-        }
-    }
-}
-
-@Composable
-private fun MockInjuryManagementScreen(onBack: () -> Unit) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    Column(modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TourHighlight {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary,
-                    modifier = Modifier.size(24.dp).clickable(onClick = onBack),
-                )
-            }
-            Spacer(modifier = Modifier.width(Spacing.md))
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Health & Injuries", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Colors.textPrimary)
-                Text("Track your injuries and conditions", fontSize = 12.sp, color = Colors.textSecondary)
-            }
-            Button(
-                onClick = {},
-                colors = ButtonDefaults.buttonColors(containerColor = Colors.primary, contentColor = Colors.buttonText),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.height(40.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp),
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-        val tabs = listOf(Triple("Recovering", Color(0xFFFFB300), 0), Triple("Chronic", Color(0xFFAB47BC), 1), Triple("Healed", Colors.success, 2))
-        TabRow(selectedTabIndex = selectedTab, containerColor = Colors.backgroundRoot, contentColor = Colors.primary) {
-            tabs.forEach { (label, _, index) ->
-                Tab(
-                    selected = selectedTab == index,
-                    onClick = { selectedTab = index },
-                    selectedContentColor = Colors.primary,
-                    unselectedContentColor = Colors.textMuted,
-                ) {
-                    Text(
-                        label, modifier = Modifier.padding(vertical = 12.dp),
-                        fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selectedTab == index) Colors.primary else Colors.textMuted,
-                    )
-                }
-            }
-        }
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(Spacing.lg)) {
-            if (selectedTab == 0) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
-                ) {
-                    Column(modifier = Modifier.padding(Spacing.lg)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.width(4.dp).height(40.dp).background(Color(0xFFFFB300), RoundedCornerShape(2.dp)))
-                            Spacer(modifier = Modifier.width(Spacing.md))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Right knee · Lateral", fontWeight = FontWeight.Bold, color = Colors.textPrimary)
-                                Text("Since 3 weeks ago", fontSize = 11.sp, color = Colors.textMuted)
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(Spacing.md))
-                        HorizontalDivider(color = Colors.border)
-                        Spacer(modifier = Modifier.height(Spacing.md))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Warning, contentDescription = null, tint = Colors.warning, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Moderate", fontSize = 12.sp, color = Colors.warning, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.height(Spacing.sm))
-                        Text(
-                            "Your AI Training Plan is applying conservative load management and capping weekly mileage increases while this heals.",
-                            fontSize = 12.sp, color = Colors.primary, lineHeight = 16.sp,
-                        )
-                    }
-                }
-            } else {
-                Text("No entries in this category yet.", fontSize = 13.sp, color = Colors.textMuted)
-            }
-            Spacer(modifier = Modifier.height(Spacing.xl))
-        }
-        TourPromptBanner("Tap the back arrow above to head back to your Dashboard.")
     }
 }
 
@@ -1237,10 +1048,20 @@ private const val TOUR_RUN_FIRST_CUE =
  *     "Stop run?" confirmation → the real saving overlay → the Run Summary step.
  *
  * Added 2026-09-19 so the tour shows the prepare → run → summary flow end-to-end (it used
- * to jump from the setup screen straight to a finished run). Not on iOS yet.
+ * to jump from the setup screen straight to a finished run).
+ *
+ * Watch users (2026-10-05) get the watch-prepared version of the same screen instead, since
+ * that's what "Prepare for Watch" actually opens: the real [WatchStandbyBanner] ("Waiting for
+ * Watch") and [ControlButtons] with `isWatchRun` — no phone Start button, and once running only
+ * the escape-hatch Stop with its "pause and stop on your watch" caption. The watch's own START
+ * and STOP presses are stood in for by the prompt banner's button, so the tour never teaches
+ * a watch user to start or stop from the phone. Kept 1:1 with iOS.
  */
 @Composable
-private fun MockRunSessionScreen(onFinished: () -> Unit) {
+private fun MockRunSessionScreen(watchChoice: TourWatchChoice, onFinished: () -> Unit) {
+    val isWatchRun = watchChoice != TourWatchChoice.PHONE_ONLY
+    val isSamsungWatch = watchChoice == TourWatchChoice.SAMSUNG_WATCH
+    val watchStartLabel = if (isSamsungWatch) "Tap Start Run" else "Press START"
     val context = LocalContext.current
     val firstName = remember {
         SessionManager(context).getUserName()?.trim()?.takeIf { it.isNotBlank() }?.substringBefore(' ')
@@ -1257,7 +1078,8 @@ private fun MockRunSessionScreen(onFinished: () -> Unit) {
     val briefText = remember {
         val greeting = if (firstName != null) "Right, $firstName —" else "Right —"
         "$greeting 5 km easy run today. GPS is locked and I'm with you the whole way: I'll call your pace each kilometre, " +
-            "check in at halfway, and let you know if you're drifting off target. Tap Start when you're ready."
+            "check in at halfway, and let you know if you're drifting off target. " +
+            if (isWatchRun) "Start on your watch when you're ready." else "Tap Start when you're ready."
     }
 
     // 1. Preparing → briefed, mirroring the real screen's "Coach is preparing…" wait.
@@ -1304,7 +1126,7 @@ private fun MockRunSessionScreen(onFinished: () -> Unit) {
     } else "0:00"
     val cadenceStr = if (hasMoved) "${170 + wobble}" else "0"
     val heartRateStr = if (hasMoved) "${minOf(152, 118 + elapsedSec * 2) + wobble}" else "0"
-    val highlightStop = isRunning && cueFired
+    val highlightStop = isRunning && cueFired && !isWatchRun
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -1319,6 +1141,8 @@ private fun MockRunSessionScreen(onFinished: () -> Unit) {
                             isRunning = isRunning,
                             isPaused = isPaused,
                             isStopping = isSaving,
+                            isWatchRun = isWatchRun,
+                            isSamsungWatch = isSamsungWatch,
                             onStart = { if (phase == MockRunPhase.BRIEFED) phase = MockRunPhase.RUNNING },
                             onPause = { showPauseConfirm = true },
                             onResume = { phase = MockRunPhase.RUNNING },
@@ -1326,10 +1150,26 @@ private fun MockRunSessionScreen(onFinished: () -> Unit) {
                             onCancel = {},
                         )
                     }
-                    if (highlightStop) TourHighlight { bar() } else if (phase == MockRunPhase.BRIEFED) {
+                    if (highlightStop) TourHighlight { bar() } else if (phase == MockRunPhase.BRIEFED && !isWatchRun) {
                         TourHighlight(highlightColor = Colors.buttonText) { bar() }
                     } else bar()
-                    TourPromptBanner(
+                    if (isWatchRun) when (phase) {
+                        // The watch's own START/STOP, stood in for by the banner button.
+                        MockRunPhase.BRIEFED -> TourPromptBannerWithNext(
+                            text = "Your session is on your watch now. Start it there and your phone follows automatically — no need to start twice.",
+                            nextLabel = watchStartLabel,
+                            onNext = { phase = MockRunPhase.RUNNING },
+                        )
+                        MockRunPhase.RUNNING -> if (!cueFired) TourPromptBanner(
+                            "Your watch records the run. Your phone, in your pocket, tracks along live and speaks your coaching."
+                        ) else TourPromptBannerWithNext(
+                            text = "Coaching cues are spoken by your phone through its speaker or headphones. Finish on your watch to see your summary.",
+                            nextLabel = if (isSamsungWatch) "Stop on watch" else "Press STOP",
+                            onNext = { phase = MockRunPhase.SAVING },
+                        )
+                        MockRunPhase.SAVING -> TourPromptBanner("Your watch syncs the run to your phone…")
+                        else -> TourPromptBanner("Your coach is getting ready on your phone — that's why you prepare the session there first…")
+                    } else TourPromptBanner(
                         when (phase) {
                             MockRunPhase.PREPARING -> "This is your run screen. When you prepare a session on your phone, your coach gets ready first…"
                             MockRunPhase.BRIEFED -> "Your coach briefs you before every run — this is what they'll say. Tap \"Start Run\" to begin."
@@ -1360,6 +1200,14 @@ private fun MockRunSessionScreen(onFinished: () -> Unit) {
                         onShareClick = {},
                         onCloseClick = {},
                     )
+                }
+                if (isWatchRun && phase == MockRunPhase.BRIEFED) {
+                    item {
+                        WatchStandbyBanner(
+                            isSamsungWatch = isSamsungWatch,
+                            modifier = Modifier.padding(horizontal = Spacing.md).padding(top = Spacing.sm),
+                        )
+                    }
                 }
                 item {
                     AiCoachLivePanel(
@@ -1424,9 +1272,8 @@ private fun MockRunSessionScreen(onFinished: () -> Unit) {
  * So the map card, stat grid, charts, splits table and Data tab are exactly what a real run
  * produces — the previous version was a hand-drawn list of seven label/value rows.
  *
- * All five tabs are explorable. The guided path is Data → "Download Run as .GPX" → "Upload to
- * Strava": the real Strava button just opens Strava's web uploader, which needs the .GPX
- * already on the device, so the tour teaches that order.
+ * All five tabs are explorable; it opens on Ai Insights and the prompt banner's Next moves on
+ * (until 2026-10-05 it forced Data → "Download Run as .GPX" → "Upload to Strava" first).
  */
 @Composable
 private fun MockRunSummaryScreen(onFinished: () -> Unit) {
@@ -1446,7 +1293,6 @@ private fun MockRunSummaryScreen(onFinished: () -> Unit) {
     val analysis = loaded.analysis
     var selectedTab by remember { mutableIntStateOf(0) }
     var comments by remember { mutableStateOf("") }
-    var gpxDownloaded by remember { mutableStateOf(false) }
     // Tab indices with no Group Run / Dynamics tabs: Ai Insights, Summary, Graphs, Data, Badges.
     val dataTabIndex = 3
 
@@ -1474,14 +1320,15 @@ private fun MockRunSummaryScreen(onFinished: () -> Unit) {
                     run = run, onDelete = {},
                     selectedTab = selectedTab, onTabSelected = { selectedTab = it },
                 )
+                // Download/Strava are inert here (no file, no leaving the app); the step used to
+                // force Data → GPX → Strava before continuing, which kept the AI debrief — the
+                // reason this page exists — from being the thing people remember.
                 dataTabIndex -> DataTabFlagship(
                     run = run,
-                    onDownloadGpx = { gpxDownloaded = true },
+                    onDownloadGpx = {},
                     onDelete = {},
                     selectedTab = selectedTab, onTabSelected = { selectedTab = it },
-                    onUploadToStrava = { if (gpxDownloaded) onFinished() },
-                    downloadButtonModifier = if (gpxDownloaded) Modifier else Modifier.tourHighlight(),
-                    stravaButtonModifier = if (gpxDownloaded) Modifier.tourHighlight() else Modifier,
+                    onUploadToStrava = {},
                 )
                 else -> AchievementsTabFlagship(
                     run = run, analysisState = analysis, onDelete = {},
@@ -1489,12 +1336,13 @@ private fun MockRunSummaryScreen(onFinished: () -> Unit) {
                 )
             }
         }
-        TourPromptBanner(
-            when {
-                selectedTab != dataTabIndex -> "Every run gets this full breakdown — explore the tabs, then open \"Data\" to keep going."
-                !gpxDownloaded -> "Scroll down: Strava needs the file on your device first — tap \"Download Run as .GPX\"."
-                else -> "Now tap \"Upload to Strava\" — it opens Strava's uploader where you pick that .GPX file."
-            }
+        TourPromptBannerWithNext(
+            text = if (selectedTab == 0)
+                "After every run your coach debriefs you like this. Splits, graphs and badges are in the other tabs."
+            else
+                "Every run gets this full breakdown — and you can export it to Strava from Data.",
+            nextLabel = "Next",
+            onNext = onFinished,
         )
     }
 }
@@ -1786,7 +1634,7 @@ private fun MockAiPlansScreen(onAdvance: () -> Unit) {
             when (state) {
                 AiPlansStepState.EMPTY -> "Tap \"Generate My Training Plan\" to see your AI Coach build one."
                 AiPlansStepState.GENERATING -> "Your AI Coach is putting your plan together…"
-                AiPlansStepState.READY -> "Tap Continue — one more thing to show you."
+                AiPlansStepState.READY -> "Tap Continue to finish the tour."
             }
         )
     }

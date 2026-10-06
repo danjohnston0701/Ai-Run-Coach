@@ -604,6 +604,16 @@ export async function runAutoMigrations(): Promise<void> {
     },
     { name: "idx_guest_tour_sessions_converted", sql: "CREATE INDEX IF NOT EXISTS idx_guest_tour_sessions_converted ON guest_tour_sessions(converted_user_id)" },
     { name: "idx_guest_tour_sessions_first_started", sql: "CREATE INDEX IF NOT EXISTS idx_guest_tour_sessions_first_started ON guest_tour_sessions(first_started_at)" },
+    // Watch choice + exit screen + event log. Canonical copy:
+    // migrations/20261005_guest_tour_watch_choice_and_exit.sql
+    { name: "guest_tour_sessions.watch_choice", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS watch_choice TEXT" },
+    { name: "guest_tour_sessions.current_step", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS current_step INTEGER" },
+    { name: "guest_tour_sessions.current_step_name", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS current_step_name TEXT" },
+    { name: "guest_tour_sessions.abandoned_step", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS abandoned_step INTEGER" },
+    { name: "guest_tour_sessions.abandoned_step_name", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS abandoned_step_name TEXT" },
+    { name: "guest_tour_sessions.abandoned_via", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS abandoned_via TEXT" },
+    { name: "guest_tour_sessions.abandoned_at", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS abandoned_at TIMESTAMP" },
+    { name: "guest_tour_sessions.event_log", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS event_log JSONB NOT NULL DEFAULT '[]'::jsonb" },
 
     // ── google_play_transactions ─────────────────────────────────────────────────
     // Purchase-token → user mapping for Google Play subscriptions (the Play analogue of
