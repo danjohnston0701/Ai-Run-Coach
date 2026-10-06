@@ -339,8 +339,10 @@ function coercePlanWeeks(weeks: any[]): any[] {
     totalDistance: parseFloat(String(week.totalDistance).replace(/[^\d.]/g, '')) || 0,
     workouts: Array.isArray(week.workouts) ? week.workouts.map((wo: any) => ({
       ...wo,
-      // 0=Sun … 6=Sat; the model sometimes writes 7 for Sunday
-      dayOfWeek: (parseInt(String(wo.dayOfWeek), 10) || 1) % 7,
+      // 0=Sun … 6=Sat, but the model sometimes writes 7 for Sunday. Left as-is: date maths wraps
+      // it ((7 + 6) % 7 = Sunday) and both apps sort a week's workouts by dayOfWeek, where 7 keeps
+      // Sunday last — 0 would list it first.
+      dayOfWeek: parseInt(String(wo.dayOfWeek), 10) || 1,
       distance: parseFloat(String(wo.distance).replace(/[^\d.]/g, '')) || 0,
     })) : []
   }));
@@ -1959,7 +1961,7 @@ STRUCTURAL CONSTRAINTS:
     const weeklyPlanId = weeklyPlan[0].id;
 
     for (const workout of (week.workouts ?? [])) {
-      const dayOfWeek = workout.dayOfWeek; // coerced to 0–6 by coercePlanWeeks
+      const dayOfWeek = workout.dayOfWeek; // integer from coercePlanWeeks (7 = Sunday)
       const dayOffsetFromMonday = (dayOfWeek + 6) % 7;
       const scheduledDate = new Date(planWeekStart);
       scheduledDate.setDate(planWeekStart.getDate() + ((weekNum - 1) * 7) + dayOffsetFromMonday);
