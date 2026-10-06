@@ -105,8 +105,8 @@ export function isNoviceFitnessLevel(level?: string | null): boolean {
  * (e.g. "235" from a 5'10" runner → BMI 74). If the value is physiologically implausible
  * as kg but plausible as lb, treat it as lb.
  */
-export function normaliseWeightKg(rawWeight: number, heightCm: number): number {
-  return parseWeightKg(rawWeight, heightCm) ?? rawWeight;   // shared rule: utils/run-derivation.ts
+export function normaliseWeightKg(rawWeight: number, heightCm: number, unitConfirmed = false): number {
+  return parseWeightKg(rawWeight, heightCm, unitConfirmed) ?? rawWeight;   // shared rule: utils/run-derivation.ts
 }
 
 const QUALITY_SESSION_TYPES = [
@@ -583,7 +583,8 @@ export async function generateTrainingPlan(
     const rawWeight = user[0]?.weight || overrideWeight;
     const userHeight = (rawHeight != null && !isNaN(Number(rawHeight)) && Number(rawHeight) > 0) ? Number(rawHeight) : 170;
     const enteredWeight = (rawWeight != null && !isNaN(Number(rawWeight)) && Number(rawWeight) > 0) ? Number(rawWeight) : 70;
-    const userWeight = normaliseWeightKg(enteredWeight, userHeight);
+    // Confirmed only when it is the profile's own value saved through the lb/kg toggle.
+    const userWeight = normaliseWeightKg(enteredWeight, userHeight, !!user[0]?.weight && !!user[0]?.weightUnitConfirmed);
     if (userWeight !== enteredWeight) {
       console.log(`[Training Plan] Weight ${enteredWeight} is implausible as kg at ${userHeight}cm — treating as lb (${userWeight}kg)`);
     }

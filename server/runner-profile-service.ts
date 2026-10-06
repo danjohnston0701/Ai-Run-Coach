@@ -437,6 +437,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
       gender:               users.gender,
       height:               users.height,
       weight:               users.weight,
+      weightUnitConfirmed:  users.weightUnitConfirmed,
       fitnessLevel:         users.fitnessLevel,
       desiredFitnessLevel:  users.desiredFitnessLevel,
       coachName:            users.coachName,
@@ -591,7 +592,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
 
   // ── 6b. Physical build — BMI ──────────────────────────────────────────────
   const heightCm = user.height ? parseFloat(user.height) : null;
-  const weightKg = parseWeightKg(user.weight, heightCm);   // pounds typed into the old kg field → kg
+  const weightKg = parseWeightKg(user.weight, heightCm, user.weightUnitConfirmed);
   let bmi: number | null = null;
   if (heightCm && weightKg && heightCm > 0) {
     const hm = heightCm / 100;

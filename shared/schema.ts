@@ -13,6 +13,10 @@ export const users = pgTable("users", {
   gender: text("gender"),
   height: text("height"),
   weight: text("weight"),
+  // true once the runner saved weight with the apps' lb/kg toggle (value is definitely kg).
+  // false = entered in the old kg-only field, where US runners often typed pounds — only then
+  // may parseWeightKg() infer pounds from an implausible BMI. Never guess for confirmed values.
+  weightUnitConfirmed: boolean("weight_unit_confirmed").notNull().default(false),
   fitnessLevel: text("fitness_level"),
   desiredFitnessLevel: text("desired_fitness_level"),
   coachName: text("coach_name").default("AI Coach"),

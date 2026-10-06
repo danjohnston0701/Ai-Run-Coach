@@ -604,6 +604,8 @@ export async function runAutoMigrations(): Promise<void> {
     },
     { name: "idx_guest_tour_sessions_converted", sql: "CREATE INDEX IF NOT EXISTS idx_guest_tour_sessions_converted ON guest_tour_sessions(converted_user_id)" },
     { name: "idx_guest_tour_sessions_first_started", sql: "CREATE INDEX IF NOT EXISTS idx_guest_tour_sessions_first_started ON guest_tour_sessions(first_started_at)" },
+    // Weight saved via the lb/kg toggle (definitely kg) — see shared/schema.ts users.weightUnitConfirmed.
+    { name: "users.weight_unit_confirmed", sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS weight_unit_confirmed BOOLEAN NOT NULL DEFAULT false" },
     // Watch choice + exit screen + event log. Canonical copy:
     // migrations/20261005_guest_tour_watch_choice_and_exit.sql
     { name: "guest_tour_sessions.watch_choice", sql: "ALTER TABLE guest_tour_sessions ADD COLUMN IF NOT EXISTS watch_choice TEXT" },

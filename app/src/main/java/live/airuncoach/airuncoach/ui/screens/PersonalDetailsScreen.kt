@@ -54,6 +54,7 @@ fun PersonalDetailsScreen(
     val gender by viewModel.gender.collectAsState()
     val weight by viewModel.weight.collectAsState()
     val weightUnit by viewModel.weightUnit.collectAsState()
+    val weightNeedsUnitCheck by viewModel.weightNeedsUnitCheck.collectAsState()
     val height by viewModel.height.collectAsState()
     val defaultSessionType by viewModel.defaultSessionType.collectAsState()
     val targetDistanceDecimals by viewModel.targetDistanceDecimals.collectAsState()
@@ -347,6 +348,22 @@ fun PersonalDetailsScreen(
                         unfocusedBorderColor = Colors.textMuted
                     )
                 )
+                if (weightNeedsUnitCheck) {
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(
+                        text = "Is $weight in pounds? Our weight field used to be kilograms only, so please check — your coaching and calorie estimates use this.",
+                        style = AppTextStyles.small,
+                        color = Colors.warning
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        TextButton(onClick = { viewModel.confirmLegacyWeightUnit(WeightUnit.LB) }) {
+                            Text("Yes, pounds", color = Colors.primary, fontWeight = FontWeight.SemiBold)
+                        }
+                        TextButton(onClick = { viewModel.confirmLegacyWeightUnit(WeightUnit.KG) }) {
+                            Text("No, it's kg", color = Colors.textSecondary)
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
             item {

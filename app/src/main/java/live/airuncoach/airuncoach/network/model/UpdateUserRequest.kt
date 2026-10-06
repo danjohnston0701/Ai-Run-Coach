@@ -6,6 +6,8 @@ data class UpdateUserRequest(
     val dob: String? = null,
     val gender: String? = null,
     val weight: Double? = null,
+    /** Always true when this app sends weight — it comes from the lb/kg toggle, so it is kg. */
+    val weightUnitConfirmed: Boolean? = null,
     val height: Double? = null,
     val fitnessLevel: String? = null,
     val distanceScale: String? = null,

@@ -46,6 +46,14 @@ object WeightUnits {
         return (kg * 10).roundToLong() / 10.0
     }
 
+    /** Stored "kg" that is implausible for the height (BMI > 55) but plausible as pounds (BMI 15–55). */
+    fun looksLikePoundsStoredAsKg(kg: Double?, heightCm: Double?): Boolean {
+        if (kg == null || heightCm == null || heightCm < 100 || heightCm > 250) return false
+        val m2 = (heightCm / 100) * (heightCm / 100)
+        val asLbBmi = kg * KG_PER_LB / m2
+        return kg / m2 > 55 && asLbBmi in 15.0..55.0
+    }
+
     /** Re-express a field's text when the runner flips the unit (keeps blanks / partial input as-is). */
     fun convertText(text: String, from: WeightUnit, to: WeightUnit): String {
         if (from == to) return text

@@ -1245,6 +1245,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const updateData = { ...req.body };
+      // Weight from the lb/kg toggle (new apps send weightUnitConfirmed: true) is definitely kg;
+      // weight from an older app came from the kg-only field — unit unknown again.
+      if (updateData.weight !== undefined) updateData.weightUnitConfirmed = updateData.weightUnitConfirmed === true;
+      else delete updateData.weightUnitConfirmed;
       // Older clients still send the retired boolean; the column is gone from the schema, so
       // drop it rather than let Drizzle reject the whole update. Clamp the replacement to 0–3.
       delete updateData.distanceDecimalsEnabled;
@@ -4091,7 +4095,7 @@ function transformRunForAndroid(run: any) {
             const ageYears = Math.floor(ageMs / (365.25 * 24 * 60 * 60 * 1000)); 
             return ageYears > 0 && ageYears < 150 ? ageYears : undefined; 
           })() : undefined,
-          weight: parseWeightKg(user.weight, user.height) ?? undefined,
+          weight: parseWeightKg(user.weight, user.height, user.weightUnitConfirmed) ?? undefined,
           injuries: aiService.activeInjuriesForPrompt(user.injuryHistory),
         } : undefined,
         coachName,
@@ -12220,17 +12224,20 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     const needsHeight = !(Number(body.runnerHeight) > 0);
     const needsWeight = !(Number(body.runnerWeight) > 0);
     const needsAge = !(Number(body.runnerAge) > 0);
+    const sentWeight = Number(body.runnerWeight) > 0;
+    if (!needsHeight && !needsWeight && !needsAge && !sentWeight) return;
     try {
-      // The apps send weight from their cached profile, which can be pounds typed into the old
-      // kg-only field — normalise whichever side supplied it before it reaches the BMI note.
-      const normaliseWeight = () => {
-        if (Number(body.runnerWeight) > 0) body.runnerWeight = parseWeightKg(body.runnerWeight, body.runnerHeight) ?? undefined;
-      };
-      if (!needsHeight && !needsWeight && !needsAge) { normaliseWeight(); return; }
       const user = await storage.getUser(String(uid));
       if (!user) return;
+      // The apps send weight from their cached profile, which may be pounds typed into the old
+      // kg-only field — normalise it (unless the runner confirmed the unit) before the BMI note.
+      const normaliseWeight = () => {
+        if (Number(body.runnerWeight) > 0) {
+          body.runnerWeight = parseWeightKg(body.runnerWeight, body.runnerHeight ?? user.height, user.weightUnitConfirmed) ?? undefined;
+        }
+      };
       if (needsHeight && Number(user.height) > 0) body.runnerHeight = Number(user.height);
-      if (needsWeight) { const kg = parseWeightKg(user.weight, user.height); if (kg) body.runnerWeight = kg; }
+      if (needsWeight) { const kg = parseWeightKg(user.weight, user.height, user.weightUnitConfirmed); if (kg) body.runnerWeight = kg; }
       if (needsAge && user.dob) {
         const dob = new Date(user.dob);
         if (!Number.isNaN(dob.getTime())) {

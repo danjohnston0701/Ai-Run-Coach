@@ -47,6 +47,14 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     private val _weightUnit = MutableStateFlow(WeightUnit.KG)
     val weightUnit: StateFlow<WeightUnit> = _weightUnit.asStateFlow()
 
+    /**
+     * A weight saved in the old kg-only field that is implausible as kg for this height — very
+     * likely pounds. We ask rather than assume: the runner checks the unit and saves, which
+     * confirms it either way (a genuinely heavy runner's kg value is never "corrected").
+     */
+    private val _weightNeedsUnitCheck = MutableStateFlow(false)
+    val weightNeedsUnitCheck: StateFlow<Boolean> = _weightNeedsUnitCheck.asStateFlow()
+
     private val _height = MutableStateFlow("")
     val height: StateFlow<String> = _height.asStateFlow()
 
@@ -86,8 +94,16 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
             } else {
                 user.gender ?: ""
             }
-            _weightUnit.value = WeightUnits.load(sharedPrefs, user.country)
-            _weight.value = WeightUnits.format(user.weight, _weightUnit.value)
+            _weightNeedsUnitCheck.value = user.weightUnitConfirmed != true &&
+                WeightUnits.looksLikePoundsStoredAsKg(user.weight, user.height)
+            if (_weightNeedsUnitCheck.value) {
+                // Show the number exactly as they typed it, labelled kg as it was entered.
+                _weightUnit.value = WeightUnit.KG
+                _weight.value = WeightUnits.format(user.weight, WeightUnit.KG)
+            } else {
+                _weightUnit.value = WeightUnits.load(sharedPrefs, user.country)
+                _weight.value = WeightUnits.format(user.weight, _weightUnit.value)
+            }
             _height.value = user.height?.toString() ?: ""
             _defaultSessionType.value = when (user.defaultSessionType?.lowercase()) {
                 "walk" -> "Walk"
@@ -119,7 +135,17 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
         _gender.value = gender
     }
 
+    /** The runner's answer to "Is this in pounds?" — relabels the number as entered, never converts it. */
+    fun confirmLegacyWeightUnit(unit: WeightUnit) {
+        _weightUnit.value = unit
+        WeightUnits.save(sharedPrefs, unit)
+        _weightNeedsUnitCheck.value = false
+    }
+
     fun onWeightUnitChanged(unit: WeightUnit) {
+        // While a possibly-mislabelled legacy value is unanswered, the toggle RELABELS the number
+        // ("180" kg → "180" lb) — converting would turn 180 into 396.8.
+        if (_weightNeedsUnitCheck.value) { confirmLegacyWeightUnit(unit); return }
         _weight.value = WeightUnits.convertText(_weight.value, _weightUnit.value, unit)
         _weightUnit.value = unit
         WeightUnits.save(sharedPrefs, unit)
@@ -127,6 +153,8 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
 
     fun onWeightChanged(weight: String) {
         _weight.value = weight
+        // Retyping the weight answers the question too — it's now in the unit shown.
+        _weightNeedsUnitCheck.value = false
     }
 
     fun onHeightChanged(height: String) {
@@ -166,7 +194,10 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 email = _email.value,
                 dob = formatDateOfBirth(_dateOfBirth.value),
                 gender = _gender.value.ifBlank { null },
-                weight = WeightUnits.toKg(_weight.value, _weightUnit.value),
+                // An unanswered "Is this in pounds?" leaves the stored weight alone (unconfirmed) —
+                // saving a name change must not silently confirm a possibly-wrong unit.
+                weight = if (_weightNeedsUnitCheck.value) null else WeightUnits.toKg(_weight.value, _weightUnit.value),
+                weightUnitConfirmed = if (!_weightNeedsUnitCheck.value && WeightUnits.toKg(_weight.value, _weightUnit.value) != null) true else null,
                 height = _height.value.toDoubleOrNull(),
                 fitnessLevel = null,
                 distanceScale = null,
@@ -180,6 +211,7 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 val updatedUser = apiService.updateUser(user.id, request)
                 val updatedUserJson = gson.toJson(updatedUser)
                 sharedPrefs.edit().putString("user", updatedUserJson).apply()
+                if (updatedUser.weightUnitConfirmed == true) _weightNeedsUnitCheck.value = false
             } catch (e: Exception) {
                 // Handle error
             }

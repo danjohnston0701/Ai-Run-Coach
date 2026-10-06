@@ -386,19 +386,22 @@ function toDate(v: unknown): Date | null {
 /**
  * users.weight is free text ("62", "62 kg", "140 lbs") — kg, or null when unusable.
  *
- * The apps only offered a kg field until 2026-10 and US runners typed pounds into it ("235" from
- * a 5'10" runner = BMI 74). A bare number that is implausible as kg for the runner's height
- * (BMI > 55) but plausible as lb (BMI 15–55) is read as pounds. Without a height, only values
- * beyond any realistic kg weight (> 250) are tried as pounds. Use this everywhere weight is read
- * — BMI, calories and every AI prompt — so a pounds value is never treated as kilograms.
+ * `unitConfirmed` (users.weight_unit_confirmed) = the runner saved it with the apps' lb/kg toggle,
+ * so it IS kilograms — taken as-is, however heavy (a genuinely 170 kg runner must never be
+ * "corrected" to 77 kg). Only unconfirmed legacy values, entered in the old kg-only field where
+ * US runners often typed pounds ("235" from a 5'10" runner = BMI 74), are checked: a bare number
+ * implausible as kg for the height (BMI > 55) but plausible as lb (BMI 15–55) is read as pounds;
+ * without a height, only values beyond any realistic kg weight (> 250). The apps ask these
+ * runners to confirm the unit, which ends the guessing. Use this everywhere weight is read.
  */
-export function parseWeightKg(raw: unknown, heightCm?: unknown): number | null {
+export function parseWeightKg(raw: unknown, heightCm?: unknown, unitConfirmed = false): number | null {
   if (raw == null) return null;
   const s = String(raw).toLowerCase();
   const n = parseFloat(s);
   if (!Number.isFinite(n) || n <= 0) return null;
   const lbToKg = (v: number) => Math.round(v * 0.45359237 * 10) / 10;
   let kg = /lb/.test(s) ? lbToKg(n) : n;
+  if (unitConfirmed) return kg >= 25 && kg <= 350 ? kg : null;
   if (!/lb|kg/.test(s)) {
     const h = parseFloat(String(heightCm ?? ""));
     if (Number.isFinite(h) && h > 100 && h < 250) {

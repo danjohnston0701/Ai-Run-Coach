@@ -55,5 +55,7 @@ data class User(
     // Set server-side and returned in the login response for localized pricing display.
     val currency: String? = null,
     val timezone: String? = null,
-    val country: String? = null
+    val country: String? = null,
+    /** Weight was saved with the lb/kg toggle (so it is definitely kg). */
+    val weightUnitConfirmed: Boolean? = null
 )

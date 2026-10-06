@@ -19,9 +19,9 @@ import { deriveRunFields, parseSeriesValue, parseWeightKg, RUN_SERIES_FIELDS, ty
 async function contextFor(userId: string | null | undefined, linkedWorkoutId: string | null | undefined): Promise<DerivationContext> {
   const ctx: DerivationContext = {};
   if (userId) {
-    const [u] = await db.select({ timezone: users.timezone, weight: users.weight, height: users.height }).from(users).where(eq(users.id, userId)).limit(1);
+    const [u] = await db.select({ timezone: users.timezone, weight: users.weight, height: users.height, weightUnitConfirmed: users.weightUnitConfirmed }).from(users).where(eq(users.id, userId)).limit(1);
     ctx.timezone = u?.timezone ?? null;
-    ctx.weightKg = parseWeightKg(u?.weight, u?.height);
+    ctx.weightKg = parseWeightKg(u?.weight, u?.height, u?.weightUnitConfirmed);
   }
   if (linkedWorkoutId) {
     const [w] = await db.select({ workoutType: plannedWorkouts.workoutType }).from(plannedWorkouts)
