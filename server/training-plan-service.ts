@@ -12,7 +12,7 @@ import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
 import { generateSessionInstructions } from "./session-coaching-service";
 import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
-import { assessOrientationNeed, generateOrientationCoachingPrompt, type OrientationAssessment } from "./orientation-session-service";
+import { generateOrientationCoachingPrompt } from "./orientation-session-service";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { jsonrepair } from "jsonrepair";
 import OpenAI from "openai";
@@ -83,6 +83,133 @@ export function getBlockSize(daysPerWeek: number): number {
   if (daysPerWeek === 4) return 4;
   if (daysPerWeek === 5) return 3;
   return 2; // 6-7 days/week
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOVICE / RETURN-TO-RUN PROGRESSION GUARD
+// A newcomer with no run history (0 km/week) was once given a 20 km/week
+// "baseline" and a 5K plan that jumped from 3-min walk-run jogs straight to a
+// 6 km continuous run in week 3. The prompt rules below stop the model doing
+// that, and findProgressionViolations() checks the output deterministically —
+// a violating plan is sent back to the model once for correction.
+// ─────────────────────────────────────────────────────────────────────────────
+const NOVICE_FITNESS_LEVELS = ["newcomer", "beginner", "novice"];
+
+export function isNoviceFitnessLevel(level?: string | null): boolean {
+  return !!level && NOVICE_FITNESS_LEVELS.includes(level.trim().toLowerCase());
+}
+
+/**
+ * The apps only offer a kg weight field, but US users routinely type pounds into it
+ * (e.g. "235" from a 5'10" runner → BMI 74). If the value is physiologically implausible
+ * as kg but plausible as lb, treat it as lb.
+ */
+export function normaliseWeightKg(rawWeight: number, heightCm: number): number {
+  const m2 = (heightCm / 100) ** 2;
+  if (rawWeight / m2 <= 55) return rawWeight;
+  const asKg = rawWeight * 0.45359237;
+  const bmiAsLb = asKg / m2;
+  return bmiAsLb >= 15 && bmiAsLb <= 55 ? Math.round(asKg * 10) / 10 : rawWeight;
+}
+
+const QUALITY_SESSION_TYPES = [
+  "intervals", "tempo", "strides", "hill_repeats", "hills", "fartlek",
+  "race_pace", "time_trial", "threshold", "progression_run",
+];
+
+/** Longest stretch of continuous running (minutes) a workout asks for. */
+function longestContinuousRunMin(wo: any, paceMinPerKm: number): number {
+  const type = String(wo.workoutType ?? "").toLowerCase();
+  const sessionType = String(wo.sessionType ?? "").toLowerCase();
+  if (type === "rest" || type === "orientation" || type === "walk" || sessionType === "walk") return 0;
+  if (type === "walk_run" || type === "run_walk") return (Number(wo.intervalDurationSeconds) || 0) / 60;
+  const durationSec = Number(wo.duration) || 0;
+  if (durationSec > 0) return durationSec / 60;
+  const km = Number(wo.distance) || 0;
+  return km > 0 ? km * paceMinPerKm : 0;
+}
+
+/**
+ * Deterministic progression checks for novice / injured athletes. Returns
+ * human-readable violations (empty = OK), phrased so they can be fed back to the model.
+ */
+export function findProgressionViolations(
+  weeks: any[],
+  opts: { startingLongestRunMin: number; daysPerWeek: number; paceMinPerKm: number },
+): string[] {
+  const violations: string[] = [];
+  let longestSoFar = opts.startingLongestRunMin;
+  let prevWeekLastOffset: number | null = null;
+
+  for (const week of weeks) {
+    const weekNum = week.weekNumber;
+    const workouts: any[] = Array.isArray(week.workouts) ? week.workouts : [];
+    const allowed = Math.max(longestSoFar * 1.5, longestSoFar + 5);
+    let weekMax = 0;
+
+    for (const wo of workouts) {
+      const type = String(wo.workoutType ?? "").toLowerCase();
+      const mins = longestContinuousRunMin(wo, opts.paceMinPerKm);
+      const label = `Week ${weekNum} "${wo.description ?? type}"`;
+      if (mins > allowed + 0.5) {
+        violations.push(
+          `${label}: ~${Math.round(mins)} min of continuous running, but the longest continuous run so far is ~${Math.round(longestSoFar)} min — the most allowed this week is ${Math.round(allowed)} min. Use walk-run or a shorter time-based run.`,
+        );
+      }
+      if (QUALITY_SESSION_TYPES.includes(type) && longestSoFar < 30) {
+        violations.push(
+          `${label}: '${type}' is not allowed until the athlete can run 30 minutes continuously (currently ~${Math.round(longestSoFar)} min).`,
+        );
+      }
+      weekMax = Math.max(weekMax, mins);
+    }
+
+    // Rest day between sessions when the schedule allows it (≤4 days/week)
+    if (opts.daysPerWeek <= 4) {
+      const offsets = workouts
+        .filter(wo => String(wo.workoutType ?? "").toLowerCase() !== "rest")
+        .map(wo => (((Number(wo.dayOfWeek) || 0) % 7) + 6) % 7) // 0=Mon … 6=Sun
+        .sort((a, b) => a - b);
+      for (let i = 1; i < offsets.length; i++) {
+        if (offsets[i] - offsets[i - 1] === 1) {
+          violations.push(`Week ${weekNum}: sessions on consecutive days — leave a rest day between sessions.`);
+          break;
+        }
+      }
+      if (prevWeekLastOffset === 6 && offsets[0] === 0) {
+        violations.push(`Week ${weekNum}: Monday session follows the previous Sunday session — leave a rest day between sessions.`);
+      }
+      if (offsets.length > 0) prevWeekLastOffset = offsets[offsets.length - 1];
+    }
+
+    longestSoFar = Math.max(longestSoFar, weekMax);
+  }
+  return violations;
+}
+
+/** Prompt section for novice / injured athletes — shared by block 1 and later blocks. */
+function buildProgressionSafetyRules(opts: {
+  isNovice: boolean;
+  hasInjury: boolean;
+  daysPerWeek: number;
+  longestContinuousRunMin: number;
+  targetDistance: number;
+}): string {
+  const who = opts.isNovice && opts.hasInjury
+    ? "a newcomer to running who is also recovering from injury"
+    : opts.isNovice ? "a newcomer to running" : "returning to running from injury";
+  const longest = Math.round(opts.longestContinuousRunMin);
+  return `━━━ BEGINNER / RETURN-TO-RUNNING PROGRESSION RULES (MANDATORY) ━━━━━━━━━━
+
+This athlete is ${who}. These rules OVERRIDE the plan-type guidance above. Plans that break them are rejected and sent back.
+1. Prescribe by TIME, not distance, until the athlete can run 30 minutes continuously: use "walk_run" sessions (intervalCount + intervalDurationSeconds + restDurationSeconds), or a continuous easy run with "duration" in seconds and "distance": null.
+2. The longest CONTINUOUS running stretch (a walk_run run interval, or a whole continuous run) may grow by at most 50% or 5 minutes (whichever is larger) per week, measured against the longest prescribed so far. The longest continuous run so far is ~${longest} min. Never jump from walk-run straight to a long continuous run.
+3. No intervals, tempo, hills, strides, fartlek, race-pace or time trials until the athlete has completed 30 minutes of continuous easy running.
+4. Total weekly running time grows by no more than ~20–25% week to week. A deload week reduces BOTH total time AND the longest continuous stretch — it must not contain the block's longest run.
+5. Keep every session (including walk breaks) to 45 minutes or less until the athlete can run 30 minutes continuously.${opts.daysPerWeek <= 4 ? `
+6. Never schedule sessions on consecutive days — always leave a rest day between sessions (including Sunday → Monday across weeks).` : ""}${opts.isNovice && opts.targetDistance > 0 && opts.targetDistance <= 10 ? `
+7. No session may be longer than the goal distance (${opts.targetDistance}km) — running ${opts.targetDistance}km comfortably IS the goal; it comes at the end of the plan, not in the opening weeks.` : ""}
+- Coach effort by feel (talk test / RPE), not heart-rate caps: deconditioned runners' heart rates run high even at a slow jog.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,6 +325,58 @@ function validateGeneratedPlan(planData: any, opts: ValidatePlanOptions): void {
   }
 }
 
+/** Session duration in whole seconds, or null (integer column — rejects NaN). */
+function safeDurationSeconds(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+/** Coerce AI week/workout fields to the types the DB insert expects. */
+function coercePlanWeeks(weeks: any[]): any[] {
+  return weeks.map((week: any) => ({
+    ...week,
+    weekNumber: parseInt(String(week.weekNumber), 10) || 1,
+    totalDistance: parseFloat(String(week.totalDistance).replace(/[^\d.]/g, '')) || 0,
+    workouts: Array.isArray(week.workouts) ? week.workouts.map((wo: any) => ({
+      ...wo,
+      // 0=Sun … 6=Sat; the model sometimes writes 7 for Sunday
+      dayOfWeek: (parseInt(String(wo.dayOfWeek), 10) || 1) % 7,
+      distance: parseFloat(String(wo.distance).replace(/[^\d.]/g, '')) || 0,
+    })) : []
+  }));
+}
+
+/** Send a plan back to the model with the progression violations it must fix. */
+async function requestPlanCorrection(
+  systemPrompt: string,
+  userPrompt: string,
+  previousJson: string,
+  violations: string[],
+): Promise<any> {
+  const res = await openai.chat.completions.create({
+    model: "gpt-4.1",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+      { role: "assistant", content: previousJson },
+      {
+        role: "user",
+        content: `This plan breaks the mandatory progression rules for this athlete:\n- ${violations.join("\n- ")}\n\nRevise the plan so every rule is satisfied — change only what is needed, keep the same JSON structure, week count and sessions per week. Return the complete corrected JSON.`,
+      },
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0.3,
+    max_tokens: 32000,
+  });
+  if (res.choices[0].finish_reason === "length") throw new Error("Correction response truncated");
+  const raw = (res.choices[0].message.content || "{}").replace(/```json\n?/g, "").replace(/\n?```/g, "").trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return JSON.parse(jsonrepair(raw));
+  }
+}
+
 export async function generateTrainingPlan(
   userId: string,
   goalType: string, // 5k, 10k, half_marathon, marathon, ultra
@@ -293,7 +472,16 @@ export async function generateTrainingPlan(
       if (goalType === 'half_marathon') return 20;
       return 20;
     })();
-    const weeklyMileageBase = runsLast30.length > 0 ? (totalDistanceLast30 / 4) : noHistoryFallbackKm;
+    // Newcomers / beginners with no history are genuinely starting from (near) zero — anchoring
+    // them to the 20 km/week event fallback produced plans far beyond what they can do.
+    // Prefer the athlete's own onboarding answer when they gave one.
+    const isNovice = isNoviceFitnessLevel(experienceLevel) || isNoviceFitnessLevel(user[0]?.fitnessLevel);
+    const profileWeeklyKm = Number(user[0]?.averageWeeklyMileage) || 0;
+    const noHistoryBaselineKm = profileWeeklyKm > 0 ? profileWeeklyKm : isNovice ? 0 : noHistoryFallbackKm;
+    const weeklyMileageBase = runsLast30.length > 0 ? (totalDistanceLast30 / 4) : noHistoryBaselineKm;
+    const hasActiveInjuries = injuries.some(i =>
+      ['active', 'recovering', 'chronic'].includes(String(i.status).toLowerCase())
+    );
 
     // ── Helper: parse a "M:SS/km" pace string into total seconds per km
     const parsePaceSecs = (pace: string | null | undefined): number | null => {
@@ -321,14 +509,17 @@ export async function generateTrainingPlan(
 
     // ── Runs closest to the goal distance (±20%) — e.g. 4–6km runs for a 5k goal
     const distanceTolerance = targetDistance * 0.20;
+    // runs.distance is km (legacy rows > 200 are metres); runs.duration is seconds (legacy rows may be ms)
+    const runKm = (r: any): number | null => r.distance ? (r.distance > 200 ? r.distance / 1000 : r.distance) : null;
+    const runSecs = (r: any): number | null => r.duration ? (r.duration > 100000 ? r.duration / 1000 : r.duration) : null;
     const similarDistanceRuns = recentRuns.filter(r => {
-      const km = r.distance ? r.distance / 1000 : (r.distanceInMeters ? r.distanceInMeters / 1000 : null);
+      const km = runKm(r);
       return km != null && Math.abs(km - targetDistance) <= distanceTolerance;
     });
 
     // Average time at goal distance (for e.g. "how long does this runner currently take to run 5km?")
     const goalDistanceTimes = similarDistanceRuns
-      .map(r => r.duration ? r.duration / 1000 : null) // duration stored in ms → convert to seconds
+      .map(r => runSecs(r))
       .filter((v): v is number => v !== null && v > 0);
     const avgTimeAtGoalDistanceSecs = goalDistanceTimes.length > 0
       ? goalDistanceTimes.reduce((a, b) => a + b, 0) / goalDistanceTimes.length
@@ -357,7 +548,7 @@ export async function generateTrainingPlan(
     // Average data from last 3 runs (for coaching summary)
     const last3AvgData = last3Runs.length > 0 ? {
       count: last3Runs.length,
-      avgDistance: last3Runs.reduce((sum, r) => sum + (r.distance || 0), 0) / last3Runs.length,
+      avgDistanceKm: last3Runs.reduce((sum, r) => sum + (runKm(r) || 0), 0) / last3Runs.length,
       avgPace: last3Runs
         .map(r => parsePaceSecs(r.avgPace))
         .filter((v): v is number => v !== null)
@@ -392,7 +583,11 @@ export async function generateTrainingPlan(
     const rawHeight = user[0]?.height || overrideHeight;
     const rawWeight = user[0]?.weight || overrideWeight;
     const userHeight = (rawHeight != null && !isNaN(Number(rawHeight)) && Number(rawHeight) > 0) ? Number(rawHeight) : 170;
-    const userWeight = (rawWeight != null && !isNaN(Number(rawWeight)) && Number(rawWeight) > 0) ? Number(rawWeight) : 70;
+    const enteredWeight = (rawWeight != null && !isNaN(Number(rawWeight)) && Number(rawWeight) > 0) ? Number(rawWeight) : 70;
+    const userWeight = normaliseWeightKg(enteredWeight, userHeight);
+    if (userWeight !== enteredWeight) {
+      console.log(`[Training Plan] Weight ${enteredWeight} is implausible as kg at ${userHeight}cm — treating as lb (${userWeight}kg)`);
+    }
     const bmi = userWeight / ((userHeight / 100) ** 2);
     const bmiCategory = bmi < 18.5 ? 'underweight' : bmi < 25 ? 'normal' : bmi < 30 ? 'overweight' : 'obese';
 
@@ -451,36 +646,10 @@ export async function generateTrainingPlan(
       return fallback;
     })();
 
-    // ========== PHASE 1-3: ORIENTATION SESSION ASSESSMENT ==========
-    // Check if user needs an orientation session to gauge fitness before generating main plan
-    let orientationAssessment: OrientationAssessment | null = null;
-    const userDemographics = {
-      age: userAge,
-      gender: user[0]?.gender || overrideGender,
-      height: userHeight,
-      weight: userWeight,
-    };
-    
-    try {
-      orientationAssessment = await assessOrientationNeed(
-        userId,
-        userDemographics,
-        experienceLevel,
-        goalType
-      );
-      
-      if (orientationAssessment.needsOrientation) {
-        console.log(`[Orientation] User requires orientation session:`, {
-          reason: orientationAssessment.reason,
-          distance: orientationAssessment.recommendedDistance,
-          pace: orientationAssessment.recommendedPace,
-          riskFactors: orientationAssessment.riskFactors,
-        });
-      }
-    } catch (orientationErr) {
-      console.warn(`[Orientation] Error assessing orientation need, continuing without orientation:`, orientationErr);
-      orientationAssessment = { needsOrientation: false, recommendedDistance: 0 };
-    }
+    // Orientation: the AI prompt's ORIENTATION SESSION RULE makes the first workout the
+    // orientation session. (A separate deterministic orientation insert used to live here —
+    // it omitted the NOT NULL trainingPlanId, so it always failed after creating an empty
+    // duplicate "Week 1" row, and it prescribed a Zone 3-4 tempo effort for brand-new runners.)
     // ── Max HR: use history-derived estimate when enough data exists, else Tanaka formula ──
     // Collect peak HR from recent runs (stored as heartRate field which represents avg HR;
     // we use the top-end values as a peak-HR proxy until dedicated maxHR fields are added)
@@ -578,6 +747,18 @@ export async function generateTrainingPlan(
     // Gender: prefer DB value, then Android override
     const userGender = user[0]?.gender || overrideGender || 'Not specified';
 
+    // Progression guard inputs (novice / injured athletes) — see findProgressionViolations()
+    const needsProgressionGuard = isNovice || hasActiveInjuries;
+    const longestRecentRunMin = runsLast30.reduce((max, r) => Math.max(max, (runSecs(r) ?? 0) / 60), 0);
+    const startingLongestRunMin = longestRecentRunMin > 0 ? longestRecentRunMin : isNovice ? 2 : 10;
+    const guardPaceMinPerKm = avgPaceSecs ? Math.max(avgPaceSecs / 60, 5) : 9;
+
+    const walkRunOrientationRule = `🔑 ORIENTATION SESSION RULE (new users only):
+Set the FIRST workout's workoutType to "orientation". For this athlete it is a gentle WALK-RUN calibration — NOT a continuous run.
+- effortLabel: "orientation_calibration"
+- distance: 2, duration: 1200, intervalCount: 6, intervalDurationSeconds: 60, restDurationSeconds: 120
+- instructions: "Gentle walk-run to see how your body responds. Walk briskly for 5 minutes, then alternate 1 minute of very easy jogging with 2 minutes of walking. Walk whenever you need to — there is no target pace. Your coach will use today's data to set your personalised targets."`;
+
     // Build personalized runner profile section  
     const runnerProfileSection = `
 Runner Profile (Personal Details):
@@ -601,7 +782,7 @@ ${hasRunHistory ? `Recent Running History Summary:
 
 Last 3 Run Sessions Snapshot:
 - Number of recent sessions: ${last3AvgData?.count || 0}
-- Average distance per run: ${last3AvgData ? (last3AvgData.avgDistance / 1000).toFixed(2) : '0'}km
+- Average distance per run: ${last3AvgData ? last3AvgData.avgDistanceKm.toFixed(2) : '0'}km
 - Average pace: ${last3AvgData ? Math.floor(last3AvgData.avgPace / 60) + ':' + String(Math.round(last3AvgData.avgPace % 60)).padStart(2, '0') : 'N/A'}/km
 - Time span between sessions: ${last3AvgData?.daysSpan || 0} days
 
@@ -619,25 +800,27 @@ DO NOT treat the absence of run data as evidence of low fitness. Instead:
     return `IMPORTANT: This runner has NO previous run data recorded in this app — they are NEW to this app only.
 Build the OPTIMAL plan for this ${targetDistance}km goal. Key principle: fitness level (${experienceLevel}) informs session intensity only — it does NOT cap session distances or weekly volume.
 - Session distances and weekly volume must be built to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks
-- Start at ~${Math.round(weeklyMileageBase)}km/week and build to meet the event requirements
+- ${weeklyMileageBase > 0 ? `Start at ~${Math.round(weeklyMileageBase)}km/week and build to meet the event requirements` : `This athlete is not currently running (0 km/week) — start from walk-run and build gradually (see the PROGRESSION RULES below)`}
 - Paces will be set after their first session using real performance data — focus on session structure, not numeric targets
 
-🔑 ORIENTATION SESSION RULE (new users only):
+${(isNovice || hasActiveInjuries) ? walkRunOrientationRule : `🔑 ORIENTATION SESSION RULE (new users only):
 Set the FIRST workout's workoutType to "orientation". This is a calibration run — NOT a full training session.
 - effortLabel: "orientation_calibration"
 - distance: 3–5km (comfortable, not exhausting)
-- instructions: "Easy exploration run. Start at a comfortable pace and let it settle naturally over the first kilometre. Run the whole session at a conversational effort — you should be able to speak in full sentences throughout. Your coach will use your pace and heart rate data from today to calibrate all future session targets specifically to you."
+- instructions: "Easy exploration run. Start at a comfortable pace and let it settle naturally over the first kilometre. Run the whole session at a conversational effort — you should be able to speak in full sentences throughout. Your coach will use your pace and heart rate data from today to calibrate all future session targets specifically to you."`}
 - All other week 1-2 sessions: set workoutType and effortLabel as designed, but note in instructions that specific targets will appear once the orientation run is complete`;
   } else {
     return `IMPORTANT: This runner has NO previous run data recorded in this app.
-Use their stated fitness level (${experienceLevel}) and the ${weeklyMileageBase.toFixed(0)}km/week baseline to set appropriate starting volume.
+${weeklyMileageBase > 0
+  ? `Use their stated fitness level (${experienceLevel}) and the ${weeklyMileageBase.toFixed(0)}km/week baseline to set appropriate starting volume.`
+  : `Their stated fitness level is ${experienceLevel} and they are not currently running (0 km/week, no previous runs). Start from walk-run — do NOT assume any existing running volume.`}
 Build progressively toward the ${targetDistance}km goal.
 
-🔑 ORIENTATION SESSION RULE (new users only):
+${(isNovice || hasActiveInjuries) ? walkRunOrientationRule : `🔑 ORIENTATION SESSION RULE (new users only):
 Set the FIRST workout's workoutType to "orientation". This is a calibration run.
 - effortLabel: "orientation_calibration"
 - distance: 2–3km (gentle, achievable)
-- instructions: "Easy exploration run at a comfortable conversational pace. Your coach will use your data from this session to set your personalised training targets."`;
+- instructions: "Easy exploration run at a comfortable conversational pace. Your coach will use your data from this session to set your personalised training targets."`}`;
   }
 })()}
 `;
@@ -691,6 +874,10 @@ Apply your certified coaching expertise for 10km preparation. Your training scie
       }
 
       // ── 5km ───────────────────────────────────────────────────────────────────
+      if ((gt === '5k' || gt === 'distance_5k' || (targetDistance > 0 && targetDistance <= 8)) && isNovice && !isPreEventPlan) {
+        return `🏅 5KM COMPLETION GOAL — ${targetDistance}km, ${experienceLevel.toUpperCase()} RUNNER
+This athlete is new to running. The objective is to run ${targetDistance}km continuously and comfortably by the end of the plan — a couch-to-5K style progression from walk-run to continuous running — not 5km race performance. Do NOT apply VO2max, threshold or "long runs exceed race distance" principles. Build the habit, the tendons and the aerobic base; the longest continuous run should reach ${targetDistance}km only in the final weeks.${targetTime ? ' Any target time is a long-term aspiration — it must not drive this plan.' : ''}`;
+      }
       if (gt === '5k' || gt === 'distance_5k' || (targetDistance > 0 && targetDistance <= 8)) {
         return `🏅 5KM RACE GOAL — ${targetDistance}km
 Apply your certified coaching expertise for 5km performance. The 5km is a speed-endurance event requiring VO2max development, lactate threshold work, and neuromuscular sharpening. Long runs exceed race distance to build the aerobic base. Design the plan your coaching knowledge says is right for a ${experienceLevel} runner targeting a strong 5km in ${weeksUntilTarget} weeks.`;
@@ -964,7 +1151,7 @@ Your coaching expertise should determine:
 ⚠️ MANDATORY JSON OUTPUT: Include a "safetyDisclaimer" object (see output spec). The disclaimer text must explicitly state this plan is AI-generated training guidance, not medical advice.`;
 })() : `No current injuries or health limitations reported.`}
 
-━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${needsProgressionGuard ? buildProgressionSafetyRules({ isNovice, hasInjury: hasActiveInjuries, daysPerWeek, longestContinuousRunMin: startingLongestRunMin, targetDistance }) + '\n\n' : ''}━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 WEEK-BY-WEEK PROGRESSION — THIS IS THE MOST IMPORTANT QUALITY STANDARD:
 Every week MUST be distinct. No two weeks should have identical sessions, distances, or intensity distribution. A plan where week 1 looks the same as week 8 is not a coaching plan — it is a repeated template and is unacceptable.
@@ -1167,16 +1354,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
     console.log(`[Training Plan] AI returned ${planData.weeks.length} weeks, expected ${weeksToGenerate} (block 1 of ${isRollingPlan ? Math.ceil(weeksUntilTarget / weeksToGenerate) : 1})`);
 
     // Coerce weeks data to correct types
-    planData.weeks = planData.weeks.map((week: any) => ({
-      ...week,
-      weekNumber: parseInt(String(week.weekNumber), 10) || 1,
-      totalDistance: parseFloat(String(week.totalDistance).replace(/[^\d.]/g, '')) || 0,
-      workouts: Array.isArray(week.workouts) ? week.workouts.map((wo: any) => ({
-        ...wo,
-        dayOfWeek: parseInt(String(wo.dayOfWeek), 10) || 1,
-        distance: parseFloat(String(wo.distance).replace(/[^\d.]/g, '')) || 0,
-      })) : []
-    }));
+    planData.weeks = coercePlanWeeks(planData.weeks);
 
     // Enforce exact week count — AI sometimes returns wrong number of weeks
     if (planData.weeks.length < weeksToGenerate) {
@@ -1190,9 +1368,38 @@ App capabilities available in every session: real-time GPS pace/distance, live a
       planData.weeks = planData.weeks.slice(0, weeksToGenerate);
     }
 
+    // ── Novice / return-to-run progression guard ──────────────────────────
+    // Deterministic check; a violating plan goes back to the model once with the
+    // violations listed. We keep whichever version has fewer violations.
+    if (needsProgressionGuard) {
+      const guardOpts = { startingLongestRunMin, daysPerWeek, paceMinPerKm: guardPaceMinPerKm };
+      let violations = findProgressionViolations(planData.weeks, guardOpts);
+      if (violations.length > 0) {
+        console.warn(`[Training Plan] Progression guard: ${violations.length} violation(s) — requesting correction:\n  ${violations.join('\n  ')}`);
+        try {
+          const corrected = await requestPlanCorrection(systemPromptContent, prompt, rawContent, violations);
+          if (Array.isArray(corrected?.weeks) && corrected.weeks.length >= weeksToGenerate) {
+            const correctedWeeks = coercePlanWeeks(corrected.weeks).slice(0, weeksToGenerate);
+            const remaining = findProgressionViolations(correctedWeeks, guardOpts);
+            if (remaining.length < violations.length) {
+              planData = { ...planData, ...corrected, weeks: correctedWeeks };
+              violations = remaining;
+            }
+          }
+        } catch (correctionErr) {
+          console.error(`[Training Plan] Progression correction failed — keeping original plan:`, correctionErr);
+        }
+        if (violations.length > 0) {
+          console.warn(`[Training Plan] Progression guard: ${violations.length} violation(s) remain:\n  ${violations.join('\n  ')}`);
+        } else {
+          console.log(`[Training Plan] Progression guard: ✅ corrected plan passes`);
+        }
+      }
+    }
+
     // Sanitise numeric fields before DB insert — Postgres rejects NaN for integer/real columns
     const safeTargetTime   = (targetTime != null && !isNaN(targetTime) && targetTime > 0) ? Math.round(targetTime) : null;
-    const safeWeeklyMileage = (!isNaN(weeklyMileageBase) && weeklyMileageBase > 0) ? weeklyMileageBase : 20;
+    const safeWeeklyMileage = (!isNaN(weeklyMileageBase) && weeklyMileageBase >= 0) ? weeklyMileageBase : 0;
     const safeDaysPerWeek   = (!isNaN(daysPerWeek) && daysPerWeek >= 1) ? Math.round(daysPerWeek) : 4;
 
     // nextBlockAt: start of the last week of this block (i.e. when we should generate the next batch)
@@ -1221,9 +1428,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
       weeksToGenerate,
       daysPerWeek,
       weeklyMileageBase,
-      hasActiveInjuries: injuries.some(i =>
-        ['active','recovering','ACTIVE','RECOVERING'].includes(i.status)
-      ),
+      hasActiveInjuries,
       goalType,
       targetDistance,
     });
@@ -1272,84 +1477,12 @@ App capabilities available in every session: real-time GPS pace/distance, live a
       duration?: number | null;
     }> = [];
 
-    // ========== PHASE 3: INSERT ORIENTATION SESSION IF NEEDED ==========
-    // If user needs orientation, insert it as the very first workout (Week 1, Day 1)
-    let weekOneInsertionIndex = 0; // Track if we inserted orientation
-    if (orientationAssessment?.needsOrientation) {
-      console.log(`[Orientation] Inserting orientation session as Week 1, Day 1...`);
-      
-      try {
-        // Create Week 1 weekly plan for orientation
-        const orientationWeek = await db
-          .insert(weeklyPlans)
-          .values({
-            trainingPlanId: planId,
-            weekNumber: 1,
-            weekDescription: "Orientation & Fitness Assessment",
-            totalDistance: orientationAssessment.recommendedDistance,
-            focusArea: "Fitness Assessment",
-            intensityLevel: "Assessment",
-          })
-          .returning();
-
-        const weeklyPlanId = orientationWeek[0].id;
-
-        // Calculate today's date for the orientation workout
-        const todayInUserTz = userTimezone
-          ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
-          : new Date();
-        if (!userTimezone) todayInUserTz.setHours(0, 0, 0, 0);
-
-        // Create orientation workout
-        // Orientation sessions should be at TEMPO/THRESHOLD (Zone 3-4) to actually assess fitness
-        // NOT Zone 2, which is too easy to reveal true fitness level
-        const orientationWorkout = await db
-          .insert(plannedWorkouts)
-          .values({
-            weeklyPlanId: weeklyPlanId,
-            dayOfWeek: todayInUserTz.getDay(),
-            scheduledDate: todayInUserTz,
-            workoutType: "orientation",
-            distance: orientationAssessment.recommendedDistance,
-            targetPace: orientationAssessment.recommendedPace,
-            intensity: "tempo", // Tempo/Threshold effort to assess actual fitness
-            description: "Orientation Run: Establish Your Baseline Fitness",
-            instructions: orientationAssessment.orientationBrief,
-            effortDescription: "Steady tempo effort - challenging but sustainable (Zone 3-4)",
-            sessionGoal: "assess_fitness",
-            sessionIntent: "orientation_run",
-            hrZoneNumber: 3, // Tempo zone instead of Zone 2
-            hrZoneMinBpm: orientationAssessment.targetHeartRateZone ? Math.round(orientationAssessment.targetHeartRateZone.max) : undefined,
-            hrZoneMaxBpm: orientationAssessment.targetHeartRateZone ? Math.round(orientationAssessment.targetHeartRateZone.max * 1.15) : undefined, // Zone 3-4 range
-            hrZoneScenario: hrZoneScenario,
-          })
-          .returning();
-
-        const orientationWorkoutId = orientationWorkout[0].id;
-        console.log(`[Orientation] ✅ Orientation workout created: ${orientationWorkoutId}`);
-
-        // Schedule session instructions generation for orientation
-        pendingSessionInstructions.push({
-          workoutId: orientationWorkoutId,
-          workoutType: "orientation",
-          intensity: "tempo",
-          sessionGoal: "assess_fitness",
-          sessionIntent: "orientation_run",
-          distance: orientationAssessment.recommendedDistance,
-        });
-
-        weekOneInsertionIndex = 1; // Shift week numbering by 1
-      } catch (orientationInsertErr) {
-        console.error(`[Orientation] ❌ Error inserting orientation session, continuing without it:`, orientationInsertErr);
-      }
-    }
-
     // Create weekly plans and workouts
     for (const week of planData.weeks) {
       // weekNumber is NOT NULL integer — guard against AI returning undefined/NaN
       const safeWeekNumber = (typeof week.weekNumber === 'number' && !isNaN(week.weekNumber) && week.weekNumber > 0)
-        ? Math.round(week.weekNumber) + weekOneInsertionIndex  // Shift week number if orientation was inserted
-        : planData.weeks.indexOf(week) + 1 + weekOneInsertionIndex; // fallback: position in array + offset
+        ? Math.round(week.weekNumber)
+        : planData.weeks.indexOf(week) + 1; // fallback: position in array
 
       const weeklyPlan = await db
         .insert(weeklyPlans)
@@ -1456,6 +1589,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
             scheduledDate,
             workoutType: workout.workoutType,
             distance: safeDistance,
+            duration: safeDurationSeconds(workout.duration),
             targetPace: null, // Always null at generation — enrichment service fills this in
             intensity: workout.intensity,
             hrZoneNumber,
@@ -1610,6 +1744,39 @@ export async function generateNextBlock(planId: string, userId: string): Promise
   // ── 3. Fetch runner's recent performance data ──────────────────────────────
   const aiRunnerProfile = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
 
+  // Existing workouts — adherence, progression baseline and the plan's calendar anchor
+  const existingWorkouts = await db
+    .select({ workout: plannedWorkouts, weekNumber: weeklyPlans.weekNumber })
+    .from(plannedWorkouts)
+    .innerJoin(weeklyPlans, eq(plannedWorkouts.weeklyPlanId, weeklyPlans.id))
+    .where(eq(plannedWorkouts.trainingPlanId, planId));
+  const [blockUser] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+
+  const isNovice = isNoviceFitnessLevel(plan.experienceLevel) || isNoviceFitnessLevel(blockUser?.fitnessLevel);
+  const planInjuries: InjuryInput[] = (() => {
+    try { return plan.injuriesAtCreation ? JSON.parse(plan.injuriesAtCreation) : []; } catch { return []; }
+  })();
+  const hasActiveInjuries = planInjuries.some(i =>
+    ['active', 'recovering', 'chronic'].includes(String(i.status).toLowerCase())
+  );
+  const progressionGates: string[] = (() => {
+    try { return plan.safetyDisclaimer ? (JSON.parse(plan.safetyDisclaimer).progressionGates ?? []) : []; } catch { return []; }
+  })();
+  const needsProgressionGuard = isNovice || hasActiveInjuries;
+  const guardPaceMinPerKm = 9;
+
+  const sessionWorkouts = existingWorkouts.filter(r => r.workout.workoutType !== 'rest');
+  const completedWorkouts = sessionWorkouts.filter(r => r.workout.isCompleted);
+  const pastDueWorkouts = sessionWorkouts.filter(r => r.workout.scheduledDate && new Date(r.workout.scheduledDate) < new Date());
+  // Baseline for the progression guard: what the athlete has actually done if anything,
+  // otherwise what block 1 prescribed.
+  const longestOf = (rows: typeof sessionWorkouts) =>
+    rows.reduce((max, r) => Math.max(max, longestContinuousRunMin(r.workout, guardPaceMinPerKm)), 0);
+  const startingLongestRunMin = Math.max(
+    completedWorkouts.length > 0 ? longestOf(completedWorkouts) : longestOf(sessionWorkouts),
+    isNovice ? 2 : 10,
+  );
+
   // ── 4. Build the next-block prompt ────────────────────────────────────────
   const isLastBlock = nextBlockEnd >= totalWeeks;
   const weeksRemainingAfter = totalWeeks - nextBlockEnd;
@@ -1627,6 +1794,13 @@ The athlete has completed (or is completing) the following weeks:
 ${previousBlockSummary}
 
 Continue the progression logically from where this block ends. Do not repeat the same sessions or volumes — build on the foundation that has been laid.
+Adherence so far: ${completedWorkouts.length} of ${pastDueWorkouts.length} sessions due to date were completed${pastDueWorkouts.length > 0 && completedWorkouts.length < pastDueWorkouts.length * 0.75 ? ' — the athlete is behind the plan: consolidate (repeat or gently extend the last completed level) rather than progressing further' : ''}.
+
+━━━ THE ATHLETE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Fitness level: ${plan.experienceLevel}${isNovice ? ' (new to running)' : ''}
+${hasActiveInjuries ? `Injuries at plan creation: ${planInjuries.map(i => `${i.bodyPart} (${i.status}${i.injuryDate ? `, since ${i.injuryDate}` : ''})`).join('; ')} — keep all rehabilitation constraints from block 1; every session's instructions must state acceptable discomfort, stop symptoms and expected next-day response.` : 'No injuries recorded at plan creation.'}
+${progressionGates.length > 0 ? `Progression gates the athlete must pass before advancing:\n${progressionGates.map(g => `- ${g}`).join('\n')}` : ''}
 
 ━━━ PLAN CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1644,7 +1818,7 @@ All the same rules apply as block 1:
 - Session types, paces, and intensity must evolve across these weeks
 - Name each week's training phase explicitly in weekDescription
 
-━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${needsProgressionGuard ? buildProgressionSafetyRules({ isNovice, hasInjury: hasActiveInjuries, daysPerWeek, longestContinuousRunMin: startingLongestRunMin, targetDistance: plan.targetDistance ?? 0 }) + '\n\n' : ''}━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Generate EXACTLY ${weeksToGenerate} weeks (weeks ${nextBlockStart} to ${nextBlockEnd}).
 weekNumber values must start at ${nextBlockStart} and end at ${nextBlockEnd}.
@@ -1679,13 +1853,11 @@ STRUCTURAL CONSTRAINTS:
 - weekNumber values must be ${nextBlockStart} through ${nextBlockEnd} (not 1 through ${weeksToGenerate})
 - Do not include a coachingProgrammeSummary — just the weeks array`;
 
+  const systemPrompt = `You are an elite AI running coach continuing a personalised multi-block training programme. You have full creative authority. Use the previous block summary and athlete profile to design the next logical training phase. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`;
   const response = await openai.chat.completions.create({
     model: "gpt-4.1",
     messages: [
-      {
-        role: "system",
-        content: `You are an elite AI running coach continuing a personalised multi-block training programme. You have full creative authority. Use the previous block summary and athlete profile to design the next logical training phase. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`
-      },
+      { role: "system", content: systemPrompt },
       { role: "user", content: prompt }
     ],
     response_format: { type: "json_object" },
@@ -1698,27 +1870,66 @@ STRUCTURAL CONSTRAINTS:
   }
 
   let rawContent = (response.choices[0].message.content || '{}').replace(/```json\n?/g, '').replace(/\n?```/g, '').trim();
-  const blockData = JSON.parse(rawContent);
+  let blockData = JSON.parse(rawContent);
 
   if (!blockData.weeks || !Array.isArray(blockData.weeks) || blockData.weeks.length < weeksToGenerate) {
     throw new Error(`[NextBlock] AI returned ${blockData.weeks?.length ?? 0} weeks, expected ${weeksToGenerate}`);
   }
+  blockData.weeks = coercePlanWeeks(blockData.weeks);
 
-  // ── 5. Compute timezone-aware nextBlockAt ─────────────────────────────────
-  const userRecord = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  const userTimezone = userRecord[0]?.timezone ?? null;
+  // Same novice / return-to-run progression guard as block 1
+  if (needsProgressionGuard) {
+    const guardOpts = { startingLongestRunMin, daysPerWeek, paceMinPerKm: guardPaceMinPerKm };
+    let violations = findProgressionViolations(blockData.weeks, guardOpts);
+    if (violations.length > 0) {
+      console.warn(`[NextBlock] Progression guard: ${violations.length} violation(s) — requesting correction:\n  ${violations.join('\n  ')}`);
+      try {
+        const corrected = await requestPlanCorrection(systemPrompt, prompt, rawContent, violations);
+        if (Array.isArray(corrected?.weeks) && corrected.weeks.length >= weeksToGenerate) {
+          const correctedWeeks = coercePlanWeeks(corrected.weeks);
+          const remaining = findProgressionViolations(correctedWeeks, guardOpts);
+          if (remaining.length < violations.length) {
+            blockData = { ...blockData, weeks: correctedWeeks };
+            violations = remaining;
+          }
+        }
+      } catch (correctionErr) {
+        console.error(`[NextBlock] Progression correction failed — keeping original block:`, correctionErr);
+      }
+      if (violations.length > 0) {
+        console.warn(`[NextBlock] Progression guard: ${violations.length} violation(s) remain:\n  ${violations.join('\n  ')}`);
+      }
+    }
+  }
 
-  const newNextBlockAt: Date | null = (() => {
-    if (isLastBlock) return null; // Plan fully generated after this block
+  // ── 5. Plan calendar anchor + nextBlockAt ─────────────────────────────────
+  // Week N's dates must be offset from the plan's own week-1 Monday. This used to use the
+  // Monday of the week the block was *generated*, which pushed every later block 3–5 weeks
+  // into the future (a block generated during week 4 put week 5 at week-4-Monday + 28 days).
+  // Inverting block 1's own date formula on an existing workout keeps the same timezone basis.
+  const userTimezone = blockUser?.timezone ?? null;
+  const planWeekStart: Date = (() => {
+    const ref = existingWorkouts.find(r => r.workout.scheduledDate && r.weekNumber != null);
+    if (ref) {
+      const anchor = new Date(ref.workout.scheduledDate!);
+      const dayOffsetFromMonday = (((ref.workout.dayOfWeek ?? 1) % 7) + 6) % 7;
+      anchor.setDate(anchor.getDate() - dayOffsetFromMonday - (ref.weekNumber - 1) * 7);
+      return anchor;
+    }
     const today = userTimezone
       ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
-      : new Date();
+      : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
     const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
     const weekStart = new Date(today);
     weekStart.setDate(today.getDate() - daysSinceMonday);
+    return weekStart;
+  })();
+
+  const newNextBlockAt: Date | null = (() => {
+    if (isLastBlock) return null; // Plan fully generated after this block
     // Trigger at the start of the last week of this new block
-    const triggerDate = new Date(weekStart);
-    triggerDate.setDate(weekStart.getDate() + (nextBlockEnd - plan.currentWeek!) * 7);
+    const triggerDate = new Date(planWeekStart);
+    triggerDate.setDate(planWeekStart.getDate() + (nextBlockEnd - 1) * 7);
     return triggerDate;
   })();
 
@@ -1734,13 +1945,6 @@ STRUCTURAL CONSTRAINTS:
     duration?: number | null;
   }> = [];
 
-  const today = userTimezone
-    ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
-    : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
-  const daysSinceMonday = today.getDay() === 0 ? 6 : today.getDay() - 1;
-  const planWeekStart = new Date(today);
-  planWeekStart.setDate(today.getDate() - daysSinceMonday);
-
   for (const week of blockData.weeks) {
     const weekNum = parseInt(String(week.weekNumber), 10);
     const weeklyPlan = await db.insert(weeklyPlans).values({
@@ -1755,7 +1959,7 @@ STRUCTURAL CONSTRAINTS:
     const weeklyPlanId = weeklyPlan[0].id;
 
     for (const workout of (week.workouts ?? [])) {
-      const dayOfWeek = parseInt(String(workout.dayOfWeek), 10) || 1;
+      const dayOfWeek = workout.dayOfWeek; // coerced to 0–6 by coercePlanWeeks
       const dayOffsetFromMonday = (dayOfWeek + 6) % 7;
       const scheduledDate = new Date(planWeekStart);
       scheduledDate.setDate(planWeekStart.getDate() + ((weekNum - 1) * 7) + dayOffsetFromMonday);
@@ -1768,6 +1972,7 @@ STRUCTURAL CONSTRAINTS:
         scheduledDate,
         workoutType,
         distance: parseFloat(String(workout.distance ?? 0).replace(/[^\d.]/g, '')) || 0,
+        duration: safeDurationSeconds(workout.duration),
         targetPace: null, // Always null at generation — enrichment service fills this in
         effortLabel: workout.effortLabel ?? null,
         effortDescription: workout.effortLabel ?? null, // Mirror to effortDescription for display
