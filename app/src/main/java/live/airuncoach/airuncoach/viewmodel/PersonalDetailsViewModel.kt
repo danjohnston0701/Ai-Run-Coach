@@ -17,6 +17,8 @@ import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.UpdateUserRequest
 import live.airuncoach.airuncoach.utils.TargetDistance
+import live.airuncoach.airuncoach.utils.WeightUnit
+import live.airuncoach.airuncoach.utils.WeightUnits
 import kotlin.math.roundToInt
 
 class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
@@ -38,8 +40,12 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     private val _gender = MutableStateFlow("")
     val gender: StateFlow<String> = _gender.asStateFlow()
 
+    /** Weight as typed, in [weightUnit] (the server stores kilograms — converted on save). */
     private val _weight = MutableStateFlow("")
     val weight: StateFlow<String> = _weight.asStateFlow()
+
+    private val _weightUnit = MutableStateFlow(WeightUnit.KG)
+    val weightUnit: StateFlow<WeightUnit> = _weightUnit.asStateFlow()
 
     private val _height = MutableStateFlow("")
     val height: StateFlow<String> = _height.asStateFlow()
@@ -80,7 +86,8 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
             } else {
                 user.gender ?: ""
             }
-            _weight.value = user.weight?.toString() ?: ""
+            _weightUnit.value = WeightUnits.load(sharedPrefs, user.country)
+            _weight.value = WeightUnits.format(user.weight, _weightUnit.value)
             _height.value = user.height?.toString() ?: ""
             _defaultSessionType.value = when (user.defaultSessionType?.lowercase()) {
                 "walk" -> "Walk"
@@ -110,6 +117,12 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     
     fun onGenderChanged(gender: String) {
         _gender.value = gender
+    }
+
+    fun onWeightUnitChanged(unit: WeightUnit) {
+        _weight.value = WeightUnits.convertText(_weight.value, _weightUnit.value, unit)
+        _weightUnit.value = unit
+        WeightUnits.save(sharedPrefs, unit)
     }
 
     fun onWeightChanged(weight: String) {
@@ -153,7 +166,7 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 email = _email.value,
                 dob = formatDateOfBirth(_dateOfBirth.value),
                 gender = _gender.value.ifBlank { null },
-                weight = _weight.value.toDoubleOrNull(),
+                weight = WeightUnits.toKg(_weight.value, _weightUnit.value),
                 height = _height.value.toDoubleOrNull(),
                 fitnessLevel = null,
                 distanceScale = null,

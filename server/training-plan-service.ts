@@ -5,6 +5,7 @@
  * Plans are tailored to user's fitness level, goals, and current training load.
  */
 
+import { parseWeightKg } from "./utils/run-derivation";
 import { db } from "./db";
 import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations, sessionInstructions, coachingSessionEvents } from "@shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
@@ -105,11 +106,7 @@ export function isNoviceFitnessLevel(level?: string | null): boolean {
  * as kg but plausible as lb, treat it as lb.
  */
 export function normaliseWeightKg(rawWeight: number, heightCm: number): number {
-  const m2 = (heightCm / 100) ** 2;
-  if (rawWeight / m2 <= 55) return rawWeight;
-  const asKg = rawWeight * 0.45359237;
-  const bmiAsLb = asKg / m2;
-  return bmiAsLb >= 15 && bmiAsLb <= 55 ? Math.round(asKg * 10) / 10 : rawWeight;
+  return parseWeightKg(rawWeight, heightCm) ?? rawWeight;   // shared rule: utils/run-derivation.ts
 }
 
 const QUALITY_SESSION_TYPES = [

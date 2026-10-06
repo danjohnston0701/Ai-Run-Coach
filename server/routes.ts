@@ -104,7 +104,7 @@ import { registerUserActivityRoutes } from "./user-activity";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
-import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES } from "./utils/run-derivation";
+import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg } from "./utils/run-derivation";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -4091,7 +4091,7 @@ function transformRunForAndroid(run: any) {
             const ageYears = Math.floor(ageMs / (365.25 * 24 * 60 * 60 * 1000)); 
             return ageYears > 0 && ageYears < 150 ? ageYears : undefined; 
           })() : undefined,
-          weight: user.weight ? (() => { const w = parseFloat(user.weight); return w > 0 && w < 500 ? w : undefined; })() : undefined,
+          weight: parseWeightKg(user.weight, user.height) ?? undefined,
           injuries: aiService.activeInjuriesForPrompt(user.injuryHistory),
         } : undefined,
         coachName,
@@ -12220,12 +12220,17 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     const needsHeight = !(Number(body.runnerHeight) > 0);
     const needsWeight = !(Number(body.runnerWeight) > 0);
     const needsAge = !(Number(body.runnerAge) > 0);
-    if (!needsHeight && !needsWeight && !needsAge) return;
     try {
+      // The apps send weight from their cached profile, which can be pounds typed into the old
+      // kg-only field — normalise whichever side supplied it before it reaches the BMI note.
+      const normaliseWeight = () => {
+        if (Number(body.runnerWeight) > 0) body.runnerWeight = parseWeightKg(body.runnerWeight, body.runnerHeight) ?? undefined;
+      };
+      if (!needsHeight && !needsWeight && !needsAge) { normaliseWeight(); return; }
       const user = await storage.getUser(String(uid));
       if (!user) return;
       if (needsHeight && Number(user.height) > 0) body.runnerHeight = Number(user.height);
-      if (needsWeight && Number(user.weight) > 0) body.runnerWeight = Number(user.weight);
+      if (needsWeight) { const kg = parseWeightKg(user.weight, user.height); if (kg) body.runnerWeight = kg; }
       if (needsAge && user.dob) {
         const dob = new Date(user.dob);
         if (!Number.isNaN(dob.getTime())) {
@@ -12236,6 +12241,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           if (age > 0 && age < 120) body.runnerAge = age;
         }
       }
+      normaliseWeight();
     } catch { /* non-fatal — the model's defaults still apply */ }
   };
 

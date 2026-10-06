@@ -383,13 +383,31 @@ function toDate(v: unknown): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-/** users.weight is free text ("62", "62 kg", "140 lbs") — kg, or null when unusable. */
-export function parseWeightKg(raw: unknown): number | null {
+/**
+ * users.weight is free text ("62", "62 kg", "140 lbs") — kg, or null when unusable.
+ *
+ * The apps only offered a kg field until 2026-10 and US runners typed pounds into it ("235" from
+ * a 5'10" runner = BMI 74). A bare number that is implausible as kg for the runner's height
+ * (BMI > 55) but plausible as lb (BMI 15–55) is read as pounds. Without a height, only values
+ * beyond any realistic kg weight (> 250) are tried as pounds. Use this everywhere weight is read
+ * — BMI, calories and every AI prompt — so a pounds value is never treated as kilograms.
+ */
+export function parseWeightKg(raw: unknown, heightCm?: unknown): number | null {
   if (raw == null) return null;
   const s = String(raw).toLowerCase();
   const n = parseFloat(s);
   if (!Number.isFinite(n) || n <= 0) return null;
-  const kg = /lb/.test(s) ? n * 0.4536 : n;
+  const lbToKg = (v: number) => Math.round(v * 0.45359237 * 10) / 10;
+  let kg = /lb/.test(s) ? lbToKg(n) : n;
+  if (!/lb|kg/.test(s)) {
+    const h = parseFloat(String(heightCm ?? ""));
+    if (Number.isFinite(h) && h > 100 && h < 250) {
+      const m2 = (h / 100) ** 2;
+      if (n / m2 > 55 && lbToKg(n) / m2 >= 15 && lbToKg(n) / m2 <= 55) kg = lbToKg(n);
+    } else if (n > 250 && lbToKg(n) <= 250) {
+      kg = lbToKg(n);
+    }
+  }
   return kg >= 30 && kg <= 250 ? kg : null;
 }
 

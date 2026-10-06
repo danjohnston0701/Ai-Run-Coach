@@ -51,6 +51,7 @@
  *   Stored in user_stats.ai_runner_profile.  Injected verbatim into AI prompts.
  */
 
+import { parseWeightKg } from "./utils/run-derivation";
 import OpenAI, { APIError } from 'openai';
 import { runDistanceKm, MIN_MEANINGFUL_RUN_KM } from './utils/run-units';
 import { db } from './db';
@@ -590,7 +591,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
 
   // ── 6b. Physical build — BMI ──────────────────────────────────────────────
   const heightCm = user.height ? parseFloat(user.height) : null;
-  const weightKg = user.weight ? parseFloat(user.weight) : null;
+  const weightKg = parseWeightKg(user.weight, heightCm);   // pounds typed into the old kg field → kg
   let bmi: number | null = null;
   if (heightCm && weightKg && heightCm > 0) {
     const hm = heightCm / 100;

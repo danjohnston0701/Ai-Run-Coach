@@ -32,6 +32,8 @@ import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.utils.TargetDistance
+import live.airuncoach.airuncoach.utils.WeightUnit
+import live.airuncoach.airuncoach.ui.components.WeightUnitToggle
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import live.airuncoach.airuncoach.viewmodel.PersonalDetailsViewModel
@@ -51,6 +53,7 @@ fun PersonalDetailsScreen(
     val dateOfBirth by viewModel.dateOfBirth.collectAsState()
     val gender by viewModel.gender.collectAsState()
     val weight by viewModel.weight.collectAsState()
+    val weightUnit by viewModel.weightUnit.collectAsState()
     val height by viewModel.height.collectAsState()
     val defaultSessionType by viewModel.defaultSessionType.collectAsState()
     val targetDistanceDecimals by viewModel.targetDistanceDecimals.collectAsState()
@@ -322,11 +325,19 @@ fun PersonalDetailsScreen(
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
             item {
-                SectionTitle(title = "Weight (kg)")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SectionTitle(title = "Weight (${weightUnit.label})")
+                    WeightUnitToggle(unit = weightUnit, onUnitChange = viewModel::onWeightUnitChanged)
+                }
                 OutlinedTextField(
                     value = weight,
                     onValueChange = viewModel::onWeightChanged,
-                    label = { Text("Enter your weight in kilograms") },
+                    label = { Text(if (weightUnit == WeightUnit.LB) "Enter your weight in pounds" else "Enter your weight in kilograms") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Colors.textPrimary,

@@ -18,6 +18,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import live.airuncoach.airuncoach.utils.WeightUnit
+import live.airuncoach.airuncoach.utils.WeightUnits
+import live.airuncoach.airuncoach.ui.components.WeightUnitToggle
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -70,8 +73,9 @@ fun CreateGoalScreen(
     // Health & Wellbeing fields
     var selectedHealthTarget by remember { mutableStateOf("") }
     var customHealthGoal by remember { mutableStateOf("") }
-    var targetWeightKg by remember { mutableStateOf("") }
-    var startingWeightKg by remember { mutableStateOf("") }
+    // Weight-loss goal: typed in the runner's unit, converted to kg on submit.
+    var targetWeightText by remember { mutableStateOf("") }
+    var startingWeightText by remember { mutableStateOf("") }
     // Injury Recovery fields (shown when selectedHealthTarget == "Injury Recovery")
     var injuryBodyPart by remember { mutableStateOf("") }
     var injuryDate by remember { mutableStateOf("") }
@@ -81,16 +85,16 @@ fun CreateGoalScreen(
     // Load user data to get current weight
     val sharedPrefs = LocalContext.current.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
     val gson = Gson()
-    val userWeight = remember {
-        val userJson = sharedPrefs.getString("user", null)
-        if (userJson != null) {
-            try {
-                val user = gson.fromJson(userJson, User::class.java)
-                user.weight
-            } catch (e: Exception) {
-                null
-            }
-        } else null
+    val profileUser = remember {
+        sharedPrefs.getString("user", null)?.let { json ->
+            try { gson.fromJson(json, User::class.java) } catch (e: Exception) { null }
+        }
+    }
+    var weightUnit by remember { mutableStateOf(WeightUnits.load(sharedPrefs, profileUser?.country)) }
+    // Start from the profile weight (editable — it used to be pinned to the profile value and
+    // only sent if the runner retyped it).
+    LaunchedEffect(Unit) {
+        if (startingWeightText.isEmpty()) startingWeightText = WeightUnits.format(profileUser?.weight, weightUnit)
     }
     
     // Consistency fields
@@ -162,8 +166,8 @@ fun CreateGoalScreen(
                 timeTargetSeconds = timeTargetSeconds,
                 healthTarget = finalHealthTarget,
                 weeklyRunTarget = finalWeeklyTarget,
-                targetWeightKg = targetWeightKg.toDoubleOrNull(),
-                startingWeightKg = startingWeightKg.toDoubleOrNull(),
+                targetWeightKg = WeightUnits.toKg(targetWeightText, weightUnit),
+                startingWeightKg = WeightUnits.toKg(startingWeightText, weightUnit),
                 injuryBodyPart = if (isInjuryRecovery) injuryBodyPart.ifBlank { null } else null,
                 injuryDate = if (isInjuryRecovery) injuryDate.ifBlank { null } else null,
                 injurySeverity = if (isInjuryRecovery) injurySeverity.ifBlank { null } else null,
@@ -392,10 +396,17 @@ fun CreateGoalScreen(
                         if (selectedHealthTarget == "Lose weight") {
                             item {
                                 WeightTargetSection(
-                                    startingWeight = userWeight?.toString() ?: "",
-                                    targetWeight = targetWeightKg,
-                                    onStartingWeightChange = { startingWeightKg = it },
-                                    onTargetWeightChange = { targetWeightKg = it }
+                                    startingWeight = startingWeightText,
+                                    targetWeight = targetWeightText,
+                                    unit = weightUnit,
+                                    onUnitChange = { unit ->
+                                        startingWeightText = WeightUnits.convertText(startingWeightText, weightUnit, unit)
+                                        targetWeightText = WeightUnits.convertText(targetWeightText, weightUnit, unit)
+                                        weightUnit = unit
+                                        WeightUnits.save(sharedPrefs, unit)
+                                    },
+                                    onStartingWeightChange = { startingWeightText = it },
+                                    onTargetWeightChange = { targetWeightText = it }
                                 )
                                 Spacer(modifier = Modifier.height(Spacing.md))
                             }
@@ -1003,11 +1014,20 @@ fun HealthTargetSection(
 fun WeightTargetSection(
     startingWeight: String,
     targetWeight: String,
+    unit: WeightUnit,
+    onUnitChange: (WeightUnit) -> Unit,
     onStartingWeightChange: (String) -> Unit,
     onTargetWeightChange: (String) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        FormFieldLabel(text = "Weight Details")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FormFieldLabel(text = "Weight Details")
+            WeightUnitToggle(unit = unit, onUnitChange = onUnitChange)
+        }
         
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1024,10 +1044,10 @@ fun WeightTargetSection(
                     Spacer(modifier = Modifier.height(4.dp))
                 }
                 FormField(
-                    label = if (startingWeight.isEmpty()) "Current Weight (kg)" else "",
+                    label = if (startingWeight.isEmpty()) "Current Weight (${unit.label})" else "",
                     value = startingWeight,
                     onValueChange = onStartingWeightChange,
-                    placeholder = "e.g., 80",
+                    placeholder = if (unit == WeightUnit.LB) "e.g., 180" else "e.g., 80",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                 )
             }
@@ -1035,22 +1055,22 @@ fun WeightTargetSection(
             // Target Weight
             Column(modifier = Modifier.weight(1f)) {
                 FormField(
-                    label = "Target Weight (kg)",
+                    label = "Target Weight (${unit.label})",
                     value = targetWeight,
                     onValueChange = onTargetWeightChange,
-                    placeholder = "e.g., 70",
+                    placeholder = if (unit == WeightUnit.LB) "e.g., 160" else "e.g., 70",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                 )
             }
         }
         
         if (startingWeight.isNotEmpty() && targetWeight.isNotEmpty()) {
-            val startKg = startingWeight.toDoubleOrNull()
-            val targetKg = targetWeight.toDoubleOrNull()
-            if (startKg != null && targetKg != null && startKg > targetKg) {
-                val diff = startKg - targetKg
+            val start = startingWeight.trim().replace(',', '.').toDoubleOrNull()
+            val target = targetWeight.trim().replace(',', '.').toDoubleOrNull()
+            if (start != null && target != null && start > target) {
+                val diff = start - target
                 Text(
-                    text = "Goal: Lose ${String.format("%.1f", diff)} kg",
+                    text = "Goal: Lose ${String.format("%.1f", diff)} ${unit.label}",
                     style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
                     color = Colors.success
                 )
