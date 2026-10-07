@@ -1,3 +1,4 @@
+- [Public app launch](app-launch.md) — both mobile apps are live; website calls to action should promote downloads, not interest registration.
 - [Which client is which](client-topology.md) — repo has 3 clients (Express backend, React web, Android); users test the ANDROID app, so bugs often live there, not in client/src.
 - [Android auth token storage](android-auth-token.md) — token lives in EncryptedSharedPreferences "session_prefs" via SessionManager, NOT plain "user_prefs".
 - [Flyover video share format](flyover-video-format.md) — run flyover MUST be MP4/H.264 end-to-end (blob type + filename ext + Android share Intent/MediaScanner MIME); WebM is rejected by Instagram/WhatsApp.

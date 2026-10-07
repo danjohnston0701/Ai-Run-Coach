@@ -1,3 +1,4 @@
+import { AppDownloadLinks } from "@/components/AppDownloadLinks";
 import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +92,7 @@ export function MobileAppComingSoon({ userName, lastRunDistance }: MobileAppComi
       </header>
 
       <main className="space-y-6">
-        {/* Mobile Apps Coming Soon */}
+        {/* Download AI Run Coach */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -101,13 +102,14 @@ export function MobileAppComingSoon({ userName, lastRunDistance }: MobileAppComi
             <Smartphone className="w-10 h-10 text-primary" />
           </div>
           <h2 className="text-2xl font-display font-bold uppercase tracking-wide mb-3">
-            Mobile Apps Coming Soon
+            Mobile Apps Available Now
           </h2>
           <p className="text-muted-foreground text-sm max-w-sm mx-auto mb-8">
-            We're building native mobile apps with GPS tracking, AI coaching, and more. Stay tuned!
+            AI Run Coach is now live on iOS and Android. Download the app for GPS tracking, AI coaching, and more.
           </p>
         </motion.div>
 
+        <AppDownloadLinks />
         <div className="grid gap-4">
           {/* Android App Card */}
           <motion.div
@@ -128,10 +130,10 @@ export function MobileAppComingSoon({ userName, lastRunDistance }: MobileAppComi
                       Android App
                     </h3>
                     <p className="text-muted-foreground text-sm mt-1">
-                      Coming Soon
+                      Available Now
                     </p>
                     <Badge variant="outline" className="mt-2 border-green-500/50 text-green-400">
-                      In Development
+                      Now Live
                     </Badge>
                   </div>
                 </div>
@@ -158,10 +160,10 @@ export function MobileAppComingSoon({ userName, lastRunDistance }: MobileAppComi
                       iOS App
                     </h3>
                     <p className="text-muted-foreground text-sm mt-1">
-                      Coming Soon
+                      Available Now
                     </p>
                     <Badge variant="outline" className="mt-2 border-blue-500/50 text-blue-400">
-                      In Development
+                      Now Live
                     </Badge>
                   </div>
                 </div>
