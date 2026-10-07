@@ -159,7 +159,11 @@ class RunSessionViewModel @Inject constructor(
         private set
 
     fun setGroupRunId(id: String) {
+        val changed = groupRunId != id
         groupRunId = id
+        // Load the group once up front so the run screen's "GROUP RUN · N runners" line is
+        // filled in on the prepare screen too — polling only starts once the run is running.
+        if (changed) viewModelScope.launch { fetchGroupRunParticipants() }
     }
 
     // ── Group Run Participants ─────────────────────────────────────────────────
@@ -167,9 +171,6 @@ class RunSessionViewModel @Inject constructor(
     private val _groupRunParticipants = MutableStateFlow<List<GroupRunParticipant>>(emptyList())
     val groupRunParticipants: StateFlow<List<GroupRunParticipant>> = _groupRunParticipants.asStateFlow()
 
-    /** Whether participants are currently being fetched */
-    private val _isLoadingParticipants = MutableStateFlow(false)
-    val isLoadingParticipants: StateFlow<Boolean> = _isLoadingParticipants.asStateFlow()
 
     // ── Live Tracking Observers ────────────────────────────────────────────────
     /** Session ID for the active live tracking session, set once after createLiveSession() succeeds */
@@ -219,6 +220,7 @@ class RunSessionViewModel @Inject constructor(
         viewModelScope.launch {
             _runState.collect { runState ->
                 if (runState.isRunning && groupRunId != null) {
+                    reportGroupRunStarted()
                     startParticipantPolling()
                 } else if (!runState.isRunning) {
                     // Stop polling when run stops
@@ -234,7 +236,35 @@ class RunSessionViewModel @Inject constructor(
     /** Polling job for group run participants */
     private var participantPollingJob: kotlinx.coroutines.Job? = null
 
-    /** Start polling for group run participants every 2 seconds */
+    /** Group run this session has already told the server it started recording. */
+    private var reportedGroupRunStartId: String? = null
+
+    /**
+     * Tells the server this runner is genuinely recording the group run (stamps
+     * participants.startedAt) so everyone's in-run panel can show "Recording" rather than
+     * guessing from the pre-run "Ready" tap. Fires on the first isRunning, which also covers
+     * watch-started runs (the service drives runState either way). Retried on the next
+     * state change if it fails; the server keeps the first timestamp.
+     */
+    private fun reportGroupRunStarted() {
+        val grId = groupRunId ?: return
+        if (reportedGroupRunStartId == grId) return
+        reportedGroupRunStartId = grId
+        viewModelScope.launch {
+            try {
+                val groupRun = apiService.markGroupRunStarted(grId)
+                groupRun.participants?.let { _groupRunParticipants.value = it }
+            } catch (e: Exception) {
+                reportedGroupRunStartId = null
+                Log.w("RunSessionViewModel", "Failed to report group run start: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Poll group run participants while running. 10 s is plenty for "who's recording /
+     * who's finished" and keeps a 10-runner group from hammering the API every 2 s.
+     */
     private fun startParticipantPolling() {
         if (participantPollingJob != null) return // Already polling
         
@@ -242,10 +272,10 @@ class RunSessionViewModel @Inject constructor(
             while (groupRunId != null && _runState.value.isRunning) {
                 try {
                     fetchGroupRunParticipants()
-                    delay(2000) // Poll every 2 seconds
+                    delay(10_000)
                 } catch (e: Exception) {
                     Log.w("RunSessionViewModel", "Error polling participants: ${e.message}")
-                    delay(5000) // Back off on error
+                    delay(15_000) // Back off on error
                 }
             }
         }
@@ -261,13 +291,10 @@ class RunSessionViewModel @Inject constructor(
     private suspend fun fetchGroupRunParticipants() {
         val grId = groupRunId ?: return
         try {
-            _isLoadingParticipants.value = true
             val groupRun = apiService.getGroupRun(grId)
             _groupRunParticipants.value = groupRun.participants ?: emptyList()
         } catch (e: Exception) {
             Log.w("RunSessionViewModel", "Failed to fetch group run participants: ${e.message}")
-        } finally {
-            _isLoadingParticipants.value = false
         }
     }
 

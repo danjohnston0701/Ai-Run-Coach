@@ -265,6 +265,10 @@ interface ApiService {
     @POST("/api/group-runs/{id}/start")
     suspend fun startGroupRun(@Path("id") groupRunId: String): GroupRun?
 
+    /** This runner's app started recording the group run (idempotent — first start wins). */
+    @POST("/api/group-runs/{id}/started")
+    suspend fun markGroupRunStarted(@Path("id") groupRunId: String): GroupRun
+
     @POST("/api/group-runs/{id}/complete")
     suspend fun completeGroupRun(
         @Path("id") groupRunId: String,

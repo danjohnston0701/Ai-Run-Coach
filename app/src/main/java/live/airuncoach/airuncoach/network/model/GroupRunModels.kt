@@ -43,7 +43,9 @@ data class GroupRunCompleteRequest(
 data class GroupRunResultsResponse(
     @SerializedName("groupRunId") val groupRunId: String,
     @SerializedName("groupRunName") val groupRunName: String?,
-    @SerializedName("results") val results: List<GroupRunParticipantResult>
+    @SerializedName("results") val results: List<GroupRunParticipantResult>,
+    @SerializedName("finishedCount") val finishedCount: Int? = null,
+    @SerializedName("totalCount") val totalCount: Int? = null
 )
 
 /**
@@ -62,6 +64,10 @@ data class GroupRunParticipantResult(
     @SerializedName("runId") val runId: String?,
     @SerializedName("completedAt") val completedAt: String?,
     @SerializedName("isCurrentUser") val isCurrentUser: Boolean,
+    /** Server-ranked position (pace, runners who covered the group distance first); null = unranked. */
+    @SerializedName("rank") val rank: Int? = null,
+    /** "not_started" | "running" | "finished" */
+    @SerializedName("status") val status: String? = null,
     /** Full run record — backend should populate by looking up the run by [runId]. */
     @SerializedName("runSession") val runSession: RunSession?
 )

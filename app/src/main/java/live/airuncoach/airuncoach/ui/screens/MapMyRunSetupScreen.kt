@@ -98,8 +98,9 @@ fun MapMyRunSetupScreen(
         isGroupRun: Boolean,
         groupRunParticipants: List<String>,
         activityType: String,
-        isWatchMode: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _ -> }
+        isWatchMode: Boolean,
+        aiCoachEnabled: Boolean
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     // Remembers the last-picked target distance/time so it survives a full app close/reopen
@@ -512,7 +513,8 @@ fun MapMyRunSetupScreen(
                                             isGroupRunEnabled,
                                             groupRunParticipants,
                                             if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
-                                            true  // isWatchMode — navigate to the watch-standby run screen
+                                            true,  // isWatchMode — navigate to the watch-standby run screen
+                                            isAiCoachEnabled
                                         )
                                     }
                                 )
@@ -575,7 +577,8 @@ fun MapMyRunSetupScreen(
                                             isGroupRunEnabled,
                                             groupRunParticipants,
                                             if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
-                                            false  // isWatchMode — phone starts tracking immediately
+                                            false,  // isWatchMode — phone starts tracking immediately
+                                            isAiCoachEnabled
                                         )
                                     }
                                 )
@@ -635,7 +638,8 @@ fun MapMyRunSetupScreen(
                                     isGroupRunEnabled,
                                     groupRunParticipants,
                                     if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
-                                    false  // isWatchMode — phone starts tracking immediately
+                                    false,  // isWatchMode — phone starts tracking immediately
+                                    isAiCoachEnabled
                                 )
                             }
                         )

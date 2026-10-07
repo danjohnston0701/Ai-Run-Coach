@@ -251,6 +251,9 @@ class SyncWorker(
                 workoutType = run.workoutType,
                 workoutIntensity = run.workoutIntensity,
                 workoutDescription = run.workoutDescription,
+                // Group run link — without it a queued retry uploads unlinked and the runner
+                // shows as "Running…" in the group results forever.
+                groupRunId = run.groupRunId,
                 // ── Time-series chart data — critical for elevation, HR, pace, and cadence graphs ──
                 // These were previously missing from SyncWorker, meaning any run that failed its
                 // initial upload and was retried here would permanently lose all graph data.

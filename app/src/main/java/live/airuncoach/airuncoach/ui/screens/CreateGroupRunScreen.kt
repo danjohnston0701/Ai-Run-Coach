@@ -27,7 +27,6 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.CreateGroupRunState
 import live.airuncoach.airuncoach.viewmodel.CreateGroupRunViewModel
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -193,7 +192,11 @@ fun CreateGroupRunScreen(
                                         context,
                                         { _, hour, minute ->
                                             val ldt = LocalDateTime.of(year, month + 1, day, hour, minute)
-                                            val iso = ldt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z"
+                                            // The picked time is the runner's LOCAL time — convert to a real
+                                            // UTC instant. Appending "Z" to the local wall time saved it as if
+                                            // it were UTC, so iOS (which converts to local) and the server's
+                                            // "in the future" check were off by the timezone offset.
+                                            val iso = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
                                             viewModel.onDateTimeChanged(iso)
                                         },
                                         cal.get(Calendar.HOUR_OF_DAY),

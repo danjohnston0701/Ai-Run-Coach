@@ -33,5 +33,16 @@ data class GroupRunParticipant(
     @SerializedName("role") val role: String = "participant",         // "organiser"|"participant"
     @SerializedName("runId") val runId: String? = null,               // linked run session after run
     @SerializedName("readyToStart") val readyToStart: Boolean = false,
-    @SerializedName("completedAt") val completedAt: String? = null    // when they finished their run
-)
+    @SerializedName("completedAt") val completedAt: String? = null,   // when they finished their run
+    @SerializedName("startedAt") val startedAt: String? = null,       // when their app started recording
+    /** Server-derived: "not_started" | "running" | "finished" (null from an older backend). */
+    @SerializedName("runStatus") val runStatus: String? = null
+) {
+    /** Falls back to the raw fields when talking to a backend that predates [runStatus]. */
+    val effectiveRunStatus: String
+        get() = runStatus ?: when {
+            runId != null || completedAt != null -> "finished"
+            startedAt != null -> "running"
+            else -> "not_started"
+        }
+}

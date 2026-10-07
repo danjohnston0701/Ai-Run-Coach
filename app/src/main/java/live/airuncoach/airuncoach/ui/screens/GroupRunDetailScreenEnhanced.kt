@@ -540,7 +540,7 @@ fun ParticipantsSectionHeader(total: Int, accepted: Int, onInviteMore: (() -> Un
                 color = Colors.textPrimary
             )
             Text(
-                "$accepted going • $total invited",
+                "$accepted of $total going",
                 style = AppTextStyles.small,
                 color = Colors.textMuted
             )
@@ -605,8 +605,10 @@ fun ParticipantRowEnhanced(participant: GroupRunParticipant, status: String) {
                         )
                     }
                 }
-                if (participant.completedAt != null && status == "accepted") {
+                if (participant.effectiveRunStatus == "finished" && status == "accepted") {
                     Text("✓ Finished", style = AppTextStyles.small, color = Colors.success)
+                } else if (participant.effectiveRunStatus == "running" && status == "accepted") {
+                    Text("🏃 Recording", style = AppTextStyles.small, color = Colors.primary)
                 } else if (participant.readyToStart && status == "accepted") {
                     Text("Ready", style = AppTextStyles.small, color = Colors.primary)
                 }

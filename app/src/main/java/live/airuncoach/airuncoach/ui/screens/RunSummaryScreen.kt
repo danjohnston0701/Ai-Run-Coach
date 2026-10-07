@@ -791,8 +791,14 @@ private fun GroupRunLeaderboardTab(
                         style = AppTextStyles.h3.copy(fontWeight = FontWeight.ExtraBold),
                         color = Colors.textPrimary
                     )
+                    val finished = results?.finishedCount
+                    val total = results?.totalCount
                     Text(
-                        text = "Results",
+                        text = when {
+                            finished == null || total == null -> "Results"
+                            finished < total -> "$finished of $total finished · updating live"
+                            else -> "All $total finished"
+                        },
                         style = AppTextStyles.small,
                         color = Colors.textMuted
                     )
@@ -1109,7 +1115,7 @@ private fun GroupRunNameTimeCell(participant: GroupRunParticipantResult) {
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
-            text = participant.userName,
+            text = participant.rank?.let { "#$it ${participant.userName}" } ?: participant.userName,
             style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
             color = if (participant.isCurrentUser) Colors.primary else Colors.textPrimary,
             maxLines = 1,
@@ -1123,7 +1129,12 @@ private fun GroupRunNameTimeCell(participant: GroupRunParticipantResult) {
                 val s = totalSec % 60
                 if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
                 else String.format(Locale.US, "%d:%02d", m, s)
-            } ?: "Running…",
+            } ?: when {
+                // Marked done with no run linked (no data to compare) vs genuinely still out.
+                participant.status == "finished" || participant.completedAt != null -> "Finished"
+                participant.status == "not_started" -> "Not started"
+                else -> "Running…"
+            },
             style = AppTextStyles.small,
             color = Colors.textSecondary
         )
