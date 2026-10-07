@@ -548,7 +548,7 @@ fun MainScreen(
                         // Navigate to check_route_availability - it will handle the API check itself
                         navController.navigate("check_route_availability")
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, activityTypeString, isWatchMode ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, activityTypeString, isWatchMode, aiCoachEnabled ->
                         // Create RunSetupConfig and start run without route — preserve social settings
                         val activityType = if (activityTypeString.equals("walk", ignoreCase = true)) PhysicalActivityType.WALK else PhysicalActivityType.RUN
                         val config = RunSetupConfig(
@@ -558,6 +558,9 @@ fun MainScreen(
                             targetHours = hours,
                             targetMinutes = minutes,
                             targetSeconds = seconds,
+                            // The setup screen's AI Coach toggle — was dropped here, so every
+                            // no-route run used RunSetupConfig's default (on) whatever was chosen.
+                            aiCoachEnabled = aiCoachEnabled,
                             liveTrackingEnabled = liveTrackingEnabled,
                             liveTrackingObservers = liveTrackingObservers,
                             isGroupRun = isGroupRun,
@@ -1420,11 +1423,15 @@ fun MainScreen(
                     mode = "no_route",
                     isGroupRun = true,
                     groupRunId = groupRunId,
+                    // Same default as the dashboard's AI Coach switch (DashboardViewModel) — the
+                    // group setup used to open with coaching off whatever the runner had chosen.
+                    initialAiCoachEnabled = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+                        .getBoolean("ai_coach_enabled", true),
                     onNavigateBack = { navController.popBackStack() },
                     onGenerateRoute = { _, _, _, _, _, _, _, _, _, _, _, _, _ ->
                         // Group runs don't support route generation - ignore this callback
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, activityTypeString, isWatchMode ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, activityTypeString, isWatchMode, aiCoachEnabled ->
                         // Create RunSetupConfig with group run context
                         val config = RunSetupConfig(
                             // Setup-screen toggle — was hardcoded RUN with the value discarded.
@@ -1434,6 +1441,7 @@ fun MainScreen(
                             targetHours = hours,
                             targetMinutes = minutes,
                             targetSeconds = seconds,
+                            aiCoachEnabled = aiCoachEnabled,
                             liveTrackingEnabled = liveTrackingEnabled,
                             liveTrackingObservers = liveTrackingObservers,
                             isGroupRun = true,

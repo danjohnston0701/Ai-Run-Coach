@@ -46,6 +46,10 @@ sealed class AiAnalysisState {
     ) : AiAnalysisState()
 }
 
+/** Group-results live refresh on the Run Summary — see startGroupResultsPolling(). */
+private const val GROUP_RESULTS_POLL_INTERVAL_MS = 15_000L
+private const val GROUP_RESULTS_POLL_MAX_MS = 4 * 60 * 60 * 1000L
+
 @HiltViewModel
 class RunSummaryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -312,15 +316,13 @@ class RunSummaryViewModel @Inject constructor(
      * If the caller is the organiser, server also marks the whole group as "completed".
      * This happens silently in background — no UI interaction needed.
      */
-    private fun completeGroupRunParticipation(groupRunId: String, runId: String) {
-        viewModelScope.launch {
-            try {
-                val response = apiService.completeGroupRun(groupRunId, GroupRunCompleteRequest(runId))
-                Log.d("RunSummaryViewModel", "✅ Linked run $runId to group run $groupRunId")
-            } catch (e: Exception) {
-                // Silently log failures - the run is already saved, this is just for group linking
-                Log.w("RunSummaryViewModel", "⚠️ Failed to link run to group run $groupRunId: ${e.message}")
-            }
+    private suspend fun completeGroupRunParticipation(groupRunId: String, runId: String) {
+        try {
+            apiService.completeGroupRun(groupRunId, GroupRunCompleteRequest(runId))
+            Log.d("RunSummaryViewModel", "✅ Linked run $runId to group run $groupRunId")
+        } catch (e: Exception) {
+            // Silently log failures - the run is already saved, this is just for group linking
+            Log.w("RunSummaryViewModel", "⚠️ Failed to link run to group run $groupRunId: ${e.message}")
         }
     }
     
@@ -1440,12 +1442,12 @@ class RunSummaryViewModel @Inject constructor(
                 val lookup = apiService.getGroupRunByRun(runId)
                 _linkedGroupRunId.value = lookup.groupRunId
                 _linkedGroupRunName.value = lookup.groupRunName
-                // Auto-link this run to the group run (server links run ↔ group)
-                // If caller is organiser, server also marks whole group as "completed"
+                // Link first, then read results — launched in parallel before, the results
+                // could be fetched before this runner's own row was linked.
                 completeGroupRunParticipation(lookup.groupRunId, runId)
-                // Now load full leaderboard results
                 val results = apiService.getGroupRunResults(lookup.groupRunId)
                 _groupRunResults.value = results
+                startGroupResultsPolling(lookup.groupRunId)
             } catch (_: Exception) {
                 // 404 means this is not a group run — that's perfectly normal, stay silent
                 _linkedGroupRunId.value = null
@@ -1468,6 +1470,32 @@ class RunSummaryViewModel @Inject constructor(
                 // keep stale data
             } finally {
                 _isLoadingGroupRun.value = false
+            }
+        }
+    }
+
+    private var groupResultsPollingJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Keeps the group table live while anyone is still out running: the first runner home
+     * opens their summary long before the others finish, and each later finisher should
+     * appear without a manual refresh. Silent (no spinner — that would blank the table
+     * every tick), stops once every participant has a result, and is capped so a
+     * participant who never records anything can't keep it polling indefinitely.
+     */
+    private fun startGroupResultsPolling(groupRunId: String) {
+        if (groupResultsPollingJob?.isActive == true) return
+        groupResultsPollingJob = viewModelScope.launch {
+            val deadline = System.currentTimeMillis() + GROUP_RESULTS_POLL_MAX_MS
+            while (System.currentTimeMillis() < deadline) {
+                val current = _groupRunResults.value?.results.orEmpty()
+                if (current.isNotEmpty() && current.all { it.runId != null || it.completedAt != null }) break
+                delay(GROUP_RESULTS_POLL_INTERVAL_MS)
+                try {
+                    _groupRunResults.value = apiService.getGroupRunResults(groupRunId)
+                } catch (e: Exception) {
+                    Log.w("RunSummaryViewModel", "Group results poll failed: ${e.message}")
+                }
             }
         }
     }

@@ -405,7 +405,8 @@ fun ErrorGroupRunsState(
 fun formatGroupRunDate(isoDateTime: String?): String {
     if (isoDateTime.isNullOrEmpty()) return ""
     return try {
-        val zdt = ZonedDateTime.parse(isoDateTime)
+        // Server timestamps are UTC ("…Z") — show them in the runner's own timezone.
+        val zdt = ZonedDateTime.parse(isoDateTime).withZoneSameInstant(java.time.ZoneId.systemDefault())
         zdt.format(DateTimeFormatter.ofPattern("EEE d MMM, h:mm a", Locale.getDefault()))
     } catch (_: Exception) {
         isoDateTime.take(16).replace("T", " ")

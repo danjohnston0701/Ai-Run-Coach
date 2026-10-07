@@ -8,7 +8,8 @@
     "render:short": "remotion render Short out/garmin-iphone-short.mp4 --concurrency=2",
     "render:garmin-android": "remotion render GarminAndroid out/garmin-android.mp4 --concurrency=2",
     "render:applewatch-iphone": "remotion render AppleWatchIphone out/applewatch-iphone.mp4 --concurrency=2",
-    "render:galaxywatch-android": "remotion render GalaxyWatchAndroid out/galaxywatch-android.mp4 --concurrency=2"
+    "render:galaxywatch-android": "remotion render GalaxyWatchAndroid out/galaxywatch-android.mp4 --concurrency=2",
+    "render:group-run-reel": "remotion render GroupRunReel out/group-run-reel.mp4 --concurrency=2"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.531",

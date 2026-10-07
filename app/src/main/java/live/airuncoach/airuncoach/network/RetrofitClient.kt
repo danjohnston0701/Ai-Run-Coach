@@ -235,8 +235,10 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
         .build()
 
     val instance: ApiService by lazy {
+        // Debug-only local-server override — see debugApiBaseUrlOverride().
+        val debugOverride = debugApiBaseUrlOverride(context)
         // Use local backend for debug builds, production backend for release builds
-        val baseUrl = if (BuildConfig.DEBUG) { 
+        val baseUrl = debugOverride ?: if (BuildConfig.DEBUG) { 
             // LOCAL DEV: Your Mac's IP address
             // TOGGLE: Switch between local and production for testing
             val useLocalBackend = false // Set to false to use production backend on physical device
@@ -341,7 +343,10 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                     .build()
                 
                 // Determine base URL - ALWAYS use production for Garmin (OAuth requires consistent callback URLs)
-                val baseUrl = "https://airuncoach.live"
+                // Debug builds only: `debug_api_base_url` in user_prefs (set with adb run-as) points
+                // the app at a local server — used to film marketing footage against seeded demo
+                // data instead of real accounts. Release builds ignore it.
+                val baseUrl = debugApiBaseUrlOverride(context) ?: "https://airuncoach.live"
                 
                 // Build Retrofit with custom Gson that handles ISO date strings in Long fields
                 val retrofit = Retrofit.Builder()
@@ -355,6 +360,19 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
             }
         }
         
+        /**
+         * Debug builds only: `debug_api_base_url` in user_prefs (set with adb run-as) points the
+         * app at a local server — used to film marketing footage and test against seeded demo
+         * data instead of real accounts. Release builds always return null.
+         */
+        fun debugApiBaseUrlOverride(context: Context): String? {
+            if (!BuildConfig.DEBUG) return null
+            val url = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                .getString("debug_api_base_url", null)?.takeIf { it.isNotBlank() } ?: return null
+            Log.w("RetrofitClient", "⚠️ DEBUG API override → $url")
+            return url
+        }
+
         // Public initialize method
         fun initialize(context: Context, sessionManager: SessionManager): ApiService {
             return initializeInternal(context, sessionManager)

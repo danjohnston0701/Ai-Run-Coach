@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Group Run carousel</title>
+<!--
+  Instagram carousel (1080 x 1350, 4:5) promoting Group Runs.
+  Render: ./render.sh → slide-1.png … slide-6.png (variant chosen with ?v=1..6).
+  Every phone screen is a real screenshot of the Android app (screens/*.png), captured from the
+  debug build running against a local demo server with fictional runners — see README.md.
+  Only the headline copy and the phone frame are marketing; nothing inside the screen is mocked.
+-->
+<style>
+  :root {
+    --cyan: #00D4FF; --mint: #2FF5B0; --bg: #0A0F1A; --text: #FFFFFF; --text2: #A0AEC0; --muted: #718096; --border: #2D3748;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1350px; overflow: hidden; background: var(--bg); }
+  body { font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; }
+  .stage { position: relative; width: 1080px; height: 1350px; overflow: hidden;
+    background:
+      radial-gradient(ellipse 70% 50% at 80% 62%, rgba(0,212,255,0.20) 0%, rgba(0,212,255,0) 65%),
+      radial-gradient(ellipse 55% 40% at 0% 100%, rgba(255,107,53,0.16) 0%, rgba(255,107,53,0) 70%),
+      linear-gradient(165deg, #0E1628 0%, #0A0F1A 50%, #060A12 100%); }
+  .streaks { position: absolute; inset: 0; pointer-events: none; }
+
+  .copy { position: absolute; left: 70px; top: 96px; width: 450px; }
+  .kicker { display: inline-flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--cyan); }
+  .kicker .num { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--cyan);
+    display: grid; place-items: center; font-size: 19px; letter-spacing: 0; }
+  h1 { font-size: 62px; line-height: 1.02; font-weight: 800; letter-spacing: -2px; margin-top: 22px; }
+  h1 em { font-style: normal; background: linear-gradient(90deg, var(--cyan), var(--mint));
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 27px; line-height: 1.42; color: var(--text2); margin-top: 24px; }
+
+  /* Pixel-style frame around a real 1080x2400 screenshot */
+  .phone { position: absolute; right: 60px; top: 120px; width: 470px; height: 1030px; border-radius: 54px; padding: 16px;
+    background: linear-gradient(150deg, #3b3f46 0%, #1c1e22 35%, #121316 65%, #34383e 100%);
+    box-shadow: 0 50px 110px rgba(0,0,0,.6), 0 12px 36px rgba(0,0,0,.35), inset 0 0 0 1.5px rgba(255,255,255,.08); }
+  .phone img { display: block; width: 100%; height: 100%; border-radius: 26px; object-fit: cover; object-position: top; }
+
+  .brand { position: absolute; left: 80px; bottom: 70px; display: flex; align-items: center; gap: 16px; font-size: 26px; font-weight: 700; }
+  .brand img { width: 58px; height: 58px; border-radius: 14px; }
+  .swipe { position: absolute; left: 80px; bottom: 160px; font-size: 22px; color: var(--text2); font-weight: 600; letter-spacing: .04em; }
+
+  .cta { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 90px; }
+  .cta img { width: 200px; height: 200px; border-radius: 46px; box-shadow: 0 30px 80px rgba(0,212,255,.28); }
+  .cta h1 { font-size: 96px !important; margin-top: 50px; }
+  .cta .sub { margin: 26px auto 0; font-size: 34px; }
+  .steps { margin-top: 56px; display: grid; gap: 16px; text-align: left; width: 820px; }
+  .step { display: flex; gap: 20px; align-items: center; background: rgba(31,41,55,.75); border: 1px solid var(--border); border-radius: 22px; padding: 22px 26px; font-size: 27px; }
+  .step .n { flex: none; width: 50px; height: 50px; border-radius: 50%; background: var(--cyan); color: var(--bg); display: grid; place-items: center; font-weight: 800; font-size: 24px; }
+  .dl { margin-top: 54px; display: inline-flex; padding: 24px 44px; border-radius: 999px; font-size: 30px; font-weight: 800;
+    background: linear-gradient(90deg, var(--cyan), var(--mint)); color: #04111C; box-shadow: 0 20px 50px rgba(0,212,255,.3); }
+  .plat { margin-top: 22px; font-size: 22px; color: var(--muted); letter-spacing: .06em; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <svg class="streaks" width="1080" height="1350">
+    <defs><linearGradient id="sg" x1="0" x2="1"><stop offset="0" stop-color="#00D4FF" stop-opacity="0"/><stop offset="1" stop-color="#00D4FF" stop-opacity=".55"/></linearGradient></defs>
+    <g stroke="url(#sg)" stroke-linecap="round">
+      <line x1="-40" y1="1050" x2="380" y2="950" stroke-width="3"/>
+      <line x1="-40" y1="1095" x2="300" y2="1015" stroke-width="2"/>
+      <line x1="-40" y1="1140" x2="420" y2="1030" stroke-width="1.5"/>
+    </g>
+  </svg>
+  <div id="content"></div>
+</div>
+<script>
+const v = Number(new URLSearchParams(location.search).get("v") || 1);
+const phone = (src) => `<div class="phone"><img src="screens/${src}"></div>`;
+const brand = `<div class="brand"><img src="app-icon.png">Ai Run Coach</div>`;
+const swipe = `<div class="swipe">Swipe →</div>`;
+const slide = (kicker, a, b, sub, src) => `
+  <div class="copy"><div class="kicker">${kicker}</div><h1>${a}<br><em>${b}</em></h1><div class="sub">${sub}</div></div>
+  ${phone(src)}${brand}${swipe}`;
+const slides = {
+  1: () => slide("New · Group Runs", "Run together.", "Wherever you are.",
+    "Start a group run with your crew — everyone records their own run with their own AI coach.", "run-coach.png"),
+  2: () => slide('<span class="num">1</span>Plan', "Bring your", "running crew.",
+    "Set the distance, time and meeting point, then invite friends from the app.", "detail.png"),
+  3: () => slide('<span class="num">2</span>Run', "Your run,", "your coach.",
+    "The run screen stays exactly as you know it — plus one line showing who's in the group and who's finished.", "run-finished.png"),
+  4: () => slide('<span class="num">3</span>Compare', "Results that", "fill in live.",
+    "Home first? Watch the group table update as each runner finishes — pace, heart rate, cadence and elevation.", "results.png"),
+  5: () => slide('<span class="num">4</span>Debrief', "Your AI coach", "reads the group.",
+    "A personal debrief on how you ran against everyone else, and what to work on next.", "debrief.png"),
+  6: () => `
+    <div class="cta"><img src="app-icon.png">
+      <h1>Your crew.<br><em>One run.</em></h1>
+      <div class="sub">Group Runs are live in Ai Run Coach.</div>
+      <div class="steps">
+        <div class="step"><span class="n">1</span><span>Profile → <b>Group Runs</b> → create a run</span></div>
+        <div class="step"><span class="n">2</span><span>Invite your friends</span></div>
+        <div class="step"><span class="n">3</span><span>Run — then compare results as everyone finishes</span></div>
+      </div>
+      <div class="dl">Download free · link in bio</div>
+      <div class="plat">iPHONE · ANDROID · GARMIN · APPLE WATCH · GALAXY WATCH</div>
+    </div>`,
+};
+document.getElementById("content").innerHTML = (slides[v] || slides[1])();
+</script>
+</body>
+</html>

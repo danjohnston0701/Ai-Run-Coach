@@ -2153,6 +2153,7 @@ export const groupRunParticipants = pgTable("group_run_participants", {
   readyToStart: boolean("ready_to_start").notNull().default(false),
   runId: varchar("run_id").references(() => runs.id),              // linked completed run
   joinedAt: timestamp("joined_at").defaultNow(),
+  startedAt: timestamp("started_at"),                                // when the participant's app started recording this group run
   completedAt: timestamp("completed_at"),                            // when the participant finished their run
 });
 

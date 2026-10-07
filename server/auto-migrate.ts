@@ -475,6 +475,13 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_group_run_participants_completed_at",
       sql: "CREATE INDEX IF NOT EXISTS idx_group_run_participants_completed_at ON group_run_participants(group_run_id, completed_at)",
     },
+    // When the participant's app actually started recording the group run (POST
+    // /api/group-runs/:id/started) — lets everyone see who is recording vs who only
+    // tapped "Ready" (which is all the in-run panel had to go on before).
+    {
+      name: "group_run_participants.started_at",
+      sql: "ALTER TABLE group_run_participants ADD COLUMN IF NOT EXISTS started_at TIMESTAMP DEFAULT NULL",
+    },
 
     // ── runs.power_saver_mode_detected ───────────────────────────────────────────
     // Tracks whether the phone had power saver / battery saver active during the run.

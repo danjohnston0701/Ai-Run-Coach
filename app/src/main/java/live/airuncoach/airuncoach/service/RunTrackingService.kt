@@ -4510,6 +4510,10 @@ class RunTrackingService : Service(), SensorEventListener {
             workoutType = planWorkoutType,
             workoutIntensity = planWorkoutIntensity,
             workoutDescription = planWorkoutDescription,
+            // Group run link — stamped on the session itself (not just read from the service
+            // field at upload time) so a run that falls back to SyncQueue/SyncWorker still
+            // carries it; otherwise an offline finish never linked to the group.
+            groupRunId = groupRunId,
             // ── Garmin watch device info ───────────────────────────────────────
             hasGarminData = hasGarminData,
             garminDeviceName = garminDeviceName,
@@ -5444,7 +5448,7 @@ class RunTrackingService : Service(), SensorEventListener {
             workoutIntensity = runSession.workoutIntensity,
             workoutDescription = runSession.workoutDescription,
             // Group run context if this run is part of a group
-            groupRunId = groupRunId,
+            groupRunId = runSession.groupRunId ?: groupRunId,
             // Mark as Garmin data if run was completed on the watch
             hasGarminData = hasGarminData || isWatchRun,
             garminDeviceName = garminDeviceName ?: deviceName,

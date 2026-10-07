@@ -96,6 +96,7 @@ import achievementsRouter from "./routes-achievements";
 import googlePlayRouter from "./routes-google-play";
 import guestTourRouter, { markGuestTourConverted } from "./routes-guest-tour";
 import { runDistanceKm } from "./utils/run-units";
+import { rankGroupResults } from "./group-run-results";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
@@ -5745,7 +5746,9 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       const groupRun = await storage.createGroupRun({
         hostUserId: creatorId,
         title: name,
-        description: description || null,
+        // Column is NOT NULL DEFAULT '' — an explicit null (blank description, which the
+        // create screens allow) made every such create fail with a 500.
+        description: typeof description === "string" ? description : "",
         meetingPoint: meetingPoint || null,
         meetingLat: meetingLat ? parseFloat(meetingLat) : null,
         meetingLng: meetingLng ? parseFloat(meetingLng) : null,
@@ -15680,6 +15683,34 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   }
 
+  // A participant's app started recording this group run. Called by both apps when the
+  // session actually begins (phone start or watch start), so the in-run panel and the
+  // group detail can show who is genuinely recording — "ready" only meant someone tapped
+  // a button on the detail screen. First start wins (a resumed/restarted session keeps it).
+  app.post("/api/group-runs/:groupRunId/started", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { groupRunId } = req.params;
+      const userId = req.user!.userId;
+      const gr = await storage.getGroupRun(groupRunId);
+      if (!gr) return res.status(404).json({ error: 'Group run not found' });
+
+      const updated = await db.update(groupRunParticipants)
+        .set({ startedAt: sql`COALESCE(${groupRunParticipants.startedAt}, NOW())`, readyToStart: true })
+        .where(and(
+          eq(groupRunParticipants.groupRunId, groupRunId),
+          eq(groupRunParticipants.userId, userId),
+          eq(groupRunParticipants.invitationStatus, 'accepted'),
+        ))
+        .returning({ id: groupRunParticipants.id });
+      if (updated.length === 0) return res.status(403).json({ error: 'Not an accepted participant in this group run' });
+
+      res.json(await buildGroupRunResponse(groupRunId, userId));
+    } catch (error: any) {
+      console.error("Group run started error:", error);
+      res.status(500).json({ error: "Failed to record group run start" });
+    }
+  });
+
   app.post("/api/group-runs/:groupRunId/complete", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { groupRunId } = req.params;
@@ -15715,59 +15746,85 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       const gr = await storage.getGroupRun(groupRunId);
       if (!gr) return res.status(404).json({ error: 'Group run not found' });
 
-      const allParticipants = await db.select().from(groupRunParticipants)
-        .where(and(
-          eq(groupRunParticipants.groupRunId, groupRunId),
-          eq(groupRunParticipants.invitationStatus, 'accepted')
-        ));
+      const everyone = await db.select().from(groupRunParticipants)
+        .where(eq(groupRunParticipants.groupRunId, groupRunId));
+      // Results carry every runner's full run record — only people in the group see them.
+      if (gr.hostUserId !== userId && !everyone.some(p => p.userId === userId)) {
+        return res.status(403).json({ error: 'Not a participant in this group run' });
+      }
+      const allParticipants = everyone.filter(p => p.invitationStatus === 'accepted');
 
-      const results = await Promise.all(
+      const loaded = await Promise.all(
         allParticipants.map(async (p) => {
           const u = await storage.getUser(p.userId);
-          let runData = null;
+          let runData: any = null;
           if (p.runId) {
-            try {
-              runData = await storage.getRun(p.runId);
-            } catch {}
+            try { runData = await storage.getRun(p.runId); } catch {}
           }
-          const rawDistanceKm = runData ? ((runData as any).distance || 0) : 0;
-          return {
-            userId: p.userId,
-            userName: u?.name || 'Unknown',
-            profilePic: u?.profilePic || null,
-            runId: p.runId || null,
-            completedAt: p.completedAt?.toISOString() || null,
-            isCurrentUser: p.userId === userId,
-            _sortDistanceKm: rawDistanceKm,
-            // Full run record, shaped via the same transformRunForAndroid() used by
-            // GET /api/runs/:id — Android's GroupRunParticipantResult.runSession (its own doc
-            // comment: "replaces the old [stats] summary object — we use the real run record so
-            // the table can display all the same rich metrics as the individual run history")
-            // deserializes with Gson field-name matching and no @SerializedName annotations, so
-            // it needs the same field names/units (meters, milliseconds) as that endpoint, not
-            // the raw DB row (kilometers, seconds, different field names entirely).
-            runSession: runData ? transformRunForAndroid(runData) : null,
-            // Curated subset — iOS's GroupRunParticipantResult.stats (GroupRunResultsView.swift)
-            // still decodes this shape and was not updated when Android moved to runSession, so
-            // both are populated here to avoid regressing either platform.
-            stats: runData ? {
-              distance: rawDistanceKm,
-              duration: (runData as any).duration || 0,
-              avg_pace: (runData as any).avgPace || null,
-              avg_heart_rate: (runData as any).avgHeartRate || null,
-              calories: (runData as any).calories || null,
-              avg_cadence: (runData as any).cadence || null,
-              total_elevation_gain: (runData as any).elevationGain || null,
-            } : null,
-          };
+          return { p, u, runData };
         })
       );
+      const byUser = new Map(loaded.map(l => [l.p.userId, l]));
 
-      // Sort by distance descending
-      results.sort((a, b) => (b._sortDistanceKm || 0) - (a._sortDistanceKm || 0));
-      const responseResults = results.map(({ _sortDistanceKm, ...rest }) => rest);
+      // One ordering for the table and the AI debrief — see group-run-results.ts.
+      const ranked = rankGroupResults(
+        loaded.map(({ p, runData }) => ({
+          userId: p.userId,
+          rawDistance: runData ? (runData.distance ?? 0) : null,
+          rawDuration: runData ? (runData.duration ?? 0) : null,
+          startedAt: p.startedAt ?? null,
+          completedAt: p.completedAt ?? null,
+        })),
+        gr.targetDistance,
+      );
 
-      res.json({ groupRunId, groupRunName: gr.title, results: responseResults });
+      const responseResults = ranked.map((r) => {
+        const { p, u, runData } = byUser.get(r.userId)!;
+        // Full run record, shaped via the same transformRunForAndroid() used by
+        // GET /api/runs/:id — Android's GroupRunParticipantResult.runSession deserializes
+        // with Gson field-name matching, so it needs that endpoint's field names/units
+        // (meters, milliseconds), not the raw DB row. averagePace is replaced with the
+        // pace recomputed from distance/duration so every row is computed the same way
+        // whichever device recorded it.
+        const runSession = runData ? transformRunForAndroid(runData) : null;
+        if (runSession && r.pace) runSession.averagePace = r.pace;
+        return {
+          userId: p.userId,
+          userName: u?.name || 'Unknown',
+          profilePic: u?.profilePic || null,
+          runId: p.runId || null,
+          completedAt: p.completedAt?.toISOString() || null,
+          startedAt: p.startedAt?.toISOString() || null,
+          isCurrentUser: p.userId === userId,
+          status: r.status,
+          rank: r.rank,
+          distanceKm: r.distanceKm,
+          durationSeconds: r.durationSeconds,
+          paceSecondsPerKm: r.paceSecondsPerKm != null ? Math.round(r.paceSecondsPerKm) : null,
+          coveredTargetDistance: r.coveredTargetDistance,
+          runSession,
+          // Curated subset — iOS's GroupRunParticipantResult.stats still decodes this
+          // shape as a fallback, so it's kept populated (normalised units: km, seconds).
+          stats: runData ? {
+            distance: r.distanceKm ?? 0,
+            duration: r.durationSeconds ?? 0,
+            avg_pace: r.pace ?? runData.avgPace ?? null,
+            avg_heart_rate: runData.avgHeartRate || null,
+            calories: runData.calories || null,
+            avg_cadence: runData.cadence || null,
+            total_elevation_gain: runData.elevationGain || null,
+          } : null,
+        };
+      });
+
+      res.json({
+        groupRunId,
+        groupRunName: gr.title,
+        targetDistanceKm: gr.targetDistance ?? null,
+        finishedCount: ranked.filter(r => r.status === 'finished').length,
+        totalCount: ranked.length,
+        results: responseResults,
+      });
     } catch (error: any) {
       console.error("Group run results error:", error);
       res.status(500).json({ error: "Failed to get group run results" });
@@ -18904,6 +18961,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         invitationStatus: groupRunParticipants.invitationStatus,
         readyToStart: groupRunParticipants.readyToStart,
         runId: groupRunParticipants.runId,
+        startedAt: groupRunParticipants.startedAt,
         completedAt: groupRunParticipants.completedAt,
         name: users.name,
         profilePic: users.profilePic,
@@ -18946,7 +19004,11 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         role: p.role,
         runId: p.runId,
         readyToStart: p.readyToStart,
+        startedAt: p.startedAt?.toISOString() ?? null,
         completedAt: p.completedAt?.toISOString() ?? null,
+        // Live state for the in-run panel / detail screen: finished (run linked or marked
+        // done) > running (app started recording) > not_started.
+        runStatus: p.runId || p.completedAt ? "finished" : p.startedAt ? "running" : "not_started",
       })),
     };
   }
@@ -19028,46 +19090,50 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         return res.json({ debrief: "Not enough participants to generate a group comparison." });
       }
 
-      // Fetch run data for each participant who has a linked run
+      // Fetch run data for each participant who has a linked run. Field names are the
+      // Drizzle schema's (cadence / elevationGain) — this previously read avgCadence /
+      // totalElevationGain, which don't exist, so the prompt always said "not recorded".
       const participantData = await Promise.all(participants.map(async p => {
         const user = await db.select().from(users).where(eq(users.id, p.userId)).limit(1);
-        const name = user[0]?.username || "Runner";
-        if (!p.runId) return { name, userId: p.userId, role: p.role, hasRun: false };
-
-        const run = await storage.getRun(p.runId);
+        const name = user[0]?.name || user[0]?.username || "Runner";
+        const run: any = p.runId ? await storage.getRun(p.runId) : null;
         return {
           name,
           userId: p.userId,
           role: p.role,
-          hasRun: true,
-          distanceKm: run ? Number(run.distance) : null,
-          durationSec: run ? Number(run.duration) : null,
-          avgPace: run?.avgPace || null,
-          avgHeartRate: run ? Number(run.avgHeartRate) : null,
-          avgCadence: run ? Number(run.avgCadence) : null,
-          totalElevationGain: run ? Number(run.totalElevationGain) : null,
+          hasRun: !!run,
+          startedAt: p.startedAt ?? null,
+          completedAt: p.completedAt ?? null,
+          rawDistance: run ? (run.distance ?? 0) : null,
+          rawDuration: run ? (run.duration ?? 0) : null,
+          avgHeartRate: run?.avgHeartRate || null,
+          avgCadence: run?.cadence || null,
+          totalElevationGain: run?.elevationGain ?? null,
         };
       }));
 
-      const finishers = participantData.filter(p => p.hasRun && p.durationSec);
       const currentUser = participantData.find(p => p.userId === userId);
-
       if (!currentUser?.hasRun) {
         return res.json({ debrief: "Complete your run first to generate a personalised group debrief." });
       }
 
-      // Sort finishers by pace (faster = lower sec/km)
-      const ranked = [...finishers].sort((a, b) => {
-        const paceA = (a.durationSec! / (a.distanceKm || 1));
-        const paceB = (b.durationSec! / (b.distanceKm || 1));
-        return paceA - paceB;
-      });
+      // Same ranking as the results table (group-run-results.ts).
+      const rankedAll = rankGroupResults(participantData, (await storage.getGroupRun(id))?.targetDistance);
+      const ranked = rankedAll
+        .filter(r => r.rank != null)
+        .map(r => ({ ...r, ...participantData.find(p => p.userId === r.userId)!, rank: r.rank }));
+      const finishers = ranked;
+      const me = ranked.find(p => p.userId === userId);
+      if (!me) {
+        return res.json({ debrief: "Your run was too short to compare with the group." });
+      }
 
-      const userRank = ranked.findIndex(p => p.userId === userId) + 1;
-      const groupAvgPace = ranked.reduce((sum, p) => sum + (p.durationSec! / (p.distanceKm || 1)), 0) / ranked.length;
-      const userPace = currentUser.durationSec! / (currentUser.distanceKm || 1);
+      const userRank = me.rank!;
+      const groupAvgPace = ranked.reduce((sum, p) => sum + p.paceSecondsPerKm!, 0) / ranked.length;
+      const userPace = me.paceSecondsPerKm!;
       const paceVsGroupSec = groupAvgPace - userPace; // positive = user faster
       const paceVsGroupPct = Math.abs(paceVsGroupSec / groupAvgPace * 100);
+      const stillOut = rankedAll.filter(r => r.status !== "finished").length;
 
       const prompt = `You are an elite running coach giving a personalised post-run debrief after a group run.
 
@@ -19076,14 +19142,15 @@ Total participants who finished: ${finishers.length}
 Current user "${currentUser.name}" finished rank ${userRank} of ${finishers.length}
 
 CURRENT USER STATS:
-- Pace: ${currentUser.avgPace || 'unknown'}
+- Pace: ${me.pace}/km
 - HR: ${currentUser.avgHeartRate ? currentUser.avgHeartRate + ' bpm' : 'not recorded'}
 - Cadence: ${currentUser.avgCadence ? currentUser.avgCadence + ' spm' : 'not recorded'}
 - Elevation gain: ${currentUser.totalElevationGain ? currentUser.totalElevationGain + 'm' : 'not recorded'}
 
 GROUP COMPARISON:
 - User was ${paceVsGroupSec > 0 ? `${paceVsGroupPct.toFixed(1)}% faster` : `${paceVsGroupPct.toFixed(1)}% slower`} than group average pace
-- Top finisher: ${ranked[0]?.name} (${ranked[0]?.avgPace || 'unknown pace'})
+- Top finisher: ${ranked[0]?.name} (${ranked[0]?.pace ? ranked[0].pace + '/km' : 'unknown pace'})
+${stillOut > 0 ? `- ${stillOut} runner(s) are still out on the course, so this ranking is provisional — say so briefly.` : ''}
 
 Write a 3-4 sentence personalised debrief in a warm, encouraging coaching voice. Include:
 1. A specific insight about their performance vs the group (pace, HR efficiency, or cadence)
