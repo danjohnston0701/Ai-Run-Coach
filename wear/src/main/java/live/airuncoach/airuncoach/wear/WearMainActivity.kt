@@ -44,6 +44,11 @@ class WearMainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        controller.onUiVisible()
+    }
+
     /**
      * Extra multifunction buttons, on watches that have them, arrive here as raw key events —
      * left unhandled, Wear OS's default action exits straight to the watch face with no
@@ -79,6 +84,8 @@ class WearMainActivity : ComponentActivity() {
             Manifest.permission.BODY_SENSORS,
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACTIVITY_RECOGNITION,
+            // The run-in-progress notification / Ongoing Activity (API 33+).
+            Manifest.permission.POST_NOTIFICATIONS,
         ).filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (needed.isNotEmpty()) {
             permissionLauncher.launch(needed.toTypedArray())

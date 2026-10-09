@@ -14,27 +14,32 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import live.airuncoach.airuncoach.wear.BuildConfig
 import live.airuncoach.airuncoach.wear.data.DirectHttpApiClient
 import live.airuncoach.airuncoach.wear.data.RetryLoop
+import live.airuncoach.airuncoach.wear.data.RunSyncer
 import live.airuncoach.airuncoach.wear.data.SessionDataRequest
-import live.airuncoach.airuncoach.wear.data.SessionEndRequest
 import live.airuncoach.airuncoach.wear.data.SessionStartRequest
-import live.airuncoach.airuncoach.wear.data.SessionSummary
-import live.airuncoach.airuncoach.wear.data.UploadBatchRequest
 import live.airuncoach.airuncoach.wear.data.WearDataLayerClient
 import live.airuncoach.airuncoach.wear.sensors.HealthServicesManager
 import live.airuncoach.airuncoach.wear.sensors.resolveGpsQuality
 import live.airuncoach.airuncoach.wear.storage.CrashBreadcrumb
 import live.airuncoach.airuncoach.wear.storage.GpsPoint
 import live.airuncoach.airuncoach.wear.storage.OfflineGpsBuffer
+import live.airuncoach.airuncoach.wear.storage.PendingRunStore
+import live.airuncoach.airuncoach.wear.storage.RunRecord
 import live.airuncoach.airuncoach.wear.storage.SaveTier
 import live.airuncoach.airuncoach.wear.storage.WearPreferences
+import live.airuncoach.airuncoach.wear.sync.SyncWorker
+import org.json.JSONObject
 import live.airuncoach.airuncoach.wear.ui.Overlay
 import live.airuncoach.airuncoach.wear.ui.RunScreenState
 import java.util.UUID
@@ -59,7 +64,9 @@ class RunSessionController(
     private val httpApi: DirectHttpApiClient,
     private val health: HealthServicesManager,
     private val prefs: WearPreferences,
-    private val offlineBuffer: OfflineGpsBuffer
+    private val offlineBuffer: OfflineGpsBuffer,
+    private val store: PendingRunStore,
+    private val syncer: RunSyncer
 ) {
     companion object {
         private const val TAG = "RunSessionController"
@@ -74,11 +81,15 @@ class RunSessionController(
         private const val PAUSE_RESUME_RETRY_INTERVAL_MS = 5000L
         private const val GPS_LOST_THRESHOLD_MS = 2000L
         private const val CONNECT_WAIT_GRACE_MS = 8000L
-        private const val OFFLINE_CAPTURE_INTERVAL_MS = 15_000L
         private const val WATCH_DATA_INTERVAL_MS = 2000L
         private const val HTTP_DATA_INTERVAL_MS = 1000L
-        private const val MIN_SAVE_DISTANCE_M = 100.0
-        private const val MIN_SAVE_DURATION_S = 30
+        /** How much of a run a flat battery or a killed app can cost. */
+        private const val CHECKPOINT_INTERVAL_MS = 30_000L
+        // DataStreamer.mc: 5 retries 2 s apart, waiting for the token if it hasn't arrived.
+        private const val SESSION_START_ATTEMPTS = 6
+        private const val SESSION_START_RETRY_MS = 5_000L
+        /** What the server's watchDeviceLabel()/watchExternalSource() key Galaxy runs on. */
+        const val DEVICE_MODEL = "Samsung Galaxy Watch (Wear OS)"
     }
 
     private val _state = MutableStateFlow(RunScreenState())
@@ -148,7 +159,24 @@ class RunSessionController(
     private var lastWatchDataSentMs = 0L
     private var lastHttpDataSentMs = 0L
     private var lastOfflineCaptureMs = 0L
+    private var lastCheckpointMs = 0L
     private var statusClearJob: kotlinx.coroutines.Job? = null
+
+    /** Moving time of the current watch-owned run (pauses excluded). */
+    private val clock = ActiveClock()
+    private var startedAtEpochSec = 0L
+    /** session/start reached the server for [sessionId]. */
+    @Volatile private var sessionStarted = false
+    /** Distance already covered before a relaunch — Health Services reports 0 until its first
+     * update after reattaching, which must not wipe the distance off the screen/checkpoint. */
+    private var distanceFloorM = 0.0
+    private val checkpointMutex = Mutex()
+
+    /** Crash breadcrumb from the previous app run, forwarded with the first watchReady that
+     * actually reaches the phone. */
+    private var pendingCrashForPhone: String? = null
+    /** The server rejected our token mid-run; drop back to pairing once the run is over. */
+    private var authExpiredPending = false
 
     // Run summary accumulators (for endSession)
     private var sumHr = 0.0; private var maxHr = 0; private var sumCadence = 0.0
@@ -175,17 +203,15 @@ class RunSessionController(
     }
 
     fun start() {
-        scope.launch {
-            val token = prefs.getAuthTokenOnce()
-            val storedMaxHr = prefs.getMaxHrOnce()
-            _state.update { it.copy(isAuthenticated = !token.isNullOrBlank(), overlay = if (!token.isNullOrBlank()) Overlay.GPS_WAIT else Overlay.WAITING,
-                maxHr = storedMaxHr) }
-        }
         connectStartMs = System.currentTimeMillis()
+        pendingCrashForPhone = CrashBreadcrumb.consumePending(context)
+        pendingCrashForPhone?.let { showStatus("Last crash: $it", 15_000L) }
 
-        // The Data Layer's view of the phone is the connection state. This was never wired up,
-        // so isPhoneConnected stayed false forever: the prepare screen always read "Phone not
-        // connected", idle showed OFFLINE, and watch data was never streamed to the phone.
+        // The Data Layer's view of the phone is the connection state. Every time the phone
+        // (re)appears: say hello (the phone answers with auth, any prepared run and the session
+        // type — it can't before it knows the watch is there; a watchReady sent at launch was
+        // dropped because no phone node was known yet), report runs that synced while it was
+        // away, and try the queue again since the watch may now have the phone's internet.
         scope.launch {
             dataLayer.isPhoneConnected.collect { connected ->
                 val s = _state.value
@@ -196,22 +222,155 @@ class RunSessionController(
                     showStatus("Phone lost - saving offline", 5000L)
                 }
                 _state.update { it.copy(isPhoneConnected = connected) }
+                if (connected && !s.isPhoneConnected) onPhoneReachable()
             }
         }
 
-        val pendingCrash = CrashBreadcrumb.consumePending(context)
         dataLayer.onMessage = { type, payload -> handleMessage(type, payload) }
         dataLayer.start()
-        dataLayer.sendCommand("watchReady", buildMap {
-            put("hasPendingSync", false) // set true below if a persisted batch is found
-            if (pendingCrash != null) put("lastCrash", pendingCrash)
-        })
-        if (pendingCrash != null) {
-            showStatus("Last crash: $pendingCrash", 15_000L)
-        }
-
         startLocationUpdates()
-        scope.launch { tickLoop() }
+
+        scope.launch {
+            val token = prefs.getAuthTokenOnce()
+            val storedMaxHr = prefs.getMaxHrOnce()
+            val storedType = prefs.getSessionTypeOnce()
+            _state.update { it.copy(isAuthenticated = !token.isNullOrBlank(), overlay = if (!token.isNullOrBlank()) Overlay.GPS_WAIT else Overlay.WAITING,
+                maxHr = storedMaxHr, sessionType = storedType ?: it.sessionType) }
+            // A prepared session survives the app restarting before the run starts.
+            prefs.getPreparedRunOnce()?.let { json ->
+                runCatching { dataLayer.jsonToMap(JSONObject(json)) }.getOrNull()?.let {
+                    applyPreparedRun(it, persist = false)
+                }
+            }
+
+            recoverInterruptedRun()
+            if (!_state.value.isRunning) RunTrackingService.stop(context)
+
+            sendWatchReady()
+            if (store.hasPending()) requestSync()
+            tickLoop()
+        }
+    }
+
+    /**
+     * A checkpoint on launch means the last run never reached FINISH. If Health Services is
+     * still recording it, the app was killed or crashed mid-run: carry on with the same run.
+     * Otherwise (battery died, watch restarted) save what the checkpoint holds as a finished
+     * run so it syncs — losing at most the last [CHECKPOINT_INTERVAL_MS].
+     */
+    private suspend fun recoverInterruptedRun() {
+        val cp = store.loadCheckpoint()
+        val exerciseRunning = health.isOwnExerciseInProgress()
+        if (cp == null || cp.sessionId.isBlank()) {
+            // A workout left running with nothing to attach it to (killed before the first
+            // checkpoint): stop it rather than leave GPS and HR on until the battery dies.
+            if (exerciseRunning == true) health.endExercise()
+            return
+        }
+        if (exerciseRunning == true && cp.clock != null) {
+            resumeFromCheckpoint(cp)
+            return
+        }
+        if (exerciseRunning == true) health.endExercise()
+        store.clearCheckpoint()
+        if (cp.sampleCount > 0) {
+            val tier = store.enqueue(cp.copy(recovered = true, clock = null))
+            Log.d(TAG, "Unfinished run ${cp.sessionId} saved from checkpoint: $tier")
+            showStatus("Unfinished run saved", 6000L)
+        }
+    }
+
+    private fun resumeFromCheckpoint(cp: RunRecord) {
+        Log.d(TAG, "Reattaching to run ${cp.sessionId} after a relaunch")
+        phoneControlled = false
+        isFinishing = false
+        sessionId = cp.sessionId
+        plannedWorkoutId = cp.plannedWorkoutId
+        startedAtEpochSec = cp.startedAtEpochSec
+        sessionStarted = cp.sessionStarted
+        cp.clock?.let { clock.restore(it) }
+        sampleN = cp.sampleCount
+        sumHr = cp.sumHeartRate; maxHr = cp.maxHeartRate ?: 0; sumCadence = cp.sumCadence
+        sumPace = cp.sumPace; sumAscent = cp.totalAscentM; sumDescent = cp.totalDescentM
+        lastAlt = cp.lastAltM
+        offlineBuffer.restore(cp.points)
+        distanceFloorM = cp.distanceM
+        lastOfflineCaptureMs = 0L
+        lastCheckpointMs = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        _state.update {
+            it.copy(isRunning = true, isPaused = cp.isPaused, isFinished = false, overlay = Overlay.NONE,
+                sessionType = cp.sessionType, distanceM = cp.distanceM, elapsedMs = clock.elapsedMs(now),
+                avgPaceSecPerKm = cp.avgPaceSecPerKm ?: 0.0)
+        }
+        health.reattach()
+        RunTrackingService.start(context)
+        if (!sessionStarted) startSessionWithRetry(cp.sessionId, cp.sessionType)
+        showStatus("Run recovered", 5000L)
+        vibeShort()
+    }
+
+    /** WearMainActivity.onResume — the one moment a foreground service can always be started. */
+    fun onUiVisible() {
+        if (_state.value.isRunning && !phoneControlled && !videoDemo) RunTrackingService.start(context)
+    }
+
+    private fun onPhoneReachable() {
+        sendWatchReady()
+        store.takeUnnotified().forEach { notifySyncComplete(it.sessionId, it.runId) }
+        if (store.hasPending()) requestSync()
+    }
+
+    private fun sendWatchReady() {
+        val crash = pendingCrashForPhone
+        val sent = dataLayer.sendCommand("watchReady", buildMap {
+            put("hasPendingSync", store.hasPending())
+            if (crash != null) put("lastCrash", crash)
+        })
+        if (sent) pendingCrashForPhone = null
+    }
+
+    // ── Sync of queued runs ───────────────────────────────────────────────────
+
+    /** Try the queue now, and leave a network-gated background retry behind if anything's left. */
+    fun requestSync() {
+        scope.launch(Dispatchers.IO) {
+            val result = syncer.syncAll()
+            Log.d(TAG, "Sync: $result")
+            if (result.remaining > 0 && !result.authBlocked) SyncWorker.schedule(context)
+        }
+    }
+
+    /** RunSyncer's notifyPhone: false when the phone isn't there to hear it. */
+    internal fun notifySyncComplete(sid: String, runId: String?): Boolean {
+        if (!_state.value.isPhoneConnected) return false
+        return dataLayer.sendCommand("syncComplete", buildMap {
+            put("sessionId", sid)
+            if (runId != null) put("runId", runId)
+        })
+    }
+
+    // ── Expired sign-in (DataStreamer.mc's _markAuthExpired) ──────────────────
+
+    /** DirectHttpApiClient's 401 callback (any thread). */
+    fun onAuthRejected(token: String) {
+        scope.launch {
+            prefs.rejectAuth(token)
+            if (_state.value.isRunning) {
+                // Keep recording — the run is saved on the watch and syncs once re-paired.
+                authExpiredPending = true
+            } else {
+                applyAuthExpired()
+            }
+        }
+    }
+
+    private fun applyAuthExpired() {
+        authExpiredPending = false
+        _state.update { it.copy(isAuthenticated = false, overlay = Overlay.WAITING) }
+        // The phone answers watchReady with its current token — a fresh one if it has signed in
+        // again since; the same dead one is ignored in "auth" below.
+        sendWatchReady()
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -257,10 +416,18 @@ class RunSessionController(
         sampleN = 0; lastAlt = null
         offlineBuffer.reset()
         lastOfflineCaptureMs = 0L
-        sessionId = UUID.randomUUID().toString()
+        distanceFloorM = 0.0
+        sessionStarted = false
+        val now = System.currentTimeMillis()
+        clock.start(now)
+        startedAtEpochSec = now / 1000
+        lastCheckpointMs = now
+        val sid = UUID.randomUUID().toString()
+        sessionId = sid
 
         _state.update {
-            it.copy(isRunning = true, isPaused = false, isFinished = false, overlay = Overlay.NONE)
+            it.copy(isRunning = true, isPaused = false, isFinished = false, overlay = Overlay.NONE,
+                elapsedMs = 0, distanceM = 0.0, paceSecPerKm = 0.0, avgPaceSecPerKm = 0.0)
         }
 
         if (videoDemo) {
@@ -271,20 +438,11 @@ class RunSessionController(
 
         health.startExercise(isWalk = s.isWalk)
         health.setCallbackActive(true)
+        RunTrackingService.start(context)
 
         if (!phoneControlled) {
-            scope.launch {
-                httpApi.startSession(
-                    SessionStartRequest(
-                        sessionId = sessionId!!,
-                        deviceId = Build.MODEL,
-                        deviceModel = "Samsung Galaxy Watch (Wear OS)",
-                        activityType = if (s.isWalk) "walking" else "running",
-                        sessionType = s.sessionType,
-                        plannedWorkoutId = plannedWorkoutId
-                    )
-                )
-            }
+            startSessionWithRetry(sid, s.sessionType)
+            writeCheckpoint()
         }
 
         dataLayer.sendHello(APP_VERSION)
@@ -294,29 +452,74 @@ class RunSessionController(
         showStatus("Back button pauses", 4000L)
     }
 
+    /**
+     * POST session/start, retried like DataStreamer.mc — including waiting for a token that
+     * hasn't arrived yet. The run is recorded either way; this only decides whether the server
+     * sees it live (coaching, the phone's reattach recovery) or just when it syncs.
+     */
+    private fun startSessionWithRetry(sid: String, sessionType: String) {
+        scope.launch(Dispatchers.IO) {
+            repeat(SESSION_START_ATTEMPTS) { attempt ->
+                if (sessionId != sid || !_state.value.isRunning) return@launch
+                if (!prefs.getAuthTokenOnce().isNullOrBlank()) {
+                    val result = httpApi.startSession(
+                        SessionStartRequest(
+                            sessionId = sid,
+                            deviceId = Build.MODEL,
+                            deviceModel = DEVICE_MODEL,
+                            activityType = if (sessionType == "walk") "walking" else "running",
+                            sessionType = sessionType,
+                            plannedWorkoutId = plannedWorkoutId
+                        )
+                    )
+                    if (result.ok) {
+                        sessionStarted = true
+                        return@launch
+                    }
+                    if (result.unauthorized) return@launch
+                }
+                if (attempt < SESSION_START_ATTEMPTS - 1) delay(SESSION_START_RETRY_MS)
+            }
+            Log.w(TAG, "session/start never reached the server for $sid — the run syncs at the finish")
+        }
+    }
+
     fun pauseRun() {
         val s = _state.value
         if (!s.isRunning || s.isPaused) return
-        _state.update { it.copy(isPaused = true) }
+        clock.pause(System.currentTimeMillis())
+        _state.update { it.copy(isPaused = true, elapsedMs = clock.elapsedMs(System.currentTimeMillis())) }
         resumeRetry.cancel() // only one of pause/resume should ever be retrying at once
         pauseRetry.start()
-        if (!videoDemo) health.pauseExercise()
+        if (!videoDemo) {
+            health.pauseExercise()
+            if (!phoneControlled) writeCheckpoint()
+        }
         vibeShort()
     }
 
     fun resumeRun() {
         val s = _state.value
         if (!s.isPaused) return
+        clock.resume(System.currentTimeMillis())
         _state.update { it.copy(isPaused = false) }
         pauseRetry.cancel()
         resumeRetry.start()
-        if (!videoDemo) health.resumeExercise()
+        if (!videoDemo) {
+            health.resumeExercise()
+            if (!phoneControlled) writeCheckpoint()
+        }
         vibeShort()
     }
 
     fun finishRun() {
         isFinishing = true
+        val now = System.currentTimeMillis()
+        if (!phoneControlled && clock.isStarted) {
+            _state.update { it.copy(elapsedMs = clock.elapsedMs(now)) }
+        }
         val s = _state.value
+        val record = if (!phoneControlled && !videoDemo) buildRecord(now, s) else null
         _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE,
                 isPrepared = false, prepareGateDismissed = false, preparedDistanceKm = null,
                 preparedTargetPace = null, statusMessage = null, screenPage = 0) }
@@ -325,6 +528,7 @@ class RunSessionController(
         pauseRetry.cancel()
         resumeRetry.cancel()
         sessionReadySent = false
+        clock.reset()
         if (videoDemo) {
             vibeLong()
             return
@@ -335,63 +539,33 @@ class RunSessionController(
 
         health.endExercise()
         health.setCallbackActive(false)
+        RunTrackingService.stop(context)
 
-        if (!phoneControlled && offlineBuffer.points.isNotEmpty()) {
-            val sid = sessionId
-            if (sid != null) {
-                val tier = offlineBuffer.save(sid, s.distanceM.toFloat(), (s.elapsedMs / 1000).toInt(), sumAscent.toFloat())
-                Log.d(TAG, "Offline buffer saved: $tier (${offlineBuffer.points.size} pts)")
+        // Queue first, then try to sync: the run is only ever removed from the watch once the
+        // server has confirmed it (RunSyncer). It used to upload once from here and delete its
+        // copy whatever the outcome, so a run finished without a connection was simply lost.
+        if (record != null && record.sampleCount > 0) {
+            scope.launch(Dispatchers.IO) {
+                checkpointMutex.withLock {
+                    val tier = store.enqueue(record)
+                    Log.d(TAG, "Run ${record.sessionId} queued: $tier (${record.points.size} pts)")
+                    if (tier != SaveTier.FAILED) store.clearCheckpoint()
+                }
                 dataLayer.sendCommand("pendingSync")
+                requestSync()
             }
+        } else {
+            scope.launch(Dispatchers.IO) { checkpointMutex.withLock { store.clearCheckpoint() } }
         }
 
-        if (!phoneControlled && sampleN > 0 && sessionId != null &&
-            s.distanceM >= MIN_SAVE_DISTANCE_M && s.elapsedMs / 1000 >= MIN_SAVE_DURATION_S
-        ) {
-            val n = sampleN.toDouble()
-            scope.launch {
-                httpApi.endSession(
-                    SessionEndRequest(
-                        sessionId = sessionId!!,
-                        sessionType = s.sessionType,
-                        summary = SessionSummary(
-                            totalDistance = s.distanceM,
-                            totalDuration = s.elapsedMs / 1000,
-                            avgHeartRate = if (sumHr > 0) (sumHr / n).toInt() else null,
-                            maxHeartRate = if (maxHr > 0) maxHr else null,
-                            avgCadence = if (sumCadence > 0) (sumCadence / n).toInt() else null,
-                            avgPace = if (sumPace > 0) sumPace / n else null,
-                            totalAscent = sumAscent.takeIf { it > 0 },
-                            totalDescent = sumDescent.takeIf { it > 0 }
-                        ),
-                        plannedWorkoutId = plannedWorkoutId
-                    )
-                )
-                // If the buffer was persisted above, flush it too (upload-batch enriches the
-                // just-created run with full GPS/HR/pace series — see server/routes.ts).
-                val sid = sessionId
-                if (sid != null && offlineBuffer.points.isNotEmpty()) {
-                    val runId = httpApi.uploadBatch(
-                        sid,
-                        UploadBatchRequest(
-                            sessionId = sid,
-                            sessionType = s.sessionType,
-                            points = offlineBuffer.points.map {
-                                listOf(it.elapsedS, it.latE5, it.lngE5, it.altDm, it.hr, it.cadence, it.paceDs)
-                            },
-                            distanceM = s.distanceM.toFloat(),
-                            durationSec = (s.elapsedMs / 1000).toInt(),
-                            totalAscent = sumAscent.toFloat(),
-                            plannedWorkoutId = plannedWorkoutId
-                        )
-                    )
-                    offlineBuffer.clearPersisted()
-                    dataLayer.sendCommand("syncComplete", buildMap {
-                        put("sessionId", sid)
-                        if (runId != null) put("runId", runId)
-                    })
-                }
-            }
+        // This run's prepared session is used up — the next run asks again (and must not be
+        // linked to the same plan workout).
+        plannedWorkoutId = null
+        coachTargetPace = null
+        coachWorkoutDesc = null
+        scope.launch {
+            prefs.setPlannedWorkoutId(null)
+            prefs.setPreparedRun(null)
         }
 
         // Ported from the Garmin side (2026-09): phoneControlled was previously only ever reset
@@ -399,11 +573,54 @@ class RunSessionController(
         // watch's own button (this function) never reached that message, so the flag stayed
         // stuck true and the very next session (even one started fresh from the watch) was
         // wrongly treated as phone-controlled: no fresh standalone session ID, no offline
-        // backup, no standalone endSession() call. Reset here, after the !phoneControlled-gated
+        // backup, no standalone session/end. Reset here, after the !phoneControlled-gated
         // logic above has already run for THIS session using its correct value.
         phoneControlled = false
+        if (authExpiredPending) applyAuthExpired()
 
         vibeLong()
+    }
+
+    /** The run so far, as saved to the checkpoint / queue. */
+    private fun buildRecord(now: Long, s: RunScreenState): RunRecord? {
+        val sid = sessionId ?: return null
+        val n = sampleN.toDouble()
+        return RunRecord(
+            sessionId = sid,
+            sessionType = s.sessionType,
+            plannedWorkoutId = plannedWorkoutId,
+            startedAtEpochSec = startedAtEpochSec,
+            finishedAtMs = now,
+            distanceM = s.distanceM,
+            durationSec = (clock.elapsedMs(now) / 1000).toInt(),
+            totalAscentM = sumAscent,
+            totalDescentM = sumDescent,
+            avgHeartRate = if (sumHr > 0) (sumHr / n).toInt() else null,
+            maxHeartRate = if (maxHr > 0) maxHr else null,
+            avgCadence = if (sumCadence > 0) (sumCadence / n).toInt() else null,
+            avgPaceSecPerKm = if (sumPace > 0) sumPace / n else null,
+            points = offlineBuffer.compact(),
+            sessionStarted = sessionStarted,
+            clock = clock.snapshot(),
+            isPaused = s.isPaused,
+            sampleCount = sampleN,
+            sumHeartRate = sumHr,
+            sumCadence = sumCadence,
+            sumPace = sumPace,
+            lastAltM = lastAlt
+        )
+    }
+
+    private fun writeCheckpoint() {
+        val now = System.currentTimeMillis()
+        lastCheckpointMs = now
+        val record = buildRecord(now, _state.value) ?: return
+        scope.launch(Dispatchers.IO) {
+            checkpointMutex.withLock {
+                // A checkpoint landing after FINISH would resurrect the run on the next launch.
+                if (_state.value.isRunning && sessionId == record.sessionId) store.saveCheckpoint(record)
+            }
+        }
     }
 
     fun toggleScreen() {
@@ -449,19 +666,7 @@ class RunSessionController(
                 // Absent unless the phone knows the runner's age — then no zone is shown.
                 val maxHrValue = (payload["maxHr"] as? Number)?.toInt()?.takeIf { it > 0 }
                 if (!token.isNullOrBlank()) {
-                    scope.launch { prefs.setAuth(token, runnerName, maxHrValue) }
-                    _state.update {
-                        it.copy(
-                            isAuthenticated = true,
-                            maxHr = maxHrValue ?: it.maxHr,
-                            overlay = overlayAfterAuth(it)
-                        )
-                    }
-                    dataLayer.sendHello(APP_VERSION)
-                    if (_state.value.gpsQuality >= 3 && !_state.value.isRunning && !sessionReadySent) {
-                        dataLayer.sendCommand("sessionReady")
-                        sessionReadySent = true
-                    }
+                    scope.launch { acceptAuth(token, runnerName, maxHrValue) }
                 }
             }
             "startAck" -> startRetry.cancel()
@@ -469,25 +674,7 @@ class RunSessionController(
                 phoneControlled = true
                 _state.update { it.copy(isRunning = true, isPaused = false, overlay = Overlay.NONE) }
             }
-            "preparedRun" -> {
-                val sType = payload["sessionType"] as? String
-                if (sType != null) {
-                    scope.launch { prefs.setSessionType(sType) }
-                    _state.update { it.copy(sessionType = sType) }
-                    dataLayer.sendCommand("sessionTypeAck")
-                }
-                coachTargetPace = (payload["targetPace"] as? String)?.takeIf { it.isNotBlank() }
-                coachWorkoutDesc = payload["workoutDesc"] as? String
-                plannedWorkoutId = payload["plannedWorkoutId"] as? String
-                scope.launch { prefs.setPlannedWorkoutId(plannedWorkoutId) }
-                // Leaves the prepare-on-phone screen for the ready screen, which shows what was
-                // prepared. A new preparedRun replaces the last one entirely (Garmin 3.4.9).
-                val dist = (payload["distance"] as? Number)?.toDouble()?.takeIf { it > 0 }
-                if (!_state.value.isRunning) _state.update {
-                    it.copy(isPrepared = true, isFinished = false, preparedDistanceKm = dist,
-                        preparedTargetPace = coachTargetPace)
-                }
-            }
+            "preparedRun" -> applyPreparedRun(payload, persist = true)
             "preparedRunCancelled" -> {
                 // Runner backed out of the prepared session on the phone — back to the
                 // prepare-on-phone screen. Ignored mid-run.
@@ -495,7 +682,10 @@ class RunSessionController(
                     coachTargetPace = null
                     coachWorkoutDesc = null
                     plannedWorkoutId = null
-                    scope.launch { prefs.setPlannedWorkoutId(null) }
+                    scope.launch {
+                        prefs.setPlannedWorkoutId(null)
+                        prefs.setPreparedRun(null)
+                    }
                     _state.update { it.copy(isPrepared = false, prepareGateDismissed = false,
                         preparedDistanceKm = null, preparedTargetPace = null) }
                 }
@@ -562,9 +752,68 @@ class RunSessionController(
                 sessionReadySent = false
                 health.endExercise()
                 health.setCallbackActive(false)
+                RunTrackingService.stop(context)
                 vibeLong()
                 isFinishing = false
             }
+        }
+    }
+
+    private suspend fun acceptAuth(token: String, runnerName: String, maxHrValue: Int?) {
+        // The server already said no to this exact token — adopting it again would just fail
+        // every call (and loop: 401 → watchReady → same token). Wait for the phone to sign in.
+        if (token == prefs.getRejectedTokenOnce()) {
+            Log.w(TAG, "Phone sent the token the server rejected — staying unpaired")
+            if (!_state.value.isRunning) showStatus("Sign in on your phone", 6000L)
+            return
+        }
+        prefs.setAuth(token, runnerName, maxHrValue)
+        _state.update {
+            it.copy(
+                isAuthenticated = true,
+                maxHr = maxHrValue ?: it.maxHr,
+                overlay = overlayAfterAuth(it)
+            )
+        }
+        dataLayer.sendHello(APP_VERSION)
+        if (_state.value.gpsQuality >= 3 && !_state.value.isRunning && !sessionReadySent) {
+            dataLayer.sendCommand("sessionReady")
+            sessionReadySent = true
+        }
+        // A new token may be what the queue was waiting for (DataStreamer.mc uploads its
+        // pending batch on auth too).
+        if (store.hasPending()) requestSync()
+    }
+
+    /**
+     * Leaves the prepare-on-phone screen for the ready screen, which shows what was prepared.
+     * A new preparedRun replaces the last one entirely (Garmin 3.4.9). [persist]: also saved,
+     * so it survives the app restarting before the run (false when restoring that copy).
+     */
+    private fun applyPreparedRun(payload: Map<String, Any?>, persist: Boolean) {
+        if (_state.value.isRunning) return
+        val sType = payload["sessionType"] as? String
+        if (sType != null) {
+            _state.update { it.copy(sessionType = sType) }
+            if (persist) {
+                scope.launch { prefs.setSessionType(sType) }
+                dataLayer.sendCommand("sessionTypeAck")
+            }
+        }
+        coachTargetPace = (payload["targetPace"] as? String)?.takeIf { it.isNotBlank() }
+        coachWorkoutDesc = payload["workoutDesc"] as? String
+        plannedWorkoutId = (payload["plannedWorkoutId"] as? String)?.takeIf { it.isNotBlank() }
+        if (persist) {
+            val json = runCatching { JSONObject(payload.filterValues { it != null }).toString() }.getOrNull()
+            scope.launch {
+                prefs.setPlannedWorkoutId(plannedWorkoutId)
+                prefs.setPreparedRun(json)
+            }
+        }
+        val dist = (payload["distance"] as? Number)?.toDouble()?.takeIf { it > 0 }
+        _state.update {
+            it.copy(isPrepared = true, isFinished = false, preparedDistanceKm = dist,
+                preparedTargetPace = coachTargetPace)
         }
     }
 
@@ -591,7 +840,10 @@ class RunSessionController(
 
         val offlineGraceElapsed = (now - connectStartMs) >= CONNECT_WAIT_GRACE_MS
 
-        if (s.isRunning && !s.isPaused) {
+        // A phone-started run is mirrored from the phone's runUpdate messages; the watch's own
+        // (idle) sensors must not overwrite those numbers, feed the summary, or stream under
+        // the previous watch run's session ID — RunView.mc gates all of this on !_phoneControlled.
+        if (s.isRunning && !s.isPaused && !phoneControlled) {
             val m = if (videoDemo) videoDemoMetrics(now) else health.metrics.value
             val pace = if (m.speedMs != null && m.speedMs > 0.3 && m.speedMs <= 5.5) 1000.0 / m.speedMs else s.paceSecPerKm
             if (m.heartRate > 0) { sumHr += m.heartRate; if (m.heartRate > maxHr) maxHr = m.heartRate }
@@ -617,10 +869,14 @@ class RunSessionController(
                 }
             }
 
+            // Moving time from the pause-aware clock (Health Services' own figure isn't used:
+            // it was wall-clock since START, pauses included).
+            val elapsedMs = if (videoDemo) m.elapsedMs else clock.elapsedMs(now)
+            val distanceM = maxOf(m.distanceM, distanceFloorM)
             _state.update {
                 it.copy(
-                    elapsedMs = m.elapsedMs,
-                    distanceM = m.distanceM,
+                    elapsedMs = elapsedMs,
+                    distanceM = distanceM,
                     paceSecPerKm = pace,
                     heartRate = m.heartRate,
                     cadence = m.cadenceSpm,
@@ -634,9 +890,10 @@ class RunSessionController(
             if (videoDemo) {
                 if (m.distanceM >= 5000.0) finishRun()
             } else {
-                maybeCaptureOfflinePoint(now, m)
-                maybeSendWatchData(now, m)
-                maybeSendHttpData(now, m)
+                maybeCaptureOfflinePoint(now, m, elapsedMs)
+                maybeSendWatchData(now, m, elapsedMs, distanceM)
+                maybeSendHttpData(now, m, elapsedMs, distanceM)
+                if (!phoneControlled && now - lastCheckpointMs >= CHECKPOINT_INTERVAL_MS) writeCheckpoint()
             }
         } else {
             // Mirrors RunView.mc: once GPS becomes ready while idle+authenticated, the watch
@@ -655,15 +912,16 @@ class RunSessionController(
         }
     }
 
-    private fun maybeCaptureOfflinePoint(now: Long, m: live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics) {
+    private fun maybeCaptureOfflinePoint(now: Long, m: live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics, elapsedMs: Long) {
         if (phoneControlled) return
-        if (now - lastOfflineCaptureMs < OFFLINE_CAPTURE_INTERVAL_MS) return
+        if (now - lastOfflineCaptureMs < OfflineGpsBuffer.CAPTURE_INTERVAL_MS) return
         lastOfflineCaptureMs = now
         val lat = m.lat ?: return
         val lng = m.lng ?: return
+        val wasFull = offlineBuffer.isFull
         offlineBuffer.addPoint(
             GpsPoint(
-                elapsedS = (m.elapsedMs / 1000).toInt(),
+                elapsedS = (elapsedMs / 1000).toInt(),
                 latE5 = (lat * 100000).toInt(),
                 lngE5 = (lng * 100000).toInt(),
                 altDm = ((m.altM ?: 0.0) * 10).toInt(),
@@ -672,9 +930,10 @@ class RunSessionController(
                 paceDs = (_state.value.paceSecPerKm * 10).toInt()
             )
         )
+        if (offlineBuffer.isFull && !wasFull) showStatus("Route full - 6h", 5000L)
     }
 
-    private fun maybeSendWatchData(now: Long, m: live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics) {
+    private fun maybeSendWatchData(now: Long, m: live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics, elapsedMs: Long, distanceM: Double) {
         if (!_state.value.isPhoneConnected) return
         if (now - lastWatchDataSentMs < WATCH_DATA_INTERVAL_MS) return
         lastWatchDataSentMs = now
@@ -682,13 +941,13 @@ class RunSessionController(
             mapOf(
                 "lat" to m.lat, "lng" to m.lng, "alt" to m.altM, "speed" to m.speedMs,
                 "bear" to m.bearingDeg, "acc" to lastGpsAccuracyM,
-                "hr" to m.heartRate, "hrz" to 1, "cad" to m.cadenceSpm,
-                "elap" to (m.elapsedMs / 1000).toInt(), "dist" to m.distanceM.toFloat()
+                "hr" to m.heartRate, "hrz" to _state.value.hrZone, "cad" to m.cadenceSpm,
+                "elap" to (elapsedMs / 1000).toInt(), "dist" to distanceM.toFloat()
             )
         )
     }
 
-    private fun maybeSendHttpData(now: Long, m: live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics) {
+    private fun maybeSendHttpData(now: Long, m: live.airuncoach.airuncoach.wear.sensors.ExerciseMetrics, elapsedMs: Long, distanceM: Double) {
         // Always streams now, connected or not — previously gated to standalone-only
         // (mirroring Garmin's old !_isConnected gate), which left the backend with zero
         // live data for the common phone-connected case. That's the only source
@@ -704,16 +963,20 @@ class RunSessionController(
                     sessionId = sid,
                     timestamp = now,
                     heartRate = m.heartRate.takeIf { it > 0 },
-                    heartRateZone = null,
+                    heartRateZone = _state.value.hrZone,
                     cadence = m.cadenceSpm.takeIf { it > 0 },
                     pace = _state.value.paceSecPerKm.takeIf { it > 0 },
-                    cumulativeDistance = m.distanceM,
-                    elapsedTime = m.elapsedMs / 1000,
+                    cumulativeDistance = distanceM,
+                    elapsedTime = elapsedMs / 1000,
                     altitude = m.altM,
                     isMoving = true,
                     isPaused = _state.value.isPaused,
                     latitude = m.lat,
-                    longitude = m.lng
+                    longitude = m.lng,
+                    // Sent every second (like Garmin) so the server's fallback path always has
+                    // the climb even if session/end never arrives.
+                    cumulativeAscent = sumAscent,
+                    cumulativeDescent = sumDescent
                 )
             )
         }

@@ -24,17 +24,20 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        // Standalone Wear OS app — separate applicationId from the phone app (see
-        // manifest's android:name="com.google.android.wearable.standalone" = true).
-        // Must match the package name already reserved on the Play Console listing
-        // (carried over from the earlier Tizen samsung-watch-app/ scaffold).
-        applicationId = "airuncoach.live.samsung_watch_app"
+        // Same applicationId as the phone app (app/), published as the Wear OS form factor
+        // of the phone app's Play listing. Required: the Wear Data Layer (MessageClient/
+        // CapabilityClient) only connects apps with the same package name AND signing key.
+        // Still standalone (manifest's com.google.android.wearable.standalone = true).
+        applicationId = "live.airuncoach.airuncoach"
         // Wear OS 3.0+ (API 30) is required for the Health Services ExerciseClient API
         // this app depends on — effectively Galaxy Watch4 and later.
         minSdk = 30
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.0.3"
+        // Version codes are shared with the phone app's listing (phone is ~100 and counts
+        // up by 1), so the watch lives in its own 1,000,000+ range to never collide.
+        // Increment by 1 for every Play upload.
+        versionCode = 1_000_009
+        versionName = "1.0.8"
     }
 
     // ── Release signing ─────────────────────────────────────────────────────
@@ -77,6 +80,10 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        // android.util.Log etc. are stubs on the JVM; return defaults instead of throwing.
+        unitTests.isReturnDefaultValues = true
+    }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -103,6 +110,8 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.4.0")
     implementation("androidx.wear.compose:compose-navigation:1.4.0")
     implementation("androidx.wear:wear:1.3.0")
+    // Ongoing Activity: a run in progress shows on the watch face / recents (RunTrackingService).
+    implementation("androidx.wear:wear-ongoing:1.0.0")
 
     // --- Wear OS Data Layer: phone<->watch messaging (MessageClient/CapabilityClient) ---
     implementation("com.google.android.gms:play-services-wearable:18.2.0")
@@ -116,6 +125,11 @@ dependencies {
 
     // --- Local storage: auth token, crash breadcrumb, offline GPS buffer ---
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    // --- Background sync of runs saved while offline (SyncWorker) ---
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    // Queued runs / checkpoints are JSON files (PendingRunStore).
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // --- Direct-HTTP standalone/offline path to the backend (mirrors the phone app's
     // Retrofit setup — same versions as app/build.gradle.kts) ---

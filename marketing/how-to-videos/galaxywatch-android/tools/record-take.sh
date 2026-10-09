@@ -21,7 +21,7 @@ export PATH=$PATH:~/Library/Android/sdk/platform-tools
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TAKES="$HERE/takes"; FLOWS="$HERE/tools/flows"; mkdir -p "$TAKES"
 PKG=live.airuncoach.airuncoach
-WPKG=airuncoach.live.samsung_watch_app
+WPKG=live.airuncoach.airuncoach
 PHONE=${PHONE:-emulator-5556}
 WATCH=${WATCH:-emulator-5554}
 MAESTRO=~/.maestro/bin/maestro

@@ -9,6 +9,7 @@ import androidx.health.services.client.data.DataType
 import androidx.health.services.client.data.DataTypeAvailability
 import androidx.health.services.client.data.ExerciseConfig
 import androidx.health.services.client.data.ExerciseLapSummary
+import androidx.health.services.client.data.ExerciseTrackedStatus
 import androidx.health.services.client.data.ExerciseType
 import androidx.health.services.client.data.ExerciseUpdate
 import androidx.health.services.client.data.LocationData
@@ -19,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** A single tick of live exercise metrics — the Wear OS analog of Garmin's `Activity.Info`. */
 data class ExerciseMetrics(
+    /** Only set by the video demo — a real run's moving time comes from the controller's
+     * ActiveClock (wall-clock minus pauses), never from here. */
     val elapsedMs: Long = 0,
     val distanceM: Double = 0.0,
     val speedMs: Double? = null,
@@ -51,7 +54,6 @@ class HealthServicesManager(context: Context) {
     private val _isExerciseInProgress = MutableStateFlow(false)
     val isExerciseInProgress: StateFlow<Boolean> = _isExerciseInProgress
 
-    private var startTimeMs: Long = 0L
 
     private val callback = object : ExerciseUpdateCallback {
         override fun onExerciseUpdateReceived(update: ExerciseUpdate) {
@@ -70,10 +72,7 @@ class HealthServicesManager(context: Context) {
                 // not from this callback.
                 val location = dp.getData(DataType.LOCATION).lastOrNull()?.value
 
-                val elapsed = if (startTimeMs > 0) System.currentTimeMillis() - startTimeMs else 0L
-
                 _metrics.value = _metrics.value.copy(
-                    elapsedMs = elapsed,
                     distanceM = distance,
                     speedMs = speed ?: _metrics.value.speedMs,
                     heartRate = hr,
@@ -122,7 +121,6 @@ class HealthServicesManager(context: Context) {
     fun startExercise(isWalk: Boolean) {
         try {
             _metrics.value = ExerciseMetrics()
-            startTimeMs = System.currentTimeMillis()
             val exerciseType = if (isWalk) ExerciseType.WALKING else ExerciseType.RUNNING
             val dataTypes = setOf(
                 DataType.HEART_RATE_BPM,
@@ -142,6 +140,34 @@ class HealthServicesManager(context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "startExercise failed: ${e.message}")
         }
+    }
+
+    /**
+     * True when Health Services is still running a workout this app started — i.e. the app was
+     * killed (or crashed) mid-run and has just been relaunched. Null if it couldn't be asked.
+     */
+    suspend fun isOwnExerciseInProgress(): Boolean? = try {
+        kotlinx.coroutines.withTimeout(5_000L) {
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                val future = exerciseClient.getCurrentExerciseInfoAsync()
+                future.addListener({
+                    val result = runCatching {
+                        future.get().exerciseTrackedStatus == ExerciseTrackedStatus.OWNED_EXERCISE_IN_PROGRESS
+                    }.getOrNull()
+                    if (cont.isActive) cont.resumeWith(Result.success(result))
+                }, { it.run() })
+            }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "isOwnExerciseInProgress failed: ${e.message}")
+        null
+    }
+
+    /** Picks a still-running workout back up after a relaunch (see [isOwnExerciseInProgress]). */
+    fun reattach() {
+        _metrics.value = ExerciseMetrics()
+        _isExerciseInProgress.value = true
+        setCallbackActive(true)
     }
 
     fun pauseExercise() {
@@ -164,7 +190,6 @@ class HealthServicesManager(context: Context) {
         try {
             exerciseClient.endExerciseAsync()
             _isExerciseInProgress.value = false
-            startTimeMs = 0L
         } catch (e: Exception) {
             Log.w(TAG, "endExercise failed: ${e.message}")
         }

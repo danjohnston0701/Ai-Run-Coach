@@ -18,7 +18,7 @@ import kotlin.math.sin
  * Services exercise and no GPS worth filming, so this plays the real screens on cue, driven by
  * adb broadcasts so each step lands at an exact moment alongside the phone's VideoDemoMode.kt:
  *
- *   adb shell am broadcast -p airuncoach.live.samsung_watch_app -a live.airuncoach.wear.videodemo.ENABLE
+ *   adb shell am broadcast -p live.airuncoach.airuncoach -a live.airuncoach.wear.videodemo.ENABLE
  *       (pairing screen) → LINK [--ez phone false] (linked, prepare-on-phone; phone=false for
  *       the phone-free shot) → PREPARE (prepared 5 km session, GPS lock over ~8 s, ready screen)
  *       or GPS (GPS lock only) → START [--ei skip <sec>] → STOP (or 5 km reached)

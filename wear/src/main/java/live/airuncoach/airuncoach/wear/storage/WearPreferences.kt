@@ -27,6 +27,8 @@ class WearPreferences(context: Context) {
         val MAX_HR = intPreferencesKey("personal_max_hr")
         val SESSION_TYPE = stringPreferencesKey("session_type")
         val PLANNED_WORKOUT_ID = stringPreferencesKey("planned_workout_id")
+        val PREPARED_RUN = stringPreferencesKey("prepared_run")
+        val REJECTED_TOKEN = stringPreferencesKey("rejected_auth_token")
     }
 
     val authToken: Flow<String?> = dataStore.data.map { it[Keys.AUTH_TOKEN] }
@@ -60,4 +62,31 @@ class WearPreferences(context: Context) {
     }
 
     suspend fun getPlannedWorkoutIdOnce(): String? = dataStore.data.map { it[Keys.PLANNED_WORKOUT_ID] }.first()
+
+    /**
+     * The phone's last "preparedRun" message, verbatim (JSON), so a prepared session — target,
+     * distance, the plan workout it belongs to — survives the watch app being restarted before
+     * the run starts. Cleared when the run finishes or the phone cancels the prepare.
+     */
+    suspend fun setPreparedRun(json: String?) {
+        dataStore.edit { prefs ->
+            if (json != null) prefs[Keys.PREPARED_RUN] = json else prefs.remove(Keys.PREPARED_RUN)
+        }
+    }
+
+    suspend fun getPreparedRunOnce(): String? = dataStore.data.map { it[Keys.PREPARED_RUN] }.first()
+
+    /**
+     * The server answered 401 to [token]: forget it and remember which one it was, so the same
+     * dead token arriving again from the phone isn't adopted (and retried) in a loop. Mirrors
+     * DataStreamer.mc's authTokenExpired flag.
+     */
+    suspend fun rejectAuth(token: String) {
+        dataStore.edit { prefs ->
+            if (prefs[Keys.AUTH_TOKEN] == token) prefs.remove(Keys.AUTH_TOKEN)
+            prefs[Keys.REJECTED_TOKEN] = token
+        }
+    }
+
+    suspend fun getRejectedTokenOnce(): String? = dataStore.data.map { it[Keys.REJECTED_TOKEN] }.first()
 }

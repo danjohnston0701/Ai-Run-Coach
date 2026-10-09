@@ -51,5 +51,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Held for the whole of a watch-owned run so Wear OS doesn't throttle/kill the app
+             when the screen times out — see RunTrackingService. -->
+        <service
+            android:name=".session.RunTrackingService"
+            android:exported="false"
+            android:foregroundServiceType="health|location" />
+
     </application>
 </manifest>

@@ -10,15 +10,17 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 import retrofit2.http.Path
+import java.util.concurrent.TimeUnit
 
 /**
- * Direct watch->cloud HTTP path for standalone/offline mode — the Wear OS analog of the
- * Garmin watch app's DataStreamer.mc. Used only when the phone isn't reachable over the Data
- * Layer (mirrors Garmin's `!_isConnected` gating). Targets the same, already-hardened
- * `/api/garmin-companion/` endpoints the Garmin watch app uses (FCM wake fallback, batch
- * upload, dedup against phone-tracked runs) — see the backend generalization in
- * server/routes.ts (`watchDeviceLabel`/`watchExternalSource`) that lets a `deviceModel`
- * string distinguish Samsung/Wear OS sessions from Garmin ones without a separate API.
+ * Direct watch->cloud HTTP path — the Wear OS analog of the Garmin watch app's DataStreamer.mc.
+ * Targets the same, already-hardened `/api/garmin-companion/` endpoints the Garmin watch app
+ * uses (FCM wake fallback, batch upload, dedup against phone-tracked runs) — see the backend
+ * generalization in server/routes.ts (`watchDeviceLabel`/`watchExternalSource`) that lets a
+ * `deviceModel` string distinguish Samsung/Wear OS sessions from Garmin ones without a
+ * separate API.
+ *
+ * Field names below are the JSON keys — proguard-rules.pro keeps them from being renamed.
  */
 
 data class SessionStartRequest(
@@ -43,7 +45,9 @@ data class SessionDataRequest(
     val isMoving: Boolean,
     val isPaused: Boolean,
     val latitude: Double?,
-    val longitude: Double?
+    val longitude: Double?,
+    val cumulativeAscent: Double? = null,
+    val cumulativeDescent: Double? = null
 )
 
 data class SessionSummary(
@@ -67,14 +71,31 @@ data class SessionEndRequest(
 data class UploadBatchRequest(
     val sessionId: String,
     val sessionType: String,
-    val points: List<List<Int>>, // compact 7-field arrays, see OfflineGpsBuffer
+    val points: List<List<Int>>, // compact 7-field arrays, see GpsPoint
     val distanceM: Float,
     val durationSec: Int,
     val totalAscent: Float,
-    val plannedWorkoutId: String? = null
+    val plannedWorkoutId: String? = null,
+    /** Wall-clock start, epoch seconds — dates a late-synced run to when it was run. */
+    val startedAtEpoch: Long? = null,
+    val phoneConnected: Boolean? = null,
+    val deviceModel: String? = null,
+    val watchAppVersion: String? = null
 )
 
 data class UploadBatchResponse(val runId: String?)
+data class SessionEndResponse(val runId: String?)
+
+/** Outcome of one call: [ok] = 2xx; [unauthorized] = 401 (the stored token is dead). */
+data class ApiResult<T>(val ok: Boolean, val value: T? = null, val unauthorized: Boolean = false)
+
+/** The calls the watch makes, as an interface so the sync logic is unit-testable. */
+interface CompanionApi {
+    suspend fun startSession(body: SessionStartRequest): ApiResult<Unit>
+    suspend fun sendData(body: SessionDataRequest): ApiResult<String?>
+    suspend fun endSession(body: SessionEndRequest): ApiResult<String?>
+    suspend fun uploadBatch(sessionId: String, body: UploadBatchRequest): ApiResult<String?>
+}
 
 private interface GarminCompanionApi {
     @POST("/api/garmin-companion/session/start")
@@ -84,7 +105,7 @@ private interface GarminCompanionApi {
     suspend fun sendData(@Body body: SessionDataRequest): Response<Map<String, Any?>>
 
     @POST("/api/garmin-companion/session/end")
-    suspend fun endSession(@Body body: SessionEndRequest): Response<Unit>
+    suspend fun endSession(@Body body: SessionEndRequest): Response<SessionEndResponse>
 
     @POST("/api/garmin-companion/session/{sessionId}/upload-batch")
     suspend fun uploadBatch(
@@ -93,14 +114,23 @@ private interface GarminCompanionApi {
     ): Response<UploadBatchResponse>
 }
 
-class DirectHttpApiClient(private val getAuthToken: suspend () -> String?) {
+/**
+ * @param onUnauthorized called whenever the server rejects the stored token (HTTP 401), with
+ *   the token that was rejected — mirrors DataStreamer.mc's `_markAuthExpired()`.
+ */
+class DirectHttpApiClient(
+    private val getAuthToken: suspend () -> String?,
+    private val onUnauthorized: (rejectedToken: String) -> Unit = {}
+) : CompanionApi {
 
     private val authInterceptor = Interceptor { chain ->
         val token = kotlinx.coroutines.runBlocking { getAuthToken() }
         val request = chain.request().newBuilder().apply {
             if (!token.isNullOrBlank()) addHeader("Authorization", "Bearer $token")
         }.build()
-        chain.proceed(request)
+        val response = chain.proceed(request)
+        if (response.code == 401 && !token.isNullOrBlank()) onUnauthorized(token)
+        response
     }
 
     private val okHttpClient = OkHttpClient.Builder()
@@ -108,6 +138,9 @@ class DirectHttpApiClient(private val getAuthToken: suspend () -> String?) {
         .addInterceptor(HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
         })
+        // A 6-hour track is a few hundred KB — allow for a slow Bluetooth-proxied link.
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private val api: GarminCompanionApi = Retrofit.Builder()
@@ -117,23 +150,25 @@ class DirectHttpApiClient(private val getAuthToken: suspend () -> String?) {
         .build()
         .create(GarminCompanionApi::class.java)
 
-    suspend fun startSession(body: SessionStartRequest): Boolean =
-        runCatching { api.startSession(body).isSuccessful }.getOrDefault(false)
-
-    /** Returns any "coaching" cue text piggybacked on the response, or null. */
-    suspend fun sendData(body: SessionDataRequest): Result<String?> =
-        runCatching {
-            val resp = api.sendData(body)
-            if (!resp.isSuccessful) throw java.io.IOException("HTTP ${resp.code()}")
-            resp.body()?.get("coaching") as? String
+    private suspend fun <R, T> call(block: suspend () -> Response<R>, map: (R?) -> T): ApiResult<T> =
+        try {
+            val resp = block()
+            ApiResult(ok = resp.isSuccessful, value = if (resp.isSuccessful) map(resp.body()) else null,
+                unauthorized = resp.code() == 401)
+        } catch (e: Exception) {
+            ApiResult(ok = false)
         }
 
-    suspend fun endSession(body: SessionEndRequest): Boolean =
-        runCatching { api.endSession(body).isSuccessful }.getOrDefault(false)
+    override suspend fun startSession(body: SessionStartRequest): ApiResult<Unit> =
+        call({ api.startSession(body) }) { Unit }
 
-    suspend fun uploadBatch(sessionId: String, body: UploadBatchRequest): String? =
-        runCatching {
-            val resp = api.uploadBatch(sessionId, body)
-            if (resp.isSuccessful) resp.body()?.runId else null
-        }.getOrNull()
+    /** Value: any "coaching" cue text piggybacked on the response. */
+    override suspend fun sendData(body: SessionDataRequest): ApiResult<String?> =
+        call({ api.sendData(body) }) { it?.get("coaching") as? String }
+
+    override suspend fun endSession(body: SessionEndRequest): ApiResult<String?> =
+        call({ api.endSession(body) }) { it?.runId }
+
+    override suspend fun uploadBatch(sessionId: String, body: UploadBatchRequest): ApiResult<String?> =
+        call({ api.uploadBatch(sessionId, body) }) { it?.runId }
 }

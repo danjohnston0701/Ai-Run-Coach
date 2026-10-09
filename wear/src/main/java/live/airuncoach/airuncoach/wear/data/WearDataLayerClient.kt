@@ -101,14 +101,17 @@ class WearDataLayerClient(private val context: Context, private val scope: Corou
         _isPhoneConnected.value = node != null
     }
 
-    fun send(payload: Map<String, Any?>) {
-        val nodeId = connectedNodeId ?: return
-        try {
+    /** False when no phone is reachable to send to (the message is dropped). */
+    fun send(payload: Map<String, Any?>): Boolean {
+        val nodeId = connectedNodeId ?: return false
+        return try {
             val json = JSONObject(payload).toString()
             messageClient.sendMessage(nodeId, MESSAGE_PATH, json.toByteArray(Charsets.UTF_8))
                 .addOnFailureListener { e -> Log.w(TAG, "send failed: ${e.message}") }
+            true
         } catch (e: Exception) {
             Log.w(TAG, "send error: ${e.message}")
+            false
         }
     }
 
@@ -128,7 +131,7 @@ class WearDataLayerClient(private val context: Context, private val scope: Corou
         }
     }
 
-    private fun jsonToMap(json: JSONObject): Map<String, Any?> {
+    internal fun jsonToMap(json: JSONObject): Map<String, Any?> {
         val map = mutableMapOf<String, Any?>()
         val keys = json.keys()
         while (keys.hasNext()) {
