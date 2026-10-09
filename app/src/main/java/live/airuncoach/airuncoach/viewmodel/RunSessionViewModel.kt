@@ -772,6 +772,16 @@ class RunSessionViewModel @Inject constructor(
     ) {
         _watchSendState.value = live.airuncoach.airuncoach.ui.components.WatchSendState.SENDING
 
+        // This instance belongs to WorkoutDetailScreen and never had setRunConfig() called, so
+        // prepareServiceForWatch() below used to send the coaching plan with NO workout ID,
+        // plan ID, workout type or target. A watch START that reached the service directly
+        // (phone pocketed) then saved the run as an unlinked "free" run — the plan workout
+        // never completed (Damion's orientation, 2026-10-06). The caller builds this workout's
+        // RunSetupConfig into RunConfigHolder first; adopt it when it is for this workout.
+        if (runConfig?.workoutId != workoutId) {
+            RunConfigHolder.getConfig()?.takeIf { it.workoutId == workoutId }?.let { runConfig = it }
+        }
+
         // Use the pre-generated coaching brief if available
         val preRunBrief = activeSessionCoachingPlan?.preRunBrief
         val sessionType = runConfig?.activityType?.name?.lowercase() ?: "run"

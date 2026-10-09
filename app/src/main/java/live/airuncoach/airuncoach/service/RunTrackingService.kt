@@ -1972,7 +1972,11 @@ class RunTrackingService : Service(), SensorEventListener {
         // prepared on the phone. Without a target there are no final-500/250/100m cues, no
         // "target reached" cue and no final-stretch quiet zone, and the race-distance inference
         // below is a poor substitute (see maybeInferTargetDistance).
-        if (targetDistance == null) {
+        // Never for a plan workout or coached session: those define their own length (a
+        // time-based walk-run has no distance at all), and a borrowed Dashboard target fires
+        // "final 500 m" / "final 100 m — give it everything" mid-session and then silences
+        // every remaining_m-gated cue (Damion's 37-min walk-run got a 3 km target, 2026-10-08).
+        if (targetDistance == null && planWorkoutId == null && dynamicCoachingPlan == null) {
             try {
                 val prefs = getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
                 val dashKm = prefs.getFloat("target_distance_km", 0f)
@@ -4379,7 +4383,12 @@ class RunTrackingService : Service(), SensorEventListener {
         if (dynamicCoachingPlan != null && !hasCoachingFiredThisTick) {
             // If targetDistance wasn't set via intent (e.g. watch-initiated run), fall back to
             // the distance declared in the coaching plan so that "remaining_m" conditions work.
-            if (targetDistance == null) {
+            // Not for time-based plans (no phase has a distance): their totalDistanceKm is the
+            // AI's guess (5 km for a 6×(2+3 min) walk-run) and would fake a finish line.
+            val isTimeBasedPlan = dynamicCoachingPlan?.phases.orEmpty().let { phases ->
+                phases.isNotEmpty() && phases.none { (it.distanceKm ?: 0.0) > 0.0 }
+            }
+            if (targetDistance == null && !isTimeBasedPlan) {
                 val planDist = dynamicCoachingPlan?.targetMetrics?.totalDistanceKm
                 if (planDist != null && planDist > 0) {
                     targetDistance = planDist * 1000.0
@@ -6621,6 +6630,9 @@ class RunTrackingService : Service(), SensorEventListener {
      */
     private fun maybeInferTargetDistance() {
         if (targetDistance != null) return
+        // A plan workout's length comes from its plan; guessing a race distance would fake a
+        // finish line inside a time-based session (see startTracking()'s Dashboard fallback).
+        if (planWorkoutId != null || dynamicCoachingPlan != null) return
         // Previously the first inference was permanent. With 1000 m in the candidate list that
         // meant every target-less run inferred "1 km" at 850 m, then — once past 1 km —
         // remaining went negative forever: no final cues, no final-stretch quiet zone, and
@@ -6982,9 +6994,12 @@ class RunTrackingService : Service(), SensorEventListener {
     /** Minimum gap between reactive trigger re-fires (90 seconds for on_condition triggers) */
     private val REACTIVE_TRIGGER_COOLDOWN_MS = 90_000L
 
-    // Trigger types that are handled exclusively by evaluateDynamicPhase() — skip in condition loops
+    // Trigger types that are handled exclusively by evaluateDynamicPhase() — skip in condition loops.
+    // rep_midpoint: evaluateDynamicPhase() times its own per-rep midpoint; the AI's version has no
+    // phase in its condition ("remaining_m > 500"), so the condition loop fired "halfway through
+    // this jog" during warm-ups and walk breaks.
     private val PHASE_TRANSITION_TRIGGER_TYPES = setOf(
-        "phase_start", "phase_end", "rep_start", "rep_end", "recovery_start"
+        "phase_start", "phase_end", "rep_start", "rep_end", "recovery_start", "rep_midpoint"
     )
 
     /**
@@ -7791,17 +7806,25 @@ class RunTrackingService : Service(), SensorEventListener {
             }
 
             // Find matching trigger from the plan (may be null for interval phases if AI didn't generate one)
-            val phaseStartTrigger = plan.triggers.firstOrNull { t ->
-                t.type in triggerTypeToMatch &&
-                (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName) ||
-                 // Also match generic rep_start/recovery_start triggers (no phase name in id/condition)
-                 (totalReps > 1 && t.type in listOf("rep_start", "recovery_start") &&
-                  !t.condition.contains("phase ==") &&
-                  !t.id.contains("warmup") && !t.id.contains("cooldown"))) &&
-                // rep_start / recovery_start must fire on EVERY rep — never block via triggerFiredOnce.
-                if (t.frequency == "once" && t.type !in listOf("rep_start", "recovery_start")) {
-                    !triggerFiredOnce.contains(t.id)
-                } else true
+            // Types are tried in triggerTypeToMatch's priority order — a plain firstOrNull over
+            // plan.triggers took whichever came first in the plan, so a walk-run plan listing
+            // "rep_start_jog" before "recovery_start_walk" announced every walk break as "Jog rep
+            // N of 6" and the walk cue never played (Damion, 2026-10-08). A generic (unnamed)
+            // trigger only matches its own kind: rep_start for work, recovery_start for recovery.
+            val genericTypeForPhase = if (isRecovery) "recovery_start" else "rep_start"
+            val phaseStartTrigger = triggerTypeToMatch.firstNotNullOfOrNull { wantedType ->
+                plan.triggers.firstOrNull { t ->
+                    t.type == wantedType &&
+                    (t.condition.contains(phaseBaseName) || t.id.contains(phaseBaseName) ||
+                     // Also match generic rep_start/recovery_start triggers (no phase name in id/condition)
+                     (totalReps > 1 && t.type == genericTypeForPhase &&
+                      !t.condition.contains("phase ==") &&
+                      !t.id.contains("warmup") && !t.id.contains("cooldown"))) &&
+                    // rep_start / recovery_start must fire on EVERY rep — never block via triggerFiredOnce.
+                    if (t.frequency == "once" && t.type !in listOf("rep_start", "recovery_start")) {
+                        !triggerFiredOnce.contains(t.id)
+                    } else true
+                }
             }
 
             if (!hasCoachingFiredThisTick && canFireCoaching(bypassDistanceGate = true)) {

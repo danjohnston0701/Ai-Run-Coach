@@ -6771,6 +6771,78 @@ function ensureClosingStageMilestones(
   return updated;
 }
 
+// Sessions whose purpose is controlled, low effort — a "give it everything / sprint to the line"
+// finish contradicts them. Damion's walk-run reintroduction after a back problem (RPE 2/10) was
+// told "Final 100 metres — give it everything you've got!" (2026-10-08).
+const GENTLE_FINISH_SESSION_TYPES = new Set([
+  "walk_run", "orientation", "recovery", "recovery_run", "easy", "easy_run", "walk",
+]);
+const GENTLE_FINISH_SESSION_GOALS = new Set(["recovery", "reintroduce_running"]);
+
+function softenFinishCuesForGentleSessions(
+  triggers: SessionCoachingTrigger[],
+  sessionType: string,
+  sessionGoal: string,
+): SessionCoachingTrigger[] {
+  if (!GENTLE_FINISH_SESSION_TYPES.has(sessionType) && !GENTLE_FINISH_SESSION_GOALS.has(sessionGoal)) {
+    return triggers;
+  }
+  const calm: Record<string, string[]> = {
+    final_100m: [
+      "Last 100 metres — stay relaxed and smooth, no need to push.",
+      "100 metres to go — keep it easy right to the end.",
+      "Nearly there — same gentle effort to the finish.",
+    ],
+    final_250m: [
+      "250 metres left — hold this easy, comfortable effort.",
+      "Last 250 metres — stay smooth and relaxed.",
+    ],
+  };
+  return triggers.map(t => {
+    const msgs = calm[t.type];
+    if (!msgs) return t;
+    return { ...t, message: msgs[0], alternativeMessages: msgs.slice(1) };
+  });
+}
+
+// Walk-run / return-to-running sessions are effort-led (RPE ~2/10): HR is secondary, and a
+// beginner's slowest possible jog often sits above a %-of-max Zone 2. Damion's 6×(2+3 min)
+// walk-run (Z2 112–131, jogs at 134–152 on hills at 9–10 min/km) got 13 "slow down" cues he
+// could not act on. So for these sessions:
+//   • hr-high alerts fire only above a safety ceiling — the top of Zone 3, derived from the
+//     Zone 2 ceiling with the same %-of-max model (Z2 = 60–70%, Z3 = 70–80% of max HR);
+//   • hr-low alerts are dropped — never push effort up in a walk-run.
+const EFFORT_LED_SESSION_TYPES = new Set(["walk_run"]);
+const EFFORT_LED_SESSION_GOALS = new Set(["reintroduce_running"]);
+
+function relaxHrAlertsForEffortLedSessions(
+  triggers: SessionCoachingTrigger[],
+  sessionType: string,
+  sessionGoal: string,
+  zone2MaxHR: number | undefined,
+): SessionCoachingTrigger[] {
+  if (!EFFORT_LED_SESSION_TYPES.has(sessionType) && !EFFORT_LED_SESSION_GOALS.has(sessionGoal)) {
+    return triggers;
+  }
+  const isHigh = (t: SessionCoachingTrigger) => /hr_zone_high|hr_high|heart_rate_high/.test(t.type);
+  const isLow = (t: SessionCoachingTrigger) => /hr_zone_low|hr_low|heart_rate_low/.test(t.type);
+  const ceiling = zone2MaxHR && zone2MaxHR > 0 ? Math.round(zone2MaxHR * 0.8 / 0.7) : null;
+  return triggers
+    .filter(t => !isLow(t))
+    .map(t => {
+      if (!isHigh(t) || ceiling == null) return t;
+      return {
+        ...t,
+        condition: `hr > ${ceiling}`,
+        message: "Heart rate's {hr} — higher than today needs. Walk for a bit until your breathing settles.",
+        alternativeMessages: [
+          "Heart rate {hr}. Ease right off — walk until talking feels easy again.",
+          "That's {hr} bpm. Today is about easy effort, so take a walk and let it come down.",
+        ],
+      };
+    });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // generateSessionCoaching
 //
@@ -7960,7 +8032,16 @@ FINAL REMINDER — NON-NEGOTIABLE:
     // ── Post-processing: guarantee final_100m and session_complete triggers ─────
     // If OpenAI forgot to include final_100m or session_complete, inject defaults.
     // These are MANDATORY for distance-based sessions. (Fixes: Wayne & Claire missing prompts)
-    const withMandatoryMilestones = ensureClosingStageMilestones(gatedTriggers, targetDistanceKm, activityType, targetDurationMinutes);
+    const withMandatoryMilestones = relaxHrAlertsForEffortLedSessions(
+      softenFinishCuesForGentleSessions(
+        ensureClosingStageMilestones(gatedTriggers, targetDistanceKm, activityType, targetDurationMinutes),
+        sessionType,
+        sessionGoal,
+      ),
+      sessionType,
+      sessionGoal,
+      targetHRMax,
+    );
 
     // ── Post-processing: guarantee rep_start / recovery_start triggers for interval sessions ──
     // If OpenAI didn't include these (which were historically missing from the vocabulary),

@@ -678,6 +678,13 @@ fun WorkoutDetailScreen(
                 val watchReady = companionInstalled && isCoachingReady && !isAudioPreloading
                 val onPrepareWatch = {
                     commitLiveTrackingSelection()
+                    // Signal to the run screen that it should NOT auto-start —
+                    // it must wait for the watch to send the "start" command.
+                    WorkoutHolder.isWatchMode = true
+                    // Builds this workout's RunSetupConfig (plan/workout IDs, targets) into
+                    // RunConfigHolder BEFORE the prepare below, which adopts it — otherwise the
+                    // service standby carried the coaching plan but no workout link.
+                    onStartWorkout(workout)
                     runSessionViewModel.prepareRunOnWatchWithCoaching(
                         workoutId        = workout.id,
                         distanceKm       = workout.distance?.toFloat() ?: 0f,
@@ -688,10 +695,6 @@ fun WorkoutDetailScreen(
                         intervalDistKm   = workout.intervalDistanceMeters?.let { it / 1000f },
                         intervalDurSecs  = workout.intervalDurationSeconds
                     )
-                    // Signal to the run screen that it should NOT auto-start —
-                    // it must wait for the watch to send the "start" command.
-                    WorkoutHolder.isWatchMode = true
-                    onStartWorkout(workout)
                 }
                 val onStartPhone = {
                     commitLiveTrackingSelection()

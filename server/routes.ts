@@ -13,7 +13,7 @@ import {
   garminWellnessMetrics, connectedDevices, garminActivities, garminBodyComposition, 
   runs, garminRealtimeData, garminCompanionSessions, garminPairingDiagnostics, garminPairingCodes,
   dailyFitness, segmentEfforts, segmentStars, segments,
-  trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations,
+  trainingPlans, weeklyPlans, plannedWorkouts, planAdaptations, sessionInstructions as sessionInstructionsTable,
   feedActivities, reactions, activityComments, commentLikes,
   clubs, clubMemberships, challenges, challengeParticipants, groupRunParticipants, groupRuns,
   achievements, userAchievements, goals, users, notificationPreferences,
@@ -2619,6 +2619,35 @@ function transformRunForAndroid(run: any) {
     }
   });
 
+  // ── Helper: enrich weeks 1-2 once the orientation session is done ────────
+  // Every way an orientation can become complete must call this — auto-complete from a saved
+  // run, the manual "Mark complete" and "Skip". Only auto-complete did, so a manually-completed
+  // orientation left the plan on placeholder targets indefinitely (Damion, 2026-10-06).
+  // Background, idempotent enough to re-run: enrichment overwrites targets.
+  // Coaching plans cached before this ran carry the placeholder targets — mark them stale so
+  // the version gate regenerates them on next open (cheaper than regenerateCoaching=true,
+  // which would generate a plan for every workout whether or not it is ever opened).
+  function enrichWeeksAfterOrientation(planId: string, userId: string, source: string): void {
+    setImmediate(async () => {
+      try {
+        console.log(`[${source}] Orientation complete — enriching weeks 1-2 for plan ${planId}`);
+        const allIds = await getWorkoutIdsForPlanWeeks(planId, [1, 2]);
+        const open = allIds.length === 0 ? [] : (await db.select({ id: plannedWorkouts.id, isCompleted: plannedWorkouts.isCompleted })
+          .from(plannedWorkouts).where(inArray(plannedWorkouts.id, allIds)))
+          .filter(w => !w.isCompleted).map(w => w.id);
+        if (open.length > 0) {
+          await enrichWorkoutBlock(userId, open);
+          await db.update(sessionInstructionsTable).set({ generatedVersion: "0" })
+            .where(inArray(sessionInstructionsTable.plannedWorkoutId, open));
+        }
+        await markPlanEnrichedThroughWeek(planId, 2);
+        console.log(`[${source}] ✅ Weeks 1-2 enriched after orientation for plan ${planId} (${open.length} workouts)`);
+      } catch (e) {
+        console.error(`[${source}] Enrichment after orientation failed for plan ${planId}:`, e);
+      }
+    });
+  }
+
   // ── Helper: server-side auto-complete of a linked planned workout ────────
   // Called whenever a run is saved (new, Case-0 merge, or Case-2 merge).
   // Idempotent — skips silently if already completed or no link exists.
@@ -2639,22 +2668,7 @@ function transformRunForAndroid(run: any) {
     // When a new user completes their orientation run, we now have real pace + HR data
     // to enrich all week 1-2 sessions with accurate numeric targets.
     if ((pw as any).workoutType === "orientation" && (pw as any).trainingPlanId) {
-      const planId = (pw as any).trainingPlanId;
-      const userId = (savedRun as any)?.userId;
-
-      setImmediate(async () => {
-        try {
-          console.log(`[autoComplete] Orientation complete — enriching weeks 1-2 for plan ${planId}`);
-          const workoutIds = await getWorkoutIdsForPlanWeeks(planId, [1, 2]);
-          if (workoutIds.length > 0) {
-            await enrichWorkoutBlock(userId, workoutIds);
-            await markPlanEnrichedThroughWeek(planId, 2);
-            console.log(`[autoComplete] ✅ Weeks 1-2 enriched after orientation for plan ${planId}`);
-          }
-        } catch (e) {
-          console.error(`[autoComplete] Enrichment after orientation failed for plan ${planId}:`, e);
-        }
-      });
+      enrichWeeksAfterOrientation((pw as any).trainingPlanId, (savedRun as any)?.userId, "autoComplete");
     }
 
     // Advance the week if all workouts in this week are now done
@@ -17986,6 +18000,10 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       console.log(`✅ Workout updated: ${workoutId}`);
 
+      if (workoutBefore?.workoutType === "orientation" && !workoutBefore.isCompleted && workoutBefore.trainingPlanId) {
+        enrichWeeksAfterOrientation(workoutBefore.trainingPlanId, req.user!.userId, "completeWorkout");
+      }
+
       // Mirror the link on the run so plan-adherence queries work correctly
       if (runId && workoutBefore) {
         await db.update(runs)
@@ -18062,7 +18080,13 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   app.put("/api/training-plans/workouts/:workoutId/skip", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { workoutId } = req.params;
+      const [before] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));
       await db.update(plannedWorkouts).set({ isCompleted: true }).where(eq(plannedWorkouts.id, workoutId));
+      // A skipped orientation has no run data, but weeks 1-2 must still leave placeholder
+      // targets — enrichment falls back to DOB/fitness-level zones.
+      if (before?.workoutType === "orientation" && !before.isCompleted && before.trainingPlanId) {
+        enrichWeeksAfterOrientation(before.trainingPlanId, req.user!.userId, "skipWorkout");
+      }
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to skip workout" });

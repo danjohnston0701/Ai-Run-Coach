@@ -605,7 +605,10 @@ export async function getOrGenerateSessionCoaching(
   //         AI max_tokens increased to 8000 to prevent truncation of richer plans.
   //         Android engine fixed: 3-pass trigger evaluation prevents reactive triggers from blocking
   //         progress triggers — km splits and milestones now fire independently of HR alerts.
-  const CURRENT_PLAN_VERSION = "2.9";
+  // v3.0:  Gentle sessions (walk_run, orientation, recovery, easy, reintroduce_running goal) get
+  //         calm final_100m / final_250m cues instead of "give it everything / sprint to the line".
+  //         Walk-run / reintroduce_running: hr-high alerts only above the top of Zone 3, hr-low dropped.
+  const CURRENT_PLAN_VERSION = "3.0";
 
   // Semver-aware comparison: parse "major.minor" strings to numeric values for correct ordering.
   // String comparison fails for versions like "2.10" vs "2.4" ("2.10" < "2.4" lexicographically).
