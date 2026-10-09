@@ -35,6 +35,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
 
+// Temporarily hidden / not yet launched (2026-10-09). Flip back to re-enable — the cards,
+// view-model plumbing and OAuth handling are untouched.
+//  • Strava import: hidden until the Strava API application is active again.
+//  • Galaxy Watch: shown under "Coming Soon" until the Wear OS app is live on Google Play.
+private const val SHOW_STRAVA_IMPORT = false
+private const val SAMSUNG_WATCH_APP_AVAILABLE = false
+
 // Generic device info for the "Coming Soon" section
 data class DeviceInfo(
     val name: String,
@@ -107,8 +114,9 @@ fun ConnectedDevicesScreen(
             //     requiresAppInstall = true,
             //     onConnect = {}
             // ),
-            // Samsung Galaxy Watch moved out of "Coming Soon" — see the dedicated
-            // "Samsung / Wear OS Watch App" section below, mirroring the Garmin section.
+            // Samsung Galaxy Watch: back in "Coming Soon" until the Wear OS app is published —
+            // the dedicated "Samsung / Wear OS Watch App" section below takes over once
+            // SAMSUNG_WATCH_APP_AVAILABLE is true.
             // COROS removed per requirements
             // DeviceInfo(
             //     name = "COROS",
@@ -119,6 +127,16 @@ fun ConnectedDevicesScreen(
             //     isAvailableOnAndroid = true,
             //     onConnect = {}
             // )
+        ) + if (SAMSUNG_WATCH_APP_AVAILABLE) emptyList() else listOf(
+            DeviceInfo(
+                name = "Samsung Galaxy Watch",
+                description = "Ai Run Coach for Galaxy Watch4 and later (Wear OS) — run with or without your phone",
+                icon = Icons.Default.Watch,
+                supportsRealtimeHR = true,
+                supportsPostRunSync = true,
+                isAvailableOnAndroid = true,
+                onConnect = {}
+            )
         )
     }
 
@@ -159,7 +177,10 @@ fun ConnectedDevicesScreen(
             // ── Page subtitle ─────────────────────────────────────────────────
             item {
                 Text(
-                    "Connect your Ai Run Coach app to your fitness devices and services. Control sessions from your Garmin or Wear OS watch while your phone coaches you, and import your historic Strava runs so your AI coach has full context from day one.",
+                    if (SHOW_STRAVA_IMPORT)
+                        "Connect your Ai Run Coach app to your fitness devices and services. Control sessions from your Garmin or Wear OS watch while your phone coaches you, and import your historic Strava runs so your AI coach has full context from day one."
+                    else
+                        "Connect your Ai Run Coach app to your fitness devices. Control sessions from your Garmin watch while your phone coaches you.",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary
                 )
@@ -187,14 +208,14 @@ fun ConnectedDevicesScreen(
             }
 
             // ── Section: Samsung / Wear OS Watch App ──────────────────────────
-            item {
+            if (SAMSUNG_WATCH_APP_AVAILABLE) item {
                 SectionHeader(
                     title = "Samsung / Wear OS Watch App",
                     accentColor = Colors.primary
                 )
             }
 
-            item {
+            if (SAMSUNG_WATCH_APP_AVAILABLE) item {
                 SamsungWatchAppCard(
                     onSetUp = onNavigateToSamsungWatchApp,
                     demoVideo = howToVideos.firstOrNull { it.watch == "wear_os" },
@@ -203,7 +224,7 @@ fun ConnectedDevicesScreen(
             }
 
             // ── Section: Strava Integration ───────────────────────────────────
-            item {
+            if (SHOW_STRAVA_IMPORT) item {
                 SectionHeader(
                     title = "Strava",
                     subtitle = "Import historic runs for AI coaching",
@@ -211,7 +232,7 @@ fun ConnectedDevicesScreen(
                 )
             }
 
-            item {
+            if (SHOW_STRAVA_IMPORT) item {
                 StravaIntegrationCard(
                     isConnected = stravaConnected,
                     athleteName = stravaAthleteName,
