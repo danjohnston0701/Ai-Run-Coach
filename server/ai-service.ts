@@ -6,6 +6,7 @@ import * as runPrompts from "./coaching-prompts-run";
 import * as walkPrompts from "./coaching-prompts-walk";
 import type { PaceUpdatePromptContext, StruggleCoachingPromptContext } from "./coaching-prompts-run";
 import { getWorkoutPhilosophy, formatPhilosophyForPrompt } from "./workoutPhilosophy";
+import { firstNameOf } from "./utils/first-name";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -1108,7 +1109,7 @@ export async function generatePaceUpdate(params: {
 CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'run'}. Do NOT mention hills, terrain, elevation, climbing, descending, or any terrain characteristics — you have no information about the terrain. Focus only on pace, effort, form, and motivation.`;
   
   // Build runner/walker profile + history context
-  const runnerFirstNamePace = runnerName ? runnerName.split(' ')[0] : null;
+  const runnerFirstNamePace = firstNameOf(runnerName) ?? null;
   let runnerContext = '';
   if (runnerFirstNamePace) runnerContext += `${isWalkSession ? 'Walker' : 'Runner'}: ${runnerFirstNamePace}. `;
   if (fitnessLevel) runnerContext += `Fitness level: ${fitnessLevel}. `;
@@ -1373,7 +1374,7 @@ export async function generateCompletionSummary(params: {
   const activityLabel = activityType || 'run';
   
   // Build the summary prompt
-  const summaryPrompt = `You are ${coachName}, giving a brief final congratulations as ${runnerName || 'the runner'} completes their ${activityLabel}.
+  const summaryPrompt = `You are ${coachName}, giving a brief final congratulations as ${firstNameOf(runnerName) || 'the runner'} completes their ${activityLabel}.
   
 COMPLETION STATS:
 - Total distance: ${distance} km${targetDistance ? ` (target was ${targetDistance} km)` : ''}
@@ -1734,7 +1735,7 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
     }
 
     // Declare runnerFirstName early so it can be used in prompt templates
-    const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+    const runnerFirstName = firstNameOf(runnerName) ?? null;
 
     const pacePromptModule = isWalkActivity ? walkPrompts : runPrompts;
     const { system: paceSystemMsg, user: pacePrompt } = pacePromptModule.paceCoachingPrompt({
@@ -1789,7 +1790,7 @@ STOP nagging about the target. Switch to: acknowledge the effort they ARE puttin
   // toneDirective(coachTone) and runnerProfileBlock(runnerProfile) own all of
   // that. The AI derives HOW to communicate from those signals; we just supply
   // the FACTS it needs to personalise the content intelligently.
-  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+  const runnerFirstName = firstNameOf(runnerName) ?? null;
   const totalRunsAllTime = (params as any).totalRunsAllTime as number | undefined | null;
 
   let runnerProfileContext = '';
@@ -2265,7 +2266,7 @@ CRITICAL: No GPS elevation data for this ${isWalkStruggle ? 'walk' : 'run'}. Do 
   const spokenBaselinePace = formatPaceForTTS(baselinePace);
 
   // Build walker/runner profile + history context for struggle coaching
-  const runnerFirstNameStruggle = runnerName ? runnerName.split(' ')[0] : null;
+  const runnerFirstNameStruggle = firstNameOf(runnerName) ?? null;
   let struggleRunnerContext = '';
   if (runnerFirstNameStruggle) struggleRunnerContext += `${isWalkStruggle ? 'Walker' : 'Runner'}: ${runnerFirstNameStruggle}. `;
   if (fitnessLevel) struggleRunnerContext += `Fitness level: ${fitnessLevel}. `;
@@ -2938,7 +2939,7 @@ export async function generateEmotionalCoaching(params: {
   } = params;
 
   const progress = targetDistance ? Math.round((distance / targetDistance) * 100) : 0;
-  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+  const runnerFirstName = firstNameOf(runnerName) ?? null;
 
   // Build emotional coaching prompts by category.
   // Each category previously ended with a "Key themes/phrases/cues:" line of fully
@@ -3939,7 +3940,7 @@ READINESS COACHING GUIDANCE (use this to personalize the readinessInsight):
 - This session is part of a structured coaching program. Adjust your briefing to emphasize how this specific workout fits into their progression.`;
   }
 
-  const briefingRunnerName = runnerName ? runnerName.split(' ')[0] : null;
+  const briefingRunnerName = firstNameOf(runnerName) ?? null;
   const prompt = `You are ${coachName}, an AI ${isWalk ? 'walking' : 'running'} coach. Your coaching style is ${coachTone}.
 ${briefingRunnerName ? `The ${isWalk ? 'walker' : 'runner'}'s name is ${briefingRunnerName}. Use their name naturally in the briefing.` : ''}
 ${fitnessLevel ? `${isWalk ? 'Walker' : 'Runner'}'s fitness level: ${fitnessLevel}.` : ''}
@@ -4201,7 +4202,7 @@ export async function generateHeartRateCoaching(params: {
   const effectiveMaxHR = runnerAge ? calcMaxHR(runnerAge) : maxHR;
   const currentZone = getHeartRateZoneNumber(currentHR, effectiveMaxHR);
   const percentMax = Math.round((currentHR / effectiveMaxHR) * 100);
-  const runnerFirstName = runnerName ? runnerName.split(' ')[0] : null;
+  const runnerFirstName = firstNameOf(runnerName) ?? null;
   
   const zoneNames = ['', 'Recovery', 'Aerobic', 'Tempo', 'Threshold', 'Maximum'];
   
@@ -6843,6 +6844,158 @@ function relaxHrAlertsForEffortLedSessions(
     });
 }
 
+
+// ── Timed + effort-led plan guarantees (deterministic, applied to every generated plan) ──────
+// Damion's 5×(2 min jog + 3 min walk) walk-run (2026-10-10) was generated as a "5 km" session
+// (workout.distance null → a 5 km default), with no warm-up or cool-down although the workout
+// prescribed both, a session_complete of "distance >= 5.0" that never fired in a 25-minute
+// session, and a brief, rep cues and HR band built from a jog pace (8:59) that was really his
+// orientation's walk+jog AVERAGE. None of that should depend on the model getting it right.
+const EFFORT_LED_PLAN_TYPES = new Set(["walk_run", "orientation"]);
+
+function isEffortLedSession(sessionType: string, sessionGoal?: string): boolean {
+  return EFFORT_LED_PLAN_TYPES.has(sessionType) || EFFORT_LED_SESSION_GOALS.has(sessionGoal ?? "");
+}
+
+function fmtMinutes(min: number): string {
+  const m = Math.round(min * 10) / 10;
+  return Number.isInteger(m) ? `${m}` : m.toFixed(1);
+}
+
+export function finalizeTimedAndEffortLedPlan(
+  plan: SessionCoachingPlan,
+  ctx: { sessionType: string; sessionGoal?: string; sessionInstructions?: string; activityType?: string; zone2MaxHR?: number; targetDistanceKm?: number },
+): SessionCoachingPlan {
+  const effortLed = isEffortLedSession(ctx.sessionType, ctx.sessionGoal);
+  let phases = [...(plan.phases ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  let triggers = [...(plan.triggers ?? [])];
+  let preRunBrief = plan.preRunBrief;
+  const repeating = phases.filter(p => (p.repetitions ?? 1) > 1);
+  const isWalk = ctx.activityType === "walk";
+
+  if (effortLed && repeating.length > 0) {
+    // 1. Warm-up / cool-down the workout prescribes ("Start with 5 minutes of brisk walking to
+    //    warm up, and finish with a few minutes of easy walking") but the model left out.
+    const instr = (ctx.sessionInstructions ?? "").toLowerCase();
+    const hasWarm = phases.some(p => /warm/i.test(p.name));
+    const hasCool = phases.some(p => /cool/i.test(p.name));
+    const warmMin = Number(instr.match(/(\d+)\s*min(?:ute)?s?\s+of\s+brisk\s+walk(?:ing)?\s+to\s+warm/)?.[1] ?? 5);
+    if (!hasWarm) {
+      phases = [{ name: "warmup_walk", order: -1, durationMinutes: warmMin, effort: "easy", coachingFocus: "relaxation",
+        phaseInstructions: `Brisk walk for ${warmMin} minutes to warm up before the first jog.` }, ...phases];
+      triggers.push({ id: "warmup_walk_start", type: "phase_start", condition: "phase == warmup_walk", frequency: "once",
+        message: `Let's start with ${warmMin} minutes of brisk walking to warm up. I'll tell you when to start the first jog.`,
+        alertType: "none" });
+    }
+    if (!hasCool) {
+      phases = [...phases, { name: "cooldown_walk", order: 999, durationMinutes: 3, effort: "easy", coachingFocus: "relaxation",
+        phaseInstructions: "Easy walk to cool down." }];
+      triggers.push({ id: "cooldown_walk_start", type: "phase_start", condition: "phase == cooldown_walk", frequency: "once",
+        message: "That's the last jog done. Walk easy for a few minutes to cool down.", alertType: "none" });
+    }
+    phases = phases.map((p, i) => ({ ...p, order: i }));
+
+    // 2. Effort-led: no pace targets, and an HR band that is a safety ceiling, not a zone the
+    //    runner is told to stay inside (a beginner's slowest jog often sits above Zone 2).
+    const ceiling = ctx.zone2MaxHR && ctx.zone2MaxHR > 0 ? Math.round(ctx.zone2MaxHR * 0.8 / 0.7) : undefined;
+    phases = phases.map(p => {
+      const isRecovery = /^(recovery|walk|rest|float)/i.test(p.name) || /warm|cool/i.test(p.name);
+      return { ...p, targetPaceMin: undefined, targetPaceMax: undefined, targetHRMin: undefined,
+        targetHRMax: isRecovery ? undefined : ceiling };
+    });
+    const work = repeating.find(p => !/^(recovery|walk|rest|float)/i.test(p.name)) ?? repeating[0];
+    const rest = repeating.find(p => p !== work);
+    const workMin = work?.durationMinutes ?? 0;
+    const restMin = rest?.durationMinutes ?? 0;
+    const reps = work?.repetitions ?? repeating[0].repetitions ?? 1;
+    const jog = isWalk ? "brisk walk" : "jog";
+    triggers = triggers
+      .filter(t => t.type !== "rep_midpoint") // the phase engine times its own midpoint
+      // Cadence targets ("aim for 170") don't belong in an easy walk-run — every walk break is
+      // below them, and a returning runner shouldn't be pushed on turnover.
+      .filter(t => !/cadence/i.test(t.condition))
+      .map(t => {
+        if (t.type === "rep_start") return { ...t, condition: "always",
+          message: `${isWalk ? "Pick it up" : "Jog"} ${"{repNum}"} of ${"{totalReps}"} — an easy ${jog}, you should be able to talk in full sentences.`,
+          alternativeMessages: [
+            `Time to ${jog} — rep ${"{repNum}"} of ${"{totalReps}"}. Nice and easy, no need to push.`,
+            `Rep ${"{repNum}"} of ${"{totalReps}"} — start your easy ${jog}. Relaxed shoulders, gentle steps.`,
+            `${"{repNum}"} of ${"{totalReps}"} — ease into an easy ${jog}. Comfortable is the goal.`,
+          ] };
+        if (t.type === "recovery_start") return { ...t, condition: "always",
+          message: "Walk now — a brisk walk, and let your breathing settle.",
+          alternativeMessages: [
+            "Good — walk it now. Let your breathing come back down.",
+            "Walk break — keep it brisk and relaxed.",
+            "Nice work. Walk now and let your heart rate settle before the next one.",
+          ] };
+        return t;
+      });
+
+    // 3. A brief that quotes paces or BPM numbers contradicts an effort-led session.
+    if (!preRunBrief || /per kilomet|\/km|beats per minute|\bbpm\b|\d{2,3}\s*(?:and|to|–|-)\s*\d{2,3}/i.test(preRunBrief)) {
+      const warm = phases.find(p => /warm/i.test(p.name))?.durationMinutes;
+      preRunBrief = `${warm ? `We'll start with ${fmtMinutes(warm)} minutes of brisk walking to warm up. ` : ""}` +
+        `Then ${reps} rounds of ${fmtMinutes(workMin)} minutes easy ${jog}${restMin ? ` and ${fmtMinutes(restMin)} minutes walking` : ""}. ` +
+        `Keep the ${jog}s easy enough to talk in full sentences — there's no pace to hit today. ` +
+        `I'll tell you when to ${jog} and when to walk, then we'll finish with an easy walk to cool down.`;
+    }
+  }
+
+  // 4. Time-based sessions end on time. If no phase has a distance, any distance end point is
+  //    invented (the "5 km" default), so session_complete must be elapsed-time based.
+  const totalMin = (() => {
+    let sum = 0;
+    for (let i = 0; i < phases.length; i++) {
+      const p = phases[i];
+      if ((p.repetitions ?? 1) > 1) {
+        // A run of consecutive repeating phases interleaves (same expansion as the apps).
+        let j = i; let group = 0;
+        while (j < phases.length && (phases[j].repetitions ?? 1) > 1) { group += phases[j].durationMinutes ?? 0; j++; }
+        sum += group * (p.repetitions ?? 1);
+        i = j - 1;
+      } else sum += p.durationMinutes ?? 0;
+    }
+    return sum;
+  })();
+  const isTimed = !(ctx.targetDistanceKm && ctx.targetDistanceKm > 0) &&
+    phases.length > 0 && phases.every(p => !(p.distanceKm && p.distanceKm > 0)) && totalMin > 0;
+  let targetMetrics = plan.targetMetrics;
+  if (isTimed) {
+    const label = isWalk ? "walk" : "session";
+    const complete = {
+      id: "session_complete_timed", type: "session_complete", condition: `elapsed_min >= ${fmtMinutes(totalMin)}`,
+      frequency: "once", alertType: "none",
+      message: effortLed
+        ? `That's today's ${label} done — ${fmtMinutes(totalMin)} minutes, nicely controlled. Great work.`
+        : `That's your ${fmtMinutes(totalMin)} minute ${label} done — brilliant effort today.`,
+    } as SessionCoachingTrigger;
+    triggers = triggers
+      .filter(t => !/session_complete|session_end|final_(500|250|100)m/.test(t.type) &&
+        !(effortLed && /km_split|milestone/.test(t.type)))
+      // "remaining_m > 500" is the model's "not in the final stretch" guard. With no distance
+      // the apps evaluate remaining_m as false, which would silence the cue for the whole session.
+      .map(t => {
+        if (!/remaining_m\s*>/.test(t.condition)) return t;
+        const condition = t.condition
+          .replace(/remaining_m\s*>=?\s*\d+(\.\d+)?/g, "remaining_min > 1")
+          .trim();
+        return { ...t, condition };
+      })
+      .concat(complete);
+    targetMetrics = { ...targetMetrics, totalDurationMinutes: Math.round(totalMin), totalDistanceKm: 0, primaryMetric: "duration" };
+  }
+  if (effortLed && repeating.length > 0) {
+    // The apps fall back to these when a phase has no HR target — a walk break must not inherit
+    // a jog's 110–130 band, and nothing should read a pace target.
+    const ceiling = ctx.zone2MaxHR && ctx.zone2MaxHR > 0 ? Math.round(ctx.zone2MaxHR * 0.8 / 0.7) : undefined;
+    targetMetrics = { ...targetMetrics, mainEffortPaceMin: undefined, mainEffortPaceMax: undefined,
+      mainEffortHRMin: undefined, mainEffortHRMax: ceiling };
+  }
+
+  return { ...plan, phases, triggers, preRunBrief, targetMetrics };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // generateSessionCoaching
 //
@@ -7681,7 +7834,7 @@ Session Details:
 - Type: ${sessionType}
 - Goal: ${sessionGoal}${sessionIntent ? `\n- Intent: ${sessionIntent}` : ""}
 - Primary Metric: ${primaryConstraint === "intervals" ? "reps" : primaryConstraint} ← organise the plan, triggers, and preRunBrief around this
-- Target Distance: ${targetDistanceKm} km${primaryConstraint === "distance" ? " ← PRIMARY END POINT" : primaryConstraint === "intervals" ? "" : " (informational — no distance end trigger)"}
+- Target Distance: ${targetDistanceKm > 0 ? `${targetDistanceKm} km` : "none — this session has no distance; never mention kilometres as a goal or an end point"}${targetDistanceKm > 0 && primaryConstraint === "distance" ? " ← PRIMARY END POINT" : primaryConstraint === "intervals" ? "" : " (informational — no distance end trigger)"}
 - Target Duration: ${targetDurationMinutes} minutes${primaryConstraint === "duration" ? " ← PRIMARY END POINT" : " (estimate only — do not end session on elapsed time)"}
 - Overall Pace Range: ${formatPaceForPrompt(targetPaceMin)} – ${formatPaceForPrompt(targetPaceMax)}
 - Overall HR Range: ${targetHRMin ?? "not set"}–${targetHRMax ?? "not set"} bpm
@@ -8090,13 +8243,15 @@ FINAL REMINDER — NON-NEGOTIABLE:
       `policy=primaryMetric:${coachingPolicy.primaryMetric} cadence:${coachingPolicy.cadenceTriggersAllowed} elev:${coachingPolicy.elevationTriggersAllowed}`
     );
 
-    return plan;
+    return finalizeTimedAndEffortLedPlan(plan, { sessionType, sessionGoal, sessionInstructions, activityType, zone2MaxHR: targetHRMax, targetDistanceKm });
 
   } catch (error) {
     console.error("[generateSessionCoaching] Error generating session coaching:", error);
 
     // Robust fallback — always returns a usable plan
-    return buildFallbackSessionCoaching(params);
+    return finalizeTimedAndEffortLedPlan(buildFallbackSessionCoaching(params), {
+      sessionType, sessionGoal, sessionInstructions, activityType, zone2MaxHR: targetHRMax, targetDistanceKm,
+    });
   }
 }
 
@@ -8230,7 +8385,7 @@ function buildFallbackSessionCoaching(
     {
       name: "main_effort", order: 1,
       durationMinutes: targetDurationMinutes - 15,
-      distanceKm: targetDistanceKm,
+      distanceKm: targetDistanceKm > 0 ? targetDistanceKm : undefined,
       targetPaceMin, targetPaceMax, targetHRMin, targetHRMax,
       effort: isRecovery ? "easy" : isInterval ? "hard" : isTempo ? "threshold" : "moderate",
       coachingFocus: isRecovery ? "relaxation" : isInterval ? "power" : "rhythm",
@@ -8283,7 +8438,7 @@ function buildFallbackSessionCoaching(
     sessionType, sessionGoal,
     coachingTone: tone,
     cueingStrategy: strategy,
-    preRunBrief: `Today's session is a ${targetDistanceKm}km ${sessionType.replace(/_/g, " ")} ${activityType}. ${
+    preRunBrief: `Today's session is a ${targetDistanceKm > 0 ? `${targetDistanceKm}km` : `${targetDurationMinutes}-minute`} ${sessionType.replace(/_/g, " ")} ${activityType}. ${
       targetPaceMin ? `Target pace: ${formatPaceForPrompt(targetPaceMin)}–${formatPaceForPrompt(targetPaceMax)}.` : ""
     } Focus on consistent effort throughout.`,
     whyThisSession: `This session builds your ${sessionGoal.replace(/_/g, " ")} and improves running fitness.`,

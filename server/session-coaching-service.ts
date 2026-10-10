@@ -608,7 +608,10 @@ export async function getOrGenerateSessionCoaching(
   // v3.0:  Gentle sessions (walk_run, orientation, recovery, easy, reintroduce_running goal) get
   //         calm final_100m / final_250m cues instead of "give it everything / sprint to the line".
   //         Walk-run / reintroduce_running: hr-high alerts only above the top of Zone 3, hr-low dropped.
-  const CURRENT_PLAN_VERSION = "3.0";
+  // v3.1:  finalizeTimedAndEffortLedPlan(): timed sessions end on elapsed time (no invented
+  //         "5 km"), walk-runs get the prescribed warm-up/cool-down walks, effort-led cues and
+  //         brief carry no pace/BPM targets, HR band = safety ceiling only.
+  const CURRENT_PLAN_VERSION = "3.1";
 
   // Semver-aware comparison: parse "major.minor" strings to numeric values for correct ordering.
   // String comparison fails for versions like "2.10" vs "2.4" ("2.10" < "2.4" lexicographically).
@@ -751,6 +754,9 @@ export async function getOrGenerateSessionCoaching(
     `→ using ${resolvedTargetHRMin}–${resolvedTargetHRMax}`,
   );
 
+  const effortLed = workout.workoutType === "walk_run" || workout.workoutType === "orientation" ||
+    workout.sessionGoal === "reintroduce_running";
+
   // 5. Build GenerateSessionCoachingParams from DB workout data
   const params: GenerateSessionCoachingParams = {
     sessionType:           workout.workoutType,
@@ -765,9 +771,14 @@ export async function getOrGenerateSessionCoaching(
       if (workout.distance) return Math.round(workout.distance * 6);
       return 30;
     })(),
-    targetDistanceKm:      workout.distance ?? 5,
-    targetPaceMin:         paceStringToSecPerKm(workout.targetPace),
-    targetPaceMax:         workout.targetPace
+    // No distance means a timed session — never invent one. The old "?? 5" turned Damion's
+    // 25-minute walk-run into a "5 km" session whose finish cue ("That's 5 km done",
+    // distance >= 5.0) never fired (2026-10-10).
+    targetDistanceKm:      workout.distance ?? 0,
+    // Effort-led sessions (walk-run, return to running) coach to feel, not pace — and their
+    // enriched paces can be a walk+jog average that is no jog pace at all (8:59 for Damion).
+    targetPaceMin:         effortLed ? undefined : paceStringToSecPerKm(workout.targetPace),
+    targetPaceMax:         !effortLed && workout.targetPace
                              ? paceStringToSecPerKm(workout.targetPace)! + 30  // +30s/km tolerance
                              : undefined,
     targetHRMin:           resolvedTargetHRMin,
@@ -784,8 +795,8 @@ export async function getOrGenerateSessionCoaching(
     intervalHRMax:             (workout as any).intervalHeartRateMax ?? undefined,
     recoveryHRMax:             (workout as any).restHeartRateMax ?? undefined,
     // Per-phase pace targets
-    intervalTargetPaceSecPerKm: paceStringToSecPerKm((workout as any).intervalTargetPace),
-    recoveryTargetPaceSecPerKm: paceStringToSecPerKm((workout as any).restTargetPace),
+    intervalTargetPaceSecPerKm: effortLed ? undefined : paceStringToSecPerKm((workout as any).intervalTargetPace),
+    recoveryTargetPaceSecPerKm: effortLed ? undefined : paceStringToSecPerKm((workout as any).restTargetPace),
     runnerProfile: {
       age:                  (user as any).age ?? undefined,
       gender:               (user as any).gender ?? undefined,

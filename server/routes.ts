@@ -105,7 +105,8 @@ import { registerUserActivityRoutes } from "./user-activity";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
-import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg } from "./utils/run-derivation";
+import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime } from "./utils/run-derivation";
+import { firstNameOf } from "./utils/first-name";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -115,6 +116,16 @@ import {
   generateIntelligentRoute,
   NoRoutesError
 } from "./intelligent-route-generation";
+
+// run_date/run_time are the runner's LOCAL date/time of the START (what createRun's
+// derivation writes). The watch insert paths below used to stamp the server's clock
+// (UTC on Replit) at the END of the run — a 07:10 Houston run read "12:51", hours away
+// from the phone run the same runner did three minutes later.
+async function runLocalStart(userId: string, startedAt: Date): Promise<{ runDate: string; runTime: string }> {
+  const [u] = await db.select({ timezone: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+  const local = localDateTime(startedAt, u?.timezone);
+  return { runDate: local.date, runTime: local.time };
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
@@ -955,13 +966,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ==================== TEST ENDPOINTS ====================
+  // Admin-only. Both used to be open to anyone: given just a user's email they pushed an
+  // arbitrary title/body to that user's phone (found 2026-10-11). No client calls them.
+  const requireAdmin = async (req: AuthenticatedRequest, res: Response, next: () => void) => {
+    const [u] = await db.select({ isAdmin: users.isAdmin }).from(users).where(eq(users.id, req.user!.userId)).limit(1);
+    if (!u?.isAdmin) return res.status(403).json({ error: "Admin access required" });
+    next();
+  };
 
   /**
    * Debug endpoint to send a test coaching plan reminder notification.
    * Usage: POST /api/test/coaching-plan-reminder
    * Body: { userEmail: "user@example.com", workoutName: "6x400m Intervals", distance: 5, intensity: "z4" }
    */
-  app.post("/api/test/coaching-plan-reminder", async (req: Request, res: Response) => {
+  app.post("/api/test/coaching-plan-reminder", authMiddleware, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { userEmail, workoutName, distance, intensity } = req.body;
 
@@ -1003,7 +1021,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
    * Usage: POST /api/test/push-notification
    * Body: { userEmail: "user@example.com", title: "Test", body: "Test message" }
    */
-  app.post("/api/test/push-notification", async (req: Request, res: Response) => {
+  app.post("/api/test/push-notification", authMiddleware, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { userEmail, title, body } = req.body;
 
@@ -8353,8 +8371,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
                 startLat: activity.startingLatitudeInDegree,
                 startLng: activity.startingLongitudeInDegree,
                 name: activity.activityName || `${activityType.replace(/_/g, ' ')} from Garmin`,
-                runDate: startTime.toISOString().split('T')[0],
-                runTime: startTime.toTimeString().split(' ')[0].slice(0, 5),
+                startedAt: startTime,
+                ...(await runLocalStart(device.userId, startTime)),
                 completedAt: startTime,
                 externalId: String(activity.activityId),
                 externalSource: 'garmin',
@@ -11617,7 +11635,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         targetPace: targetPace,
         weatherImpact: weatherImpactData,
         userTimezoneId: userTimezoneId,
-        runnerName: req.body.runnerName || user?.name || undefined,
+        runnerName: firstNameOf(req.body.runnerName || user?.name),
         fitnessLevel: user?.fitnessLevel || undefined,
         runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
         // Training plan context for personalized coaching
@@ -11936,7 +11954,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         targetPace: targetPace || null,
         weatherImpact,
         userTimezoneId: userTimezoneId,
-        runnerName: req.body.runnerName || user?.name || undefined,
+        runnerName: firstNameOf(req.body.runnerName || user?.name),
         fitnessLevel: user?.fitnessLevel || undefined,
         runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
         // Training plan context — enables workout-specific coaching briefings
@@ -12099,7 +12117,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         targetPace: targetPace || null,
         weatherImpact,
         userTimezoneId: userTimezoneId,
-        runnerName: req.body.runnerName || user?.name || undefined,
+        runnerName: firstNameOf(req.body.runnerName || user?.name),
         fitnessLevel: user?.fitnessLevel || undefined,
         runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
         // Training plan context — enables workout-specific coaching briefings
@@ -12578,7 +12596,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         console.warn("Session trigger TTS failed, returning text only:", ttsError);
       }
 
-      recordFired(coachingUserId, false);
+      recordFired(coachingUserId, cooldown.isMilestone);
       res.json({
         message,
         audio: base64Audio,
@@ -13196,7 +13214,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         wellness,
         runnerAge,
         fitnessLevel: req.body.fitnessLevel ?? (user as any)?.fitnessLevel ?? undefined,
-        runnerName: req.body.runnerName ?? user?.name ?? undefined,
+        runnerName: firstNameOf(req.body.runnerName ?? user?.name),
         runnerProfile: (await getRunnerProfile(req.user!.userId).catch(() => null))?.profile ?? null,
         activityType,
         groundContactTimeMs: req.body.groundContactTimeMs,
@@ -14422,8 +14440,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             elevation: stats.totalAscent ?? null,
             name: `${watchDeviceLabel(updated?.deviceModel)} ${sessionType === "walk" ? "Walk" : "Run"}`,
             sessionType,
-            runDate: now.toISOString().split('T')[0],
-            runTime: now.toTimeString().split(' ')[0].slice(0, 5),
+            startedAt: new Date(now.getTime() - durationSecs * 1000),
+            ...(await runLocalStart(userId, new Date(now.getTime() - durationSecs * 1000))),
             completedAt: now,
             externalId: sessionId,
             externalSource: watchExternalSource(updated?.deviceModel),
@@ -14675,8 +14693,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             elevation:      totalAscent ?? null,
             name:           `${watchDeviceLabel(batchDeviceModel ?? batchSession?.deviceModel)} ${resolvedBatchSessionType === "walk" ? "Walk" : "Run"}`,
             sessionType:    resolvedBatchSessionType,
-            runDate:        now.toISOString().split('T')[0],
-            runTime:        now.toTimeString().split(' ')[0].slice(0, 5),
+            ...(await runLocalStart(userId, startedAt ?? new Date(now.getTime() - durSec * 1000))),
             completedAt:    now,
             externalId:     sessionId,
             externalSource: watchExternalSource(batchDeviceModel ?? batchSession?.deviceModel),

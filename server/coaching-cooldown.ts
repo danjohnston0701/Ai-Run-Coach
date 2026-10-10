@@ -147,6 +147,14 @@ export async function checkCooldown(
   if (endpointName === 'interval-coaching') {
     return { allowed: true, isMilestone: true };
   }
+  // Coaching-plan structure cues. The phone already spaces these and fires them at the exact
+  // moment the session structure demands, so a 90 s cooldown here only meant "skipped" →
+  // the phone played the plan's canned fallback text instead. In a walk-run that changes
+  // phase every 2–3 minutes that was nearly every cue (Damion, 2026-10-10: "Starting rep 1 —
+  // aim for 11:00 pace" for a walk break was a fallback template).
+  if (endpointName === 'session-trigger-live' && isPlanStructureCue(triggerType)) {
+    return { allowed: true, isMilestone: true };
+  }
 
   // ── 2. User-setting-gated milestones ────────────────────────────────────────
   // 500m check-in (first 500m into the run)
@@ -193,6 +201,12 @@ export async function checkCooldown(
   }
 
   return { allowed: true, isMilestone: false };
+}
+
+/** Session-plan cues that mark the session's structure (or safety) and must never be rate-limited. */
+export function isPlanStructureCue(triggerType: string | null | undefined): boolean {
+  const t = String(triggerType ?? '');
+  return /^(rep_start|recovery_start|rep_end|rep_midpoint|phase_start|phase_end|session_complete|session_end|hr_zone_high|hr_high|heart_rate_high|hr_recovery_acknowledgement)/.test(t);
 }
 
 /**

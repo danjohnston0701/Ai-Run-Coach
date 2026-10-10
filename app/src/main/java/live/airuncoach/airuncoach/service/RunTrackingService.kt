@@ -1478,6 +1478,17 @@ class RunTrackingService : Service(), SensorEventListener {
     // Interval midpoint tracking — fires a live AI midpoint cue once per work rep
     private var lastRepMidpointFiredAtRep: Int = -1
 
+    // A phase transition that couldn't be spoken on the tick it happened (previous cue still
+    // playing / inside the 15 s gap) is retried on later ticks instead of being dropped — the
+    // runner must always hear "jog" and "walk". Dropped if it's PHASE_ANNOUNCE_MAX_DELAY_SEC late.
+    private var pendingPhaseAnnounce: String? = null
+    private var lastPhaseTransitionCueMs: Long = 0L
+    private val PHASE_ANNOUNCE_MAX_DELAY_SEC = 40.0
+    // Reactive (HR/pace) cues stay quiet this long after a jog/walk announcement, and an HR-high
+    // cue waits this long into a walk break — HR lags the change of effort by a minute or more.
+    private val REACTIVE_AFTER_TRANSITION_QUIET_MS = 30_000L
+    private val RECOVERY_HR_HIGH_GRACE_SEC = 90.0
+
     // Whether there is an active coaching plan (either system) — used to suppress generic prompts
     private val isCoachingPlanActive: Boolean
         get() = dynamicCoachingPlan != null || sessionInstructions != null
@@ -1612,9 +1623,17 @@ class RunTrackingService : Service(), SensorEventListener {
     //
     /** True when this is a plan session that is NOT a continuous-effort type.
      *  All free-run prompts (km splits, struggle) are suppressed for these sessions. */
+    // Falls back to the plan itself when the workout type never arrived (watch START with no
+    // plan extras): with planWorkoutType null this used to read false, so a structured walk-run
+    // was treated as a free run and the 500 m check-in, km splits, HR timer, finish ETA and
+    // technique cues all played over the plan's own rep/walk cues (Damion, 2026-10-10).
     private val isIntervalTypeSession: Boolean
-        get() = isCoachingPlanActive && planWorkoutType != null &&
-                planWorkoutType !in TIER_2_SESSION_TYPES
+        get() {
+            if (!isCoachingPlanActive) return false
+            val type = planWorkoutType ?: dynamicCoachingPlan?.sessionType
+            if (type != null) return type !in TIER_2_SESSION_TYPES
+            return dynamicCoachingPlan?.cueingStrategy == "interval"
+        }
 
     // Phase engine state — tracks position within the AI-designed session structure
     private var currentPhaseIndex: Int = 0      // Index into sessionInstructions.phases
@@ -1726,26 +1745,7 @@ class RunTrackingService : Service(), SensorEventListener {
             // config, so "no target time" there is the runner's choice — and the setup screens
             // send it BEFORE they update RunConfigHolder, which at that moment still holds the
             // previous (backed-out-of) session's config.
-            if (intent?.action != ACTION_PREPARE_FOR_WATCH && (targetDistance == null || targetTime == null)) {
-                RunConfigHolder.getConfig()?.let { cfg ->
-                    if (targetDistance == null) {
-                        cfg.targetDistance?.toDouble()?.takeIf { it > 0 }?.let { km ->
-                            targetDistance = km * 1000.0
-                            Log.d("RunTrackingService", "🎯 targetDistance recovered from RunConfigHolder: ${km}km (intent carried none)")
-                        }
-                    }
-                    if (targetTime == null && cfg.hasTargetTime) {
-                        val ms = (cfg.targetHours * 3600000L) + (cfg.targetMinutes * 60000L) + (cfg.targetSeconds * 1000L)
-                        if (ms > 0) {
-                            targetTime = ms
-                            Log.d("RunTrackingService", "🎯 targetTime recovered from RunConfigHolder: ${ms / 1000}s (intent carried none)")
-                        }
-                    }
-                }
-            }
-            Log.d("RunTrackingService", "🎯 Session target after ${intent?.action}: " +
-                "distance=${targetDistance?.let { "${it / 1000.0}km" } ?: "none"}, " +
-                "time=${targetTime?.let { "${it / 1000}s" } ?: "none"}")
+            // RunConfigHolder target/plan recovery runs below, once this intent's plan extras are parsed.
             hasRoute = intent?.getBooleanExtra(EXTRA_HAS_ROUTE, false) == true
             intent?.getStringExtra(EXTRA_SESSION_TYPE)?.let { requestedType ->
                 currentActivityType = if (requestedType.equals("walk", ignoreCase = true)) "walk" else "run"
@@ -1791,6 +1791,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 try {
                     dynamicCoachingPlan = gson.fromJson(dynamicPlanJson, live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan::class.java)
                     sessionCoachingPlanComplete = false // Reset so new plan can fire all triggers
+                    pendingPhaseAnnounce = null
+                    lastPhaseTransitionCueMs = 0L
                     // Reset session memory for fresh run
                     sessionTopicsDiscussed.clear()
                     sessionCueCount = 0
@@ -1817,6 +1819,51 @@ class RunTrackingService : Service(), SensorEventListener {
             if (preRunBriefingText != null) {
                 Log.d("RunTrackingService", "✅ Pre-run briefing captured for coaching history: ${preRunBriefingText?.take(80)}...")
             }
+            // Runs after the plan extras above so it can tell a plan session from a free run.
+            // A plan session must only ever recover from ITS OWN config: before this check a
+            // watch START for a coached walk-run (plan JSON present, workout ID missing — the
+            // pre-2.0.59 Prepare-for-Watch path) borrowed a stale free-run config's 5 km / 22:00,
+            // got "you're 200 s/km behind your 4:24 target" and finish-ETA cues all session, and
+            // saved as an unlinked "free" run (Damion, 2026-10-10, run 6d8ee219).
+            if (intent?.action != ACTION_PREPARE_FOR_WATCH) {
+                RunConfigHolder.getConfig()?.let { cfg ->
+                    val isPlanSession = planWorkoutId != null || dynamicCoachingPlan != null
+                    // Plan context lost (service restart, bare watch START) but the configured
+                    // session is a plan workout: adopt its link so the run still completes it.
+                    if (planWorkoutId == null && dynamicCoachingPlan != null && cfg.workoutId != null) {
+                        planWorkoutId = cfg.workoutId
+                        planTrainingPlanId = planTrainingPlanId ?: cfg.trainingPlanId
+                        planWorkoutType = planWorkoutType ?: cfg.workoutType
+                        planWorkoutIntensity = planWorkoutIntensity ?: cfg.workoutIntensity
+                        planWorkoutDescription = planWorkoutDescription ?: cfg.workoutDescription
+                        planGoalType = planGoalType ?: cfg.planGoalType
+                        planWeekNumber = planWeekNumber ?: cfg.planWeekNumber
+                        planTotalWeeks = planTotalWeeks ?: cfg.planTotalWeeks
+                        Log.d("RunTrackingService", "🎯 Plan workout link recovered from RunConfigHolder: ${cfg.workoutId} (intent carried none)")
+                    }
+                    val sameSession = if (isPlanSession) cfg.workoutId != null && cfg.workoutId == planWorkoutId else cfg.workoutId == null
+                    if (!sameSession) {
+                        Log.d("RunTrackingService", "🎯 RunConfigHolder is for a different session (workout=${cfg.workoutId}, service=$planWorkoutId) — not recovering targets")
+                    } else {
+                        if (targetDistance == null) {
+                            cfg.targetDistance?.toDouble()?.takeIf { it > 0 }?.let { km ->
+                                targetDistance = km * 1000.0
+                                Log.d("RunTrackingService", "🎯 targetDistance recovered from RunConfigHolder: ${km}km (intent carried none)")
+                            }
+                        }
+                        if (targetTime == null && cfg.hasTargetTime) {
+                            val ms = (cfg.targetHours * 3600000L) + (cfg.targetMinutes * 60000L) + (cfg.targetSeconds * 1000L)
+                            if (ms > 0) {
+                                targetTime = ms
+                                Log.d("RunTrackingService", "🎯 targetTime recovered from RunConfigHolder: ${ms / 1000}s (intent carried none)")
+                            }
+                        }
+                    }
+                }
+            }
+            Log.d("RunTrackingService", "🎯 Session target after ${intent?.action}: " +
+                "distance=${targetDistance?.let { "${it / 1000.0}km" } ?: "none"}, " +
+                "time=${targetTime?.let { "${it / 1000}s" } ?: "none"}, workout=${planWorkoutId ?: "none"}")
         }
 
         when (intent?.action) {
@@ -7076,6 +7123,11 @@ class RunTrackingService : Service(), SensorEventListener {
                     // session_complete: require at least 60s elapsed to avoid instant-completion edge cases
                     if ((trigger.type.contains("session_complete") || trigger.type.contains("session_end")) &&
                         getActiveRunDuration() < 60_000L) false
+                    // A timed plan ends on time (see evaluateDynamicPhase's safety net) — a
+                    // distance condition there is an invented end point.
+                    else if ((trigger.type.contains("session_complete") || trigger.type.contains("session_end")) &&
+                        plan.phases.isNotEmpty() && plan.phases.none { (it.distanceKm ?: 0.0) > 0.0 } &&
+                        trigger.condition.contains("distance")) false
                     else evaluateConditionExpression(
                         trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName
                     )
@@ -7111,7 +7163,12 @@ class RunTrackingService : Service(), SensorEventListener {
         // Fixed-interval check-ins (e.g. every 90s, regardless of live-data conditions).
         // OpenAI uses this for regular effort summaries, cadence check-ins, etc.
         // Only evaluates if no progress trigger fired in Pass 1.
-        if (!hasCoachingFiredThisTick) {
+        // Periodic and reactive cues wait for silence: nothing while the last cue is still
+        // playing or being generated, and the global gap between cues. (They used to bypass both
+        // — "breathing" and "halfway" one second apart, an HR alert one second after "rep 4".)
+        val planCueSlotFree = !live.airuncoach.airuncoach.utils.CoachingAudioQueue.isBusy() &&
+            (now - lastGlobalCoachingTime) >= GLOBAL_COACHING_MIN_GAP_MS
+        if (!hasCoachingFiredThisTick && planCueSlotFree) {
             for (trigger in plan.triggers) {
                 if (hasCoachingFiredThisTick) break
                 if (trigger.frequency != "periodic") continue
@@ -7151,7 +7208,8 @@ class RunTrackingService : Service(), SensorEventListener {
         // HR zone alerts, pace drift, cadence cues — fire when live metrics cross
         // defined thresholds. Only one fires per GPS tick; 90s cooldown per trigger.
         // Only evaluates if Passes 1 and 2 produced nothing this tick.
-        if (!hasCoachingFiredThisTick) {
+        val inTransitionQuiet = (now - lastPhaseTransitionCueMs) < REACTIVE_AFTER_TRANSITION_QUIET_MS
+        if (!hasCoachingFiredThisTick && planCueSlotFree && !inTransitionQuiet) {
             for (trigger in plan.triggers) {
                 if (hasCoachingFiredThisTick) break
                 // Only reactive / on_condition triggers in this pass
@@ -7195,6 +7253,24 @@ class RunTrackingService : Service(), SensorEventListener {
 
                 if (!conditionMet) continue
 
+                // HR-high during a walk break: the runner is already doing what the cue asks, and HR
+                // lags — say nothing for the first 90 s, then "keep walking", never "walk for a bit"
+                // (Damion heard "walk until your breathing settles" mid-walk, 2026-10-10).
+                val isHrHigh = trigger.type.contains("hr_zone_high") || trigger.type.contains("hr_high") ||
+                    trigger.type.contains("heart_rate_high")
+                var triggerToFire = trigger
+                if (isHrHigh && !dynamicPhaseIsWorkInterval && dynamicCurrentPhaseName != null) {
+                    val recoverySec = (getActiveRunDuration() / 60_000.0 - dynamicPhaseTimeStartMin) * 60.0
+                    if (recoverySec < RECOVERY_HR_HIGH_GRACE_SEC) continue
+                    triggerToFire = trigger.copy(
+                        message = "Heart rate's still {hr} — keep walking and let it come down before the next one.",
+                        alternativeMessages = listOf(
+                            "Stay with the walk — heart rate {hr}, give it a bit longer to settle.",
+                            "Keep this walk easy — heart rate {hr} is still coming down.",
+                        ),
+                    )
+                }
+
                 triggerLastFiredMs[trigger.id] = now
 
                 Log.d("RunTrackingService", "🔔 Reactive trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
@@ -7212,7 +7288,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 }
 
                 fireLiveTriggerMessage(
-                    trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
+                    trigger = triggerToFire, phaseName = dynamicCurrentPhaseName ?: "unknown",
                     phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
                     phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
                     currentDistanceKm = currentDistanceKm, plan = plan,
@@ -7285,6 +7361,9 @@ class RunTrackingService : Service(), SensorEventListener {
         plan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan,
         currentPhase: live.airuncoach.airuncoach.network.model.DynamicCoachingPhase?,
     ) {
+        // Claim the coaching slot now, not when the reply arrives 1–3 s later — otherwise the next
+        // tick sees a free slot and a second cue is requested on top of this one.
+        recordCoachingFired()
         // Snapshot live metrics immediately (don't capture lambdas that reference mutable state)
         val snapshotHR = currentHeartRate
         val snapshotPaceSecPerKm = parsePaceToSeconds(currentPace).let { if (it > 0) it.toInt() else null }
@@ -7773,7 +7852,9 @@ class RunTrackingService : Service(), SensorEventListener {
             // to be matched, which can produce incorrect coaching cues ("lightly jog" instead
             // of "start your easy jog" for the work phase).
             val isRecovery = resolvedPhase.name.lowercase().let {
-                it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("float")
+                it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("float") ||
+                    // Warm-up / cool-down walks (added to every walk-run plan from v3.1) are walking too.
+                    (it.contains("walk") && (it.contains("warm") || it.contains("cool")))
             }
             dynamicPhaseIsWorkInterval = !isRecovery
 
@@ -7790,6 +7871,17 @@ class RunTrackingService : Service(), SensorEventListener {
             Log.d("RunTrackingService",
                 "🏃 Dynamic phase: $previousPhaseName → $resolvedPhaseName " +
                 "(${String.format("%.2f", currentDistanceKm)}km / ${String.format("%.1f", elapsedMinutes)}min) — reactive cooldowns reset")
+            pendingPhaseAnnounce = resolvedPhaseName
+        }
+
+        if (pendingPhaseAnnounce != null && pendingPhaseAnnounce != resolvedPhaseName) pendingPhaseAnnounce = null
+        val announceLateSec = (elapsedMinutes - dynamicPhaseTimeStartMin) * 60.0
+        if (pendingPhaseAnnounce == resolvedPhaseName && announceLateSec > PHASE_ANNOUNCE_MAX_DELAY_SEC) {
+            Log.w("RunTrackingService", "⚠️ Phase announcement for $resolvedPhaseName dropped — ${announceLateSec.toInt()}s late")
+            pendingPhaseAnnounce = null
+        }
+        if (pendingPhaseAnnounce == resolvedPhaseName) {
+            val isRecovery = !dynamicPhaseIsWorkInterval
 
             // ── Phase transition coaching ─────────────────────────────────────
             // For repeating interval phases (totalReps > 1): ALWAYS fire a live AI message
@@ -7828,6 +7920,8 @@ class RunTrackingService : Service(), SensorEventListener {
             }
 
             if (!hasCoachingFiredThisTick && canFireCoaching(bypassDistanceGate = true)) {
+                pendingPhaseAnnounce = null
+                lastPhaseTransitionCueMs = System.currentTimeMillis()
 
                 if (totalReps > 1) {
                     // ── Interval rep transition: always use live AI ────────────────
@@ -7944,6 +8038,40 @@ class RunTrackingService : Service(), SensorEventListener {
                     currentPhase = resolvedPhase,
                 )
             }
+        }
+
+        // ── Timed-plan completion safety net ─────────────────────────────────
+        // A time-based plan whose last phase has ended must say so, even if its own
+        // session_complete trigger is missing or (as in plans generated before v3.1) keyed to a
+        // distance the session never covers — Damion's walk-run ended in silence and he kept
+        // going for another 5 minutes (2026-10-10).
+        val timelineEndMin = expanded.last().let { it.cumulativeMinStart + it.durationMin }
+        val planIsTimed = expanded.all { it.distKm <= 0.0 } && timelineEndMin > 0
+        if (planIsTimed && !sessionCoachingPlanComplete && !hasCoachingFiredThisTick &&
+            elapsedMinutes >= timelineEndMin && canFireCoaching(bypassDistanceGate = true)) {
+            val planComplete = plan.triggers.firstOrNull { it.type.contains("session_complete") || it.type.contains("session_end") }
+            val usable = planComplete?.takeIf { !Regex("""distance|km|kilomet""", RegexOption.IGNORE_CASE).containsMatchIn(it.condition + " " + it.message) }
+            val completeTrigger = usable ?: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger(
+                id = "session_complete_timed_auto",
+                type = "session_complete",
+                condition = "always",
+                message = "That's today's session done — great work. Walk easy for a few minutes to cool down.",
+                frequency = "once",
+                alternativeMessages = null,
+                alertType = null,
+                suppressWhenIntensity = null,
+            )
+            triggerFiredOnce.add(completeTrigger.id)
+            planComplete?.let { triggerFiredOnce.add(it.id) }
+            sessionCoachingPlanComplete = true
+            hasCoachingFiredThisTick = true
+            Log.d("RunTrackingService", "✅ Timed plan finished at ${String.format("%.1f", elapsedMinutes)} min — session complete cue")
+            fireLiveTriggerMessage(
+                trigger = completeTrigger, phaseName = "session_complete",
+                phaseHRMin = null, phaseHRMax = null, phasePaceMin = null, phasePaceMax = null,
+                currentDistanceKm = currentDistanceKm, plan = plan, currentPhase = null,
+            )
+            return
         }
 
         // ── Phase-end warning ────────────────────────────────────────────────

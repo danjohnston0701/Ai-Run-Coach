@@ -6,6 +6,7 @@
  */
 
 import { parseWeightKg } from "./utils/run-derivation";
+import { firstNameOf } from "./utils/first-name";
 import { db } from "./db";
 import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations, sessionInstructions, coachingSessionEvents } from "@shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
@@ -762,7 +763,7 @@ Set the FIRST workout's workoutType to "orientation". For this athlete it is a g
     // Build personalized runner profile section  
     const runnerProfileSection = `
 Runner Profile (Personal Details):
-- Name: ${user[0]?.name || 'Runner'}
+- Name: ${firstNameOf(user[0]?.name) || 'Runner'}
 - Gender: ${userGender}
 - Age: ${userAge} years old
 - Height: ${userHeight}cm

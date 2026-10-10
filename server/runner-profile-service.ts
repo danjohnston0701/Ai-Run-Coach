@@ -52,6 +52,7 @@
  */
 
 import { parseWeightKg } from "./utils/run-derivation";
+import { firstNameOf } from "./utils/first-name";
 import OpenAI, { APIError } from 'openai';
 import { runDistanceKm, MIN_MEANINGFUL_RUN_KM } from './utils/run-units';
 import { db } from './db';
@@ -616,7 +617,7 @@ async function gatherRunnerContext(userId: string): Promise<RunnerContext | null
   };
 
   return {
-    name:                user.name,
+    name:                firstNameOf(user.name) ?? user.name,
     age,
     gender:              user.gender ?? null,
     heightCm,
