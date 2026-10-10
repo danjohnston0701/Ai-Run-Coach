@@ -2,6 +2,6 @@
     <item
         android:drawable="@drawable/icon"
         android:gravity="center"
-        android:width="40dp"
-        android:height="40dp" />
+        android:width="64dp"
+        android:height="64dp" />
 </layer-list>
