@@ -1,0 +1,85 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0;width:1600px;height:1600px;overflow:hidden;background:#05070d}
+  .stage{position:relative;width:1600px;height:1600px;overflow:hidden;
+    background:
+      radial-gradient(1300px 1100px at 50% 42%, #1a4fa8 0%, #0f3a86 28%, #0a2a66 52%, #061a44 78%, #040f2c 100%);
+  }
+  /* light rays fanning from the lower right, like the Garmin IQ store art */
+  .rays{position:absolute;left:1760px;top:1780px;width:2600px;height:2600px;transform:translate(-50%,-50%);
+    background:repeating-conic-gradient(from 250deg,
+      rgba(70,190,255,.0) 0deg 2.2deg, rgba(70,190,255,.55) 2.4deg, rgba(70,190,255,0) 2.6deg 7deg);
+    -webkit-mask:radial-gradient(circle closest-side,#000 10%,rgba(0,0,0,.55) 30%,transparent 52%);
+            mask:radial-gradient(circle closest-side,#000 10%,rgba(0,0,0,.55) 30%,transparent 52%);
+    filter:blur(1.2px);opacity:.75}
+  .flare{position:absolute;left:1380px;top:1420px;width:520px;height:520px;transform:translate(-50%,-50%);
+    border-radius:50%;background:radial-gradient(circle,rgba(110,210,255,.55),rgba(40,140,255,.18) 35%,transparent 70%);filter:blur(8px)}
+  .vignette{position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,transparent 62%,rgba(0,0,0,.35) 100%)}
+  .halo{position:absolute;left:50%;top:50%;width:1250px;height:1250px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,rgba(90,170,255,.42) 0%,rgba(60,130,255,.18) 38%,transparent 66%);filter:blur(20px)}
+  .floor{position:absolute;left:50%;top:50%;width:900px;height:900px;transform:translate(-50%,-44%);border-radius:50%;background:radial-gradient(circle,rgba(0,10,40,.45),transparent 62%);filter:blur(30px)}
+  .watch{position:absolute;left:50%;top:50%;width:880px;height:880px;transform:translate(-50%,-50%) rotate(var(--tilt))}
+  /* strap */
+  .strap{position:absolute;left:50%;width:430px;transform:translateX(-50%);
+    background:linear-gradient(90deg,#15171c 0%,#2b2f37 14%,#353a44 50%,#272b32 86%,#121418 100%);
+    box-shadow:inset 0 0 40px rgba(0,0,0,.6)}
+  .strap.top{top:-520px;height:700px;border-radius:120px 120px 60px 60px}
+  .strap.bot{bottom:-520px;height:700px;border-radius:60px 60px 120px 120px}
+  .strap::after{content:"";position:absolute;left:50%;width:6px;transform:translateX(-50%);
+    background:rgba(255,255,255,.04);top:0;bottom:0;border-radius:3px}
+  .strap .hole{position:absolute;left:50%;width:34px;height:34px;margin-left:-17px;border-radius:50%;
+    background:#0b0c10;box-shadow:inset 0 3px 6px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.06)}
+  /* lugs */
+  .lug{position:absolute;left:50%;width:500px;height:170px;transform:translateX(-50%);
+    background:linear-gradient(90deg,#3f444c,#a9afb8 18%,#e3e7ec 46%,#9ba1aa 76%,#3a3e45);
+    border-radius:70px 70px 40px 40px;box-shadow:inset 0 -10px 20px rgba(0,0,0,.45)}
+  .lug.top{top:0}.lug.bot{bottom:0;border-radius:40px 40px 70px 70px;box-shadow:inset 0 10px 20px rgba(0,0,0,.45)}
+  /* case */
+  .case{position:absolute;inset:20px;border-radius:50%;
+    background:conic-gradient(from 200deg,#6b717b,#e9edf2,#9aa1ab,#f7f9fb,#7d838d,#d7dbe1,#6b717b);
+    box-shadow:0 80px 140px rgba(0,0,0,.7),0 30px 50px rgba(0,0,0,.55),inset 0 0 0 3px rgba(255,255,255,.25)}
+  .btn{position:absolute;width:40px;height:104px;border-radius:14px;
+    background:linear-gradient(90deg,#6d737d,#e6eaef 50%,#5f656e);box-shadow:4px 6px 12px rgba(0,0,0,.5)}
+  .btn.b1{left:790px;top:178px;transform:rotate(-27deg)}.btn.b2{left:790px;top:558px;transform:rotate(27deg)}
+  /* rotating bezel (Classic-style) */
+  .bezel{position:absolute;inset:48px;border-radius:50%;
+    background:radial-gradient(circle,#1b1d22 74%,#2a2d33 80%,#121317 100%);
+    box-shadow:inset 0 4px 10px rgba(255,255,255,.12),inset 0 -6px 14px rgba(0,0,0,.8)}
+  .ticks{position:absolute;inset:48px;border-radius:50%;
+    background:repeating-conic-gradient(rgba(255,255,255,.28) 0 .6deg,transparent .6deg 6deg);
+    -webkit-mask:radial-gradient(circle closest-side,transparent 89%,#000 89.5%,#000 97%,transparent 97.5%);
+            mask:radial-gradient(circle closest-side,transparent 89%,#000 89.5%,#000 97%,transparent 97.5%)}
+  /* glass + screen */
+  .glass{position:absolute;inset:104px;border-radius:50%;background:#000;overflow:hidden;
+    box-shadow:0 0 0 6px #050506}
+  .glass img{position:absolute;left:50%;top:50%;width:610px;height:610px;transform:translate(-50%,-50%);
+    border-radius:50%;image-rendering:auto;filter:brightness(1.35) contrast(1.15) saturate(1.6)}
+  .glare{position:absolute;inset:104px;border-radius:50%;pointer-events:none;
+    background:linear-gradient(135deg,rgba(255,255,255,.16) 0%,rgba(255,255,255,.04) 28%,transparent 45%)}
+</style></head>
+<body>
+<div class="stage" id="stage">
+  <div class="rays"></div>
+  <div class="vignette"></div>
+  <div class="halo"></div>
+  <div class="floor"></div>
+  <div class="watch">
+    <div class="strap top"><span class="hole" style="top:90px"></span><span class="hole" style="top:200px"></span><span class="hole" style="top:310px"></span></div>
+    <div class="strap bot"></div>
+    <div class="lug top"></div><div class="lug bot"></div>
+    <div class="btn b1"></div><div class="btn b2"></div>
+    <div class="case"></div>
+    <div class="bezel"></div><div class="ticks"></div>
+    <div class="glass"><img id="shot" alt=""></div>
+    <div class="glare"></div>
+  </div>
+</div>
+<script>
+  const p = new URLSearchParams(location.search);
+  document.getElementById('shot').src = p.get('img');
+  const s = document.getElementById('stage').style;
+  s.setProperty('--g1', p.get('g1') || '22,195,176');
+  s.setProperty('--g2', p.get('g2') || '0,230,118');
+  document.querySelector('.watch').style.setProperty('--tilt', (p.get('tilt') || '0') + 'deg');
+</script>
+</body></html>

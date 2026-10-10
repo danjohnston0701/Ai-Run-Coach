@@ -1,0 +1,168 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>App Store creative assets</title>
+<!--
+  iOS App Store creative assets (iOS 27 product page header, search results asset, universal asset)
+  and iPhone Duo screenshots. Render with ./render.sh. Variant via ?a=<id>, Apple's art-safe-area
+  overlay via &guides=1 (measured from Apple's official PSD templates).
+  Every phone/watch screen is a real capture of the iOS app (simulator, deterministic demo 5 km run
+  used by the how-to videos) — see README.md. Only copy, frames and backgrounds are added.
+-->
+<style>
+  :root { --cyan:#00D4FF; --mint:#2FF5B0; --bg:#0A0F1A; --text:#FFFFFF; --text2:#A0AEC0; --muted:#718096;
+          --km:#2FD69A; --pace:#3B82F6; --cad:#FFC21A; --hr:#FF3355; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); overflow: hidden; }
+  body { font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; }
+  .stage { position: relative; overflow: hidden;
+    background:
+      radial-gradient(ellipse 55% 70% at 72% 45%, rgba(0,212,255,.22) 0%, rgba(0,212,255,0) 62%),
+      radial-gradient(ellipse 45% 60% at 18% 85%, rgba(47,245,176,.12) 0%, rgba(47,245,176,0) 70%),
+      radial-gradient(ellipse 40% 50% at 95% 100%, rgba(255,107,53,.12) 0%, rgba(255,107,53,0) 70%),
+      linear-gradient(160deg, #0E1628 0%, #0A0F1A 52%, #060A12 100%); }
+  .abs { position: absolute; }
+  .grad { background: linear-gradient(90deg, var(--cyan), var(--mint)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .kicker { color: var(--cyan); font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+  h1 { font-weight: 800; line-height: 1.02; letter-spacing: -.025em; }
+  .sub { color: var(--text2); line-height: 1.35; }
+
+  /* iPhone 17 Pro-style frame around a real 1206x2622 simulator capture */
+  .iphone { position: absolute; border-radius: 15.5% / 7.2%; padding: 1.9%;
+    background: linear-gradient(145deg, #5b6068 0%, #2a2d33 30%, #1a1c20 60%, #4a4e55 100%);
+    box-shadow: 0 .06em .14em rgba(0,0,0,.55), inset 0 0 0 .004em rgba(255,255,255,.12); }
+  .iphone img { display: block; width: 100%; height: 100%; border-radius: 13.8% / 6.4%; object-fit: cover; }
+  /* Apple Watch-style case around the real 416x496 capture */
+  .watch { position: absolute; border-radius: 26%; padding: 5.5%;
+    background: linear-gradient(145deg, #4a4e55 0%, #1d1f23 45%, #0f1013 70%, #3a3e45 100%);
+    box-shadow: 0 .06em .14em rgba(0,0,0,.55); }
+  .watch img { display: block; width: 100%; height: 100%; border-radius: 20%; }
+  .watch::before, .watch::after { content: ""; position: absolute; left: 22%; width: 56%; height: 18%; background: linear-gradient(90deg,#15171b,#2a2e35,#15171b); z-index: -1; }
+  .watch::before { top: -14%; border-radius: 12% 12% 0 0; } .watch::after { bottom: -14%; border-radius: 0 0 12% 12%; }
+  .crown { position: absolute; right: -3.5%; top: 26%; width: 4.5%; height: 15%; border-radius: 30%; background: linear-gradient(90deg,#2a2d33,#7a808a,#2a2d33); }
+
+  /* Decorative run rings — the four metric rings of the run screen, abstracted */
+  .ring { position: absolute; border-radius: 50%; border-style: solid; opacity: .9; }
+
+  .guide { position: absolute; border: 6px dashed #00FF66; background: rgba(0,255,102,.08); z-index: 99; }
+  .guide span { position: absolute; left: 0; top: 0; background: #00FF66; color: #000; font: 700 48px/1.2 sans-serif; padding: 4px 12px; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const A = q.get("a") || "header";
+const guides = q.get("guides") === "1";
+const S = (src) => `screens/${src}`;
+const st = document.getElementById("stage");
+
+function size(w, h) { st.style.width = w + "px"; st.style.height = h + "px"; document.documentElement.style.width = w + "px"; }
+function iphone(src, x, y, h, rot = 0) {
+  const w = h * 1206 / 2622 * 1.04;  // + bezel
+  return `<div class="iphone" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;font-size:${h}px;transform:rotate(${rot}deg)"><img src="${S(src)}"></div>`;
+}
+const phoneW = (h) => h * 1206 / 2622 * 1.04;
+function watch(src, x, y, h) {
+  const w = h * 416 / 496;
+  return `<div class="watch" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;font-size:${h}px"><img src="${S(src)}"><div class="crown"></div></div>`;
+}
+function rings(cx, cy, r, stroke, op = .9) {
+  // the run screen's four rings, laid out 2x2, as an abstract brand motif
+  const c = ["var(--km)", "var(--pace)", "var(--cad)", "var(--hr)"]; const d = r * 2.2;
+  return c.map((col, i) => `<div class="ring" style="left:${cx + (i % 2 ? d / 2 : -d / 2) - r}px;top:${cy + (i > 1 ? d / 2 : -d / 2) - r}px;width:${2 * r}px;height:${2 * r}px;border-width:${stroke}px;border-color:${col};opacity:${op}"></div>`).join("");
+}
+function guide(x1, y1, x2, y2, label = "ART SAFE AREA") {
+  return guides ? `<div class="guide" style="left:${x1}px;top:${y1}px;width:${x2 - x1}px;height:${y2 - y1}px"><span>${label}</span></div>` : "";
+}
+const icon = (s, pos = "") => `<img src="app-icon.png" style="${pos}flex:none;display:block;width:${s}px;height:${s}px;border-radius:${s * .225}px;box-shadow:0 ${s * .12}px ${s * .35}px rgba(0,212,255,.25)">`;
+
+const V = {
+  // ── Product page header, 21:9, 3840x1646. Safe: x 1097–2742, y 493–1153 ────────────────
+  header: () => { size(3840, 1646); return `
+    ${rings(260, 900, 300, 40, .22)}${rings(3580, 900, 300, 40, .22)}
+    <div class="abs" style="left:1097px;top:493px;width:1646px;height:661px;display:flex;align-items:center;gap:80px">
+      ${icon(380)}
+      <div>
+        <h1 style="font-size:176px">Your AI<br><span class="grad">running coach.</span></h1>
+        <div class="sub" style="font-size:72px;margin-top:30px">Live in your ear, every run.</div>
+      </div>
+    </div>
+    ${guide(1097, 493, 2742, 1153)}`; },
+
+  // Alternative header for product page optimisation — the new Group Runs feature.
+  "header-groups": () => { size(3840, 1646); return `
+    ${rings(260, 900, 300, 40, .22)}${rings(3580, 900, 300, 40, .22)}
+    <div class="abs" style="left:1097px;top:493px;width:1646px;height:661px;display:flex;flex-direction:column;justify-content:center;text-align:center">
+      <div class="kicker" style="font-size:52px">New · Group Runs</div>
+      <h1 style="font-size:170px;margin-top:24px">Run together.</h1>
+      <div class="sub" style="font-size:62px;margin-top:22px">Every runner, their own AI coach.</div>
+    </div>
+    ${guide(1097, 493, 2742, 1153)}`; },
+
+  // ── Search results, 3:2, 3840x2560. Safe: x 836–3003, y 765–1794 ───────────────────────
+  search: () => { size(3840, 2560); const ph = 1560; return `
+    ${rings(3500, 2300, 300, 40, .18)}
+    <div class="abs" style="left:836px;top:765px;width:1180px;height:1030px;display:flex;flex-direction:column;justify-content:center">
+      <div class="kicker" style="font-size:46px">AI running coach</div>
+      <h1 style="font-size:132px;margin-top:22px">Coaching<br><span class="grad">in your ear.</span></h1>
+      <div class="sub" style="font-size:54px;margin-top:30px">Pace, heart rate and cadence — talked through live, every run.</div>
+    </div>
+    ${iphone("ios-run-coach.png", 2130, 600, ph)}
+    ${guide(836, 765, 3003, 1794)}`; },
+
+  // ── Universal (header + search), 16:9, 5244x2950. Safe: x 1921–3322, y 660–1621 ─────────
+  universal: () => { size(5244, 2950); const ph = 1120; return `
+    ${rings(700, 1300, 360, 48, .2)}${rings(4560, 1300, 360, 48, .2)}
+    <div class="abs" style="left:1921px;top:660px;width:820px;height:962px;display:flex;flex-direction:column;justify-content:center">
+      ${icon(170)}
+      <h1 style="font-size:116px;margin-top:40px">Your AI<br><span class="grad">running coach.</span></h1>
+      <div class="sub" style="font-size:48px;margin-top:26px">Live in your ear, every run.</div>
+    </div>
+    ${iphone("ios-run-coach.png", 2770, 620, ph)}
+    ${guide(1921, 660, 3322, 1621)}`; },
+};
+
+// ── iPhone Duo screenshots: outer 1398x2034, inner 2007x2853 (portrait) ──────────────────
+const DUO = [
+  { k: "In your ear", a: "A coach that", b: "talks you through it.", s: ["ios-run-coach.png", "ios-run-rings.png"] },
+  { k: "Your watch", a: "Run with Apple Watch", b: "or Garmin.", s: ["ios-run-rings.png"], watch: true },
+  { k: "After the run", a: "See how you", b: "really ran.", s: ["ios-summary.png", "ios-splits.png"] },
+  { k: "AI review", a: "A personal review", b: "after every run.", s: ["ios-ai-review.png"] },
+];
+DUO.forEach((d, i) => {
+  V[`duo-outer-${i + 1}`] = () => { size(1398, 2034); const ph = 1460; const w = phoneW(ph); return `
+    <div class="abs" style="left:90px;top:120px;right:90px;text-align:center">
+      <div class="kicker" style="font-size:34px">${d.k}</div>
+      <h1 style="font-size:88px;margin-top:18px">${d.a}<br><span class="grad">${d.b}</span></h1>
+    </div>
+    ${iphone(d.s[0], (1398 - w) / 2, 470, ph)}
+    ${d.watch ? watch("watch-apple.png", 1398 - 470, 1300, 420) : ""}`; };
+  V[`duo-inner-${i + 1}`] = () => { size(2007, 2853); const ph = d.s.length > 1 && !d.watch ? 1800 : 2000; const w = phoneW(ph); const two = d.s.length > 1 && !d.watch; return `
+    <div class="abs" style="left:120px;top:150px;right:120px;text-align:center">
+      <div class="kicker" style="font-size:44px">${d.k}</div>
+      <h1 style="font-size:118px;margin-top:22px">${d.a}<br><span class="grad">${d.b}</span></h1>
+    </div>
+    ${two ? iphone(d.s[0], 2007 / 2 - w - 40, 640, ph) + iphone(d.s[1], 2007 / 2 + 40, 640, ph)
+          : iphone(d.s[0], d.watch ? 2007 / 2 - w + 60 : (2007 - w) / 2, 640, ph)}
+    ${d.watch ? watch("watch-apple.png", 2007 / 2 + 160, 1180, 820) : ""}`; };
+});
+
+// ── Standard iPhone screenshots (what App Store Connect accepts today) ───────────────────
+// 6.9" (Dynamic Island, large) 1320x2868 and 6.3" (Dynamic Island, medium, required) 1206x2622.
+// Same slides as the Duo set, laid out for the taller canvas; sizes scale with the canvas width.
+[["69", 1320, 2868], ["63", 1206, 2622]].forEach(([tag, W, H]) => DUO.forEach((d, i) => {
+  V[`iphone-${tag}-${i + 1}`] = () => { size(W, H); const u = W / 1320; const ph = 2020 * u; const w = phoneW(ph); return `
+    <div class="abs" style="left:${80 * u}px;top:${170 * u}px;right:${80 * u}px;text-align:center">
+      <div class="kicker" style="font-size:${36 * u}px">${d.k}</div>
+      <h1 style="font-size:${96 * u}px;margin-top:${20 * u}px">${d.a}<br><span class="grad">${d.b}</span></h1>
+    </div>
+    ${iphone(d.s[0], (W - w) / 2 - (d.watch ? 90 * u : 0), 640 * u, ph)}
+    ${d.watch ? watch("watch-apple.png", W - 560 * u, 1640 * u, 520 * u) : ""}`; };
+}));
+
+st.innerHTML = (V[A] || V.header)();
+</script>
+</body>
+</html>

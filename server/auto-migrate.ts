@@ -339,6 +339,51 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.end_trim",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS end_trim JSONB",
     },
+    // ── runs.distance: 2 dp, snapped up to the km when ≤ 0.03 short (2026-10-09) ─────
+    // A trigger so every write path is covered (phone, both watch companion paths, imports,
+    // end-trim, raw SQL). Backfill + stats recompute run after this list, below. Canonical
+    // copy and examples: migrations/20261009_runs_distance_rounding.sql
+    {
+      name: "runs.distance.normalize_function",
+      sql: `
+        CREATE OR REPLACE FUNCTION run_distance_km_normalized(d double precision)
+        RETURNS numeric
+        LANGUAGE sql IMMUTABLE AS $$
+          SELECT CASE
+            WHEN d IS NULL OR d <= 0 OR d > 200 THEN d::numeric
+            WHEN ceil(round(d::numeric, 2)) - round(d::numeric, 2) <= 0.03 THEN ceil(round(d::numeric, 2))
+            ELSE round(d::numeric, 2)
+          END
+        $$
+      `,
+    },
+    {
+      name: "runs.distance.normalize_trigger_function",
+      sql: `
+        CREATE OR REPLACE FUNCTION runs_normalize_distance()
+        RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+          NEW.distance := run_distance_km_normalized(NEW.distance);
+          RETURN NEW;
+        END
+        $$
+      `,
+    },
+    {
+      name: "runs.distance.normalize_trigger",
+      sql: `
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_runs_normalize_distance') THEN
+            CREATE TRIGGER trg_runs_normalize_distance
+              BEFORE INSERT OR UPDATE OF distance ON runs
+              FOR EACH ROW EXECUTE FUNCTION runs_normalize_distance();
+          END IF;
+        END
+        $$
+      `,
+    },
     {
       // Phone / watch / phone+watch classification (2026-10-02). Canonical copy:
       // migrations/20261002_runs_recording_source.sql
@@ -686,6 +731,40 @@ export async function runAutoMigrations(): Promise<void> {
     await pool.query(`UPDATE users SET is_admin = true WHERE email = 'danjohnston0701@gmail.com'`);
   } catch (err: any) {
     console.warn(`[AutoMigrate] Admin email setup (non-fatal): ${err.message}`);
+  }
+
+  // ── Data repair: round existing runs.distance (see the trigger in the list above) ──
+  // Idempotent — only rows not yet normalised match, so after the first start it's a no-op.
+  // The users whose runs changed get their user_stats cache rebuilt so My Data totals/PBs
+  // match the corrected distances (in the background — it doesn't hold up startup).
+  try {
+    const result = await pool.query(`
+      WITH changed AS (
+        UPDATE runs
+        SET distance = run_distance_km_normalized(distance)
+        WHERE distance > 0 AND distance <= 200
+          AND distance::numeric IS DISTINCT FROM run_distance_km_normalized(distance)
+        RETURNING user_id
+      )
+      SELECT DISTINCT user_id FROM changed WHERE user_id IS NOT NULL
+    `);
+    if (result.rowCount && result.rowCount > 0) {
+      const userIds: string[] = result.rows.map((r: any) => r.user_id);
+      console.log(`[AutoMigrate] Rounded runs.distance for ${userIds.length} user(s) — rebuilding their stats cache`);
+      void (async () => {
+        const { recomputeForUser } = await import("./user-stats-cache");
+        for (const userId of userIds) {
+          try {
+            await recomputeForUser(userId);
+          } catch (err: any) {
+            console.warn(`[AutoMigrate] Stats recompute after distance rounding failed for ${userId}: ${err.message}`);
+          }
+        }
+        console.log(`[AutoMigrate] Stats cache rebuilt after distance rounding`);
+      })();
+    }
+  } catch (err: any) {
+    console.warn(`[AutoMigrate] runs.distance rounding backfill (non-fatal): ${err.message}`);
   }
 
   // ── One-time data repair: coaching observation distances written as metres÷1000 ──

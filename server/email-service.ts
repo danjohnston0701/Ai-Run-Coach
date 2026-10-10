@@ -369,6 +369,16 @@ export async function sendFriendLiveRunInvitationEmail(
   }
 }
 
+/**
+ * Internal email to the team (not to a user). `to` defaults to SUPPORT_NOTIFICATION_EMAIL /
+ * support@airuncoach.live — never to fromEmail (noreply@), which nobody reads.
+ */
+export async function sendInternalEmail(opts: { subject: string; html: string; text: string; to?: string | null }): Promise<void> {
+  const { client, fromEmail } = await getResendClient();
+  const to = opts.to || process.env.SUPPORT_NOTIFICATION_EMAIL || "support@airuncoach.live";
+  await client.emails.send({ from: `AI Run Coach <${fromEmail}>`, to, subject: opts.subject, html: opts.html, text: opts.text });
+}
+
 export async function sendAccountDeletionNotification(opts: {
   userId: string;
   email: string;

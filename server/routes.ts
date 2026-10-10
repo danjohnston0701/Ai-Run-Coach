@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { sendNewPlanReviewEmail } from "./plan-review-email";
 import { ensureRunWeather, weatherCodeToCondition } from "./run-weather";
 import { createServer, type Server } from "node:http";
 import { eq, and, or, gte, gt, lt, desc, asc, lte, count, isNull, isNotNull, inArray } from "drizzle-orm";
@@ -14785,10 +14786,17 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       // ── Recompute elevation gain from the altitude series ────────────────
       let computedAscent: number | null = null;
       if (altitudeData.length > 1) {
+        // Anchor quantiser, same as both watch apps: the anchor only moves once a change
+        // clears 5 m (GPS altitude noise is several metres), so a slow real climb builds up
+        // against it while noise just oscillates around it. The old per-sample 0.3 m floor
+        // banked noise as climb — worse the denser the track (Wear OS now samples every 5 s).
+        const GPS_ALT_THRESHOLD_M = 5;
         let asc = 0;
+        let anchor = altitudeData[0].value;
         for (let i = 1; i < altitudeData.length; i++) {
-          const delta = altitudeData[i].value - altitudeData[i-1].value;
-          if (delta > 0.3) asc += delta;    // 0.3m noise floor for 15-sec GPS alt
+          const delta = altitudeData[i].value - anchor;
+          if (delta > GPS_ALT_THRESHOLD_M) { asc += delta; anchor = altitudeData[i].value; }
+          else if (delta < -GPS_ALT_THRESHOLD_M) { anchor = altitudeData[i].value; }
         }
         if (asc > 0) computedAscent = Math.round(asc * 10) / 10;
       }
@@ -17135,6 +17143,11 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       res.status(201).json({
         planId,
         message: "Training plan generated successfully"
+      });
+
+      // Review copy to the team — background, never affects the response.
+      setImmediate(() => {
+        sendNewPlanReviewEmail(planId).catch(err => console.error(`[PlanReview] Failed for plan ${planId}:`, err?.message ?? err));
       });
     } catch (error: any) {
       console.error("Generate training plan error:", error);
