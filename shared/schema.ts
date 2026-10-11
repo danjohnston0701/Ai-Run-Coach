@@ -1946,6 +1946,8 @@ export const knownRoutes = pgTable("known_routes", {
   // Human-readable names
   name: text("name"),                  // Auto-generated (e.g. "Saturday Morning Loop")
   displayName: text("display_name"),   // User-editable friendly name
+  // "run" | "walk" — a route only matches and learns from sessions of its own type
+  sessionType: text("session_type").notNull().default("run"),
 
   // Location fingerprint — centroid of all observed start points
   startLat: real("start_lat").notNull(),

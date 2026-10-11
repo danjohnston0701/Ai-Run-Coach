@@ -152,6 +152,10 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_known_routes_user_location",
       sql: "CREATE INDEX IF NOT EXISTS idx_known_routes_user_location ON known_routes(user_id, start_lat, start_lng)",
     },
+    {
+      name: "known_routes.session_type",
+      sql: "ALTER TABLE known_routes ADD COLUMN IF NOT EXISTS session_type TEXT NOT NULL DEFAULT 'run'",
+    },
     // Add Route Memory Engine columns to runs table
     {
       name: "runs.known_route_id",

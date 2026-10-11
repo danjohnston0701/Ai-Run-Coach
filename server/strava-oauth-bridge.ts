@@ -95,6 +95,24 @@ router.post('/api/strava/auth/authorize', authMiddleware, async (req: Authentica
   try {
     const userId = req.user!.userId;
 
+    // New Strava connections are paused: the Strava API app is at its athlete capacity, so
+    // every new athlete's OAuth fails on Strava's side (no connection since 2026-09-24).
+    // Both apps hide the Strava card (Android 2.0.60, iOS 1.8.10); this covers older builds
+    // and the run-summary "Publish to Strava" path. Users who already have a Strava
+    // connection can still re-authorise. Set STRAVA_NEW_CONNECTIONS_ENABLED=true to reopen.
+    if (process.env.STRAVA_NEW_CONNECTIONS_ENABLED !== 'true') {
+      const [existing] = await db
+        .select({ id: connectedDevices.id })
+        .from(connectedDevices)
+        .where(and(eq(connectedDevices.userId, userId), eq(connectedDevices.deviceType, 'strava')));
+      if (!existing) {
+        return res.status(503).json({
+          success: false,
+          error: 'Strava connections are temporarily unavailable. Please try again later.',
+        });
+      }
+    }
+
     const {
       generateOAuthState,
       buildStravaAuthUrl,

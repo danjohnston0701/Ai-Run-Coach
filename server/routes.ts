@@ -104,7 +104,7 @@ import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
 import { registerHowToVideoRoutes } from "./routes-how-to-videos";
 import { registerUserActivityRoutes } from "./user-activity";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
-import { recognizeRoute, updateKnownRoutes } from "./route-recognition-service";
+import { recognizeRoute, updateKnownRoutes, dropMismatchedRouteContext } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
 import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
@@ -3723,6 +3723,7 @@ function transformRunForAndroid(run: any) {
                 kmSplits: run.kmSplits,
                 gpsTrack: run.gpsTrack,
                 terrainType: run.terrainType ?? null,
+                sessionType: run.sessionType ?? null,
               });
             }
           } catch (err) {
@@ -3746,14 +3747,14 @@ function transformRunForAndroid(run: any) {
   app.post("/api/runs/recognize-route", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user!.userId;
-      const { latitude, longitude, timestamp, intendedDistanceKm } = req.body;
+      const { latitude, longitude, timestamp, intendedDistanceKm, sessionType } = req.body;
 
       if (typeof latitude !== "number" || typeof longitude !== "number") {
         return res.status(400).json({ error: "latitude and longitude are required numbers" });
       }
 
       const ts = timestamp ? new Date(timestamp) : new Date();
-      const result = await recognizeRoute(userId, latitude, longitude, ts, intendedDistanceKm ?? undefined);
+      const result = await recognizeRoute(userId, latitude, longitude, ts, intendedDistanceKm ?? undefined, sessionType ?? undefined);
       res.json(result);
     } catch (error: any) {
       console.error("[Route Recognition] Error:", error?.message ?? error);
@@ -6093,6 +6094,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         return res.json({ message: finalMessage, isCompletion: true });
       }
       
+      await dropMismatchedRouteContext(req.body);
       const message = await aiService.generatePaceUpdate(req.body);
       res.json({ message, isCompletion: false });
     } catch (error: any) {
@@ -12462,6 +12464,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
 
       const aiService = await import("./ai-service");
       const runnerProfile = await getCoachingProfile(req.body);
+      await dropMismatchedRouteContext(req.body);
       const message = await aiService.generatePaceUpdate({ ...req.body, runnerProfile });
       // Generation failed or came back empty (ai-service no longer returns canned fallback
       // lines — a recited "Keep it up!" is worse than a moment of silence). Return the same

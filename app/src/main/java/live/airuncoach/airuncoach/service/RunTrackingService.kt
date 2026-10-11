@@ -10199,8 +10199,8 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Find fastest split
-        val fastestSplit = kmSplits.minByOrNull { split ->
+        // Find fastest split — only meaningful once there are at least two to compare
+        val fastestSplit = if (kmSplits.size < 2) null else kmSplits.minByOrNull { split ->
             val parts = split.pace.split(":")
             if (parts.size == 2) parts[0].toIntOrNull()?.times(60)?.plus(parts[1].toIntOrNull() ?: 0) ?: 9999 else 9999
         }

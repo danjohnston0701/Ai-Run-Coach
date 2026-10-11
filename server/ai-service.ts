@@ -5910,6 +5910,10 @@ export async function generateEliteCoaching(params: EliteCoachingParams): Promis
 
   const isWalkSession = resolveActivityType(params) === 'walk';
 
+  // "Fastest split" only means something once there are at least two to compare.
+  const completedSplits = kmSplits?.length ?? Math.floor(distance);
+  const hasFastestSplit = !!(fastestSplitKm && fastestSplitPace && completedSplits >= 2);
+
   // For Zone 1-2 aerobic/recovery runs, skip speed-focused coaching (final pushes, sprint finishes)
   // FINAL KM is different — if they're in Zone 4-5, that's appropriate for a finishing push
   // Only constrain HR if they're in a recovery/easy zone (Z1-Z2) during the final stage
@@ -6246,7 +6250,7 @@ ${noTerrainRule}
 The ${isWalkSession ? 'walker' : 'runner'} deserves recognition for strong execution:
 ${consecutiveConsistentSplits && consecutiveConsistentSplits >= 3 ? `- They've ${isWalkSession ? 'walked' : 'run'} ${consecutiveConsistentSplits} consecutive consistent splits — excellent pacing discipline!` : ''}
 ${isNegativeSplitting ? `- They are NEGATIVE SPLITTING (getting faster as the ${isWalkSession ? 'walk' : 'run'} progresses) — this is elite-level pacing!` : ''}
-${fastestSplitKm && fastestSplitPace ? `- Their fastest split was km ${fastestSplitKm} at ${formatPaceForTTS(fastestSplitPace)} — call this out!` : ''}
+${hasFastestSplit ? `- Their fastest split was km ${fastestSplitKm} at ${formatPaceForTTS(fastestSplitPace)} — call this out!` : ''}
 
 Give a 2-3 sentence message that reinforces what's working. Reference real data. This is about substance, not generic praise.`;
       systemExtra = isWalkSession

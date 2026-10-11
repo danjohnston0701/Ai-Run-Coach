@@ -8,7 +8,8 @@ data class RouteRecognitionRequest(
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("timestamp") val timestamp: Long,          // epoch millis
-    @SerializedName("intendedDistanceKm") val intendedDistanceKm: Double? = null
+    @SerializedName("intendedDistanceKm") val intendedDistanceKm: Double? = null,
+    @SerializedName("sessionType") val sessionType: String? = null  // "run" | "walk" — only routes of this type match
 )
 
 // ─── Response ─────────────────────────────────────────────────────────────────

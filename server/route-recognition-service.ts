@@ -104,6 +104,39 @@ export interface RouteRecognitionResult {
   confidenceBreakdown: ConfidenceBreakdown | null;
 }
 
+// ─── Session type & split units ──────────────────────────────────────────────
+
+/**
+ * A known route belongs to exactly one session type. Walks and runs on the same streets are
+ * kept apart so a walk is never coached against run splits (or vice versa), and a walk never
+ * drags a run route's averages down.
+ */
+export type RouteSessionType = "run" | "walk";
+
+export function normalizeSessionType(raw: unknown): RouteSessionType {
+  return String(raw ?? "").trim().toLowerCase() === "walk" ? "walk" : "run";
+}
+
+/**
+ * runs.km_splits[].time is milliseconds, but every split field here is seconds per km.
+ * Legacy rows (and split profiles written before this fix) hold milliseconds — no real km
+ * split takes over an hour, so anything above 3600 is milliseconds.
+ */
+function toSecPerKm(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n > 3600 ? Math.round(n / 1000) : Math.round(n);
+}
+
+function normalizeSplitProfiles(profiles: SplitProfile[] | null | undefined): SplitProfile[] {
+  return (profiles ?? []).map((p) => ({
+    ...p,
+    avgSecPerKm: toSecPerKm(p.avgSecPerKm),
+    bestSecPerKm: toSecPerKm(p.bestSecPerKm),
+    worstSecPerKm: toSecPerKm(p.worstSecPerKm),
+  }));
+}
+
 // ─── Haversine Distance ───────────────────────────────────────────────────────
 
 function haversineMetres(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -264,12 +297,12 @@ function buildSplitComparisons(
   splitProfiles: SplitProfile[],
   lastRunSplits: KmSplitData[]
 ): SplitComparison[] {
-  return splitProfiles.map((profile) => {
+  return normalizeSplitProfiles(splitProfiles).map((profile) => {
     const lastRunKm = lastRunSplits.find((s) => s.km === profile.km);
     return {
       km: profile.km,
-      avgSecPerKm: profile.avgSecPerKm,
-      lastRunSecPerKm: lastRunKm ? lastRunKm.time : undefined,
+      avgSecPerKm: profile.avgSecPerKm || undefined,
+      lastRunSecPerKm: lastRunKm?.time || undefined,
     };
   });
 }
@@ -324,13 +357,19 @@ export async function recognizeRoute(
   lat: number,
   lng: number,
   timestamp: Date,
-  intendedDistanceKm?: number
+  intendedDistanceKm?: number,
+  sessionType?: string
 ): Promise<RouteRecognitionResult> {
-  // 1. Fetch all known routes for this user
-  const candidates = await db
+  // 1. Fetch the user's known routes — only those of this session's type. Clients that
+  // predate the sessionType field get every route; the coaching endpoints then drop a
+  // mismatched route context (knownRouteMatchesSession).
+  const allRoutes = await db
     .select()
     .from(knownRoutes)
     .where(eq(knownRoutes.userId, userId));
+  const candidates = sessionType
+    ? allRoutes.filter((r) => normalizeSessionType(r.sessionType) === normalizeSessionType(sessionType))
+    : allRoutes;
 
   if (candidates.length === 0) {
     return { matched: false, confidence: 0, confidenceLabel: "none", knownRoute: null, routeIntelligence: null, confidenceBreakdown: null };
@@ -449,11 +488,51 @@ async function buildRouteIntelligence(
 
 function parseKmSplits(raw: unknown): KmSplitData[] {
   if (!raw || !Array.isArray(raw)) return [];
-  return (raw as any[]).map((s) => ({
-    km: s.km ?? s.split ?? 0,
-    time: s.time ?? s.seconds ?? s.paceSeconds ?? 0,
-    pace: s.pace ?? formatSecPerKm(s.time ?? s.paceSeconds ?? 0),
-  }));
+  return (raw as any[]).map((s) => {
+    const time = toSecPerKm(s.time ?? s.seconds ?? s.paceSeconds ?? 0);
+    return {
+      km: s.km ?? s.split ?? 0,
+      time,
+      pace: s.pace ?? formatSecPerKm(time),
+    };
+  });
+}
+
+/**
+ * Guard for clients that call recognize-route without a sessionType (Android ≤ 2.0.61):
+ * they may hold a route context from the other session type. Looks the route up by the
+ * name the client echoes back; an unknown name is allowed through.
+ */
+export async function knownRouteMatchesSession(
+  userId: string,
+  routeName: string,
+  sessionType: string
+): Promise<boolean> {
+  const routes = await db
+    .select({ name: knownRoutes.name, displayName: knownRoutes.displayName, sessionType: knownRoutes.sessionType })
+    .from(knownRoutes)
+    .where(eq(knownRoutes.userId, userId));
+  const named = routes.filter((r) => (r.displayName || r.name) === routeName);
+  if (named.length === 0) return true;
+  const wanted = normalizeSessionType(sessionType);
+  return named.some((r) => normalizeSessionType(r.sessionType) === wanted);
+}
+
+/** Drops body.routeIntelligence from a coaching request when it belongs to the other session type. */
+export async function dropMismatchedRouteContext(body: any): Promise<void> {
+  const ctx = body?.routeIntelligence;
+  if (!ctx?.routeName || !body.userId) return;
+  const sessionType = body.activityType ?? body.sessionType;
+  try {
+    if (!(await knownRouteMatchesSession(body.userId, ctx.routeName, sessionType))) {
+      console.log(`[RouteMemory] Dropped "${ctx.routeName}" context — not a ${normalizeSessionType(sessionType)} route`);
+      delete body.routeIntelligence;
+    }
+  } catch (err) {
+    // Fail closed: without route memory the cue is still a normal split update
+    console.warn("[RouteMemory] Route/session check failed:", err);
+    delete body.routeIntelligence;
+  }
 }
 
 // ─── updateKnownRoutes — called on run completion ─────────────────────────────
@@ -480,6 +559,7 @@ export async function updateKnownRoutes(
     kmSplits: unknown;
     gpsTrack: unknown;
     terrainType: string | null;
+    sessionType: string | null;
   }
 ): Promise<void> {
   if (!completedRun.startLat || !completedRun.startLng) return;
@@ -487,6 +567,7 @@ export async function updateKnownRoutes(
   const lat = completedRun.startLat;
   const lng = completedRun.startLng;
   const distKm = completedRun.distance;
+  const sessionType = normalizeSessionType(completedRun.sessionType);
 
   // 1. Check for existing known_route within 100m
   const existingRoutes = await db
@@ -495,6 +576,7 @@ export async function updateKnownRoutes(
     .where(eq(knownRoutes.userId, userId));
 
   const matchingRoute = existingRoutes.find((r) => {
+    if (normalizeSessionType(r.sessionType) !== sessionType) return false;
     const d = haversineMetres(lat, lng, r.startLat, r.startLng);
     return d <= 100 && Math.abs((r.typicalDistanceKm ?? 0) - distKm) / distKm <= 0.15;
   });
@@ -546,7 +628,7 @@ export async function updateKnownRoutes(
 
     // Update split profiles
     const updatedSplitProfiles = updateSplitProfiles(
-      (matchingRoute.splitProfiles as SplitProfile[]) ?? [],
+      normalizeSplitProfiles(matchingRoute.splitProfiles as SplitProfile[] | null),
       kmSplits,
       newRunCount
     );
@@ -560,7 +642,7 @@ export async function updateKnownRoutes(
       : (matchingRoute.notableSegments as NotableSegment[]);
 
     // Generate a friendly name if none exists
-    const routeName = matchingRoute.name ?? generateRouteName(dayOfWeek, hour, newTypicalKm);
+    const routeName = matchingRoute.name ?? generateRouteName(dayOfWeek, hour, newTypicalKm, sessionType);
 
     await db
       .update(knownRoutes)
@@ -603,7 +685,7 @@ export async function updateKnownRoutes(
         terrainType: runs.terrainType,
       })
       .from(runs)
-      .where(and(eq(runs.userId, userId)))
+      .where(and(eq(runs.userId, userId), eq(runs.sessionType, sessionType)))
       .orderBy(desc(runs.completedAt));
 
     const nearbyPrior = priorRuns.find((r) => {
@@ -634,7 +716,8 @@ export async function updateKnownRoutes(
     const bestMs = Math.min(dur1Ms, dur2Ms);
     const avgMs = Math.round((dur1Ms + dur2Ms) / 2);
 
-    const pace1 = avgKm > 0 ? (nearbyPrior.duration ?? completedRun.duration) / avgKm : 0;
+    const priorKm = nearbyPrior.distance ?? distKm;
+    const pace1 = priorKm > 0 ? (nearbyPrior.duration ?? completedRun.duration) / priorKm : 0;
     const pace2 = distKm > 0 ? completedRun.duration / distKm : 0;
     const avgPace = (pace1 + pace2) / 2;
 
@@ -646,11 +729,12 @@ export async function updateKnownRoutes(
       : undefined;
     const notableSegments = elevationProfile ? detectNotableSegments(elevationProfile, distKm) : [];
 
-    const routeName = generateRouteName(dayOfWeek, hour, avgKm);
+    const routeName = generateRouteName(dayOfWeek, hour, avgKm, sessionType);
 
     await db.insert(knownRoutes).values({
       userId,
       name: routeName,
+      sessionType,
       startLat: avgLat,
       startLng: avgLng,
       startRadiusM: 75,
@@ -789,6 +873,7 @@ function updateSplitProfiles(
 ): SplitProfile[] {
   const result = [...existing];
   for (const split of newSplits) {
+    if (!split.time) continue;
     const existing_idx = result.findIndex((p) => p.km === split.km);
     if (existing_idx >= 0) {
       const p = result[existing_idx];
@@ -815,12 +900,13 @@ function updateSplitProfiles(
 
 // ─── Route name generator ─────────────────────────────────────────────────────
 
-function generateRouteName(dayOfWeek: number, hour: number, distKm: number): string {
+function generateRouteName(dayOfWeek: number, hour: number, distKm: number, sessionType: RouteSessionType): string {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const day = days[dayOfWeek];
   const time = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
   const dist = distKm < 3 ? "Short" : distKm < 7 ? "" : distKm < 12 ? "Long" : "Ultra";
-  return `${day} ${time}${dist ? " " + dist : ""} Run`.replace(/\s+/g, " ").trim();
+  const noun = sessionType === "walk" ? "Walk" : "Run";
+  return `${day} ${time}${dist ? " " + dist : ""} ${noun}`.replace(/\s+/g, " ").trim();
 }
 
 // ─── Export types for use in routes.ts ───────────────────────────────────────

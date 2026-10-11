@@ -361,7 +361,8 @@ class RunSessionViewModel @Inject constructor(
                         latitude = lat,
                         longitude = lng,
                         timestamp = System.currentTimeMillis(),
-                        intendedDistanceKm = intendedDistanceKm
+                        intendedDistanceKm = intendedDistanceKm,
+                        sessionType = runConfig?.activityType?.name?.lowercase()
                     )
                 )
                 if (response.matched) {
