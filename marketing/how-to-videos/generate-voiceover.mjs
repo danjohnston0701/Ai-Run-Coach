@@ -55,6 +55,17 @@ const LINES = {
   ],
 };
 
+// Pronunciation fixes, applied as SSML so the script lines above stay plain text:
+//  • "Ai Run Coach" — Polly reads "Ai" as the word "eye"; it's the letters A-I.
+//  • "live coaching" — Polly guessed "liv" (to live); it's "lyve" (real-time).
+const ssml = (text) => "<speak>" + text
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/\bAi Run Coach\b/g, '<say-as interpret-as="characters">AI</say-as> Run Coach')
+  .replace(/\blive coaching\b/g, '<phoneme alphabet="ipa" ph="laɪv">live</phoneme> coaching')
+  + "</speak>";
+// Speech marks report the spelled-out brand as "AI"; captions keep the brand spelling.
+const captionWord = (w) => (w === "AI" ? "Ai" : w);
+
 const polly = new PollyClient({
   region: "us-east-1",
   credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY },
@@ -68,15 +79,15 @@ for (const [video, lines] of Object.entries(LINES)) {
   for (const [i, text] of lines.entries()) {
     const name = `scene-${String(i + 1).padStart(2, "0")}`;
     const res = await polly.send(new SynthesizeSpeechCommand({
-      Text: text, VoiceId: "Olivia", Engine: "neural", OutputFormat: "mp3", SampleRate: "24000",
+      Text: ssml(text), TextType: "ssml", VoiceId: "Olivia", Engine: "neural", OutputFormat: "mp3", SampleRate: "24000",
     }));
     fs.writeFileSync(new URL(`${name}.mp3`, dir), Buffer.from(await res.AudioStream.transformToByteArray()));
     const marks = await polly.send(new SynthesizeSpeechCommand({
-      Text: text, VoiceId: "Olivia", Engine: "neural", OutputFormat: "json", SpeechMarkTypes: ["word"],
+      Text: ssml(text), TextType: "ssml", VoiceId: "Olivia", Engine: "neural", OutputFormat: "json", SpeechMarkTypes: ["word"],
     }));
     const ls = Buffer.from(await marks.AudioStream.transformToByteArray()).toString().trim().split("\n");
     fs.writeFileSync(new URL(`${name}.words.json`, dir),
-      JSON.stringify(ls.map((l) => { const m = JSON.parse(l); return { t: m.time, w: m.value }; })));
+      JSON.stringify(ls.map((l) => { const m = JSON.parse(l); return { t: m.time, w: captionWord(m.value) }; })));
     console.log(video, i + 1, "ok");
   }
 }
