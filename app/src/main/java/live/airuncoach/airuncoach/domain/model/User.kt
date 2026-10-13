@@ -49,7 +49,7 @@ data class User(
     val defaultSessionType: String? = "RUN",
     // ── Trial / Subscription lifecycle ───────────────────────────────────────
     // ISO-8601 date string set by the server on account creation (e.g. "2025-01-10").
-    // Used client-side to compute trial countdown and enforce the hard paywall after 14 days.
+    // Used client-side to compute trial countdown and enforce the hard paywall when the trial ends.
     val trialExpiresAt: String? = null,
     // Currency inferred from timezone on login (e.g. "NZD", "GBP", "USD")
     // Set server-side and returned in the login response for localized pricing display.

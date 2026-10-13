@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.ui.components.FREE_TRIAL_DAYS
 import android.app.Activity
 import android.content.Intent
 import androidx.compose.foundation.background
@@ -1186,7 +1187,7 @@ private fun CurrentPlanBanner(
                 Text(
                     text = when {
                         isTrialExpired && isFreeTrial -> "Trial Expired"
-                        isFreeTrial -> "14-Day Trial"
+                        isFreeTrial -> "$FREE_TRIAL_DAYS-Day Trial"
                         else -> tierName
                     },
                     fontSize = 20.sp,
@@ -1567,19 +1568,19 @@ data class PlanData(
     val monthlyEquivalent: String = ""
 ) {
     companion object {
-        /** 14-day free trial card — shown to non-paid users on the Plans tab */
+        /** Free trial card (no card taken, nothing to cancel) — shown to non-paid users on the Plans tab */
         val FREE_TRIAL = PlanData(
             name = "Free Trial",
-            monthlyPriceDisplay = "14 Days",
+            monthlyPriceDisplay = "$FREE_TRIAL_DAYS Days",
             monthlyPriceSuffix = " free",
             accentColor = Color(0xFF8E9BAE),
-            monthlyEquivalent = "No credit card required",
+            monthlyEquivalent = "No credit card · Nothing to cancel",
             features = listOf(
                 PlanFeature("50km of AI Coaching per month during trial", true),
                 PlanFeature("15 AI Session Summaries per month during trial", true),
                 PlanFeature("No AI Route Generation", false),
                 PlanFeature("No AI Training Plans", false),
-                PlanFeature("Full access expires when the trial ends", false)
+                PlanFeature("Never auto-charged — it simply ends, you choose whether to upgrade", true)
             )
         )
 

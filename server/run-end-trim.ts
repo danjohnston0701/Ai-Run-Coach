@@ -263,6 +263,7 @@ const TRIMMED_COLUMNS = [
   "gpsTrack", "paceData", "heartRateData", "cadenceData", "altitudeData", "kmSplits",
   "minElevation", "maxElevation", "elevationGain", "elevationLoss", "totalSteps",
   "calories", "activeCalories", "tss", "avgHeartRate", "maxHeartRate", "wasTargetAchieved",
+  "strugglePoints",
 ] as const;
 
 function truncateSeries(series: any, fraction: number): any {
@@ -306,6 +307,13 @@ export function buildEndTrimPatch(run: any, s: EndTrimSuggestion): Record<string
       const km = Number(sp?.distanceKm ?? sp?.km ?? sp?.kilometer ?? i + 1);
       return !(km > s.newDistanceKm + 1e-6);
     });
+  }
+
+  // Struggle points in the trimmed tail (the walk home / standing at the door) aren't part of the run.
+  const struggles = parseSeries(run.strugglePoints);
+  if (struggles) {
+    patch.strugglePoints = sameFormAs(run.strugglePoints, struggles.filter((sp: any) =>
+      !(typeof sp?.distanceMeters === "number" && sp.distanceMeters > s.newDistanceKm * 1000)));
   }
 
   const speeds = kept.map(p => p?.speed).filter((v): v is number => typeof v === "number" && v >= 0);

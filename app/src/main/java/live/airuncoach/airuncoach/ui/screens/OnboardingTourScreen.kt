@@ -66,6 +66,7 @@ import live.airuncoach.airuncoach.domain.model.LocationPoint
 import live.airuncoach.airuncoach.domain.model.RunSession
 import live.airuncoach.airuncoach.domain.model.TerrainType
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
+import live.airuncoach.airuncoach.ui.components.FreeTrialPromise
 import live.airuncoach.airuncoach.viewmodel.AiAnalysisState
 import com.google.android.gms.location.LocationServices
 import com.google.maps.android.PolyUtil
@@ -264,7 +265,7 @@ fun OnboardingTourScreen(
     /**
      * True when reached from the fresh-install welcome (RootNavigationGraph's
      * "onboarding_tour_preview") rather than from a signed-in session: no telemetry, no
-     * authenticated fetches, and the closing page's CTA becomes "Create a Free Account"
+     * authenticated fetches, and the closing page's CTA becomes "Start My Free Trial"
      * ([onCreateAccount]) instead of "Finish Tour".
      */
     isPreLogin: Boolean = false,
@@ -325,6 +326,7 @@ fun OnboardingTourScreen(
     if (watchChoice == null) {
         WatchChoiceScreen(
             onChoose = { watchChoice = it },
+            isPreLogin = isPreLogin,
             topBar = { TourTopBar(progress = null, isPreLogin = isPreLogin, onCreateAccount = createAccountNow, onSkip = requestSkip) },
         )
     } else {
@@ -347,7 +349,7 @@ fun OnboardingTourScreen(
             title = { Text("Leave the tour?", color = Colors.textPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "Create a free account and your AI coach will be ready for your next run.",
+                    "Start your 30-day free trial and your AI coach will be ready for your next run. No credit card needed, and nothing to cancel later.",
                     color = Colors.textSecondary,
                 )
             },
@@ -358,7 +360,7 @@ fun OnboardingTourScreen(
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Colors.primary, contentColor = Colors.buttonText),
                         shape = RoundedCornerShape(BorderRadius.lg),
-                    ) { Text("Create a Free Account", fontWeight = FontWeight.Bold) }
+                    ) { Text("Start My Free Trial", fontWeight = FontWeight.Bold) }
                     TextButton(onClick = { showLeavePrompt = false }, modifier = Modifier.fillMaxWidth()) {
                         Text("Keep touring", color = Colors.primary, fontWeight = FontWeight.SemiBold)
                     }
@@ -394,7 +396,7 @@ private fun TourTopBar(progress: String?, isPreLogin: Boolean, onCreateAccount: 
                     contentPadding = PaddingValues(horizontal = Spacing.md, vertical = 4.dp),
                     modifier = Modifier.height(32.dp),
                 ) {
-                    Text("Create account", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Colors.primary)
+                    Text("Try free", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Colors.primary)
                 }
             }
             TextButton(onClick = onSkip) {
@@ -407,6 +409,7 @@ private fun TourTopBar(progress: String?, isPreLogin: Boolean, onCreateAccount: 
 @Composable
 private fun WatchChoiceScreen(
     onChoose: (TourWatchChoice) -> Unit,
+    isPreLogin: Boolean = false,
     topBar: @Composable () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot)) {
@@ -434,6 +437,12 @@ private fun WatchChoiceScreen(
             // would be toured through a device they can't actually pair. TourWatchChoice
             // .SAMSUNG_WATCH stays so re-adding the option is a one-liner once it ships.
             WatchChoiceOption(R.drawable.icon_profile_vector, "Phone only") { onChoose(TourWatchChoice.PHONE_ONLY) }
+            if (isPreLogin) {
+                // The no-card trial is the main reason to sign up rather than bounce — say it
+                // up front, not only on the closing page most visitors never reach.
+                Spacer(modifier = Modifier.height(Spacing.xxl))
+                FreeTrialPromise(compact = true)
+            }
         }
     }
 }
@@ -546,7 +555,8 @@ private fun TourStepController(
                     val tailIndex = step - lead.size - INTERACTIVE_STEP_COUNT
                     InfoPageContent(
                         tail[tailIndex], onNext = ::advance, isLast = step == totalSteps - 1,
-                        lastLabel = if (isPreLogin) "Create a Free Account" else "Finish Tour",
+                        lastLabel = if (isPreLogin) "Start My Free Trial" else "Finish Tour",
+                        footer = if (isPreLogin) ({ FreeTrialPromise() }) else null,
                     )
                 }
             }
@@ -555,10 +565,21 @@ private fun TourStepController(
 }
 
 @Composable
-private fun InfoPageContent(page: InfoPage, onNext: () -> Unit, isLast: Boolean, lastLabel: String = "Finish Tour") {
+private fun InfoPageContent(
+    page: InfoPage,
+    onNext: () -> Unit,
+    isLast: Boolean,
+    lastLabel: String = "Finish Tour",
+    /** Extra content under the description — the pre-login closing page's free-trial promise. */
+    footer: (@Composable () -> Unit)? = null,
+) {
     Column(modifier = Modifier.fillMaxSize()) {
+        // Scrolls (the closing page's footer can outgrow a small screen) but still centres the
+        // content when it fits — min height = the viewport.
+        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
         Column(
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = Spacing.xl),
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .heightIn(min = maxHeight).padding(horizontal = Spacing.xl),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -572,6 +593,11 @@ private fun InfoPageContent(page: InfoPage, onNext: () -> Unit, isLast: Boolean,
             Text(page.title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Colors.textPrimary, textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(Spacing.md))
             Text(page.description, fontSize = 15.sp, color = Colors.textSecondary, textAlign = TextAlign.Center, lineHeight = 22.sp)
+            if (footer != null) {
+                Spacer(modifier = Modifier.height(Spacing.xl))
+                footer()
+            }
+        }
         }
         Button(
             onClick = onNext,

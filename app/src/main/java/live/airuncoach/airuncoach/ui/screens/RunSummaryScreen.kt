@@ -3,6 +3,7 @@
 package live.airuncoach.airuncoach.ui.screens
 
 
+import live.airuncoach.airuncoach.ui.components.FREE_TRIAL_DAYS
 import live.airuncoach.airuncoach.ui.components.WatchOnlyRunNotice
 import live.airuncoach.airuncoach.domain.model.isWatchOnlySession
 import android.content.Context
@@ -2310,7 +2311,7 @@ private fun AiAnalysisLimitCard(
 
             Text(
                 text = if (state.isTrialExpired)
-                    "Your 14-day free trial has ended. Upgrade to keep generating AI run insights after every run."
+                    "Your $FREE_TRIAL_DAYS-day free trial has ended. Upgrade to keep generating AI run insights after every run."
                 else
                     "You've used all ${state.limit} AI run ${if (state.limit == 1) "analysis" else "analyses"} on your $tierLabel plan this month.",
                 style = AppTextStyles.small,

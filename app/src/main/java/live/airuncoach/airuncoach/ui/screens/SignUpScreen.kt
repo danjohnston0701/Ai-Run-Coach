@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.ui.components.FreeTrialPromise
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -138,12 +139,15 @@ fun SignUpScreen(
 
             // Subtitle
             Text(
-                text = "Create an account to start your journey",
+                text = "Create your account to start your free trial",
                 style = AppTextStyles.body,
                 color = Colors.textSecondary
             )
 
-            Spacer(modifier = Modifier.height(Spacing.xxxl))
+            Spacer(modifier = Modifier.height(Spacing.md))
+            FreeTrialPromise(compact = true)
+
+            Spacer(modifier = Modifier.height(Spacing.xxl))
 
             // Name Field
             Text(

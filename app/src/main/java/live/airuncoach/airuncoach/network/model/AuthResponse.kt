@@ -128,7 +128,7 @@ data class AuthResponse(
     @SerializedName("injuries")
     val injuries: List<Injury>? = null,
 
-    // ISO-8601 trial expiry date (e.g. "2025-01-10") — account creation date + 14 days, set by server
+    // ISO-8601 trial expiry date (e.g. "2025-01-10") — account creation date + the free-trial length, set by server
     @SerializedName("trialExpiresAt")
     val trialExpiresAt: String? = null,
 

@@ -631,13 +631,26 @@ fun WorkoutDetailScreen(
             Spacer(modifier = Modifier.height(Spacing.xl))
 
             // ── Actions ───────────────────────────────────────────────────────
-            if (workout.isCompleted) {
+            // A skipped workout (completed with no run) stays startable — a runner doing it a day
+            // late after skipping it had no Start/Prepare buttons at all, started a bare free run
+            // from the watch, and lost the whole session plan (Damion, 2026-10-12).
+            val isSkipped = workout.isCompleted && workout.completedRunId.isNullOrBlank()
+            if (workout.isCompleted && !isSkipped) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(painterResource(R.drawable.icon_check_vector), null, tint = Colors.success, modifier = Modifier.size(24.dp))
                     Spacer(modifier = Modifier.width(Spacing.sm))
                     Text("Workout Complete!", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.success)
                 }
             } else if (workout.workoutType != "rest") {
+
+                if (isSkipped) {
+                    Text(
+                        "You skipped this session — you can still do it now.",
+                        style = AppTextStyles.body,
+                        color = Colors.textSecondary,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.sm)
+                    )
+                }
 
                 // ── AI Coaching generation banner ──────────────────────────
                 AiCoachingGenerationBanner(

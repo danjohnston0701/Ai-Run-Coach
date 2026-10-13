@@ -68,6 +68,14 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
   },
 };
 
+/**
+ * Length of the free trial every new account gets. No payment details are collected —
+ * the trial is purely server-side (users.trial_expires_at), so nobody can be charged when it
+ * ends. The apps advertise this number ("30-day free trial, no credit card"), so keep their
+ * copy in step if it ever changes.
+ */
+export const FREE_TRIAL_DAYS = 30;
+
 /** Users with no tier set, or an unknown tier, fall back to free limits. */
 export const DEFAULT_TIER = "free";
 

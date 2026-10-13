@@ -2498,8 +2498,8 @@ Assess whether this runner's cadence is appropriate RIGHT NOW. Consider their bi
   // Biomechanics terminology (important — easy to confuse):
   //   OVERSTRIDING   = cadence TOO LOW  → stride too long, foot lands ahead of CoM,
   //                    heel-striking, braking force on each step. Fix: shorten stride.
-  //   UNDERSTRIDING  = cadence TOO HIGH → stride too short, shuffling / micro-stepping,
-  //   (spinning)       reduced propulsion per step. Less common, often a fatigue sign.
+  //   HIGH CADENCE   = above the modelled target → NOT coached as a fault (see that branch);
+  //                    at easy paces quick, short steps are the safer gait.
   //   ON TARGET      = within personalised optimal range → efficient biomechanics.
   //
   // Android sends cadenceProximityTier ("ON_TARGET" | "CLOSE" | "NEEDS_WORK") based on
@@ -2517,15 +2517,15 @@ The correction: shorten the stride, increase turnover, shift foot strike closer 
 
 Use your coaching expertise to choose the 1-2 most effective, actionable cues for this moment — arm drive, mental metronome/rhythm, quicker and lighter foot turnover, or foot placement are all valid angles. Pick what will land best for this runner, and phrase it in your own original words rather than a stock cue.`;
   } else if (cadenceExcessPercent > 10) {
-    // Cadence significantly TOO HIGH → understriding / spinning: short shuffling steps.
-    // Each step generates less propulsion; can signal fatigue or an overcorrected form.
-    zoneAnalysis = `HIGH CADENCE / UNDERSTRIDING: Cadence ${cadence} spm is ${Math.round(cadenceExcessPercent)}% above their personalised target of ${dynOptimalCadenceTarget} spm (range ${dynOptimalCadenceMin}–${dynOptimalCadenceMax} spm) for this pace (${formatPaceForTTS(currentPace)}).
+    // Cadence well ABOVE the model's target. That is not a fault to correct: quick, short steps
+    // keep the foot under the hips and lower impact per step, and the "target" is usually
+    // low only because the pace is slow (jogging, walk-run). Telling a runner to "lengthen
+    // the stride and drive powerfully" is overstriding advice — it told a 106 kg newcomer on a
+    // back-injury-careful walk-run plan that 175 spm meant he was "shuffling" (Damion,
+    // 2026-10-12). Never coach a stride-lengthening fix from cadence alone.
+    zoneAnalysis = `HIGH CADENCE (NOT A FAULT): ${cadence} spm is above the modelled ${dynOptimalCadenceTarget} spm for this pace (${formatPaceForTTS(currentPace)}). Quick, light steps at an easy pace are efficient and low-impact — this does NOT need fixing.
 
-A cadence significantly above the biomechanics target suggests the runner is taking too many short, shuffling steps — each generating less forward propulsion. This reduces running economy and often signals fatigue or an overcorrected "spinning" gait.
-
-Personalised context: Height ${heightCmDisplay ?? 170}cm, age ${userAge ?? 'unknown'}. This is their specific efficient range at this pace — not a generic goal.
-
-Coach them to lengthen their stride slightly and drive more powerfully off each step, without overextending.`;
+Do NOT tell them to lengthen their stride, push off harder, or slow their turnover, and do not call it shuffling. If you mention cadence at all, briefly affirm the quick, light rhythm, then coach something more useful right now — relaxed shoulders, breathing, posture, or staying at a comfortable effort.`;
   } else {
     // Cadence is ON TARGET or only slightly above → efficient biomechanics. Celebrate it
     // or coach something more useful than cadence (it doesn't need fixing right now).

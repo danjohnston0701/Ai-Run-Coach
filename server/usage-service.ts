@@ -7,16 +7,16 @@
 
 import { Response } from "express";
 import { storage } from "./storage";
-import { getLimitsForTier, TierLimits, USAGE_ALERT_THRESHOLD } from "./tier-limits";
+import { getLimitsForTier, TierLimits, USAGE_ALERT_THRESHOLD, FREE_TRIAL_DAYS } from "./tier-limits";
 
 // ── Trial expiry helpers ──────────────────────────────────────────────────────
 
 /**
- * Returns true if a free-tier user's 14-day trial has expired.
+ * Returns true if a free-tier user's free trial (FREE_TRIAL_DAYS) has expired.
  *
  * Paid users are NEVER considered trial-expired — this only blocks free accounts.
  * If `trialExpiresAt` is null (legacy account created before this migration),
- * we fall back to computing the expiry from `createdAt` + 14 days.
+ * we fall back to computing the expiry from `createdAt` + FREE_TRIAL_DAYS.
  */
 export function isTrialExpired(
   tier: string | null | undefined,
@@ -35,7 +35,7 @@ export function isTrialExpired(
   // Fall back: compute from account creation date
   if (createdAt) {
     const fallbackExpiry = new Date(createdAt);
-    fallbackExpiry.setDate(fallbackExpiry.getDate() + 14);
+    fallbackExpiry.setDate(fallbackExpiry.getDate() + FREE_TRIAL_DAYS);
     return now > fallbackExpiry;
   }
 
@@ -180,7 +180,7 @@ export async function checkAndEnforceLimit(
     res.status(402).json({
       error: "trial_expired",
       message:
-        "Your 14-day free trial has ended. Upgrade to a paid plan to continue using AI Run Coach.",
+        `Your ${FREE_TRIAL_DAYS}-day free trial has ended. Upgrade to a paid plan to continue using AI Run Coach.`,
       upgradeRequired: true,
     });
     return false;

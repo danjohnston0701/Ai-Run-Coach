@@ -35,11 +35,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.ui.theme.*
 import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
 
-// Temporarily hidden / not yet launched (2026-10-09). Flip back to re-enable — the cards,
-// view-model plumbing and OAuth handling are untouched.
-//  • Strava import: hidden until the Strava API application is active again.
+// Feature switches for this screen. Flip to hide/show — the cards, view-model plumbing and
+// OAuth handling are untouched either way.
+//  • Strava import: hidden 2026-10-09 while the Strava API application was inactive, shown again
+//    2026-10-13 (server side is gated separately by STRAVA_NEW_CONNECTIONS_ENABLED).
 //  • Galaxy Watch: shown under "Coming Soon" until the Wear OS app is live on Google Play.
-private const val SHOW_STRAVA_IMPORT = false
+private const val SHOW_STRAVA_IMPORT = true
 private const val SAMSUNG_WATCH_APP_AVAILABLE = false
 
 // Generic device info for the "Coming Soon" section

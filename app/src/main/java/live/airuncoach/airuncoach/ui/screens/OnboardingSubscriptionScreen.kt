@@ -30,6 +30,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.delay
 import live.airuncoach.airuncoach.MainActivity
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.ui.components.FREE_TRIAL_DAYS
+import live.airuncoach.airuncoach.ui.components.FreeTrialPromise
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
@@ -106,7 +108,7 @@ fun OnboardingSubscriptionScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Your Ai Run Coach trial starts here",
+                    text = "Your $FREE_TRIAL_DAYS-day free trial starts here",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Colors.textPrimary,
@@ -131,6 +133,7 @@ fun OnboardingSubscriptionScreen(
             // Condensed trial summary — one card instead of two, so the primary CTA is
             // reachable without scrolling past a wall of feature bullets first.
             item {
+                FreeTrialPromise(modifier = Modifier.padding(horizontal = Spacing.lg).padding(bottom = Spacing.lg))
                 TrialSummaryCard()
             }
 
@@ -201,7 +204,7 @@ fun OnboardingSubscriptionScreen(
                     )
                 }
                 Text(
-                    text = "Free 14-day trial — no credit card required",
+                    text = "$FREE_TRIAL_DAYS days free · No credit card · Nothing to cancel",
                     fontSize = 12.sp,
                     color = Colors.textMuted,
                     textAlign = TextAlign.Center,
@@ -312,7 +315,7 @@ fun OnboardingSubscriptionScreen(
 
                     item {
                         Text(
-                            text = "You can upgrade anytime. No credit card commitment needed.",
+                            text = "No need to choose now — your free trial needs no card, and you can upgrade anytime.",
                             fontSize = 12.sp,
                             color = Colors.textMuted,
                             textAlign = TextAlign.Center,

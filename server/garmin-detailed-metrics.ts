@@ -28,6 +28,26 @@ function secsToMSS(totalSec: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+// ─── Helper: elevation gain from a raw altitude series ───────────────────────
+
+/**
+ * Same 5 m anchor quantiser as both watch apps and the companion upload path: the anchor
+ * only moves once a change clears 5 m, so a real climb builds up against it while GPS /
+ * barometer noise just oscillates around it. Summing every positive 1 s delta banked that
+ * noise as climb — ~60 m per km on a flat run.
+ */
+function quantisedGainM(alts: number[]): number {
+  const THRESHOLD_M = 5;
+  let gain = 0;
+  let anchor = alts[0];
+  for (let i = 1; i < alts.length; i++) {
+    const delta = alts[i] - anchor;
+    if (delta > THRESHOLD_M) { gain += delta; anchor = alts[i]; }
+    else if (delta < -THRESHOLD_M) { anchor = alts[i]; }
+  }
+  return gain;
+}
+
 // ─── Helper: Haversine distance between two lat/lng points (metres) ───────────
 
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -135,7 +155,7 @@ export function computeKmSplitsFromSamples(
       const cads   = slice.filter(p => p.cadence != null).map(p => p.cadence!);
       const alts   = slice.filter(p => p.altitude != null).map(p => p.altitude!);
       const elevGain = alts.length >= 2
-        ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
+        ? quantisedGainM(alts)
         : 0;
 
       splits.push({
@@ -169,7 +189,7 @@ export function computeKmSplitsFromSamples(
     const cads     = slice.filter(p => p.cadence != null).map(p => p.cadence!);
     const alts     = slice.filter(p => p.altitude != null).map(p => p.altitude!);
     const elevGain = alts.length >= 2
-      ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
+      ? quantisedGainM(alts)
       : 0;
 
     splits.push({
@@ -286,7 +306,7 @@ export function computeKmSplitsFromGpsTrack(gpsTrack: any[]): KmSplitRecord[] {
       const cads     = slice.filter(p => p.cadence != null).map(p => p.cadence!);
       const alts     = slice.filter(p => p.altitude != null).map(p => p.altitude!);
       const elevGain = alts.length >= 2
-        ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
+        ? quantisedGainM(alts)
         : 0;
 
       splits.push({
@@ -319,7 +339,7 @@ export function computeKmSplitsFromGpsTrack(gpsTrack: any[]): KmSplitRecord[] {
     const cads     = slice.filter(p => p.cadence != null).map(p => p.cadence!);
     const alts     = slice.filter(p => p.altitude != null).map(p => p.altitude!);
     const elevGain = alts.length >= 2
-      ? alts.reduce((acc, v, idx) => idx > 0 && v > alts[idx - 1] ? acc + (v - alts[idx - 1]) : acc, 0)
+      ? quantisedGainM(alts)
       : 0;
 
     splits.push({

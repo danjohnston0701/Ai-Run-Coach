@@ -67,6 +67,7 @@ import {
   getUnreadNotificationCount
 } from "./notification-service";
 import { getUsageWithLimits, checkAndEnforceLimit, recordUsage, FEATURE_LABELS, featureNotIncludedResponse, effectiveTier as resolveEffectiveTier } from "./usage-service";
+import { FREE_TRIAL_DAYS } from "./tier-limits";
 import { checkCooldown, recordFired, buildSkipResponse } from "./coaching-cooldown";
 import {
   checkAchievementsAfterRun,
@@ -416,9 +417,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       const shortUserId = generateShortUserId();
 
-      // Trial expires 14 days from account creation
+      // Trial expires FREE_TRIAL_DAYS after account creation (no card taken — nothing to charge)
       const trialExpiresAt = new Date();
-      trialExpiresAt.setDate(trialExpiresAt.getDate() + 14);
+      trialExpiresAt.setDate(trialExpiresAt.getDate() + FREE_TRIAL_DAYS);
 
       // Generate 6-digit OTP and hash it for safe storage
       const cryptoMod = await import("crypto");
@@ -2676,7 +2677,8 @@ function transformRunForAndroid(run: any) {
     if (!wid) return;
 
     const [pw] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, wid)).limit(1);
-    if (!pw || (pw as any).isCompleted) return;
+    // A skipped workout (completed, no run) that the runner then did anyway gets the run.
+    if (!pw || ((pw as any).isCompleted && (pw as any).completedRunId)) return;
 
     await db.update(plannedWorkouts)
       .set({ isCompleted: true, completedRunId: runId })
@@ -6395,11 +6397,11 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   app.get("/api/subscriptions/status", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const user = await storage.getUser(req.user!.userId);
-      // Compute trial expiry — fall back to created_at + 14 days if column not set yet
+      // Compute trial expiry — fall back to created_at + FREE_TRIAL_DAYS if column not set yet
       let trialExpiresAt = user?.trialExpiresAt ?? null;
       if (!trialExpiresAt && user?.createdAt) {
         trialExpiresAt = new Date(user.createdAt);
-        (trialExpiresAt as Date).setDate((trialExpiresAt as Date).getDate() + 14);
+        (trialExpiresAt as Date).setDate((trialExpiresAt as Date).getDate() + FREE_TRIAL_DAYS);
       }
       const { isTrialExpired: checkExpired } = await import("./usage-service");
       const trialExpired = checkExpired(user?.subscriptionTier, trialExpiresAt, user?.createdAt ?? null);
@@ -14566,6 +14568,24 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         .select()
         .from(runs)
         .where(and(eq(runs.userId, userId), eq(runs.externalId, sessionId)));
+
+      // The phone's save (or an earlier batch) already linked this session to a run. The
+      // watch can hold its batch for days before uploading — far outside the 2-hour
+      // phone-run window below — and without this check that created a second copy of
+      // the run dated on the upload day (Damion: 8 Oct run duplicated on 10 Oct).
+      if (!existingRun) {
+        const [linkedSession] = await db
+          .select({ runId: garminCompanionSessions.runId })
+          .from(garminCompanionSessions)
+          .where(and(eq(garminCompanionSessions.sessionId, sessionId), eq(garminCompanionSessions.userId, userId)));
+        if (linkedSession?.runId) {
+          const [linkedRun] = await db.select().from(runs).where(and(eq(runs.id, linkedSession.runId), eq(runs.userId, userId)));
+          if (linkedRun) {
+            console.log(`[Offline Batch] Session ${sessionId} already linked to run ${linkedRun.id} — enriching it, not creating a duplicate`);
+            existingRun = linkedRun as any;
+          }
+        }
+      }
 
       if (!existingRun) {
         // ── Dedup against phone-uploaded runs ─────────────────────────────────

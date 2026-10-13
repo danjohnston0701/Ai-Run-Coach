@@ -38,6 +38,8 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.data.SessionManager
+import live.airuncoach.airuncoach.ui.components.FREE_TRIAL_DAYS
+import live.airuncoach.airuncoach.ui.components.FreeTrialPromise
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -505,18 +507,13 @@ private fun NewInstallWelcome(
         Spacer(modifier = Modifier.height(Spacing.xxxxl))
 
         Text(
-            text = "Get started with a free account",
+            text = "Try it free for $FREE_TRIAL_DAYS days",
             style = AppTextStyles.h3.copy(fontWeight = FontWeight.Bold),
             color = Colors.textPrimary,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(Spacing.sm))
-        Text(
-            text = "14-day free trial. No card needed — real-time AI coaching, post-run analysis and training plans from your first run.",
-            style = AppTextStyles.small,
-            color = Colors.textSecondary,
-            textAlign = TextAlign.Center
-        )
+        Spacer(modifier = Modifier.height(Spacing.md))
+        FreeTrialPromise()
 
         Spacer(modifier = Modifier.height(Spacing.xl))
 
@@ -532,7 +529,7 @@ private fun NewInstallWelcome(
             )
         ) {
             Text(
-                text = "Create a Free Account",
+                text = "Start My Free Trial",
                 style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
             )
         }

@@ -1541,7 +1541,7 @@ fun MainScreen(
             }
             // The real OnboardingSubscriptionScreen again, shown once the tour ends. That screen
             // is where the tour was launched from and still holds the two things a new user most
-            // likely wants next — pair a watch, look at plans & pricing — alongside the 14-day
+            // likely wants next — pair a watch, look at plans & pricing — alongside the free-
             // trial message; landing cold on an empty dashboard loses all of it. Its own "take a
             // tour" card hides itself once the tour has been completed (SessionManager
             // .hasCompletedOnboardingTour).

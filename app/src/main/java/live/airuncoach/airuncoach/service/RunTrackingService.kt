@@ -3835,6 +3835,14 @@ class RunTrackingService : Service(), SensorEventListener {
                 // design. Confirm SUSTAINED movement over a short window of consecutive accepted
                 // points (not raw cumulative distance), then credit everything since startTime
                 // up to the earliest sample in that window as if it were a manual pause.
+                // Never for a watch-fed session: the watch's own timer is the session clock and
+                // starts on its START press, so there is no phone-side wait to remove. On a
+                // watch-fed walk-run the credit fired late and capped, cutting 10 min off a run
+                // the watch timed at 36 min and saving a 7:06/km "pace" for a ~9:45/km session
+                // (Damion, 2026-10-12, run 3fd4781f).
+                if (!hasCreditedStartIdle && (wasRunStartedByWatch || location.provider == "garmin")) {
+                    hasCreditedStartIdle = true
+                }
                 if (!hasCreditedStartIdle) {
                     if (impliedSpeedKmh < maxReasonableSpeedKmh) {
                         startIdleDistances.add(distanceIncrement)
@@ -9466,15 +9474,26 @@ class RunTrackingService : Service(), SensorEventListener {
     private fun shouldTriggerMilestone(distKm: Double): Boolean {
         val td = targetDistance ?: return false
         if (td <= 0) return false
-        val pct = (distKm / td * 100).toInt()
-        // Check if any milestone threshold has been crossed
-        val hasMilestone = when {
-            lastMilestonePercent < 25 && pct >= 25 -> true
-            lastMilestonePercent < 50 && pct >= 50 -> true
-            lastMilestonePercent < 75 && pct >= 75 -> true
-            else -> false
+        // targetDistance is in metres. This used to divide km by metres, so pct was always 0
+        // and no 25/50/75% milestone ever fired.
+        val tdKm = td / 1000.0
+        val pct = (distKm / tdKm * 100).toInt()
+        val milestone = when {
+            pct >= 75 && lastMilestonePercent < 75 -> 75
+            pct >= 50 && lastMilestonePercent < 50 -> 50
+            pct >= 25 && lastMilestonePercent < 25 -> 25
+            else -> return false
         }
-        if (!hasMilestone) return false
+        val milestoneKm = tdKm * milestone / 100.0
+        // On a round-km target the milestones land on km markers (4 km: 1/2/3 km), where the
+        // km-split cue already speaks — and the 200 m overlap guard below could only ever fire
+        // them late, saying "halfway" at 60% (Tracey, iOS, 2026-10-12). Let the split cover it.
+        val milestoneFromKmM = Math.abs(milestoneKm - Math.round(milestoneKm)) * 1000
+        // A milestone more than 300 m behind the runner is stale — skip it rather than announce it late.
+        if ((milestoneKm >= 1.0 && milestoneFromKmM <= 200) || (distKm - milestoneKm) * 1000 > 300) {
+            lastMilestonePercent = milestone
+            return false
+        }
         // Don't fire within 200m of a km split to avoid overlap
         val distFromKm = (distKm * 1000) % 1000
         return distFromKm > 200 && distFromKm < 800

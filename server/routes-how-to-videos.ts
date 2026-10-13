@@ -2,7 +2,7 @@
  * Watch + phone "how to" demo videos, played in-app from the Connected Devices tiles.
  *
  *   GET /api/how-to-videos?platform=ios|android
- *     → { videos: [{ id, watch, phone, title, subtitle, url, posterUrl, durationSec }] }
+ *     → { videos: [{ id, watch, phone, title, subtitle, url, posterUrl, youtubeUrl, durationSec }] }
  *
  * The MP4s (720p, made in marketing/how-to-videos) are served as static files from
  * assets/videos/how-to/ (express.static at /assets, which handles the Range requests AVPlayer and
@@ -23,6 +23,8 @@ type HowToVideo = {
   title: string;
   subtitle: string;
   durationSec: number;
+  /** Same edit, published on YouTube (2026-10-11) — for sharing / "watch on YouTube" links. */
+  youtubeUrl: string;
   published: boolean;
 };
 
@@ -34,9 +36,8 @@ const VIDEOS: HowToVideo[] = [
     title: "Garmin + iPhone",
     subtitle: "Install, pair, and run with your coach",
     durationSec: 103,
-    // Footage shows the Garmin watch app's 3.4.10 screens plus the red HR ring and prompt-free
-    // FINISHED screen (2026-10-03) — publish once that build is live in Connect IQ.
-    published: false,
+    youtubeUrl: "https://youtu.be/nTTCDkbnOvQ",
+    published: true,
   },
   {
     id: "garmin-android",
@@ -45,8 +46,8 @@ const VIDEOS: HowToVideo[] = [
     title: "Garmin + Android",
     subtitle: "Install, link, and run with your coach",
     durationSec: 97,
-    // Same Garmin watch footage as garmin-iphone — same publishing condition.
-    published: false,
+    youtubeUrl: "https://youtu.be/t7slQRlShEs",
+    published: true,
   },
   {
     id: "applewatch-iphone",
@@ -55,6 +56,7 @@ const VIDEOS: HowToVideo[] = [
     title: "Apple Watch + iPhone",
     subtitle: "Set up, prepare, and run with your coach",
     durationSec: 96,
+    youtubeUrl: "https://youtu.be/lHXjss9nnx4",
     published: true,
   },
   {
@@ -64,9 +66,8 @@ const VIDEOS: HowToVideo[] = [
     title: "Galaxy Watch + Android",
     subtitle: "Install, prepare, and run with your coach",
     durationSec: 98,
-    // Shows the Wear OS app's on-screen START / RESUME / FINISH controls (2026-10-03) —
-    // publish once that build is live on Google Play.
-    published: false,
+    youtubeUrl: "https://youtu.be/uV9o1PWObww",
+    published: true,
   },
 ];
 

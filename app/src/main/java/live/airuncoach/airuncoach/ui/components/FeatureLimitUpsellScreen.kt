@@ -397,7 +397,7 @@ fun RunRouteLimitUpsellScreen(
 // ── Trial Expired Hard Wall ───────────────────────────────────────────────────
 
 /**
- * Full-screen paywall shown when the user's 14-day free trial has expired.
+ * Full-screen paywall shown when the user's free trial (FREE_TRIAL_DAYS) has expired.
  *
  * This screen is presented as a non-dismissible overlay over the entire app.
  * The user CANNOT start a run, view history, or use any feature until they
@@ -464,7 +464,7 @@ fun TrialExpiredWallScreen(
                 )
 
                 Text(
-                    "You've had 14 days to experience the power of Ai Run Coach. " +
+                    "Your free trial has finished — and as we never took a card, you haven't been charged a thing. " +
                     "Upgrade now to unlock AI coaching, post-run analysis, route generation and training plans.",
                     style = AppTextStyles.body,
                     color = Colors.textSecondary,

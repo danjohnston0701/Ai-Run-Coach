@@ -188,6 +188,16 @@ class ConnectedDevicesViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error initiating Strava connection", e)
+                // Say why — a swallowed failure (e.g. the server's 503 while new Strava
+                // connections are paused) left the button looking dead.
+                val serverMessage = (e as? retrofit2.HttpException)?.response()?.errorBody()?.string()
+                    ?.let { body -> runCatching { org.json.JSONObject(body).optString("error") }.getOrNull() }
+                    ?.takeIf { it.isNotBlank() }
+                android.widget.Toast.makeText(
+                    context,
+                    serverMessage ?: "Couldn't reach Strava right now. Please check your connection and try again.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
             } finally {
                 _stravaLoading.value = false
             }

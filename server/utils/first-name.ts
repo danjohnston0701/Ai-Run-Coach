@@ -8,5 +8,8 @@ const TITLES = new Set(["mr", "mrs", "ms", "miss", "mx", "dr", "prof", "sir"]);
 export function firstNameOf(name?: string | null): string | undefined {
   const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
   if (parts.length > 1 && TITLES.has(parts[0].toLowerCase().replace(/\.$/, ""))) parts.shift();
-  return parts[0] || undefined;
+  const first = parts[0];
+  if (!first) return undefined;
+  // Typed in lower case ("tracey") → "Tracey". Mixed case the runner chose ("DeShawn") is kept.
+  return first === first.toLowerCase() ? first.charAt(0).toUpperCase() + first.slice(1) : first;
 }
