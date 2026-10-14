@@ -390,7 +390,7 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
       // Map Strava fields → our runs schema
       const distanceKm = activity.distance / 1000;
       const durationSec = activity.elapsed_time; // stored in seconds (Strava sends seconds)
-      const avgPaceSecPerKm = distanceKm > 0 ? activity.moving_time / distanceKm : 0;
+      const avgPaceSecPerKm = distanceKm > 0 ? Math.round(activity.moving_time / distanceKm) : 0;
       const paceMin = Math.floor(avgPaceSecPerKm / 60);
       const paceSec = Math.round(avgPaceSecPerKm % 60);
       const avgPaceStr = `${paceMin}:${String(paceSec).padStart(2, '0')}`;
@@ -629,7 +629,7 @@ async function processStravaWebhookEvent(event: any): Promise<void> {
           distance: (s.distance ?? 0) / 1000,
           duration: s.moving_time ?? s.elapsed_time ?? 0,
           pace: s.average_speed > 0
-            ? `${Math.floor(1000 / s.average_speed / 60)}:${String(Math.round((1000 / s.average_speed) % 60)).padStart(2, '0')}`
+            ? `${Math.floor(Math.round(1000 / s.average_speed) / 60)}:${String(Math.round(1000 / s.average_speed) % 60).padStart(2, '0')}`
             : null,
           elevation: s.elevation_difference ?? null,
         }))

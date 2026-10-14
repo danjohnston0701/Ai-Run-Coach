@@ -46,6 +46,7 @@ import live.airuncoach.airuncoach.network.model.*
 import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.data.UserPreferences
 import live.airuncoach.airuncoach.utils.CoachingAudioQueue
+import live.airuncoach.airuncoach.utils.ProgressMilestones
 import live.airuncoach.airuncoach.utils.RouteFollowingSimulator
 import live.airuncoach.airuncoach.utils.RunSimulator
 import live.airuncoach.airuncoach.utils.TextToSpeechHelper
@@ -730,7 +731,7 @@ class RunTrackingService : Service(), SensorEventListener {
     )
     private var techniqueRotationIndex = 0
     private val usedTechniqueCategories = mutableSetOf<String>()
-    private var lastMilestonePercent: Int = 0 // Track which milestones have been triggered (25, 50, 75)
+    private val milestonesConsumed = mutableSetOf<Int>() // 25/50/75% check-ins already spoken or skipped
     private var lastTargetEtaKm: Int = 0 // Track last km an ETA was given
     private var lastPaceTrendCheckKm: Int = 0 // Track last km a pace trend was analysed
     private var lastPositiveReinforcementKm: Int = 0 // Track last km positive reinforcement was given
@@ -2233,7 +2234,7 @@ class RunTrackingService : Service(), SensorEventListener {
         lastGlobalCoachingTime = 0
         lastGlobalCoachingDistance = 0.0
         lastEliteCoachingDistance = -9999.0
-        lastMilestonePercent = 0
+        milestonesConsumed.clear()
         lastTargetEtaKm = 0
         lastPaceTrendCheckKm = 0
         lastPositiveReinforcementKm = 0
@@ -4430,6 +4431,13 @@ class RunTrackingService : Service(), SensorEventListener {
         
         // Reset per-tick flag - only one coaching trigger fires per location update
         hasCoachingFiredThisTick = false
+
+        // ── 25/50/75% CHECK-INS — on time or not at all (see ProgressMilestones) ──
+        // Evaluated before every other cue so a milestone inside its few-second window gets first
+        // claim on a free slot. Plans with their own distance_pct triggers handle progress themselves.
+        if ((!isCoachingPlanActive || !isIntervalTypeSession) && !planHasProgressTriggers()) {
+            maybeFireProgressMilestone(displayDistance, duration, avgSpeed)
+        }
 
         // ── DYNAMIC COACHING PLAN ENGINE (PRIMARY — rich reactive triggers) ──
         // Evaluates live HR/pace conditions against the AI-generated coaching plan.
@@ -7121,6 +7129,12 @@ class RunTrackingService : Service(), SensorEventListener {
             if (triggerFiredOnce.contains(trigger.id)) continue
             if (trigger.type in PHASE_TRANSITION_TRIGGER_TYPES) continue
 
+            // Progress cues (distance_pct) fire within a few seconds of the point or not at all.
+            // They used to fire on the first tick at-or-past the threshold, however late, and
+            // queue behind whatever was playing.
+            val progressReady = planProgressTriggerReady(trigger, plan, currentDistanceKm, now)
+            if (progressReady == false) continue
+
             val conditionMet = when (trigger.type) {
                 "milestone" -> {
                     val td = targetDistance ?: (plan.targetMetrics.totalDistanceKm?.let { it * 1000.0 }) ?: 0.0
@@ -7149,6 +7163,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
             Log.d("RunTrackingService", "📍 Progress trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
             hasCoachingFiredThisTick = true
+            val deliverIf = if (progressReady == true) progressCueDeliveryGate(now) else null
 
             // Detect session completion — stop all further trigger evaluation after this fires
             if (trigger.type.contains("session_complete") || trigger.type.contains("session_end")) {
@@ -7162,6 +7177,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
                 currentDistanceKm = currentDistanceKm, plan = plan,
                 currentPhase = currentPhase,
+                deliverIf = deliverIf,
             )
         }
 
@@ -7223,6 +7239,28 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Only reactive / on_condition triggers in this pass
                 if (trigger.frequency == "once" || trigger.frequency == "periodic") continue
                 if (trigger.type in PHASE_TRANSITION_TRIGGER_TYPES) continue
+                // A distance_pct progress cue tagged on_condition is still a one-off moment: once,
+                // on time, or not at all (its condition stays true, so it re-fired every 90 s).
+                if (isPlanProgressTrigger(trigger)) {
+                    if (triggerFiredOnce.contains(trigger.id)) continue
+                    if (planProgressTriggerReady(trigger, plan, currentDistanceKm, now) != true) continue
+                    // The window covers the distance_pct threshold; other clauses (e.g. a phase) must hold too.
+                    if (trigger.type != "milestone" && !evaluateConditionExpression(
+                            trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName)) continue
+                    triggerFiredOnce.add(trigger.id)
+                    triggerLastFiredMs[trigger.id] = now
+                    hasCoachingFiredThisTick = true
+                    Log.d("RunTrackingService", "📍 Progress trigger [${trigger.type}] ${trigger.id} — requesting live AI message")
+                    fireLiveTriggerMessage(
+                        trigger = trigger, phaseName = dynamicCurrentPhaseName ?: "unknown",
+                        phaseHRMin = phaseHRMin, phaseHRMax = phaseHRMax,
+                        phasePaceMin = phasePaceMin, phasePaceMax = phasePaceMax,
+                        currentDistanceKm = currentDistanceKm, plan = plan,
+                        currentPhase = currentPhase,
+                        deliverIf = progressCueDeliveryGate(now),
+                    )
+                    break
+                }
 
                 val lastFiredMs = triggerLastFiredMs[trigger.id] ?: 0L
                 if ((now - lastFiredMs) < REACTIVE_TRIGGER_COOLDOWN_MS) continue
@@ -7368,6 +7406,7 @@ class RunTrackingService : Service(), SensorEventListener {
         currentDistanceKm: Double,
         plan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan,
         currentPhase: live.airuncoach.airuncoach.network.model.DynamicCoachingPhase?,
+        deliverIf: (() -> Boolean)? = null,
     ) {
         // Claim the coaching slot now, not when the reply arrives 1–3 s later — otherwise the next
         // tick sees a free slot and a second cue is requested on top of this one.
@@ -7537,6 +7576,12 @@ class RunTrackingService : Service(), SensorEventListener {
                     apiService.getSessionTriggerLive(request)
                 }
 
+                // Time-critical cue (progress milestone) that missed its moment — say nothing.
+                if (deliverIf != null && !deliverIf()) {
+                    Log.d("RunTrackingService", "⏭️ Live trigger [${trigger.type}] arrived too late or over other audio — dropped")
+                    return@launch
+                }
+
                 // Server returns skipped=true with no message when the shared cooldown rejects
                 // this call — treat that the same as a timeout and use the local fallback message
                 // rather than firing a null/blank cue for a trigger the runner is expecting.
@@ -7555,6 +7600,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     fireDynamicTrigger(fallbackMessage, trigger.type, phaseName)
                 }
             } catch (e: Exception) {
+                if (deliverIf != null && !deliverIf()) return@launch
                 Log.w("RunTrackingService", "⚠️ Live trigger API failed (${e.message}) — using fallback for [${trigger.type}]")
                 fireDynamicTrigger(fallbackMessage, trigger.type, phaseName)
             }
@@ -9450,9 +9496,10 @@ class RunTrackingService : Service(), SensorEventListener {
             if (totalDistance - lastEliteCoachingDistance < eliteCueMinGapM) return false
         }
 
-        // Priority order: milestone > target ETA > pace trend > positive reinforcement > technique > elevation
+        // Priority order: target ETA > pace trend > positive reinforcement > technique > elevation.
+        // 25/50/75% milestones are not in this chain: they need an exact moment, not a free elite
+        // slot, and fire from maybeFireProgressMilestone() instead.
         when {
-            shouldTriggerMilestone(distKm) -> fireMilestoneCoaching(distKm, duration, avgSpeed)
             shouldTriggerTargetEta(currentKm, distKm, duration) -> fireTargetEtaCoaching(distKm, duration, avgSpeed)
             shouldTriggerPaceTrend(currentKm) -> firePaceTrendCoaching(distKm, duration, avgSpeed)
             shouldTriggerPositiveReinforcement(currentKm) -> firePositiveReinforcementCoaching(distKm, duration, avgSpeed)
@@ -9471,32 +9518,105 @@ class RunTrackingService : Service(), SensorEventListener {
 
     // --- Condition checks ---
 
-    private fun shouldTriggerMilestone(distKm: Double): Boolean {
-        val td = targetDistance ?: return false
-        if (td <= 0) return false
-        // targetDistance is in metres. This used to divide km by metres, so pct was always 0
-        // and no 25/50/75% milestone ever fired.
+    /** True when the dynamic plan has its own progress (distance_pct) cues, e.g. "halfway_milestone". */
+    private fun planHasProgressTriggers(): Boolean =
+        dynamicCoachingPlan?.triggers.orEmpty().any { isPlanProgressTrigger(it) }
+
+    private fun isPlanProgressTrigger(trigger: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger): Boolean {
+        if (trigger.type.contains("session_complete") || trigger.type.contains("session_end")) return false
+        val pct = ProgressMilestones.distancePctThreshold(trigger.condition) ?: return false
+        return pct > 0 && pct < 100
+    }
+
+    /** Average speed over the active run, m/s — sizes the milestone window. */
+    private fun activeAverageSpeedMps(): Double {
+        val sec = getActiveRunDuration() / 1000.0
+        return if (sec > 0) totalDistance / sec else 0.0
+    }
+
+    /** Nothing playing, queued or just requested — a milestone may start now. */
+    private fun isProgressCueSlotClear(now: Long): Boolean =
+        !hasCoachingFiredThisTick && !CoachingAudioQueue.isBusy() &&
+            (now - lastGlobalCoachingTime) >= ProgressMilestones.QUIET_BEFORE_MS
+
+    /**
+     * Checked when a milestone's text/audio comes back: still within the delivery deadline and
+     * nothing else has started meanwhile. Otherwise the cue is discarded, never queued.
+     */
+    private fun progressCueDeliveryGate(requestedAt: Long): () -> Boolean = {
+        System.currentTimeMillis() - requestedAt <= ProgressMilestones.DELIVERY_DEADLINE_MS &&
+            !CoachingAudioQueue.isBusy()
+    }
+
+    /**
+     * Free-run 25/50/75% check-ins. Each fires within a few seconds of the runner crossing it,
+     * when the audio slot is clear, or not at all. One that can't go out in its window is
+     * consumed silently rather than said late ("halfway" at 60%, "25%" at 1.4 km of 3 km —
+     * Tracey and Miel, iOS, 2026-10-12). Milestones on a km marker are left to the km split,
+     * and ones inside the final 500 m to the final-stretch cues.
+     */
+    private fun maybeFireProgressMilestone(displayDistance: Double, duration: Long, avgSpeedKmh: Float) {
+        if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
+        val td = targetDistance ?: return
+        if (td <= 0) return
+        val speedMps = avgSpeedKmh / 3.6
+        var due: Int? = null
+        for (pct in ProgressMilestones.PERCENTS) {
+            if (pct in milestonesConsumed) continue
+            val milestoneM = td * pct / 100.0
+            when (ProgressMilestones.window(milestoneM, displayDistance, speedMps)) {
+                ProgressMilestones.Window.NOT_YET -> Unit
+                ProgressMilestones.Window.MISSED -> {
+                    milestonesConsumed.add(pct)
+                    Log.d("RunTrackingService", "⏭️ $pct% milestone window passed without a clear slot — skipped")
+                }
+                ProgressMilestones.Window.OPEN ->
+                    if (ProgressMilestones.overlapsKmMarker(milestoneM) ||
+                        ProgressMilestones.insideFinalStretch(milestoneM, td, FINAL_STRETCH_METERS)) {
+                        milestonesConsumed.add(pct)
+                    } else {
+                        due = pct
+                    }
+            }
+        }
+        val pct = due ?: return
+        val now = System.currentTimeMillis()
+        if (!isProgressCueSlotClear(now)) return // try again next tick while the window is open
+        milestonesConsumed.add(pct)
+
+        val distKm = displayDistance / 1000.0
         val tdKm = td / 1000.0
-        val pct = (distKm / tdKm * 100).toInt()
-        val milestone = when {
-            pct >= 75 && lastMilestonePercent < 75 -> 75
-            pct >= 50 && lastMilestonePercent < 50 -> 50
-            pct >= 25 && lastMilestonePercent < 25 -> 25
-            else -> return false
+        val request = buildBaseEliteRequest("milestone", distKm, duration, avgSpeedKmh).copy(
+            milestonePercent = pct,
+            projectedFinishTime = if (distKm > 0) ((duration / 1000.0) / distKm * tdKm).toLong() else null
+        )
+        fireEliteCoaching(request, "$pct% Milestone", deliverIf = progressCueDeliveryGate(now))
+    }
+
+    /**
+     * Window check for a plan trigger keyed on distance_pct ("halfway_milestone" etc.). Returns
+     * null when the trigger isn't a progress cue, false when it can't fire this tick (and marks
+     * it fired if its window has passed, so it is never said late), true when it should fire now.
+     */
+    private fun planProgressTriggerReady(
+        trigger: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger,
+        plan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan,
+        currentDistanceKm: Double,
+        now: Long,
+    ): Boolean? {
+        if (!isPlanProgressTrigger(trigger)) return null
+        val pct = ProgressMilestones.distancePctThreshold(trigger.condition) ?: return null
+        val tdM = targetDistance ?: plan.targetMetrics.totalDistanceKm?.let { it * 1000.0 } ?: return false
+        if (tdM <= 0) return false
+        return when (ProgressMilestones.window(tdM * pct / 100.0, currentDistanceKm * 1000.0, activeAverageSpeedMps())) {
+            ProgressMilestones.Window.NOT_YET -> false
+            ProgressMilestones.Window.MISSED -> {
+                triggerFiredOnce.add(trigger.id)
+                Log.d("RunTrackingService", "⏭️ Progress trigger ${trigger.id} window passed without a clear slot — skipped")
+                false
+            }
+            ProgressMilestones.Window.OPEN -> isProgressCueSlotClear(now)
         }
-        val milestoneKm = tdKm * milestone / 100.0
-        // On a round-km target the milestones land on km markers (4 km: 1/2/3 km), where the
-        // km-split cue already speaks — and the 200 m overlap guard below could only ever fire
-        // them late, saying "halfway" at 60% (Tracey, iOS, 2026-10-12). Let the split cover it.
-        val milestoneFromKmM = Math.abs(milestoneKm - Math.round(milestoneKm)) * 1000
-        // A milestone more than 300 m behind the runner is stale — skip it rather than announce it late.
-        if ((milestoneKm >= 1.0 && milestoneFromKmM <= 200) || (distKm - milestoneKm) * 1000 > 300) {
-            lastMilestonePercent = milestone
-            return false
-        }
-        // Don't fire within 200m of a km split to avoid overlap
-        val distFromKm = (distKm * 1000) % 1000
-        return distFromKm > 200 && distFromKm < 800
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -10069,7 +10189,7 @@ class RunTrackingService : Service(), SensorEventListener {
         )
     }
 
-    private fun fireEliteCoaching(request: EliteCoachingRequest, label: String) {
+    private fun fireEliteCoaching(request: EliteCoachingRequest, label: String, deliverIf: (() -> Boolean)? = null) {
         val now = System.currentTimeMillis()
         val previousEliteTime = lastEliteCoachingTime
         lastEliteCoachingTime = now
@@ -10096,6 +10216,10 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Gson-nulled non-null String throws on isNotBlank() and gets swallowed by the
                 // catch block below — but that's an accident of implementation, not a real check.)
                 if (!response.skipped && response.message.isNotBlank()) {
+                    if (deliverIf != null && !deliverIf()) {
+                        Log.d("RunTrackingService", "⏭️ Elite coaching ($label) arrived too late or over other audio — dropped")
+                        return@launch
+                    }
                     coachingHistory.add(AiCoachingNote(
                         time = getActiveRunDuration(),
                         message = "$label: ${response.message}"
@@ -10155,26 +10279,6 @@ class RunTrackingService : Service(), SensorEventListener {
             "final_250m" -> "Final 250m"
             else -> "Final 500m"
         })
-    }
-
-    private fun fireMilestoneCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
-        val td = targetDistance ?: return
-        // targetDistance is in metres, convert to km for calculations
-        val tdKm = td / 1000.0
-        val pct = (distKm / tdKm * 100).toInt()
-        val milestone = when {
-            pct >= 75 && lastMilestonePercent < 75 -> 75
-            pct >= 50 && lastMilestonePercent < 50 -> 50
-            pct >= 25 && lastMilestonePercent < 25 -> 25
-            else -> return
-        }
-        lastMilestonePercent = milestone
-
-        val request = buildBaseEliteRequest("milestone", distKm, duration, avgSpeed).copy(
-            milestonePercent = milestone,
-            projectedFinishTime = if (distKm > 0) ((duration / 1000.0) / distKm * tdKm).toLong() else null
-        )
-        fireEliteCoaching(request, "${milestone}% Milestone")
     }
 
     private fun fireTargetEtaCoaching(distKm: Double, duration: Long, avgSpeed: Float) {
