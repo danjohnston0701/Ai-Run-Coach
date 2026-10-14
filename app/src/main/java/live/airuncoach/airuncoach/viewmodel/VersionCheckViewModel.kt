@@ -1,19 +1,26 @@
 package live.airuncoach.airuncoach.viewmodel
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
+import androidx.wear.remote.interactions.RemoteActivityHelper
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.Executors
 import live.airuncoach.airuncoach.BuildConfig
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.AppVersionCheckResponse
 import live.airuncoach.airuncoach.service.GarminWatchManager
+import live.airuncoach.airuncoach.service.SamsungWatchManager
 import javax.inject.Inject
 
 /**
@@ -22,12 +29,14 @@ import javax.inject.Inject
  * - Android update: compares installed [BuildConfig.VERSION_CODE] against the server's
  *   latestVersionCode. If behind, exposes [androidUpdateAvailable] with details.
  *
- * - Garmin companion update: compares the installed watch app version (stored in SharedPrefs
- *   by [GarminWatchManager] whenever the watch connects) against the server's latestVersion.
- *   If behind, exposes [garminUpdateAvailable] with version + release note so the UI can
- *   navigate to the GarminWatchUpdateScreen.
+ * - Watch app updates ([checkWatchApps]): compares the version the Garmin / Galaxy Watch app
+ *   reported on its last connection (stored in SharedPrefs by [GarminWatchManager] /
+ *   [SamsungWatchManager]) against the server's latest. If behind, exposes
+ *   [garminUpdateAvailable] / [wearUpdateAvailable]. Each watch prompts at most once a day —
+ *   MainScreen re-enters composition when the user comes back from the update screen, so
+ *   without the throttle the prompt would reopen immediately.
  *
- * Both checks are fire-and-forget — a network failure is silently ignored so the app
+ * All checks are fire-and-forget — a network failure is silently ignored so the app
  * never blocks on startup for a version check.
  */
 @HiltViewModel
@@ -38,6 +47,10 @@ class VersionCheckViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "VersionCheck"
+        private const val PREFS = "version_check_prefs"
+        private const val KEY_GARMIN_PROMPTED_AT = "garmin_update_prompted_at"
+        private const val KEY_WEAR_PROMPTED_AT = "wear_update_prompted_at"
+        private const val WATCH_PROMPT_INTERVAL_MS = 24 * 60 * 60 * 1000L
     }
 
     data class AndroidUpdateInfo(
@@ -60,18 +73,48 @@ class VersionCheckViewModel @Inject constructor(
     private val _garminUpdateAvailable = MutableStateFlow<GarminUpdateInfo?>(null)
     val garminUpdateAvailable: StateFlow<GarminUpdateInfo?> = _garminUpdateAvailable.asStateFlow()
 
-    /** Call once after the user is logged in (or before — endpoint requires no auth). */
+    data class WearUpdateInfo(
+        val installedVersion: String,
+        val latestVersion: String,
+        val releaseNote: String,
+    )
+
+    private val _wearUpdateAvailable = MutableStateFlow<WearUpdateInfo?>(null)
+    val wearUpdateAvailable: StateFlow<WearUpdateInfo?> = _wearUpdateAvailable.asStateFlow()
+
+    /** Android app update check — call at startup (endpoint requires no auth). */
     fun checkVersions() {
         viewModelScope.launch {
             try {
-                val response: AppVersionCheckResponse = apiService.checkAppVersion()
-                checkAndroid(response)
-                checkGarmin(response)
+                checkAndroid(apiService.checkAppVersion())
             } catch (e: Exception) {
                 // Version check failure must never block app startup
                 Log.w(TAG, "Version check failed (will try again next launch): ${e.message}")
             }
         }
+    }
+
+    /** Garmin + Galaxy Watch app update checks — call from the signed-in main screen. */
+    fun checkWatchApps() {
+        viewModelScope.launch {
+            try {
+                val response = apiService.checkAppVersion()
+                checkGarmin(response)
+                checkWear(response)
+            } catch (e: Exception) {
+                Log.w(TAG, "Watch version check failed (will try again next launch): ${e.message}")
+            }
+        }
+    }
+
+    private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** True (and records the prompt) when this watch hasn't been prompted in the last day. */
+    private fun claimDailyPrompt(key: String): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong(key, 0L) < WATCH_PROMPT_INTERVAL_MS) return false
+        prefs.edit().putLong(key, now).apply()
+        return true
     }
 
     private fun checkAndroid(response: AppVersionCheckResponse) {
@@ -116,6 +159,10 @@ class VersionCheckViewModel @Inject constructor(
             Log.d(TAG, "Garmin companion is up to date ($installedVersion)")
             return
         }
+        if (!claimDailyPrompt(KEY_GARMIN_PROMPTED_AT)) {
+            Log.d(TAG, "Garmin companion $installedVersion is behind $latestVersion — already prompted today")
+            return
+        }
 
         _garminUpdateAvailable.value = GarminUpdateInfo(
             installedVersion  = installedVersion,
@@ -124,6 +171,58 @@ class VersionCheckViewModel @Inject constructor(
             connectIqStoreUrl = response.garmin.connectIqStoreUrl,
         )
         Log.i(TAG, "Garmin companion update available: $installedVersion → $latestVersion")
+    }
+
+    private fun checkWear(response: AppVersionCheckResponse) {
+        val latestVersion = response.wear?.latestVersion?.takeIf { it.isNotBlank() } ?: return
+        val installedVersion = context
+            .getSharedPreferences(SamsungWatchManager.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(SamsungWatchManager.PREF_WATCH_APP_VERSION, null)
+            ?: return // Galaxy Watch app has never connected to this phone
+        Log.d(TAG, "Wear OS app: installed=$installedVersion latest=$latestVersion")
+        if (!isVersionOlderThan(installedVersion, latestVersion)) return
+        if (!claimDailyPrompt(KEY_WEAR_PROMPTED_AT)) return
+        _wearUpdateAvailable.value = WearUpdateInfo(
+            installedVersion = installedVersion,
+            latestVersion    = latestVersion,
+            releaseNote      = response.wear.releaseNote,
+        )
+        Log.i(TAG, "Wear OS app update available: $installedVersion → $latestVersion")
+    }
+
+    fun dismissWearUpdate() {
+        _wearUpdateAvailable.value = null
+    }
+
+    /**
+     * Opens this app's Play Store page on the connected watch, where the Wear OS build updates.
+     * Opening it on the phone would only offer the phone app. Falls back to the phone listing if
+     * no watch accepts the request.
+     */
+    fun openPlayStoreOnWatch() {
+        val listing = Uri.parse("market://details?id=${context.packageName}")
+        viewModelScope.launch {
+            val opened = withContext(Dispatchers.IO) {
+                try {
+                    RemoteActivityHelper(context, Executors.newSingleThreadExecutor())
+                        .startRemoteActivity(
+                            Intent(Intent.ACTION_VIEW, listing).addCategory(Intent.CATEGORY_BROWSABLE)
+                        )
+                        .get()
+                    true
+                } catch (e: Exception) {
+                    Log.w(TAG, "Couldn't open Play Store on the watch: ${e.message}")
+                    false
+                }
+            }
+            if (!opened) {
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, listing).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Couldn't open Play Store: ${e.message}")
+                }
+            }
+        }
     }
 
     /** Dismisses the Android update dialog (stores dismissal so it re-prompts next session). */

@@ -136,7 +136,15 @@ fun MainScreen(
 
     val versionCheckVm: VersionCheckViewModel = hiltViewModel()
     val garminUpdate  by versionCheckVm.garminUpdateAvailable.collectAsState()
+    val wearUpdate    by versionCheckVm.wearUpdateAvailable.collectAsState()
     val context = LocalContext.current
+
+    // This screen's VersionCheckViewModel is its own instance (scoped to the MAIN destination),
+    // not the one RootNavigationGraph runs the Android check on — so it has to run the watch
+    // checks itself. Before this nothing ever did, and the Garmin prompt below never fired.
+    LaunchedEffect(Unit) {
+        versionCheckVm.checkWatchApps()
+    }
 
     // When a Garmin companion update is detected, navigate to the update screen
     // (same destination as the push notification path)
@@ -1684,6 +1692,40 @@ fun MainScreen(
                 navController.navigate("subscription")
             },
             onDismiss = { expiredPromptDismissed = true }
+        )
+    }
+
+    // Galaxy Watch (Wear OS) app update prompt — at most once a day (VersionCheckViewModel)
+    wearUpdate?.let { update ->
+        AlertDialog(
+            onDismissRequest = { versionCheckVm.dismissWearUpdate() },
+            containerColor = Colors.backgroundSecondary,
+            title = { Text("Watch App Update", style = AppTextStyles.h3, color = Colors.textPrimary) },
+            text = {
+                Text(
+                    text = "Your Galaxy Watch has AI Run Coach ${update.installedVersion}. Version " +
+                        "${update.latestVersion} is available" +
+                        (if (update.releaseNote.isNotBlank()) " — ${update.releaseNote}" else ".") +
+                        "\n\nTap Update to open the Play Store on your watch, or open Play Store on the " +
+                        "watch yourself and update AI Run Coach.",
+                    style = AppTextStyles.body,
+                    color = Colors.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        versionCheckVm.openPlayStoreOnWatch()
+                        versionCheckVm.dismissWearUpdate()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.primary)
+                ) { Text("Update", color = Colors.buttonText) }
+            },
+            dismissButton = {
+                TextButton(onClick = { versionCheckVm.dismissWearUpdate() }) {
+                    Text("Later", color = Colors.textSecondary)
+                }
+            }
         )
     }
 

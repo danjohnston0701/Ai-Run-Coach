@@ -18875,6 +18875,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   //   GARMIN_MIN_VERSION          – optional: minimum required companion version (older = show update prompt)
   //   GARMIN_RELEASE_NOTE         – one-sentence what's new for the Garmin app
   //   GARMIN_CONNECT_IQ_STORE_URL – Connect IQ listing URL
+  //   WEAR_LATEST_VERSION         – latest Wear OS (Galaxy Watch) app versionName e.g. "1.0.9";
+  //                                 unset = no watch-update prompt (set it once that build is live)
+  //   WEAR_RELEASE_NOTE           – one-sentence what's new for the Wear OS app
   //   IOS_LATEST_VERSION          – latest version on App Store e.g. "1.6.0"
   //   IOS_MIN_VERSION             – minimum required iOS version (older = show update prompt)
   //   IOS_APP_STORE_URL           – App Store listing URL
@@ -18892,11 +18895,15 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
                              "Major user experience improvements, smoother forms, and improved keyboard handling.",
         },
         garmin: {
-          latestVersion:    process.env.GARMIN_LATEST_VERSION     || "1.4.0",
+          latestVersion:    process.env.GARMIN_LATEST_VERSION     || "3.4.10",
           minVersion:       process.env.GARMIN_MIN_VERSION        || "1.0.0",
           connectIqStoreUrl: process.env.GARMIN_CONNECT_IQ_STORE_URL ||
                              "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017",
           releaseNote:       process.env.GARMIN_RELEASE_NOTE      || "",
+        },
+        wear: {
+          latestVersion: process.env.WEAR_LATEST_VERSION || null,
+          releaseNote:   process.env.WEAR_RELEASE_NOTE   || "",
         },
         ios: {
           latestVersion: process.env.IOS_LATEST_VERSION || "1.9.0",

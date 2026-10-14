@@ -27,8 +27,8 @@ android {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
         targetSdk = 36          // Google Play requires 36+ as of Aug 2026
-        versionCode = 105         // ← Increment by 1 for every Play Store upload
-        versionName = "2.0.63"   // ← Human-readable version shown in Play Store
+        versionCode = 106         // ← Increment by 1 for every Play Store upload
+        versionName = "2.0.64"   // ← Human-readable version shown in Play Store
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -148,6 +148,7 @@ dependencies {
 
     // --- Wear OS Data Layer: phone<->watch messaging for the Samsung/Wear OS companion app ---
     implementation("com.google.android.gms:play-services-wearable:18.2.0")
+    implementation("androidx.wear:wear-remote-interactions:1.1.0") // open Play Store on the watch (watch-app update prompt)
     
     // --- Google Maps: For route display and navigation ---
     implementation("com.google.android.gms:play-services-maps:18.2.0")

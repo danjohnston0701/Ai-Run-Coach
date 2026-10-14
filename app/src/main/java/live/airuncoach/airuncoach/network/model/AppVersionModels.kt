@@ -11,6 +11,8 @@ import com.google.gson.annotations.SerializedName
 data class AppVersionCheckResponse(
     @SerializedName("android") val android: AndroidVersionInfo,
     @SerializedName("garmin")  val garmin:  GarminVersionInfo,
+    /** Null on servers that predate the Wear OS block. */
+    @SerializedName("wear")    val wear:    WearVersionInfo? = null,
 )
 
 data class AndroidVersionInfo(
@@ -35,4 +37,11 @@ data class GarminVersionInfo(
     @SerializedName("connectIqStoreUrl") val connectIqStoreUrl: String,
     /** One-sentence summary of what's new in the watch app */
     @SerializedName("releaseNote")       val releaseNote:       String = "",
+)
+
+data class WearVersionInfo(
+    /** Latest Wear OS (Galaxy Watch) app versionName; null = not configured, no prompt. */
+    @SerializedName("latestVersion") val latestVersion: String? = null,
+    /** One-sentence summary of what's new in the watch app */
+    @SerializedName("releaseNote")   val releaseNote:   String = "",
 )

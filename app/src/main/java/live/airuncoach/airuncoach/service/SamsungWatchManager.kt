@@ -63,7 +63,7 @@ class SamsungWatchManager(
         // straight port of GarminWatchManager.handleWatchMessage()'s `when (type)` switch.
         private const val MESSAGE_PATH = "/airuncoach/message"
         const val PREF_WATCH_APP_VERSION = "wear_watch_installed_version"
-        private const val PREFS_NAME = "wear_watch_prefs"
+        const val PREFS_NAME = "wear_watch_prefs"
         private const val NOTIF_CHANNEL_ID = "wear_watch_run"
         private const val NOTIF_ID_WATCH_RUN = 9101
         private const val NOTIF_ID_SYNC_COMPLETE = 9102
