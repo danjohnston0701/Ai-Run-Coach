@@ -148,7 +148,7 @@ This section is a point-in-time handoff snapshot, not durable documentation — 
   - **Wear OS Play listing rejected** (versionCode 1000009, 10-14) because the Wear screenshots were device-framed. Replace them with the raw 454×454 captures in `marketing/feature-graphics/wear-os/watch-screenshots/` (not `-framed/`) and resubmit.
   - **Open, not yet fixed:**
     - Damion's 10-12 run row still stores the pre-fix 1574 s / 7:06/km (watch said 2557 s); offered a correction.
-    - Stale companion sessions: an hourly sweep (`abandonStaleCompanionSessions()` in `scheduler.ts`, :25) now marks `active`/`paused` sessions with 3 h of silence as `abandoned`. It clears the 6 stuck since 08-21 on its first run after the redeploy. Still open: why Damion's watch opened a second session (`kn6buacx766l7bg2`) 8 s after his 10-12 run ended. That's on the watch side and needs investigating.
+    - Stale companion sessions: an hourly sweep (`abandonStaleCompanionSessions()` in `scheduler.ts`, :25) now marks `active`/`paused` sessions with 3 h of silence as `abandoned`. The 6 stuck since 08-21 were closed by hand on production on 10-14 with the same SQL. Still open: why Damion's watch opened a second session (`kn6buacx766l7bg2`) 8 s after his 10-12 run ended. That's on the watch side and needs investigating.
     - Companion endpoints (`companionAuthMiddleware`) don't check trial/subscription entitlement.
     - Strava imports keep arriving for trial-expired users (AI off, so no cost). Product call.
     - `users.garmin_watch_app_version` is never populated (only pairing codes/runs carry it).
