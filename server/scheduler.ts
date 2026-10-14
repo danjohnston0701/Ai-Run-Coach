@@ -5,7 +5,7 @@ import { processWebhookFailureQueue } from './webhook-processor';
 import { sendCoachingPlanReminder } from './notification-service';
 import { db } from './db';
 import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '@shared/schema';
-import { eq, and, gte, lt } from 'drizzle-orm';
+import { eq, and, gte, lt, sql } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { reconcileGooglePlaySubscriptions } from './google-play-billing';
 import { backfillRunWeather, backfillRunStartPoints } from './run-weather';
@@ -15,6 +15,32 @@ import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWee
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
 // Stores the reminder send timestamp so we don't send twice in the same calendar day for a user
 const coachingPlanRemindersSent = new Map<string, Date>();
+
+/**
+ * A companion session goes quiet for this long, still 'active'/'paused', and it is treated as dead.
+ * The watch streams a data point every ~1–2 s while recording (pauses included), so 3 h of
+ * silence can't be a live run. Even an ultra keeps last_data_at fresh.
+ */
+const COMPANION_SESSION_STALE_HOURS = 3;
+
+/**
+ * Marks companion sessions the watch never ended as 'abandoned' (ended_at = last data point).
+ * Before this the only cleanup happened when that user started another session, so a row could
+ * sit 'active' for weeks: 6 did, the oldest since 2026-08-21. One was opened 8 s after a
+ * 2026-10-12 run ended and streamed 62 min before going silent. Nothing is deleted. A late
+ * /session/end or offline upload-batch still works on an abandoned row (neither filters on
+ * status) and sets it to 'completed'.
+ */
+export async function abandonStaleCompanionSessions(): Promise<number> {
+  const result = await db.execute(sql`
+    UPDATE garmin_companion_sessions
+       SET status = 'abandoned',
+           ended_at = COALESCE(ended_at, last_data_at, started_at)
+     WHERE status IN ('active', 'paused')
+       AND COALESCE(last_data_at, started_at) < now() - make_interval(hours => ${COMPANION_SESSION_STALE_HOURS}::int)
+  `);
+  return result.rowCount ?? 0;
+}
 
 interface SyncResult {
   userId: string;
@@ -396,6 +422,19 @@ export function startScheduler(): void {
   cron.schedule('50 * * * *', sweepRunDerived);
   setTimeout(sweepRunDerived, 120_000);
   console.log('[Scheduler] Run derived-fields backfill scheduled (hourly at :50)');
+
+  // Garmin companion sessions the watch never ended → 'abandoned' after 3 h of silence.
+  const sweepStaleCompanionSessions = async () => {
+    try {
+      const n = await abandonStaleCompanionSessions();
+      if (n > 0) console.log(`[Scheduler] Companion sessions: marked ${n} stale session(s) abandoned`);
+    } catch (err) {
+      console.error('[Scheduler] Stale companion session sweep error:', err);
+    }
+  };
+  cron.schedule('25 * * * *', sweepStaleCompanionSessions);
+  setTimeout(sweepStaleCompanionSessions, 150_000);
+  console.log('[Scheduler] Stale companion session sweep scheduled (hourly at :25)');
 
   // Run BPM self-heal once on startup to fix any existing wrong values immediately
   setImmediate(async () => {
