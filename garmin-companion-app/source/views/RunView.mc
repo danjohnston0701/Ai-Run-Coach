@@ -849,28 +849,7 @@ class RunView extends Ui.View {
         // was wrong: _isConnected stays true after ANY auth, so a watch-started run where the phone
         // "start" command was dropped (BT failure) would silently skip endSession and lose the run.
         // The backend deduplicates against any phone-side record — this is always safe to call.
-        if (!_phoneControlled && _dataStreamer != null && _sampleN > 0) {
-            var n = _sampleN.toFloat();
-            _dataStreamer.endSession({
-                "distance"    => _distance,
-                "elapsedTime" => _elapsedTime,
-                "avgHR"       => (_sumHR   > 0) ? (_sumHR   / n).toNumber() : null,
-                "maxHR"       => (_maxHR   > 0) ? _maxHR : null,
-                "avgCadence"  => (_sumCadence > 0) ? (_sumCadence / n).toNumber() : null,
-                "avgPace"     => (_sumPace > 0.0) ? _sumPace / n : null,
-                "totalAscent" => (_totalAscent  > 0.0) ? _totalAscent  : null,
-                "totalDescent"=> (_totalDescent > 0.0) ? _totalDescent : null,
-                "avgGct"      => (_sumGct   > 0.0) ? _sumGct   / n : null,
-                "avgVo"       => (_sumVo    > 0.0) ? _sumVo    / n : null,
-                "avgVr"       => (_sumVr    > 0.0) ? _sumVr    / n : null,
-                "avgSl"       => (_sumSl    > 0.0) ? _sumSl    / n : null,
-                "avgGcb"      => (_sumGcb   > 0.0) ? _sumGcb   / n : null,
-                "avgPower"    => (_sumPower  > 0)   ? (_sumPower / n).toNumber() : null,
-                "avgResp"     => (_sumResp  > 0.0) ? _sumResp  / n : null,
-                "ate"         => (_ate  > 0.0) ? _ate  : null,
-                "anate"       => (_anate > 0.0) ? _anate : null
-            });
-        }
+        if (!_phoneControlled) { _endBackendSession(); }
         _vibeLong();
         // Re-enable GPS for idle monitoring so the user can see GPS quality
         // before starting the next run, and so _gpsReady stays accurate.
@@ -891,6 +870,34 @@ class RunView extends Ui.View {
         // trusts whatever sessionId the watch sends with no server-side staleness check.
         _phoneControlled = false;
         Ui.requestUpdate();
+    }
+
+    // Closes this run's backend companion session (POST /session/end) with the watch's own
+    // summary. Used for watch-started runs, whether the runner finished on the watch
+    // (finishRun) or the phone ended the session ("sessionEnded"). Safe to call twice:
+    // DataStreamer.endSession() clears the session ID, so a second call is a no-op.
+    private function _endBackendSession() {
+        if (_dataStreamer == null || _sampleN <= 0) { return; }
+        var n = _sampleN.toFloat();
+        _dataStreamer.endSession({
+            "distance"    => _distance,
+            "elapsedTime" => _elapsedTime,
+            "avgHR"       => (_sumHR   > 0) ? (_sumHR   / n).toNumber() : null,
+            "maxHR"       => (_maxHR   > 0) ? _maxHR : null,
+            "avgCadence"  => (_sumCadence > 0) ? (_sumCadence / n).toNumber() : null,
+            "avgPace"     => (_sumPace > 0.0) ? _sumPace / n : null,
+            "totalAscent" => (_totalAscent  > 0.0) ? _totalAscent  : null,
+            "totalDescent"=> (_totalDescent > 0.0) ? _totalDescent : null,
+            "avgGct"      => (_sumGct   > 0.0) ? _sumGct   / n : null,
+            "avgVo"       => (_sumVo    > 0.0) ? _sumVo    / n : null,
+            "avgVr"       => (_sumVr    > 0.0) ? _sumVr    / n : null,
+            "avgSl"       => (_sumSl    > 0.0) ? _sumSl    / n : null,
+            "avgGcb"      => (_sumGcb   > 0.0) ? _sumGcb   / n : null,
+            "avgPower"    => (_sumPower  > 0)   ? (_sumPower / n).toNumber() : null,
+            "avgResp"     => (_sumResp  > 0.0) ? _sumResp  / n : null,
+            "ate"         => (_ate  > 0.0) ? _ate  : null,
+            "anate"       => (_anate > 0.0) ? _anate : null
+        });
     }
 
     function onShow() {
@@ -1175,6 +1182,14 @@ class RunView extends Ui.View {
 
         } else if (t.equals("sessionEnded")) {
             // Phone ended the session (Scenario A) - clean up all watch resources.
+            // Ack first: the phone re-sends sessionEnded until it hears this, because a single
+            // dropped message left the watch recording after the phone had saved the run, and
+            // the runner then had to stop the watch by hand (Damion, 2026-10-08 and 10-12).
+            _phoneLink.sendCommand("sessionEndedAck");
+            // Watch-started run that the phone ended: close the backend session too. Only
+            // finishRun() used to, so these sessions were left 'active' on the server. A no-op
+            // when the watch already finished (its session ID is cleared) or on a re-send.
+            if (!_phoneControlled) { _endBackendSession(); }
             _stopRetryCount   = 0;      // Phone confirmed session ended — cancel stop retry
             _stopRetryTick    = 0;
             _pauseResumeRetryCount    = 0;   // Session is over — cancel any pause/resume retry too
@@ -1234,7 +1249,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.10"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.11"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");

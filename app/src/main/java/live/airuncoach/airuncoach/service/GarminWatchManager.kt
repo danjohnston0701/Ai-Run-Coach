@@ -673,8 +673,56 @@ class GarminWatchManager(
         Log.d(TAG, "Watch acked sessionType receipt")
     }
 
+    // ── sessionEnded delivery ─────────────────────────────────────────────────
+    // A single dropped "sessionEnded" left a watch-started run recording on the watch after
+    // the phone had saved it; the runner then stopped the watch by hand minutes later and, in
+    // the post-run button presses, started a second session (Damion, 2026-10-08 and 10-12).
+    // So it is re-sent until the watch replies "sessionEndedAck". Only watch app 3.4.11+ sends
+    // that ack. Older watches get the single send, as before, because every re-send would
+    // buzz them again with nothing to stop the loop.
+    private val sessionEndedRetryHandler = Handler(Looper.getMainLooper())
+    private var sessionEndedRetryRunnable: Runnable? = null
+    private var sessionEndedRetriesLeft = 0
+    private val SESSION_ENDED_RETRY_MAX = 5
+    private val SESSION_ENDED_RETRY_DELAY_MS = 2000L
+    private val SESSION_ENDED_ACK_MIN_WATCH_VERSION = "3.4.11"
+
     fun sendSessionEnded() {
         sendToWatch(mapOf("type" to "sessionEnded"))
+        sessionEndedRetryRunnable?.let { sessionEndedRetryHandler.removeCallbacks(it) }
+        val installed = getInstalledWatchVersion()
+        if (installed == null || isVersionOlder(installed, SESSION_ENDED_ACK_MIN_WATCH_VERSION)) return
+        sessionEndedRetriesLeft = SESSION_ENDED_RETRY_MAX
+        val runnable = object : Runnable {
+            override fun run() {
+                if (sessionEndedRetriesLeft <= 0) return
+                sessionEndedRetriesLeft--
+                Log.d(TAG, "No sessionEndedAck yet — re-sending sessionEnded ($sessionEndedRetriesLeft left)")
+                sendToWatch(mapOf("type" to "sessionEnded"))
+                sessionEndedRetryHandler.postDelayed(this, SESSION_ENDED_RETRY_DELAY_MS)
+            }
+        }
+        sessionEndedRetryRunnable = runnable
+        sessionEndedRetryHandler.postDelayed(runnable, SESSION_ENDED_RETRY_DELAY_MS)
+    }
+
+    private fun onSessionEndedAcked() {
+        sessionEndedRetriesLeft = 0
+        sessionEndedRetryRunnable?.let { sessionEndedRetryHandler.removeCallbacks(it) }
+        sessionEndedRetryRunnable = null
+        Log.d(TAG, "Watch acked sessionEnded")
+    }
+
+    /** True when dotted version [a] is strictly older than [b]. */
+    private fun isVersionOlder(a: String, b: String): Boolean {
+        val x = a.split(".").map { it.toIntOrNull() ?: 0 }
+        val y = b.split(".").map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(x.size, y.size)) {
+            val p = x.getOrElse(i) { 0 }
+            val q = y.getOrElse(i) { 0 }
+            if (p != q) return p < q
+        }
+        return false
     }
 
     /**
@@ -862,6 +910,12 @@ class GarminWatchManager(
                     // the resend loop in sendSessionType(). See that function's retry comment.
                     if (action == "sessionTypeAck") {
                         onSessionTypeAcked()
+                        return
+                    }
+
+                    // Watch (3.4.11+) confirms it received "sessionEnded" — stops the re-send loop.
+                    if (action == "sessionEndedAck") {
+                        onSessionEndedAcked()
                         return
                     }
 
