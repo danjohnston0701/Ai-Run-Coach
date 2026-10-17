@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.wear.compose.material.MaterialTheme
 import live.airuncoach.airuncoach.wear.session.RunSessionController
 import live.airuncoach.airuncoach.wear.ui.screens.RunScreen
@@ -25,6 +26,7 @@ class WearMainActivity : ComponentActivity() {
     private lateinit var controller: RunSessionController
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         requestRuntimePermissionsIfNeeded()

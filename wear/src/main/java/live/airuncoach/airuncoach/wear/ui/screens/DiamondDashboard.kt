@@ -9,7 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -187,10 +188,11 @@ private fun readBatteryPercent(context: Context): Int? = try {
 internal fun DoneButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     androidx.compose.foundation.layout.Box(
         modifier = modifier
-            .size(width = 64.dp, height = 26.dp)
+            .defaultMinSize(minWidth = 64.dp, minHeight = 26.dp)
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(13.dp))
             .background(WearColors.DividerGray)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(text = "DONE", color = WearColors.White, style = TextStyle(fontSize = 10.sp, letterSpacing = 1.sp))

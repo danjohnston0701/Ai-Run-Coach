@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.wear.ui.components
 
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
@@ -24,7 +25,10 @@ fun StatusBar(input: StatusBarInput, modifier: Modifier = Modifier) {
                 StatusTone.NEUTRAL -> WearColors.White
             },
             style = TextStyle(fontSize = 9.sp, textAlign = TextAlign.Center),
-            modifier = modifier
+            // Sits near the bottom of the round face, where it's narrowest: keep it inside the
+            // middle 60% and let a long message ("Phone lost - saving offline") wrap.
+            maxLines = 2,
+            modifier = modifier.fillMaxWidth(0.6f)
         )
     }
 }

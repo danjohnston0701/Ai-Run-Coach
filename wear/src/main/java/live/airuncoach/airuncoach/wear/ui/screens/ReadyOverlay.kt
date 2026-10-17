@@ -1,8 +1,6 @@
 package live.airuncoach.airuncoach.wear.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -16,6 +14,7 @@ import androidx.wear.compose.material.Text
 import live.airuncoach.airuncoach.wear.ui.RunScreenState
 import live.airuncoach.airuncoach.wear.ui.components.GpsSignalBars
 import live.airuncoach.airuncoach.wear.ui.components.OverlayHeader
+import live.airuncoach.airuncoach.wear.ui.components.ScrollingScreen
 import live.airuncoach.airuncoach.wear.ui.theme.WearColors
 import java.util.Locale
 
@@ -31,18 +30,14 @@ fun ReadyOverlay(state: RunScreenState, onStart: () -> Unit, modifier: Modifier 
     val word = if (state.isWalk) "WALK" else "RUN"
     val accent = if (coached) WearColors.CoachedGold else WearColors.StartGreen
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(top = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {
+    ScrollingScreen(modifier = modifier, verticalArrangement = Arrangement.Top) {
         OverlayHeader()
 
         if (coached) {
             Text(
                 text = "COACHED $word",
                 color = WearColors.CoachedGold,
-                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, textAlign = TextAlign.Center)
             )
             val details = listOfNotNull(
                 state.preparedDistanceKm?.let { String.format(Locale.US, "%.1f km", it) },
@@ -78,7 +73,7 @@ fun ReadyOverlay(state: RunScreenState, onStart: () -> Unit, modifier: Modifier 
             text = hint,
             color = if (warn) WearColors.AmberWarning else WearColors.DimGray,
             style = TextStyle(fontSize = 9.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.padding(top = 6.dp, start = 34.dp, end = 34.dp)
+            modifier = Modifier.padding(top = 6.dp, start = 8.dp, end = 8.dp)
         )
     }
 }

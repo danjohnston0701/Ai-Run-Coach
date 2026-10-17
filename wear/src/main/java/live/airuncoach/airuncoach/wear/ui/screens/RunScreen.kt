@@ -1,17 +1,13 @@
 package live.airuncoach.airuncoach.wear.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.background
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -23,6 +19,8 @@ import live.airuncoach.airuncoach.wear.input.runScreenSwipeToggle
 import live.airuncoach.airuncoach.wear.session.RunSessionController
 import live.airuncoach.airuncoach.wear.ui.BackAction
 import live.airuncoach.airuncoach.wear.ui.Overlay
+import live.airuncoach.airuncoach.wear.ui.components.CappedFontScale
+import live.airuncoach.airuncoach.wear.ui.components.ScrollingScreen
 import live.airuncoach.airuncoach.wear.ui.theme.WearColors
 
 /**
@@ -38,6 +36,9 @@ import live.airuncoach.airuncoach.wear.ui.theme.WearColors
  * by [RunSessionController.pendingConfirm] so the physical bottom button, the system
  * back-gesture (BackHandler below) and the FINISH button share one source of truth.
  */
+/** See [CappedFontScale]: the dashboards' rings only fit their values up to about this scale. */
+private const val DASHBOARD_MAX_FONT_SCALE = 1.1f
+
 @Composable
 fun RunScreen(controller: RunSessionController, onExit: () -> Unit) {
     val state by controller.state.collectAsState()
@@ -73,8 +74,12 @@ fun RunScreen(controller: RunSessionController, onExit: () -> Unit) {
                 onResume = { controller.resumeRun() },
                 onFinish = { controller.requestFinish() }
             )
-            state.screenPage == 0 -> DiamondDashboard(state, onDone = { controller.dismissFinished() })
-            else -> GridDashboard(state, onDone = { controller.dismissFinished() })
+            state.screenPage == 0 -> CappedFontScale(DASHBOARD_MAX_FONT_SCALE) {
+                DiamondDashboard(state, onDone = { controller.dismissFinished() })
+            }
+            else -> CappedFontScale(DASHBOARD_MAX_FONT_SCALE) {
+                GridDashboard(state, onDone = { controller.dismissFinished() })
+            }
         }
     }
 
@@ -100,11 +105,7 @@ fun RunScreen(controller: RunSessionController, onExit: () -> Unit) {
 @Composable
 private fun ConfirmDialog(message: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize().background(WearColors.Background)) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
+        ScrollingScreen {
             Text(
                 text = message,
                 color = WearColors.White,

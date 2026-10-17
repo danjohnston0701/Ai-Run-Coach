@@ -36,8 +36,8 @@ android {
         // Version codes are shared with the phone app's listing (phone is ~100 and counts
         // up by 1), so the watch lives in its own 1,000,000+ range to never collide.
         // Increment by 1 for every Play upload.
-        versionCode = 1_000_010
-        versionName = "1.0.9"
+        versionCode = 1_000_011
+        versionName = "1.0.10"
     }
 
     // ── Release signing ─────────────────────────────────────────────────────
@@ -110,6 +110,8 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.4.0")
     implementation("androidx.wear.compose:compose-navigation:1.4.0")
     implementation("androidx.wear:wear:1.3.0")
+    // Branded launch: 48dp icon on black at startup (Wear App Quality requirement).
+    implementation("androidx.core:core-splashscreen:1.2.0")
     // Ongoing Activity: a run in progress shows on the watch face / recents (RunTrackingService).
     implementation("androidx.wear:wear-ongoing:1.0.0")
 

@@ -7,10 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +22,7 @@ import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.Text
 import live.airuncoach.airuncoach.wear.ui.components.OverlayHeader
+import live.airuncoach.airuncoach.wear.ui.components.ScrollingScreen
 import live.airuncoach.airuncoach.wear.ui.theme.WearColors
 
 /**
@@ -49,23 +47,19 @@ fun PrepareGateOverlay(
     )
     val dots = ".".repeat(dotPhase.toInt().coerceIn(0, 3))
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(top = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {
+    ScrollingScreen(modifier = modifier, verticalArrangement = Arrangement.Top) {
         OverlayHeader()
         Text(
             text = "Prepare on your phone",
             color = WearColors.White,
             style = TextStyle(fontSize = 12.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.padding(top = 2.dp, start = 22.dp, end = 22.dp)
+            modifier = Modifier.padding(top = 2.dp)
         )
         Text(
             text = "for live AI coaching",
             color = WearColors.White,
             style = TextStyle(fontSize = 12.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.padding(top = 2.dp, start = 22.dp, end = 22.dp)
+            modifier = Modifier.padding(top = 2.dp)
         )
         Text(
             text = if (isPhoneConnected) "Waiting for phone$dots" else "Phone not connected",
@@ -83,7 +77,7 @@ fun PrepareGateOverlay(
                 )
             },
             colors = ChipDefaults.chipColors(backgroundColor = WearColors.TealKm, contentColor = WearColors.Background),
-            modifier = Modifier.padding(top = 8.dp, start = 28.dp, end = 28.dp).fillMaxWidth().height(40.dp)
+            modifier = Modifier.padding(top = 8.dp).fillMaxWidth()
         )
     }
 }

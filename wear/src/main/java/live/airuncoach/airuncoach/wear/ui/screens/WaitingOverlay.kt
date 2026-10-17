@@ -7,8 +7,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
 import live.airuncoach.airuncoach.wear.ui.components.OverlayHeader
+import live.airuncoach.airuncoach.wear.ui.components.ScrollingScreen
 import live.airuncoach.airuncoach.wear.ui.theme.WearColors
 
 /**
@@ -37,11 +36,7 @@ fun WaitingOverlay(modifier: Modifier = Modifier) {
     )
     val dots = ".".repeat(dotPhase.toInt().coerceIn(0, 3))
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(top = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {
+    ScrollingScreen(modifier = modifier, verticalArrangement = Arrangement.Top) {
         OverlayHeader()
         Text(
             text = "Waiting$dots",
@@ -50,16 +45,16 @@ fun WaitingOverlay(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(top = 14.dp)
         )
         Text(
-            text = "Open Ai Run Coach on your\nphone to connect.",
+            text = "Open Ai Run Coach on your phone to connect.",
             color = WearColors.DimGray,
             style = TextStyle(fontSize = 10.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.padding(top = 10.dp, start = 16.dp, end = 16.dp)
+            modifier = Modifier.padding(top = 10.dp)
         )
         Text(
             text = "You only need to do this once.",
             color = WearColors.TealKm,
             style = TextStyle(fontSize = 10.sp, textAlign = TextAlign.Center),
-            modifier = Modifier.padding(top = 12.dp, start = 16.dp, end = 16.dp)
+            modifier = Modifier.padding(top = 12.dp)
         )
     }
 }

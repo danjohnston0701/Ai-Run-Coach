@@ -28,7 +28,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault">
+        android:theme="@style/Theme.App">
 
         <!-- Standalone: must keep working (offline GPS buffer + direct HTTP) even with
              no phone paired/reachable, mirroring the Garmin watch app's standalone mode. -->
@@ -44,7 +44,7 @@
             android:name=".WearMainActivity"
             android:exported="true"
             android:taskAffinity=""
-            android:theme="@android:style/Theme.DeviceDefault">
+            android:theme="@style/Theme.App.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

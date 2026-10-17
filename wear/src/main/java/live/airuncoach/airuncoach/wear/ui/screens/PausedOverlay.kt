@@ -4,10 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -17,10 +15,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.Text
 import live.airuncoach.airuncoach.wear.ui.RunScreenState
+import live.airuncoach.airuncoach.wear.ui.components.ScrollingScreen
 import live.airuncoach.airuncoach.wear.ui.formatDistanceKm
 import live.airuncoach.airuncoach.wear.ui.formatElapsed
 import live.airuncoach.airuncoach.wear.ui.theme.WearColors
@@ -32,11 +32,7 @@ import live.airuncoach.airuncoach.wear.ui.theme.WearColors
  */
 @Composable
 fun PausedOverlay(state: RunScreenState, onResume: () -> Unit, onFinish: () -> Unit, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
+    ScrollingScreen(modifier = modifier) {
         Text(
             text = "PAUSED",
             color = WearColors.OrangePaused,
@@ -61,18 +57,24 @@ fun PausedOverlay(state: RunScreenState, onResume: () -> Unit, onFinish: () -> U
     }
 }
 
+/** Grows taller and wraps rather than clipping its label at large system font sizes. */
 @Composable
 internal fun PillButton(label: String, background: Color, content: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .padding(horizontal = 36.dp)
+            .padding(horizontal = 8.dp)
             .fillMaxWidth()
-            .height(36.dp)
+            .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(background)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = label, color = content, style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp))
+        Text(
+            text = label,
+            color = content,
+            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, textAlign = TextAlign.Center)
+        )
     }
 }
