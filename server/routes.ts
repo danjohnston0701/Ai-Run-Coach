@@ -107,7 +107,7 @@ import { registerUserActivityRoutes } from "./user-activity";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { recognizeRoute, updateKnownRoutes, dropMismatchedRouteContext } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
-import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime } from "./utils/run-derivation";
+import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime, defaultRunName } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
 import {
   snapTrackToOSMSegments,
@@ -13276,28 +13276,12 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   // NOTE: despite the "garmin" naming (kept for backward compatibility — renaming would be
   // a large, purely-cosmetic migration), these endpoints are brand-agnostic and are shared
   // by both the Garmin Connect IQ watch app and the Wear OS (Samsung Galaxy Watch) companion
-  // app. The only brand-specific behavior is the derived run name / externalSource value
-  // below, both keyed off the freeform `deviceModel` string sent at session/start.
+  // app. The only brand-specific behavior is the externalSource value and device name below,
+  // both keyed off the freeform `deviceModel` string sent at session/start.
 
   // Classifies a companion session's freeform deviceModel string into a display label and
   // externalSource discriminator. Defaults to Garmin naming when deviceModel is absent —
   // preserves exact existing behavior for pre-existing Garmin sessions/clients.
-  /**
-   * Display label for a watch run's title. The companion reports an opaque Garmin part number
-   * ("006-B3851-00"), which used to fall straight through to the generic "Garmin Watch" for
-   * every device ever used. resolveWatchModel maps it to the real model via the Connect IQ
-   * SDK's own device definitions (see server/garmin-device-models.ts), so a run now reads
-   * "Venu 2 Plus Run" rather than "Garmin Watch Run". Falls back to the generic label only
-   * when the part number is genuinely unrecognised.
-   */
-  function watchDeviceLabel(deviceModel: string | null | undefined): string {
-    const m = (deviceModel || '').toLowerCase();
-    if (m.includes('galaxy') || m.includes('wear os') || m.includes('samsung')) {
-      return resolveWatchModel(deviceModel) || 'Samsung Galaxy Watch';
-    }
-    return resolveWatchModel(deviceModel) || 'Garmin Watch';
-  }
-
   /**
    * The device model this run was recorded on, for runs.garmin_device_name.
    *
@@ -14433,6 +14417,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             newRunId = phoneMatchedRun.id;
           } else {
 
+          const watchLocalStart = await runLocalStart(userId, new Date(now.getTime() - durationSecs * 1000));
           const [newRun] = await db.insert(runs).values({
             userId,
             distance: distanceKm,
@@ -14444,10 +14429,12 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             elevationGain: stats.totalAscent ?? null,
             elevationLoss: stats.totalDescent ?? null,
             elevation: stats.totalAscent ?? null,
-            name: `${watchDeviceLabel(updated?.deviceModel)} ${sessionType === "walk" ? "Walk" : "Run"}`,
+            // Same default as every other run (run-derivation.ts); the watch model is on
+            // garmin_device_name and the Run Summary's attribution header.
+            name: defaultRunName({ sessionType, runTime: watchLocalStart.runTime }),
             sessionType,
             startedAt: new Date(now.getTime() - durationSecs * 1000),
-            ...(await runLocalStart(userId, new Date(now.getTime() - durationSecs * 1000))),
+            ...watchLocalStart,
             completedAt: now,
             externalId: sessionId,
             externalSource: watchExternalSource(updated?.deviceModel),
@@ -14704,6 +14691,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           console.log(`[Offline Batch] Dating run from the watch's own clock: started ${startedAt.toISOString()}, finished ${now.toISOString()} (uploaded ${uploadedAt.toISOString()})`);
         }
         try {
+          const batchLocalStart = await runLocalStart(userId, startedAt ?? new Date(now.getTime() - durSec * 1000));
           const [created] = await db.insert(runs).values({
             userId,
             startedAt,
@@ -14715,9 +14703,9 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             cadence:        avgCad,
             elevationGain:  totalAscent ?? null,
             elevation:      totalAscent ?? null,
-            name:           `${watchDeviceLabel(batchDeviceModel ?? batchSession?.deviceModel)} ${resolvedBatchSessionType === "walk" ? "Walk" : "Run"}`,
+            name:           defaultRunName({ sessionType: resolvedBatchSessionType, runTime: batchLocalStart.runTime }),
             sessionType:    resolvedBatchSessionType,
-            ...(await runLocalStart(userId, startedAt ?? new Date(now.getTime() - durSec * 1000))),
+            ...batchLocalStart,
             completedAt:    now,
             externalId:     sessionId,
             externalSource: watchExternalSource(batchDeviceModel ?? batchSession?.deviceModel),

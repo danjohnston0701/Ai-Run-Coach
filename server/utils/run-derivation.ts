@@ -365,6 +365,69 @@ export function inferRecordingSource(run: Record<string, any>, pts: TrackPoint[]
   return "phone";
 }
 
+// ── Default run name ──────────────────────────────────────────────────────────
+// Every run gets a name at save time so all sources read alike in the history: a planned
+// workout is named for the session ("Tempo Run", "Hill Repeats"), anything else for the local
+// time of day, Strava-style ("Morning Run", "Evening Walk"). Clients never send one, and a
+// name already present (a rename, a Strava title) always wins. Android RunNaming.kt and iOS
+// RunNaming.swift build the same fallback for runs saved before this — change all three together.
+
+const PLAN_WORKOUT_NAMES: Record<string, string> = {
+  easy: "Easy Run",
+  easy_run: "Easy Run",
+  easy_with_strides: "Easy Run + Strides",
+  easy_strides: "Easy Run + Strides",
+  long: "Long Run",
+  long_run: "Long Run",
+  back_to_back_long: "Back-to-Back Long Run",
+  walk_run: "Walk/Run",
+  interval: "Intervals",
+  intervals: "Intervals",
+  short_interval: "Intervals",
+  park_run: "parkrun",
+  pre_race_shakeout: "Pre-Race Shakeout",
+};
+
+/** Words that already make a name read as a session; anything else gets " Run" appended. */
+const SESSION_NOUNS = /\b(run|race|intervals|repeats|strides|fartlek|shakeout|walk|parkrun)$/i;
+
+/** "tempo" → "Tempo Run", "hill_repeats" → "Hill Repeats", "parkrun_progression" → "parkrun Progression Run". */
+export function planWorkoutName(workoutType: string | null | undefined): string | null {
+  const key = (workoutType ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!key || NON_PLAN_WORKOUT_TYPES.has(key)) return null;
+  if (PLAN_WORKOUT_NAMES[key]) return PLAN_WORKOUT_NAMES[key];
+  const words = key.split("_").filter(Boolean)
+    .map((w) => (w === "parkrun" ? w : w[0].toUpperCase() + w.slice(1)));
+  const name = words.join(" ");
+  return SESSION_NOUNS.test(name) ? name : `${name} Run`;
+}
+
+/** Morning 05–11, Lunch 12–13, Afternoon 14–16, Evening 17–20, Night otherwise (local hour). */
+export function timeOfDayLabel(hour: number): string {
+  if (hour >= 5 && hour < 12) return "Morning";
+  if (hour >= 12 && hour < 14) return "Lunch";
+  if (hour >= 14 && hour < 17) return "Afternoon";
+  if (hour >= 17 && hour < 21) return "Evening";
+  return "Night";
+}
+
+/**
+ * Default name for a run with none. `runTime` is the local "HH:MM" start (runs.run_time);
+ * `workoutType` the planned workout's type — "free"/"watch_standalone" mean no plan.
+ */
+export function defaultRunName(opts: {
+  sessionType?: string | null;
+  runTime?: string | null;
+  workoutType?: string | null;
+}): string | null {
+  const isWalk = (opts.sessionType ?? "").toLowerCase() === "walk";
+  const planned = planWorkoutName(opts.workoutType);
+  if (planned) return isWalk && planned !== "Walk/Run" ? planned.replace(/\bRun$/, "Walk") : planned;
+  const hour = parseInt(String(opts.runTime ?? "").split(":")[0], 10);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+  return `${timeOfDayLabel(hour)} ${isWalk ? "Walk" : "Run"}`;
+}
+
 // ── Main entry point ──────────────────────────────────────────────────────────
 
 export type DerivationContext = {
@@ -469,6 +532,16 @@ export function deriveRunFields(
     const local = localDateTime(start, ctx.timezone);
     set("runDate", local.date);
     set("runTime", local.time);
+  }
+
+  // Name — a blank one counts as none.
+  if (run.name == null || (typeof run.name === "string" && run.name.trim() === "")) {
+    const name = defaultRunName({
+      sessionType: run.sessionType,
+      runTime: run.runTime ?? patch.runTime,
+      workoutType: plannedType ?? run.workoutType,
+    });
+    if (name) patch.name = name;
   }
 
   // Speed / time.

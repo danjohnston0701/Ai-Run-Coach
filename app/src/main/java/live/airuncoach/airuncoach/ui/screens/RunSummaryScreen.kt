@@ -28,6 +28,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import live.airuncoach.airuncoach.utils.RunNaming
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -242,19 +244,25 @@ fun RunSummaryScreenFlagship(
         }
     }
 
+    val runTitle = runSession?.let { RunNaming.displayName(it.name, it.sessionType, it.startTime, it.workoutType) }
+        ?: "Run Insights"
+
     Scaffold(
         containerColor = Colors.backgroundRoot,
         contentWindowInsets = WindowInsets(0), // outer Scaffold already handles nav bar insets
         topBar = {
             RunSummaryTopBarFlagship(
-                title = runSession?.name ?: (if (runSession?.sessionType?.lowercase() == "walk") "Walk Insights" else "Run Insights"),
+                title = runTitle,
                 subtitle = runSession?.let {
                     "${it.getFormattedDate()} • ${
                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it.startTime))
                     }"
                 } ?: "",
                 onBack = onNavigateBack,
-                onRename = { showRenameDialog = true },
+                onRename = {
+                    runNameDraft = runTitle
+                    showRenameDialog = true
+                },
                 onShare = {
                     viewModel.shareRunWithLink(context)
                 },
@@ -603,8 +611,15 @@ internal fun RunSummaryTopBarFlagship(
         IconButton(onClick = onBack) {
             Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Colors.textPrimary)
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold), color = Colors.textPrimary)
+        // The title itself opens rename too — it's the obvious place to tap.
+        Column(modifier = Modifier.weight(1f).clickable(onClick = onRename)) {
+            Text(
+                title,
+                style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
+                color = Colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             if (subtitle.isNotBlank()) {
                 Text(subtitle, style = AppTextStyles.small, color = Colors.textSecondary)
             }
@@ -1980,7 +1995,7 @@ private fun ShareableSummaryCard(
             ) {
                 Column {
                     Text(
-                        text = run.name ?: "${if (run.sessionType.lowercase() == "walk") "Walk" else "Run"} Summary",
+                        text = RunNaming.displayName(run.name, run.sessionType, run.startTime, run.workoutType),
                         style = AppTextStyles.h4.copy(fontWeight = FontWeight.ExtraBold),
                         color = Colors.textPrimary
                     )
