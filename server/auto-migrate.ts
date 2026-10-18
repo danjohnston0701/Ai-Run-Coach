@@ -808,37 +808,4 @@ export async function runAutoMigrations(): Promise<void> {
     console.warn(`[AutoMigrate] coaching_observations distance repair (non-fatal): ${err.message}`);
   }
 
-  // ── One-time data repair: fix corrupted aiCoachingNotes timestamps ──────────
-  // The POST /api/runs handler was passing note.time through parseDate(), which
-  // treated the elapsed-ms value as SECONDS and multiplied by 1000.  This made
-  // every coaching timestamp exactly 1000× too large (e.g. 173 s → 173,000 s).
-  // We correct all notes where the stored time exceeds 7,200,000 ms (2 hours) —
-  // legitimate in-run coaching notes are always shorter than 2 hours; values
-  // above that threshold were corrupted.  Dividing by 1000 recovers the original.
-  try {
-    const result = await pool.query(`
-      UPDATE runs
-      SET ai_coaching_notes = (
-        SELECT jsonb_agg(
-          CASE
-            WHEN (note->>'time')::bigint > 7200000
-            THEN jsonb_set(note, '{time}', to_jsonb(((note->>'time')::bigint / 1000)::bigint))
-            ELSE note
-          END
-        )
-        FROM jsonb_array_elements(ai_coaching_notes) AS note
-      )
-      WHERE ai_coaching_notes IS NOT NULL
-        AND jsonb_array_length(ai_coaching_notes) > 0
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements(ai_coaching_notes) AS note
-          WHERE (note->>'time')::bigint > 7200000
-        )
-    `);
-    if (result.rowCount && result.rowCount > 0) {
-      console.log(`[AutoMigrate] Fixed ai_coaching_notes timestamps in ${result.rowCount} run(s)`);
-    }
-  } catch (err: any) {
-    console.warn(`[AutoMigrate] aiCoachingNotes repair (non-fatal): ${err.message}`);
-  }
 }
