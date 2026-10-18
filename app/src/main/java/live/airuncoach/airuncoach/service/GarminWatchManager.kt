@@ -607,6 +607,28 @@ class GarminWatchManager(
         Log.d(TAG, "Sending preparedRun to watch: type=$runType dist=${distanceKm}km workout=$workoutType")
         cachedPreparedRunPayload = payload
         sendToWatch(payload)
+        openWatchApp()
+    }
+
+    /**
+     * Asks the watch to open AI Run Coach. Connect IQ never opens an app silently: the watch shows
+     * an "open AI Run Coach?" prompt, one press to accept. Once open, the watch sends "watchReady"
+     * and gets the cached prepared run back. If the app is already running, nothing is shown.
+     */
+    private fun openWatchApp() {
+        val device = connectedDevice ?: return
+        val app    = iqApp           ?: return
+        try {
+            connectIQ?.openApplication(device, app, object : ConnectIQ.IQOpenApplicationListener {
+                override fun onOpenApplicationResponse(d: IQDevice?, a: IQApp?, status: ConnectIQ.IQOpenApplicationStatus?) {
+                    Log.d(TAG, "openApplication on watch: $status")
+                }
+            })
+        } catch (e: InvalidStateException) {
+            Log.w(TAG, "openApplication — invalid state: ${e.message}")
+        } catch (e: ServiceUnavailableException) {
+            Log.w(TAG, "openApplication — service unavailable: ${e.message}")
+        }
     }
 
     /**

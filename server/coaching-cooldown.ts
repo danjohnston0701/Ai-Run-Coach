@@ -7,8 +7,7 @@
  * ── Milestone events (bypass cooldown, always fire) ──────────────────────────
  *   • Km splits          isSplit === true  (honours coachKmSplitIntervalKm setting)
  *   • 500m check-in      triggerType === '500m_checkin' (honours coachHalfKmCheckInEnabled)
- *   • Final 500m         triggerType === 'final_500m'
- *   • Final 100m         triggerType === 'final_100m'
+ *   • Final 500/250/100m triggerType or coachingType === 'final_500m' | 'final_250m' | 'final_100m'
  *   • Navigation turn    triggerType === 'navigation_turn'
  *   • Interval coaching  every interval transition is a milestone
  *
@@ -48,6 +47,9 @@ import { eq } from 'drizzle-orm';
 // ── Configuration ─────────────────────────────────────────────────────────────
 const NON_MILESTONE_COOLDOWN_MS = 90_000;   // 90 s between non-milestone cues
 const POST_MILESTONE_BUFFER_MS  = 45_000;   // 45 s quiet time after any milestone
+
+/** The finish cues every run is promised; each fires once and is never retried. */
+const FINAL_STRETCH_CUES = new Set(['final_500m', 'final_250m', 'final_100m']);
 
 // ── User settings cache ───────────────────────────────────────────────────────
 // Safe to keep per-instance/in-memory: near-static settings, short TTL, no
@@ -133,11 +135,16 @@ export async function checkCooldown(
   const now = Date.now();
   const uid = userId ? String(userId) : null;
   const triggerType: string = (body.triggerType ?? '').toString();
+  // Elite coaching (where the final-stretch cues go) names its cue in coachingType, not
+  // triggerType — both apps, snake_case from iOS. Reading only triggerType left final 500/250/100m
+  // under the 90 s cooldown, and the apps never retry a skipped final cue (2026-10-18: Jake's
+  // final 250m dropped 80 s after his final 500m; Daniel heard neither).
+  const coachingType: string = (body.coachingType ?? body.coaching_type ?? '').toString();
   const isSplit: boolean    = body.isSplit === true;
   const splitKm: number     = typeof body.splitKm === 'number' ? body.splitKm : 0;
 
   // ── 1. Unconditional milestones ─────────────────────────────────────────────
-  if (triggerType === 'final_500m' || triggerType === 'final_100m') {
+  if (FINAL_STRETCH_CUES.has(triggerType) || FINAL_STRETCH_CUES.has(coachingType)) {
     return { allowed: true, isMilestone: true };
   }
   if (triggerType === 'navigation_turn') {

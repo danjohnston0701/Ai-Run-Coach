@@ -202,6 +202,17 @@ fun RunSummaryScreenFlagship(
     // PB celebration dialog — shown once per screen visit (local flag, banner remains visible)
     var pbCelebrationDismissed by remember { mutableStateOf(false) }
 
+    // "Save to…" picker for the run's .FIT file: the runner chooses where it goes, so they can
+    // find it again (e.g. to upload to Strava). It used to be written straight into Downloads.
+    var fitExportRunId by remember { mutableStateOf<String?>(null) }
+    val saveFitLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val runId = fitExportRunId
+        fitExportRunId = null
+        if (uri != null && runId != null) viewModel.saveRunFit(runId, uri)
+    }
+
     // Delete confirmation dialog state
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
@@ -398,7 +409,11 @@ fun RunSummaryScreenFlagship(
 
                         selectedTab == 3 + groupRunTabOffset + dynamicsTabOffset -> DataTabFlagship(
                             run = session!!,
-                            onDownloadGpx = { viewModel.downloadRunAsFit(session!!.id) },
+                            onDownloadGpx = {
+                                fitExportRunId = session!!.id
+                                val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                                saveFitLauncher.launch("run_$stamp.fit")
+                            },
                             onDelete = { showDeleteConfirm = true },
                             selectedTab = selectedTab,
                             onTabSelected = { selectedTab = it },
@@ -8660,7 +8675,7 @@ internal fun DataTabFlagship(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Download Run as .GPX", fontWeight = FontWeight.Medium)
+                    Text("Download .FIT file", fontWeight = FontWeight.Medium)
                 }
                 
                 // Upload to Strava button

@@ -44,10 +44,20 @@
             android:name=".WearMainActivity"
             android:exported="true"
             android:taskAffinity=""
+            android:launchMode="singleTask"
             android:theme="@style/Theme.App.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Opened from the phone (SamsungWatchManager.openWatchApp) when a session is
+                 prepared there. singleTask so an already-open app is brought forward, not
+                 stacked. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="airuncoach" android:host="watch" android:path="/prepare" />
             </intent-filter>
         </activity>
 

@@ -283,6 +283,9 @@ class RunTrackingService : Service(), SensorEventListener {
     // can't be used for this (a legitimate stop can arrive while genuinely paused, i.e. while
     // isTracking is already false).
     private var isFinalizingStop = false
+    // Polls the server for the end of this run's Garmin companion session — see
+    // startWatchSessionEndWatchdog().
+    private var watchSessionEndWatchdog: Job? = null
     private var aiCoachEnabledForSession = true
     // Watch speed smoothing — exponential moving average applied to raw Garmin GPS speed
     // before converting to pace, to suppress brief GPS jitter spikes (which would otherwise
@@ -2113,6 +2116,7 @@ class RunTrackingService : Service(), SensorEventListener {
         totalPausedMs = 0      // Reset pause tracking for new run
         pauseStartTime = 0
         isFinalizingStop = false  // Re-arm stopTracking() for this new run
+        startWatchSessionEndWatchdog()
         splitPausedMs = 0
         hasCreditedStartIdle = false  // Re-arm start-line idle detection for new run
         startIdleDistances.clear()
@@ -4529,7 +4533,11 @@ class RunTrackingService : Service(), SensorEventListener {
         // are non-conflicting with the session's milestone triggers.
         //
         // Free runs: Fully active — all elite coaching categories fire.
-        if (!hasCoachingFiredThisTick && canFireCoaching() && eliteCoachingEligible) {
+        if (inFinalStretch) {
+            if (!hasCoachingFiredThisTick && eliteCoachingEligible) {
+                maybeFinalStretchCoaching(displayDistance, duration, avgSpeed)
+            }
+        } else if (!hasCoachingFiredThisTick && canFireCoaching() && eliteCoachingEligible) {
             maybeFireEliteCoaching(displayDistance, duration, avgSpeed, phase)
         }
         
@@ -5051,6 +5059,59 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
+    /**
+     * Ends this run when the watch's companion session has ended on the server, for when neither
+     * the watch's "stop" nor the server's watchSessionEnded push reaches the phone. Both are
+     * best-effort: the stop is a fire-and-forget ConnectIQ message whose 5 s retries live on the
+     * run view's timer (which stops as soon as that view is hidden after finishing), and the push
+     * has a 20 s TTL. 2026-10-17, Daniel: the watch closed its session at 20:45:59 and uploaded its
+     * batch, the phone got neither, and it sat on the run screen with all its coaching notes
+     * unsaved. The watch closes its session over the Garmin Connect relay, which doesn't depend on
+     * our Bluetooth link to the phone, so asking the server catches every one of those cases.
+     *
+     * Only asks while the watch is quiet — paused (the phone's 1 s timer is stopped then, which is
+     * why this is its own loop: a Garmin run is always finished from pause) or no watch GPS for
+     * 20 s. Only acts on this run's own session: the ID fetched when the watch pressed START, and
+     * started no earlier than 10 minutes before this run, so a stale ID left over from an earlier
+     * watch run can never end a phone-led one (a reattach after an OS kill passes no lower bound:
+     * it restored that exact session ID itself). stopTracking() still uploads this phone's own data
+     * (merged into the watch's run server-side) and falls back to attaching the coaching notes to
+     * the watch's run if that upload fails.
+     */
+    private fun startWatchSessionEndWatchdog(
+        earliestSessionStartMs: Long = System.currentTimeMillis() - 10 * 60_000L
+    ) {
+        watchSessionEndWatchdog?.cancel()
+        watchSessionEndWatchdog = serviceScope.launch {
+            while (isActive) {
+                delay(20_000L)
+                if (isFinalizingStop) break
+                if (lastWatchGpsMs == 0L && !wasRunStartedByWatch) continue  // no watch on this run
+                val sessionId = garminWatchManager?.activeCompanionSessionId ?: continue
+                val watchQuiet = !isTracking || System.currentTimeMillis() - lastWatchGpsMs >= 20_000L
+                if (!watchQuiet) continue
+                val session = try {
+                    apiService.getRecoverableGarminCompanionSession().session
+                } catch (e: Exception) {
+                    Log.w("RunTrackingService", "Watch-session-end check failed (non-fatal): ${e.message}")
+                    null
+                } ?: continue
+                if (session.sessionId != sessionId) continue
+                val sessionStartMs = try {
+                    session.startedAt?.let { java.time.Instant.parse(it).toEpochMilli() }
+                } catch (e: Exception) { null } ?: continue
+                if (sessionStartMs < earliestSessionStartMs) continue
+                if (session.status == "completed" || session.status == "abandoned") {
+                    Log.w("RunTrackingService", "⌚ Watch session $sessionId is ${session.status} on the server but no stop reached the phone — ending the run (companion run ${session.runId})")
+                    withContext(Dispatchers.Main) {
+                        if (!isFinalizingStop) stopTracking(session.runId)
+                    }
+                    break
+                }
+            }
+        }
+    }
+
     private fun pauseTracking() {
         // Guard against a redundant "pause" — the watch retries this command every 5s (up to
         // 6x) if its pauseAck doesn't get back to it, and that ack is itself a fire-and-forget
@@ -5243,6 +5304,8 @@ class RunTrackingService : Service(), SensorEventListener {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         sensorManager.unregisterListener(this)
         stopTimer()
+        watchSessionEndWatchdog?.cancel()
+        watchSessionEndWatchdog = null
         
         Log.d("RunTrackingService", "Stopped all tracking")
 
@@ -6025,6 +6088,7 @@ class RunTrackingService : Service(), SensorEventListener {
         )
 
         if (!isPaused) startTimer()
+        startWatchSessionEndWatchdog(earliestSessionStartMs = Long.MIN_VALUE)
         updateNotification()
 
         Log.d("RunTrackingService", "⌚ Reattached — isPaused=$isPaused, distance=${totalDistance}m, elapsed=${elapsedMs}ms")
@@ -9404,39 +9468,34 @@ class RunTrackingService : Service(), SensorEventListener {
     // ================================================================
 
     /**
-     * Final-stretch-only coaching for coached sessions.
-     * During a coaching plan run, all generic milestone/technique/ETA elite cues are
-     * suppressed — the dynamic plan handles all in-session motivation.
-     * Only the final 500m, 250m, and 100m "push" cues are preserved as they are
-     * universal to every session regardless of type.
+     * The final 500 m / 250 m / 100 m cues, called on every tick inside the final stretch.
+     *
+     * They have their own gate rather than canFireCoaching(): that gate's 150 m distance gap and
+     * its "last 150 m before a km split" lockout sit right on top of these windows — on a 5 km
+     * run the lockout covers 4.85–5.0 km, i.e. the whole final-100m window — and a cue is only
+     * ever tried once. Only two things hold a cue back here: something else still playing, and
+     * a 10 s gap after the last cue. A later cue also retires the earlier ones, so a 500 m cue
+     * that never found a slot can't play after "250 m to go".
      */
     private fun maybeFinalStretchCoaching(displayDistance: Double, duration: Long, avgSpeed: Float) {
         if (!coachingFeaturePrefs.motivationalCoachingEnabled) return
-        val now = System.currentTimeMillis()
-        val td = targetDistance ?: inferredTargetDistance
-        val remainingMeters = if (td != null && td > 0) (td - displayDistance) else null
-
-        // FINAL 100m — highest priority, bypasses cooldowns (fires once)
-        if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
-            hasFinal100mFired = true
-            fireFinalCoaching("final_100m", displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
-            return
+        if (live.airuncoach.airuncoach.utils.CoachingAudioQueue.isBusy()) return
+        val td = targetDistance ?: inferredTargetDistance ?: return
+        if (td <= 0) return
+        val remainingMeters = td - displayDistance
+        if (remainingMeters < 0) return
+        val type = when {
+            !hasFinal100mFired && remainingMeters <= 120.0 -> "final_100m"
+            !hasFinal250mFired && remainingMeters in 120.0..275.0 -> "final_250m"
+            !hasFinal500mFired && remainingMeters in 275.0..550.0 -> "final_500m"
+            else -> return
         }
-
-        // FINAL 250m — fires between 500m and 100m remaining (fires once)
-        if (!hasFinal250mFired && remainingMeters != null && remainingMeters in 0.0..275.0) {
-            if ((now - lastCoachingTime) < 10_000L) return
-            hasFinal250mFired = true
-            fireFinalCoaching("final_250m", displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
-            return
-        }
-
-        // FINAL 500m — very high priority (fires once)
-        if (!hasFinal500mFired && remainingMeters != null && remainingMeters in 0.0..550.0) {
-            if ((now - lastCoachingTime) < 10_000L) return
-            hasFinal500mFired = true
-            fireFinalCoaching("final_500m", displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
-        }
+        // final_100m is the last chance to say anything — it doesn't wait out the 10 s gap.
+        if (type != "final_100m" && (System.currentTimeMillis() - lastCoachingTime) < 10_000L) return
+        hasFinal500mFired = true
+        if (type != "final_500m") hasFinal250mFired = true
+        if (type == "final_100m") hasFinal100mFired = true
+        fireFinalCoaching(type, displayDistance / 1000.0, duration, avgSpeed, remainingMeters)
     }
 
     /**
@@ -9460,33 +9519,8 @@ class RunTrackingService : Service(), SensorEventListener {
 
         val distKm = displayDistance / 1000.0
         val currentKm = distKm.toInt()
-        val td = targetDistance ?: inferredTargetDistance // Use inferred if no explicit target
-        val remainingMeters = if (td != null && td > 0) (td - displayDistance) else null
 
-        // FINAL 100m — highest priority, bypasses cooldowns (fires once)
-        if (!hasFinal100mFired && remainingMeters != null && remainingMeters in 0.0..120.0) {
-            hasFinal100mFired = true
-            fireFinalCoaching("final_100m", distKm, duration, avgSpeed, remainingMeters)
-            return true
-        }
-
-        // FINAL 250m — fires between 500m and 100m remaining (fires once)
-        if (!hasFinal250mFired && remainingMeters != null && remainingMeters in 0.0..275.0) {
-            if ((now - lastCoachingTime) < 10_000L) return false // minimal 10s gap only
-            hasFinal250mFired = true
-            fireFinalCoaching("final_250m", distKm, duration, avgSpeed, remainingMeters)
-            return true
-        }
-
-        // FINAL 500m — very high priority, bypasses elite cooldown (fires once)
-        if (!hasFinal500mFired && remainingMeters != null && remainingMeters in 0.0..550.0) {
-            if ((now - lastCoachingTime) < 10_000L) return false // minimal 10s gap only
-            hasFinal500mFired = true
-            fireFinalCoaching("final_500m", distKm, duration, avgSpeed, remainingMeters)
-            return true
-        }
-
-        // In the final 500m, don't fire any analysis/summary coaching — only final motivation above
+        // In the final stretch only the finish cues speak, and maybeFinalStretchCoaching() owns those.
         if (isInFinalStretch()) return false
 
         // Standard elite coaching — respect cooldowns, unless a checkPaceCoaching() substitution is forcing this fire

@@ -1364,73 +1364,29 @@ class RunSummaryViewModel @Inject constructor(
         }
     }
 
-    fun downloadRunAsFit(runId: String) {
+    /** Writes the run's .FIT file to the location the runner picked in the system "Save to…" picker. */
+    fun saveRunFit(runId: String, destination: android.net.Uri) {
         viewModelScope.launch {
             try {
-                Log.d("RunSummaryVM", "Downloading GPX file for run: $runId")
-                android.widget.Toast.makeText(
-                    context,
-                    "Downloading run data as .GPX file...",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
-
-                // Get FIT file data from API
                 val response = apiService.downloadRunAsFit(runId)
-                
-                if (!response.isSuccessful) {
-                    Log.e("RunSummaryVM", "API error: ${response.code()} - ${response.message()}")
-                    android.widget.Toast.makeText(
-                        context,
-                        "Error: ${response.code()} - ${response.message()}",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
+                val bytes = if (response.isSuccessful) response.body()?.bytes() else null
+                if (bytes == null) {
+                    Log.e("RunSummaryVM", "FIT download failed: ${response.code()} ${response.message()}")
+                    android.widget.Toast.makeText(context, "Couldn't download the run file (${response.code()})", android.widget.Toast.LENGTH_SHORT).show()
                     return@launch
                 }
-                
-                response.body()?.let { responseBody ->
-                    val bytes = responseBody.bytes()
-                    
-                    // Save to Downloads folder with unique filename using current timestamp
-                    val dateTimeSuffix = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    val fileName = "run_${dateTimeSuffix}.fit"
-                    val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
-                        android.os.Environment.DIRECTORY_DOWNLOADS
-                    )
-                    
-                    if (!downloadsDir.exists()) {
-                        downloadsDir.mkdirs()
-                    }
-                    
-                    val file = java.io.File(downloadsDir, fileName)
-                    file.writeBytes(bytes)
-                    
-                    Log.d("RunSummaryVM", "FIT file saved to: ${file.absolutePath} (${bytes.size} bytes)")
-                    android.widget.Toast.makeText(
-                        context,
-                        "Run downloaded: $fileName",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                } ?: run {
-                    Log.e("RunSummaryVM", "Failed to download FIT file: empty response body")
-                    android.widget.Toast.makeText(
-                        context,
-                        "Failed to download FIT file",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(destination)?.use { it.write(bytes) }
+                        ?: throw java.io.IOException("Couldn't open the chosen location")
                 }
+                Log.d("RunSummaryVM", "FIT file saved to $destination (${bytes.size} bytes)")
+                android.widget.Toast.makeText(context, "Run file saved", android.widget.Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                Log.e("RunSummaryVM", "Failed to download FIT file: ${e.message}", e)
-                android.widget.Toast.makeText(
-                    context,
-                    "Error: ${e.localizedMessage ?: e.message ?: "Unknown error"}",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                Log.e("RunSummaryVM", "Failed to save FIT file: ${e.message}", e)
+                android.widget.Toast.makeText(context, "Couldn't save the run file: ${e.localizedMessage ?: "unknown error"}", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }
-
-    // ── Group Run leaderboard loading ──────────────────────────────────────────
-
     /**
      * Checks if the given run belongs to a group run and, if so, loads the full
      * leaderboard results. Silently does nothing if the run is not a group run.

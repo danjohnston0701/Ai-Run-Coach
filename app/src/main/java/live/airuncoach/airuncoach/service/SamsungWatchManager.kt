@@ -11,6 +11,8 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.wear.remote.interactions.RemoteActivityHelper
+import java.util.concurrent.Executors
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.CapabilityClient
 import com.google.android.gms.wearable.CapabilityInfo
@@ -58,6 +60,8 @@ class SamsungWatchManager(
         private const val TAG = "SamsungWatchManager"
         // Must match the capability declared in wear/src/main/res/values/wear.xml
         const val CAPABILITY_WEAR_APP = "airuncoach_wear_app"
+        /** Declared by WearMainActivity; opening it remotely launches the watch app. */
+        const val WATCH_PREPARE_URI = "airuncoach://watch/prepare"
         // Single message path — mirrors ConnectIQ's flexible payload-with-"type"-key design
         // rather than one Data Layer path per message type, so the dispatch shape stays a
         // straight port of GarminWatchManager.handleWatchMessage()'s `when (type)` switch.
@@ -325,6 +329,31 @@ class SamsungWatchManager(
         Log.d(TAG, "Sending preparedRun to watch: type=$runType dist=${distanceKm}km workout=$workoutType")
         cachedPreparedRunPayload = payload
         sendToWatch(payload)
+        openWatchApp()
+    }
+
+    /**
+     * Opens AI Run Coach on the Galaxy Watch, so preparing on the phone is all the runner does —
+     * like Garmin, rather than also having to find and open the watch app. The Data Layer message
+     * above only reaches a watch app that is already running; once this one opens it sends
+     * "watchReady" and gets the cached prepared run back. Needs Wear 1.0.11+, which declares the
+     * airuncoach://watch/prepare link; an older watch app just doesn't open, as before.
+     */
+    private fun openWatchApp() {
+        val nodeId = connectedNodeId ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(WATCH_PREPARE_URI))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                    .setPackage(context.packageName)
+                RemoteActivityHelper(context, Executors.newSingleThreadExecutor())
+                    .startRemoteActivity(intent, nodeId)
+                    .get()
+                Log.d(TAG, "Opened the watch app on $nodeId")
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't open the watch app: ${e.message}")
+            }
+        }
     }
 
     fun clearPendingPreparedRun() {
