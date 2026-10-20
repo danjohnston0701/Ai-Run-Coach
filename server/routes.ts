@@ -2,6 +2,8 @@ import type { Express, Request, Response } from "express";
 import { sendNewPlanReviewEmail } from "./plan-review-email";
 import { ensureRunWeather, weatherCodeToCondition } from "./run-weather";
 import { createServer, type Server } from "node:http";
+import fs from "node:fs";
+import path from "node:path";
 import { eq, and, or, gte, gt, lt, desc, asc, lte, count, isNull, isNotNull, inArray } from "drizzle-orm";
 import { storage } from "./storage";
 import { toClientUser, normalizeSessionType } from "./user-serializer";
@@ -5593,6 +5595,32 @@ function transformRunForAndroid(run: any) {
       : status === "waiting" ? `${esc(runnerName)} hasn't started yet — you're set to watch as soon as they do.`
       : status === "ended" ? `This live run has finished.`
       : `We couldn't find a live run for this code.`;
+
+    // Normally this URL opens the web live viewer (client/src/pages/ObserveLive.tsx), so a
+    // friend can watch in the browser without installing anything. It's the SPA's index.html
+    // with this run's title/description swapped into the link-preview tags, so a link pasted
+    // into WhatsApp/iMessage still reads "Watch Daniel's live run". The static page below is
+    // the fallback when no web build is present (local dev without `vite build`).
+    const webIndexPath = path.resolve(process.cwd(), "dist", "public", "index.html");
+    if (fs.existsSync(webIndexPath)) {
+      try {
+        const title = esc(`Watch ${runnerName}'s live run — AI Run Coach`);
+        const description = esc(status === "invalid"
+          ? "Follow a runner live on AI Run Coach — no app needed."
+          : `${statusLine.replace(/&#39;/g, "'").replace(/&amp;/g, "&")} Follow along live in your browser — no app needed.`);
+        const html = (await fs.promises.readFile(webIndexPath, "utf-8"))
+          .replace(/<title>[^<]*<\/title>/, "")
+          .replace(/(<meta (?:property|name)="(?:og|twitter):title" content=")[^"]*(")/g, `$1${title}$2`)
+          .replace(/(<meta (?:property|name)="(?:og|twitter):description" content=")[^"]*(")/g, `$1${description}$2`)
+          .replace("</head>", `<title>${title}</title><meta name="robots" content="noindex"></head>`);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        return res.send(html);
+      } catch (error: any) {
+        console.error("Observe landing page: failed to serve web viewer, using fallback:", error);
+      }
+    }
+
     res.setHeader("Content-Type", "text/html");
     res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Watch ${esc(runnerName)}'s live run — AI Run Coach</title>
@@ -5671,12 +5699,20 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         });
       }
 
-      // Check if session is still active
+      // live_run_sessions.runner_name isn't always set by the runner's phone; fall back to the
+      // account name, as the /observe/:code landing page does.
+      const runnerName = session.runnerName || (await storage.getUser(session.userId))?.name || null;
+
+      // Check if session is still active. sessionId/runnerName/hasStarted let the web viewer
+      // (reloaded after the finish) still show the runner's final numbers.
       if (!session.isActive) {
         return res.status(410).json({
           error: "Run session has ended",
           isExpired: true,
           message: "Sorry, this live run session has ended.",
+          sessionId: session.id,
+          runnerName,
+          hasStarted: session.hasStarted,
         });
       }
 
@@ -5694,6 +5730,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       res.json({
         sessionData: {
           ...session,
+          runnerName,
           observer_count: observerCount, // Include live observer count
         },
         isExpired: false,

@@ -32,6 +32,7 @@ import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
 import Support from "@/pages/Support";
 import RunVideoShare from "@/pages/RunVideoShare";
+import ObserveLive from "@/pages/ObserveLive";
 import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
 
 function ScrollToTop() {
@@ -106,6 +107,7 @@ function Router() {
       <Route path="/admin" component={AdminHub} />
       <Route path="/admin/ai-config" component={AdminAIConfig} />
       <Route path="/admin/costs" component={AdminCostDashboard} />
+      <Route path="/observe/:code" component={ObserveLive} />
       {!hasProfile && (
         <>
           <Route path="/" component={LandingPage} />

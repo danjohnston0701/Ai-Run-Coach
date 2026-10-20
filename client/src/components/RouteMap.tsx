@@ -11,7 +11,7 @@ interface RouteMapProps {
   routeWaypoints?: Array<{ lat: number; lng: number }>;
 }
 
-function decodePolyline(encoded: string): [number, number][] {
+export function decodePolyline(encoded: string): [number, number][] {
   const points: [number, number][] = [];
   let index = 0;
   let lat = 0;
