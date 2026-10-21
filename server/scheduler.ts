@@ -5,7 +5,7 @@ import { processWebhookFailureQueue } from './webhook-processor';
 import { sendCoachingPlanReminder } from './notification-service';
 import { db } from './db';
 import { trainingPlans, plannedWorkouts, users, notificationPreferences } from '@shared/schema';
-import { eq, and, gte, lt, sql } from 'drizzle-orm';
+import { eq, and, gte, lt, sql, inArray } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { reconcileGooglePlaySubscriptions } from './google-play-billing';
 import { backfillRunWeather, backfillRunStartPoints } from './run-weather';
@@ -323,8 +323,21 @@ export function startScheduler(): void {
 
       for (const { planId, userId, nextWeeksToEnrich } of plansToEnrich) {
         try {
-          const workoutIds = await getWorkoutIdsForPlanWeeks(planId, nextWeeksToEnrich);
-          if (workoutIds.length === 0) continue;
+          const allIds = await getWorkoutIdsForPlanWeeks(planId, nextWeeksToEnrich);
+          // Sessions whose date has passed are never run from the plan now — don't pay to
+          // enrich them (a plan the runner drifted off would otherwise enrich a stale block a day).
+          const todayUtc = new Date();
+          todayUtc.setUTCHours(0, 0, 0, 0);
+          const workoutIds = allIds.length === 0 ? [] : (await db
+            .select({ id: plannedWorkouts.id, scheduledDate: plannedWorkouts.scheduledDate, isCompleted: plannedWorkouts.isCompleted })
+            .from(plannedWorkouts)
+            .where(inArray(plannedWorkouts.id, allIds)))
+            .filter(w => !w.isCompleted && (!w.scheduledDate || new Date(w.scheduledDate) >= todayUtc))
+            .map(w => w.id);
+          if (workoutIds.length === 0) {
+            await markPlanEnrichedThroughWeek(planId, Math.max(...nextWeeksToEnrich));
+            continue;
+          }
 
           // regenerateCoaching=true: this is the only enrichment call site that can hit an
           // already-cached, now-stale coaching plan (the user may have opened a workout days

@@ -530,14 +530,22 @@ export async function generateTrainingPlan(
     })();
     const profileWeeklyKm = Number(user[0]?.averageWeeklyMileage) || 0;
     const noHistoryBaselineKm = profileWeeklyKm > 0 ? profileWeeklyKm : level.weeklyKm;
-    const weeklyMileageBase = runsLast30.length === 0
+    // Regular sessions (club runs) the runner told us they do every week are part of their
+    // volume even when they don't all reach the app. Emma (2026-10) runs two 5 km club runs a
+    // week; the ones recorded averaged ~4 km/week, which shrank her club runs to 3.5 km.
+    const regularWeeklyKm = isNovice ? 0 : regularSessions
+      .filter(r => r.countsTowardWeeklyTotal && Number(r.distanceKm) > 0)
+      .reduce((sum, r) => sum + Number(r.distanceKm), 0);
+    const historyBaselineKm = runsLast30.length === 0
       ? noHistoryBaselineKm
       : sparseHistory ? Math.max(observedWeeklyKm, isNovice ? 0 : level.weeklyKm) : observedWeeklyKm;
-    const baselineSource = runsLast30.length === 0
+    const weeklyMileageBase = Math.max(historyBaselineKm, regularWeeklyKm);
+    const baselineSource = (runsLast30.length === 0
       ? `no runs recorded in the app yet — starting point from their stated fitness level "${experienceLevel}"${profileWeeklyKm > 0 ? ` and their reported ${profileWeeklyKm} km/week` : ""}`
       : sparseHistory
         ? `only ${runsLast30.length} run${runsLast30.length === 1 ? "" : "s"} recorded in the last 30 days — combined with their stated fitness level "${experienceLevel}"`
-        : `${runsLast30.length} runs recorded in the last 30 days`;
+        : `${runsLast30.length} runs recorded in the last 30 days`)
+      + (regularWeeklyKm > historyBaselineKm ? ` — raised to the ${Math.round(regularWeeklyKm)} km/week of regular group runs they say they do` : "");
     // Best recent effort → estimated 5K and training-pace bands (null without a 3 km+ run).
     const paceAnchor = derivePaceAnchor(recentRuns);
     const hasActiveInjuries = injuries.some(i =>
@@ -827,6 +835,10 @@ export async function generateTrainingPlan(
       continuousCapable: !isNovice && !hasActiveInjuries && startingLongestRunMin >= 25,
       sparseHistory,
       longRunCeilingKm: longRunCeilingKm(targetDistance, experienceLevel || user[0]?.fitnessLevel),
+      // Regular sessions arrive 0=Sun … 6=Sat; plan days are 1=Mon … 7=Sun.
+      fixedSessions: regularSessions
+        .filter(r => r.countsTowardWeeklyTotal && r.name)
+        .map(r => ({ name: r.name, dayOfWeek: r.dayOfWeek === 0 ? 7 : r.dayOfWeek })),
     };
 
     const walkRunOrientationRule = `🔑 ORIENTATION SESSION RULE (new users only):

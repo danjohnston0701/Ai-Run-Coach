@@ -148,8 +148,9 @@ function estimateMaxHR(
     const sorted = [...peaks].sort((a, b) => b - a);
     const p95Index = Math.max(0, Math.floor(sorted.length * 0.05));
     const observed = sorted[p95Index];
-    // Clamp within ±15 bpm below / +25 bpm above Tanaka estimate
-    const clamped = Math.max(tanakaMax - 15, Math.min(tanakaMax + 25, observed));
+    // Peaks only raise the estimate (up to +25 above Tanaka): an easy-only runner's peak says
+    // nothing about a lower max — see HeartRateZones.estimateMaxHRFromHistory.
+    const clamped = Math.max(tanakaMax, Math.min(tanakaMax + 25, observed));
     return { maxHR: Math.round(clamped), source: "run history" };
   }
 
@@ -443,8 +444,10 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
             category === "easy" || category === "long" ? paceAnchor.easy
             : category === "recovery" ? paceAnchor.recovery
             : category === "tempo" ? paceAnchor.tempo
+            : category === "walk_run" ? paceAnchor.walkRun
             : null;
           if (mainBand) safePace = clamp(parsePaceToSecs(safePace), mainBand);
+          if (category === "walk_run" && safeIntervalPace) safeIntervalPace = clamp(parsePaceToSecs(safeIntervalPace), paceAnchor.walkRun);
           if (category === "interval" && (safeIntervalPace || workoutRecord.intervalCount)) {
             safeIntervalPace = clamp(parsePaceToSecs(safeIntervalPace), paceAnchor.interval);
             const rest = parsePaceToSecs(safeRestPace);
@@ -630,6 +633,26 @@ export async function findPlansNeedingEnrichment(): Promise<
     const totalWeeks = plan.totalWeeks ?? 0;
 
     if (enrichedThrough >= totalWeeks) continue; // Fully enriched
+
+    // Weeks 1-2 normally wait for the orientation run. When the runner never does it as a
+    // planned session, enrich from the history we already have two days after its date
+    // (Emma, 2026-09: orientation never ticked off, whole plan stayed on placeholders).
+    if (enrichedThrough === 0) {
+      const orientation = await db
+        .select({ scheduledDate: plannedWorkouts.scheduledDate })
+        .from(plannedWorkouts)
+        .where(and(eq(plannedWorkouts.trainingPlanId, plan.id), eq(plannedWorkouts.workoutType, "orientation")))
+        .limit(1)
+        .then(r => r[0]);
+      if (!orientation?.scheduledDate) continue;
+      const due = new Date(orientation.scheduledDate);
+      due.setHours(0, 0, 0, 0);
+      due.setDate(due.getDate() + 2);
+      if (today >= due) {
+        results.push({ planId: plan.id, userId: plan.userId, nextWeeksToEnrich: [1, 2].filter(w => w <= totalWeeks) });
+      }
+      continue;
+    }
 
     // Find the last scheduled workout in the current enriched block
     // to determine if the calendar has passed it

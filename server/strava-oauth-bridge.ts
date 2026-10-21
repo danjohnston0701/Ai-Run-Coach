@@ -10,6 +10,7 @@ import { db } from './db';
 import { sql, eq, and } from 'drizzle-orm';
 import { connectedDevices, oauthStateStore, runs } from '@shared/schema';
 import { desc } from 'drizzle-orm';
+import { syncImportedRunWithPlan } from './plan-run-sync';
 import { authMiddleware, type AuthenticatedRequest } from './auth';
 import axios from 'axios';
 
@@ -378,6 +379,7 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
     // 5. Insert new activities
     let imported = 0;
     let skipped = 0;
+    const importedRunIds: string[] = [];
 
     for (const activity of activities) {
       const stravaId = String(activity.id);
@@ -395,7 +397,7 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
       const paceSec = Math.round(avgPaceSecPerKm % 60);
       const avgPaceStr = `${paceMin}:${String(paceSec).padStart(2, '0')}`;
 
-      await db.insert(runs).values({
+      const [importedRun] = await db.insert(runs).values({
         userId,
         externalId: stravaId,
         externalSource: 'strava',
@@ -411,9 +413,10 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
         startLat: activity.start_latlng?.[0] ?? null,
         startLng: activity.start_latlng?.[1] ?? null,
         completedAt: new Date(activity.start_date),
-        runDate: activity.start_date.substring(0, 10),
-      });
+        runDate: (activity.start_date_local ?? activity.start_date).substring(0, 10),
+      }).returning({ id: runs.id });
 
+      importedRunIds.push(importedRun.id);
       imported++;
     }
 
@@ -421,6 +424,13 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
     await db.update(connectedDevices)
       .set({ lastSyncAt: new Date(), updatedAt: new Date() })
       .where(eq(connectedDevices.id, device.id));
+
+    // Imported runs complete the plan sessions they match, oldest first (background).
+    if (importedRunIds.length > 0) {
+      setImmediate(async () => {
+        for (const id of importedRunIds.reverse()) await syncImportedRunWithPlan(id, userId);
+      });
+    }
 
     console.log(`[Strava Import] Done for user ${userId}: imported=${imported}, skipped=${skipped}`);
     res.json({
@@ -635,7 +645,7 @@ async function processStravaWebhookEvent(event: any): Promise<void> {
         }))
       : undefined;
 
-    await db.insert(runs).values({
+    const [webhookRun] = await db.insert(runs).values({
       userId,
       externalId:    String(object_id),
       externalSource: 'strava',
@@ -656,10 +666,13 @@ async function processStravaWebhookEvent(event: any): Promise<void> {
       avgSpeed:      activity.average_speed ?? undefined,
       maxSpeed:      activity.max_speed     ?? undefined,
       completedAt:   startDate,
-      runDate:       startDate.toISOString().split('T')[0],
+      runDate:       (activity.start_date_local ?? startDate.toISOString()).slice(0, 10),
       gpsTrack:      gpsTrackWh ?? undefined,
       kmSplits:      kmSplitsWh ?? undefined,
-    });
+    }).returning({ id: runs.id });
+
+    // Complete the plan session this run matches, same as a run saved from the app.
+    await syncImportedRunWithPlan(webhookRun.id, userId);
 
     // Update lastSyncAt
     await db.update(connectedDevices)

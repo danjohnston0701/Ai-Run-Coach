@@ -38,9 +38,12 @@ export class HeartRateZones {
     const p95Index = Math.max(0, Math.floor(sorted.length * 0.05));
     const observedMax = sorted[p95Index];
 
-    // Sanity bounds: observed max should be within ±15 bpm of formula estimate
+    // A training run's peak is a lower bound on max HR, never evidence it is lower than the
+    // formula: someone who only runs easy never gets near it. Emma (2026-10) peaked at 160 on
+    // easy club runs; using that as max HR put her easy runs (avg 127–155) in Zone 4–5.
+    // Observed peaks can raise the estimate (up to +25), not lower it.
     const formulaMax = HeartRateZones.getMaxHeartRate(age);
-    const clampedMax = Math.max(formulaMax - 15, Math.min(formulaMax + 25, observedMax));
+    const clampedMax = Math.max(formulaMax, Math.min(formulaMax + 25, observedMax));
 
     return Math.round(clampedMax);
   }

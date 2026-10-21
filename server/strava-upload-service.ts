@@ -183,6 +183,7 @@ export interface StravaActivitySummary {
   elapsed_time: number;      // seconds
   total_elevation_gain: number;
   start_date: string;        // ISO 8601
+  start_date_local?: string; // athlete's local time, same format
   start_latlng: [number, number] | null;
   average_heartrate?: number;
   max_heartrate?: number;

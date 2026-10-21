@@ -143,7 +143,11 @@ Every plan block (`generateTrainingPlan` and `generateNextBlock`) goes through t
   - Tempo/threshold is Zone 4.
 - **Enforcement:** the model gets two correction rounds, then `repairPlanLoad` fixes whatever is left.
 - **Enrichment** (`session-enrichment-service.ts`) uses the same anchor to clamp paces and the same category to set HR zones.
-- **Orientation:** the first run saved after a new plan is created completes its orientation (`linkRunToPendingOrientation` in `routes.ts`), even if it was a free run.
+- **Regular sessions** (club runs) the runner lists count toward their starting volume and stay on their own day (rule 9, `fixedSessions`).
+- **Volume cap floor:** the weekly cap never drops below n − 1 thirty-minute runs plus the long-run floor, so the trim can't undo the minimum session length.
+- **Max HR:** run peaks can only raise the age estimate (`estimateMaxHR`, `HeartRateZones.estimateMaxHRFromHistory`). An easy-only runner's peak isn't their max.
+- **Runs from anywhere count** (`server/plan-run-sync.ts`): every run — app, free run, Strava webhook/import — first completes a pending orientation, then an open session on the same date. Runs paced outside 3:00–20:00/km don't count.
+- **Stalled plans:** if the orientation is never done, weeks 1–2 are enriched from history 2 days after its date. Sessions whose date has passed are never enriched.
 
 When a reviewed plan is wrong, add the missing rule here, not a prompt patch.
 

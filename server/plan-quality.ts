@@ -95,6 +95,8 @@ export interface PaceAnchor {
   recovery: PaceBand;
   tempo: PaceBand;
   interval: PaceBand;
+  /** Run segments of a walk-run session: around the runner's whole-session pace. */
+  walkRun: PaceBand;
 }
 
 export interface AnchorRun {
@@ -157,6 +159,10 @@ export function derivePaceAnchor(runs: AnchorRun[]): PaceAnchor | null {
     recovery: { min: p + 90, max: p + 150 },
     tempo: { min: p + 12, max: p + 30 },
     interval: { min: p - 12, max: p + 5 },
+    // A newcomer's anchor is usually a walk-run whose walk breaks slow the average, so the
+    // running bits are at or faster than it. Damion (2026-10): 9:00/km walk-runs were given
+    // 11:18/km run segments, slower than his walking-included average.
+    walkRun: { min: p - 30, max: p + 45 },
   };
 }
 
@@ -164,7 +170,7 @@ export function describeAnchor(a: PaceAnchor): string {
   const band = (b: PaceBand) => `${fmtPace(b.min)}–${fmtPace(b.max)}/km`;
   const when = a.sourceDate ? ` on ${a.sourceDate.toDateString()}` : "";
   return `Best recent effort: ${a.sourceKm.toFixed(1)} km in ${fmtDuration(a.sourceSecs)}${when} → estimated current 5K ≈ ${fmtDuration(a.est5kSecs)} (${fmtPace(a.est5kSecs / 5)}/km). A recorded training run is a floor, not a maximum — the athlete may be a little fitter.
-Training paces from this anchor: easy/long ${band(a.easy)}, recovery ${band(a.recovery)}, tempo/threshold ${band(a.tempo)}, 5K-pace intervals ${band(a.interval)}.`;
+Training paces from this anchor: easy/long ${band(a.easy)}, recovery ${band(a.recovery)}, tempo/threshold ${band(a.tempo)}, 5K-pace intervals ${band(a.interval)}, walk-run running segments ${band(a.walkRun)}.`;
 }
 
 // ── Session classification ──────────────────────────────────────────────────
@@ -253,6 +259,25 @@ export interface LoadRuleOptions {
   sparseHistory: boolean;          // < 3 runs in the last 30 days — be conservative in week 1
   priorWeeklyKms?: number[];       // later blocks: earlier weeks' volumes, oldest first
   longRunCeilingKm?: number;       // no session longer than this (longRunCeilingKm())
+  fixedSessions?: FixedSession[];  // regular club/group runs that count toward the plan
+}
+
+/** A regular session the runner does every week (club run). dayOfWeek 1=Mon … 7=Sun. */
+export interface FixedSession { name: string; dayOfWeek: number }
+
+// Matching a plan session to a regular session by name: its first distinctive word
+// ("Sands Salisbury Runners" → "sands", "TWR Salisbury" → "twr").
+const GENERIC_NAME_WORDS = new Set(["run", "runs", "runner", "runners", "running", "club", "group", "the", "and", "with", "session", "weekly"]);
+const fixedKey = (name: string): string | null =>
+  name.toLowerCase().split(/[^a-z0-9]+/).find(t => t.length >= 3 && !GENERIC_NAME_WORDS.has(t)) ?? null;
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+function fixedSessionOf(wo: any, opts: LoadRuleOptions): FixedSession | null {
+  const text = `${wo.description ?? ""} ${wo.name ?? ""}`.toLowerCase();
+  for (const f of opts.fixedSessions ?? []) {
+    const key = fixedKey(f.name);
+    if (key && new RegExp(`\\b${key}\\b`).test(text)) return f;
+  }
+  return null;
 }
 
 /** Shortest long run outside a deload week: what the athlete already runs, but never above the goal ceiling. */
@@ -262,6 +287,19 @@ const longRunAllowance = (longestSoFar: number) => Math.max(longestSoFar * 1.2, 
 const weekVolumeCap = (peakSoFar: number, isFirstPlanWeek: boolean) =>
   isFirstPlanWeek ? Math.max(peakSoFar * 1.3, peakSoFar + 5) : Math.max(peakSoFar * 1.25, peakSoFar + 4);
 const longRunShareCap = (daysPerWeek: number) => (daysPerWeek <= 3 ? 0.55 : 0.45);
+// The volume cap never goes below the smallest week the other rules allow: n − 1 minimum-length
+// runs plus the long-run floor. Emma (2026-10, ~4 km/week lately, 3 days) got a 9 km cap that
+// can't hold three 30-minute runs, so the trim undid the minimum and left 22-minute sessions.
+const minimumWeekKm = (opts: LoadRuleOptions, sessions: number): number => {
+  if (!opts.continuousCapable || sessions <= 0) return 0;
+  const easyKm = (MIN_EASY_MIN * 60) / opts.easyPaceSecs;
+  const longKm = (Math.max(MIN_EASY_MIN, longRunFloorMin(opts)) * 60) / opts.easyPaceSecs;
+  return (sessions - 1) * easyKm + longKm;
+};
+const volumeCap = (peakSoFar: number, isFirstPlanWeek: boolean, opts: LoadRuleOptions, sessions: number) =>
+  Math.max(weekVolumeCap(peakSoFar, isFirstPlanWeek), minimumWeekKm(opts, sessions));
+const runningSessions = (week: any) =>
+  (Array.isArray(week.workouts) ? week.workouts : []).filter((wo: any) => classifySession(wo.workoutType, wo.effortLabel) !== "rest").length;
 // A runner who already runs continuously gains little from a 15-minute jog: easy and long
 // runs are at least 30 min, recovery runs at least 20 (Julie's corrected plan had 2 km
 // "recovery runs" before this).
@@ -298,7 +336,7 @@ function firstTriple(weeks: any[]): number | null {
 export function buildLoadRulesPrompt(opts: LoadRuleOptions, anchor: PaceAnchor | null, baselineSource: string): string {
   const priors = opts.priorWeeklyKms ?? [];
   const peak = Math.max(opts.baselineWeeklyKm, ...priors, 0);
-  const firstCap = weekVolumeCap(peak, priors.length === 0);
+  const firstCap = volumeCap(peak, priors.length === 0, opts, opts.daysPerWeek);
   const firstLongMin = longRunAllowance(opts.startingLongestRunMin);
   const easy = opts.easyPaceSecs;
   const kmAt = (min: number) => (min * 60) / easy;
@@ -316,6 +354,7 @@ ${opts.longRunCeilingKm ? `3b. No session longer than ${opts.longRunCeilingKm} k
 6. A deload week reduces BOTH weekly volume AND the long run compared with the week before.
 7. Intensity labels: easy/long = "z2", recovery = "z1", tempo/threshold = "z4", intervals = "z5".
 8. Each session's distance must match its description — don't describe a 9 km run and set distance 6.
+${(opts.fixedSessions ?? []).length ? `9. Regular sessions stay on their own day every week: ${opts.fixedSessions!.map(f => `"${f.name}" on ${DAY_NAMES[dayOffset(f)]} (dayOfWeek ${offsetToDayOfWeek(dayOffset(f))})`).join(", ")}. Name the session after it so the athlete recognises it.\n` : ""}
 These rules are for you, not the athlete: don't quote them in session instructions.`;
 }
 
@@ -332,7 +371,7 @@ export function findLoadViolations(weeks: any[], opts: LoadRuleOptions): string[
     const n = week.weekNumber ?? idx + 1;
     const workouts: any[] = Array.isArray(week.workouts) ? week.workouts : [];
     const vol = weekKm(week, opts.easyPaceSecs);
-    const cap = weekVolumeCap(peak, idx === 0 && priors.length === 0);
+    const cap = volumeCap(peak, idx === 0 && priors.length === 0, opts, runningSessions(week));
     if (vol > cap + 0.5) {
       violations.push(`Week ${n}: ~${vol.toFixed(1)} km total, but the most allowed is ${cap.toFixed(1)} km (rule 1).`);
     }
@@ -413,7 +452,26 @@ export function findLoadViolations(weeks: any[], opts: LoadRuleOptions): string[
       violations.push(`Week ${w?.weekNumber ?? Math.floor(third / 7) + 1}: three running days in a row ending ${names[third % 7]} (sessions across the end of one week and the start of the next count too) — spread the sessions out${priors.length === 0 ? "; in the first, partial week schedule fewer sessions rather than cramming them" : ""} (rule 4c).`);
     }
   }
+  for (const m of misplacedFixedSessions(weeks, opts)) {
+    violations.push(`Week ${m.weekNumber} "${m.wo.description ?? m.wo.workoutType}": "${m.fixed.name}" is on ${DAY_NAMES[dayOffset(m.wo)]}, but the athlete does it on ${DAY_NAMES[dayOffset(m.fixed)]} — keep it on that day (rule 9).`);
+  }
   return violations;
+}
+
+/** Plan sessions named after a regular session but scheduled on another day. The first week
+ *  of a new plan is exempt: its regular day may already have passed. */
+function misplacedFixedSessions(weeks: any[], opts: LoadRuleOptions): Array<{ weekIdx: number; weekNumber: number; wo: any; fixed: FixedSession }> {
+  const out: Array<{ weekIdx: number; weekNumber: number; wo: any; fixed: FixedSession }> = [];
+  if (!(opts.fixedSessions ?? []).length) return out;
+  const firstExempt = (opts.priorWeeklyKms ?? []).length === 0;
+  weeks.forEach((week, weekIdx) => {
+    if (weekIdx === 0 && firstExempt) return;
+    for (const wo of week.workouts ?? []) {
+      const fixed = fixedSessionOf(wo, opts);
+      if (fixed && dayOffset(wo) !== dayOffset(fixed)) out.push({ weekIdx, weekNumber: week.weekNumber ?? weekIdx + 1, wo, fixed });
+    }
+  });
+  return out;
 }
 
 /**
@@ -522,7 +580,7 @@ export function repairPlanLoad(weeks: any[], opts: LoadRuleOptions): string[] {
     }
 
     // Weekly volume cap — trim easy/long running (never the quality sessions' structure).
-    const cap = weekVolumeCap(peak, idx === 0 && priors.length === 0);
+    const cap = volumeCap(peak, idx === 0 && priors.length === 0, opts, runningSessions(week));
     let vol = weekKm(week, easy);
     if (vol > cap + 0.5) {
       const trimmable = workouts.filter(wo => {
@@ -534,7 +592,12 @@ export function repairPlanLoad(weeks: any[], opts: LoadRuleOptions): string[] {
       if (trimmableKm > 0) {
         const factor = Math.max(0.4, (trimmableKm - excess) / trimmableKm);
         for (const wo of trimmable) {
-          wo.distance = Math.max(2, roundHalf(Number(wo.distance) * factor));
+          // Never back under the session's minimum length (or the long-run floor) — see minimumWeekKm.
+          const c = classifySession(wo.workoutType, wo.effortLabel);
+          const floorMin = !opts.continuousCapable ? 0
+            : c === "long" ? Math.max(MIN_EASY_MIN, longRunFloorMin(opts)) : minSessionMin(c);
+          const floorKm = Math.ceil(((floorMin * 60) / easy) * 2) / 2;
+          wo.distance = Math.max(2, floorKm, roundHalf(Number(wo.distance) * factor));
           if (Number(wo.duration) > 0) wo.duration = Math.round(wo.distance * easy);
         }
         repairs.push(`Week ${n}: ${vol.toFixed(1)} km → ${weekKm(week, easy).toFixed(1)} km (cap ${cap.toFixed(1)})`);
@@ -561,6 +624,15 @@ export function repairPlanLoad(weeks: any[], opts: LoadRuleOptions): string[] {
     prevLongest = weekLongest;
   });
 
+  // Regular sessions back on their own day; a session already on that day takes the old slot.
+  for (const m of misplacedFixedSessions(weeks, opts)) {
+    const from = m.wo.dayOfWeek;
+    const occupant = (weeks[m.weekIdx].workouts ?? []).find((o: any) => o !== m.wo && dayOffset(o) === dayOffset(m.fixed));
+    m.wo.dayOfWeek = offsetToDayOfWeek(dayOffset(m.fixed));
+    if (occupant) occupant.dayOfWeek = from;
+    repairs.push(`Week ${m.weekNumber}: "${m.fixed.name}" moved back to ${DAY_NAMES[dayOffset(m.fixed)]}`);
+  }
+
   // Three running days in a row (also across week boundaries): move an easy session to a
   // free later day in its own week; in the first, partial week drop it instead.
   if (opts.daysPerWeek <= 4) {
@@ -571,6 +643,7 @@ export function repairPlanLoad(weeks: any[], opts: LoadRuleOptions): string[] {
       const involved = timeline
         .filter(e => e.abs >= third - 2 && e.abs <= third)
         .filter(e => ["easy", "recovery", "other"].includes(classifySession(e.wo.workoutType, e.wo.effortLabel)))
+        .filter(e => !fixedSessionOf(e.wo, opts)) // a club run can't move; move the session around it
         .sort((a, b) => b.abs - a.abs);
       let fixed = false;
       for (const e of involved) {
