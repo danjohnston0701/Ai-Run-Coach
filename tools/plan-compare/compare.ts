@@ -81,7 +81,7 @@ for (let rep = 1; rep <= repeats; rep++) {
     }
 
     results.push({
-      label: c.label, repeat: rep, provider: planAiProvider(), planId, error,
+      label: c.label, repeat: rep, provider: process.env.COMPARE_LABEL ?? planAiProvider(), planId, error,
       seconds: Math.round((Date.now() - started) / 1000),
       firstAttemptViolations: firstLoad ? Number(firstLoad[1]) : firstGuard ? Number(firstGuard[1]) : 0,
       correctionRounds: (log.match(/correction \d\/2/g) ?? []).length,
@@ -94,7 +94,7 @@ for (let rep = 1; rep <= repeats; rep++) {
       weeks, workouts,
     });
     fs.writeFileSync(outPath, JSON.stringify(results, null, 1));
-    console.info(`[compare] ${c.label} #${rep} (${planAiProvider()}): ${error ?? "ok"} in ${Math.round((Date.now() - started) / 1000)}s`);
+    console.info(`[compare] ${c.label} #${rep} (${process.env.COMPARE_LABEL ?? planAiProvider()}): ${error ?? "ok"} in ${Math.round((Date.now() - started) / 1000)}s`);
   }
 }
 process.exit(0);

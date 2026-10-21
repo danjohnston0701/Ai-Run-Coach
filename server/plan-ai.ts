@@ -1,7 +1,8 @@
 // One entry point for every AI call that writes or changes a training plan: block 1,
 // next blocks, load-rule corrections, enrichment, adaptations, reassessments and the
 // plan review. PLAN_AI_PROVIDER picks the model family (read on every call, so a
-// comparison run can switch it): "openai" (default) or "anthropic".
+// comparison run can switch it): "openai" (default) or "anthropic"; see planAiProvider()
+// for per-task overrides.
 //
 // Returns the OpenAI chat-completion shape the call sites already parse
 // (choices[0].message.content / finish_reason "length" when truncated), so moving a call
@@ -17,8 +18,14 @@ export const CLAUDE_PLAN_MODEL = "claude-sonnet-5-5";
 let openaiClient: OpenAI | null = null;
 let anthropicClient: Anthropic | null = null;
 
-export function planAiProvider(): PlanAiProvider {
-  return String(process.env.PLAN_AI_PROVIDER ?? "").toLowerCase() === "anthropic" ? "anthropic" : "openai";
+/**
+ * PLAN_AI_PROVIDER sets every task; PLAN_AI_PROVIDER_<TASK> overrides one (task name in
+ * capitals, dashes as underscores — e.g. PLAN_AI_PROVIDER_PLAN_BLOCK_1=openai keeps the
+ * block the runner waits for on the faster model while everything else uses Claude).
+ */
+export function planAiProvider(task?: string): PlanAiProvider {
+  const override = task ? process.env[`PLAN_AI_PROVIDER_${task.toUpperCase().replace(/-/g, "_")}`] : undefined;
+  return String(override ?? process.env.PLAN_AI_PROVIDER ?? "").toLowerCase() === "anthropic" ? "anthropic" : "openai";
 }
 
 export interface PlanChatMessage { role: "system" | "user" | "assistant"; content: string }
@@ -53,7 +60,7 @@ function extractJsonObject(text: string): string {
 }
 
 export async function planChat(req: PlanChatRequest): Promise<PlanChatResponse> {
-  const provider = planAiProvider();
+  const provider = planAiProvider(req.task);
   const started = Date.now();
 
   if (provider === "anthropic") {

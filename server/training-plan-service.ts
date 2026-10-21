@@ -437,9 +437,10 @@ async function requestPlanCorrection(
   userPrompt: string,
   previousJson: string,
   violations: string[],
+  task: "plan-block-1-correction" | "plan-next-block-correction",
 ): Promise<any> {
   const res = await planChat({
-    task: "plan-correction",
+    task,
     openaiModel: "gpt-4.1",
     messages: [
       { role: "system", content: systemPrompt },
@@ -482,7 +483,7 @@ async function enforceLoadRules(
   for (let attempt = 1; attempt <= 2 && violations.length > 0; attempt++) {
     console.warn(`[${tag}] Load rules: ${violations.length} violation(s), correction ${attempt}/2:\n  ${violations.join('\n  ')}`);
     try {
-      const corrected = await requestPlanCorrection(systemPrompt, userPrompt, currentJson, violations);
+      const corrected = await requestPlanCorrection(systemPrompt, userPrompt, currentJson, violations, tag === 'NextBlock' ? 'plan-next-block-correction' : 'plan-block-1-correction');
       if (!Array.isArray(corrected?.weeks) || corrected.weeks.length < weeksToGenerate) break;
       const correctedWeeks = coercePlanWeeks(corrected.weeks).slice(0, weeksToGenerate);
       correctedWeeks.forEach((w: any) => (w.workouts ?? []).forEach(normaliseIntensity));
@@ -1551,7 +1552,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
       if (violations.length > 0) {
         console.warn(`[Training Plan] Progression guard: ${violations.length} violation(s) — requesting correction:\n  ${violations.join('\n  ')}`);
         try {
-          const corrected = await requestPlanCorrection(systemPromptContent, prompt, rawContent, violations);
+          const corrected = await requestPlanCorrection(systemPromptContent, prompt, rawContent, violations, 'plan-block-1-correction');
           if (Array.isArray(corrected?.weeks) && corrected.weeks.length >= weeksToGenerate) {
             const correctedWeeks = coercePlanWeeks(corrected.weeks).slice(0, weeksToGenerate);
             const remaining = findProgressionViolations(correctedWeeks, guardOpts);
@@ -2101,7 +2102,7 @@ STRUCTURAL CONSTRAINTS:
     if (violations.length > 0) {
       console.warn(`[NextBlock] Progression guard: ${violations.length} violation(s) — requesting correction:\n  ${violations.join('\n  ')}`);
       try {
-        const corrected = await requestPlanCorrection(systemPrompt, prompt, rawContent, violations);
+        const corrected = await requestPlanCorrection(systemPrompt, prompt, rawContent, violations, 'plan-next-block-correction');
         if (Array.isArray(corrected?.weeks) && corrected.weeks.length >= weeksToGenerate) {
           const correctedWeeks = coercePlanWeeks(corrected.weeks);
           const remaining = findProgressionViolations(correctedWeeks, guardOpts);

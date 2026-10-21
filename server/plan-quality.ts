@@ -187,8 +187,10 @@ export function classifySession(workoutType?: string | null, effortLabel?: strin
   if (t.includes("long") || l.includes("long")) return "long";
   // An easy run finished with a few short strides — easy for zones, load and spacing.
   if (t.includes("stride") || l.includes("stride")) return "easy";
-  if (/tempo|threshold|lactate|cruise/.test(t) || /tempo|threshold|lactate|cruise/.test(l)) return "tempo";
-  if (/interval|vo2|repeat|hill|fartlek|speed|track|stride|race_pace|time_trial/.test(t) ||
+  // Fartlek is surges at a "comfortably hard" 6–7/10 — tempo zone and pace, not VO2 (Zone 5
+  // labels on fartleks contradicted their own instructions, Claude review 2026-10-21).
+  if (/tempo|threshold|lactate|cruise|fartlek/.test(t) || /tempo|threshold|lactate|cruise|fartlek/.test(l)) return "tempo";
+  if (/interval|vo2|repeat|hill|speed|track|stride|race_pace|time_trial/.test(t) ||
       /interval|vo2|speed|neuromuscular|stride|hill|race_pace/.test(l)) return "interval";
   if (/easy|aerobic|base|jog/.test(t) || /easy|aerobic|base/.test(l)) return "easy";
   return "other";
