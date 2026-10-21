@@ -10,6 +10,7 @@ import { DateTime } from 'luxon';
 import { reconcileGooglePlaySubscriptions } from './google-play-billing';
 import { backfillRunWeather, backfillRunStartPoints } from './run-weather';
 import { backfillRunDerivedFields } from './run-derived-fields';
+import { shiftStalledPlans } from './plan-stall';
 import { findPlansNeedingEnrichment, enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek, correctImplausibleHRZoneBPMs } from './session-enrichment-service';
 
 // Track which users have already received a reminder today (user_id -> timestamp of last send)
@@ -309,6 +310,13 @@ export function startScheduler(): void {
     });
   });
   console.log('[Scheduler] Coaching plan reminders scheduled (once daily at 8 AM UTC, respects user timezone)');
+
+  // Missed a week → the plan moves back a week (plan-stall.ts). Before enrichment, so the
+  // moved sessions are enriched on their new dates.
+  cron.schedule('50 5 * * *', () => {
+    shiftStalledPlans().catch(err => console.error('[Scheduler] Plan stall check error:', err));
+  });
+  console.log('[Scheduler] Stalled-plan check scheduled (daily at 5:50 AM UTC)');
 
   // Session enrichment — rolling 2-week block enrichment.
   // Runs daily at 6 AM UTC. Finds all active plans where the calendar has passed

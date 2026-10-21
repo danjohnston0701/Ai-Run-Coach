@@ -149,6 +149,12 @@ Every plan block (`generateTrainingPlan` and `generateNextBlock`) goes through t
 - **Runs from anywhere count** (`server/plan-run-sync.ts`): every run — app, free run, Strava webhook/import — first completes a pending orientation, then an open session on the same date. Runs paced outside 3:00–20:00/km don't count.
 - **Stalled plans:** if the orientation is never done, weeks 1–2 are enriched from history 2 days after its date. Sessions whose date has passed are never enriched.
 
+- **Novice rest days:** ≤3 days/week never back to back; 4 days/week at most one back-to-back pair per week, never three in a row (Sunday → Monday counts). `repairNoviceSpacing` fixes what the model doesn't — the old "rest day after every session" rule was impossible at 4 days/week.
+- **Review pass** (`server/plan-review.ts`): after the rules, a coach-style read checks each session's text against its own numbers, level and goal. It may only rewrite description/instructions — never distances, paces, zones, days. `PLAN_AI_REVIEW=0` turns it off.
+- **Missed a week** (`server/plan-stall.ts`, daily 5:50 UTC): runner quiet 7+ days (but active in the last 28) with a session a week overdue → open sessions from that week on move back a week, next block too, and the runner is notified. Race-dated plans absorb the week by generating one fewer. Next-block dates anchor on the latest week for this reason.
+- **AI provider** (`server/plan-ai.ts`): every plan AI call (block 1, next block, corrections, enrichment, adaptation, reassessment, review) goes through `planChat`. `PLAN_AI_PROVIDER=anthropic` switches all of them to Claude (`CLAUDE_PLAN_MODEL`, needs `ANTHROPIC_API_KEY`); default OpenAI.
+- **Comparing engines/rule changes:** `tools/plan-compare/compare.ts` generates plans for real runners on a Neon BRANCH (refuses the `.env` database) and records first-attempt rule breaks, corrections, repairs, review rewrites, time and cost; `report.ts` builds the side-by-side page.
+
 When a reviewed plan is wrong, add the missing rule here, not a prompt patch.
 
 ### Progress check-ins: on time or not at all (`utils/ProgressMilestones.kt`, iOS `ProgressMilestones.swift`)

@@ -22,11 +22,8 @@ import {
   buildLoadRulesPrompt, findLoadViolations, repairPlanLoad, normaliseIntensity, recomputeWeekTotals,
   weekKm, continuousRunMin, longRunCeilingKm, explainLongerThanGoal, type LoadRuleOptions,
 } from "./plan-quality";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { planChat } from "./plan-ai";
+import { reviewPlanText } from "./plan-review";
 
 // ==================== TRAINING PLAN TEMPLATES ====================
 
@@ -142,7 +139,6 @@ export function findProgressionViolations(
 ): string[] {
   const violations: string[] = [];
   let longestSoFar = opts.startingLongestRunMin;
-  let prevWeekLastOffset: number | null = null;
 
   for (const week of weeks) {
     const weekNum = week.weekNumber;
@@ -167,27 +163,111 @@ export function findProgressionViolations(
       weekMax = Math.max(weekMax, mins);
     }
 
-    // Rest day between sessions when the schedule allows it (≤4 days/week)
-    if (opts.daysPerWeek <= 4) {
-      const offsets = workouts
-        .filter(wo => String(wo.workoutType ?? "").toLowerCase() !== "rest")
-        .map(wo => (((Number(wo.dayOfWeek) || 0) % 7) + 6) % 7) // 0=Mon … 6=Sun
-        .sort((a, b) => a - b);
-      for (let i = 1; i < offsets.length; i++) {
-        if (offsets[i] - offsets[i - 1] === 1) {
-          violations.push(`Week ${weekNum}: sessions on consecutive days — leave a rest day between sessions.`);
-          break;
-        }
-      }
-      if (prevWeekLastOffset === 6 && offsets[0] === 0) {
-        violations.push(`Week ${weekNum}: Monday session follows the previous Sunday session — leave a rest day between sessions.`);
-      }
-      if (offsets.length > 0) prevWeekLastOffset = offsets[offsets.length - 1];
-    }
-
     longestSoFar = Math.max(longestSoFar, weekMax);
   }
-  return violations;
+  return [...violations, ...noviceSpacingViolations(weeks, opts.daysPerWeek)];
+}
+
+// ── Rest days for novice / return-to-run plans ──────────────────────────────
+// ≤3 days/week: never two days in a row. 4 days/week: one back-to-back pair per week at
+// most and never three in a row — "a rest day after every session" can't fit 4 sessions
+// into 7 days once Sunday → Monday counts, so no model could pass it (Damion's re-runs,
+// 2026-10-21) and the plan shipped with the violations. Sunday → Monday always counts.
+const spacingOffset = (wo: any) => (((Number(wo.dayOfWeek) || 0) % 7) + 6) % 7; // 0=Mon … 6=Sun
+const spacingDay = (offset: number) => (offset === 6 ? 7 : offset + 1);
+
+function noviceSpacingViolations(weeks: any[], daysPerWeek: number): string[] {
+  if (daysPerWeek > 4) return [];
+  const days = new Set<number>();
+  weeks.forEach((week, wi) => {
+    for (const wo of week.workouts ?? []) {
+      if (String(wo.workoutType ?? "").toLowerCase() !== "rest") days.add(wi * 7 + spacingOffset(wo));
+    }
+  });
+  const out: string[] = [];
+  const pairsInWeek = new Map<number, number>();
+  for (const d of [...days].sort((a, b) => a - b)) {
+    if (!days.has(d - 1)) continue;
+    const wi = Math.floor(d / 7);
+    const weekNum = weeks[wi]?.weekNumber ?? wi + 1;
+    const crossesWeek = d % 7 === 0;
+    if (daysPerWeek <= 3) {
+      out.push(crossesWeek
+        ? `Week ${weekNum}: Monday session follows the previous Sunday session — leave a rest day between sessions.`
+        : `Week ${weekNum}: sessions on consecutive days — leave a rest day between sessions.`);
+    } else if (days.has(d - 2)) {
+      out.push(`Week ${weekNum}: three sessions in a row — at most two days running back to back.`);
+    } else {
+      pairsInWeek.set(wi, (pairsInWeek.get(wi) ?? 0) + 1);
+      if (pairsInWeek.get(wi)! > 1) out.push(`Week ${weekNum}: more than one pair of back-to-back sessions — at most one per week, with a rest day either side.`);
+    }
+  }
+  return [...new Set(out)];
+}
+
+// Standard rest-day patterns (0=Mon): every one leaves a rest day before the next week starts.
+const SPACING_PATTERNS: Record<number, number[]> = { 1: [5], 2: [1, 5], 3: [1, 3, 5], 4: [1, 3, 5, 6] };
+
+/** Last line of defence: move sessions until the spacing rule holds — single moves first, then
+ *  a standard pattern for any week still in breach (keeping the session order). Week 1 sessions
+ *  only move later: earlier days may already have passed. Returns what moved. */
+export function repairNoviceSpacing(weeks: any[], daysPerWeek: number): string[] {
+  const moved: string[] = [];
+  const DAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const running = (week: any) => (week.workouts ?? []).filter((wo: any) => String(wo.workoutType ?? "").toLowerCase() !== "rest");
+  const score = () => noviceSpacingViolations(weeks, daysPerWeek).length;
+
+  const singleMoves = () => {
+    for (let guard = 0; guard < 24 && score() > 0; guard++) {
+      const before = score();
+      let best: { wo: any; to: number; after: number } | null = null;
+      weeks.forEach((week, wi) => {
+        const sessions = running(week);
+        for (const wo of sessions) {
+          const from = spacingOffset(wo);
+          const taken = new Set(sessions.filter((o: any) => o !== wo).map(spacingOffset));
+          for (let to = 0; to <= 6; to++) {
+            if (to === from || taken.has(to) || (wi === 0 && to < from)) continue;
+            const original = wo.dayOfWeek;
+            wo.dayOfWeek = spacingDay(to);
+            const after = score();
+            wo.dayOfWeek = original;
+            if (after < before && (!best || after < best.after)) best = { wo, to, after };
+          }
+        }
+      });
+      if (!best) return;
+      const b = best as { wo: any; to: number; after: number };
+      moved.push(`"${b.wo.description ?? b.wo.workoutType}" → ${DAY[b.to]}`);
+      b.wo.dayOfWeek = spacingDay(b.to);
+    }
+  };
+
+  // Standard pattern for one week, if week 1's sessions would only move later.
+  const applyPattern = (wi: number): boolean => {
+    const week = weeks[wi];
+    const sessions = running(week).sort((x: any, y: any) => spacingOffset(x) - spacingOffset(y));
+    const pattern = SPACING_PATTERNS[sessions.length];
+    if (!pattern || sessions.every((wo: any, i: number) => spacingOffset(wo) === pattern[i])) return false;
+    if (wi === 0 && sessions.some((wo: any, i: number) => pattern[i] < spacingOffset(wo))) return false;
+    sessions.forEach((wo: any, i: number) => { wo.dayOfWeek = spacingDay(pattern[i]); });
+    moved.push(`Week ${week.weekNumber ?? wi + 1} → ${pattern.map(d => DAY[d]).join("/")}`);
+    return true;
+  };
+
+  singleMoves();
+  // Weeks still in breach (a cross-week breach names the later week — try it, then the week
+  // before, then the week after), then single moves again: fixing week 2 can free week 1's options.
+  for (let guard = 0; guard < weeks.length * 2 && score() > 0; guard++) {
+    const weekNums = noviceSpacingViolations(weeks, daysPerWeek)
+      .map(v => Number(v.match(/^Week (\d+)/)?.[1]))
+      .filter(n => Number.isFinite(n));
+    const wi = weeks.findIndex(w => Number(w.weekNumber) === weekNums[0]);
+    if (wi < 0) break;
+    if (!applyPattern(wi) && !(wi > 0 && applyPattern(wi - 1)) && !(wi + 1 < weeks.length && applyPattern(wi + 1))) break;
+    singleMoves();
+  }
+  return moved;
 }
 
 /** Prompt section for novice / injured athletes — shared by block 1 and later blocks. */
@@ -210,7 +290,7 @@ This athlete is ${who}. These rules OVERRIDE the plan-type guidance above. Plans
 3. No intervals, tempo, hills, strides, fartlek, race-pace or time trials until the athlete has completed 30 minutes of continuous easy running.
 4. Total weekly running time grows by no more than ~20–25% week to week. A deload week reduces BOTH total time AND the longest continuous stretch — it must not contain the block's longest run.
 5. Keep every session (including walk breaks) to 45 minutes or less until the athlete can run 30 minutes continuously.${opts.daysPerWeek <= 4 ? `
-6. Never schedule sessions on consecutive days — always leave a rest day between sessions (including Sunday → Monday across weeks).` : ""}${opts.isNovice && opts.targetDistance > 0 && opts.targetDistance <= 10 ? `
+6. ${opts.daysPerWeek <= 3 ? "Never schedule sessions on consecutive days — always leave a rest day between sessions" : "At most ONE pair of back-to-back days per week (e.g. Sat + Sun) and never three days in a row; every other session has a rest day either side"} (Sunday → Monday across weeks counts).` : ""}${opts.isNovice && opts.targetDistance > 0 && opts.targetDistance <= 10 ? `
 7. No session may be longer than the goal distance (${opts.targetDistance}km) — running ${opts.targetDistance}km comfortably IS the goal; it comes at the end of the plan, not in the opening weeks.` : ""}
 - Coach effort by feel (talk test / RPE), not heart-rate caps: deconditioned runners' heart rates run high even at a slow jog.`;
 }
@@ -358,8 +438,9 @@ async function requestPlanCorrection(
   previousJson: string,
   violations: string[],
 ): Promise<any> {
-  const res = await openai.chat.completions.create({
-    model: "gpt-4.1",
+  const res = await planChat({
+    task: "plan-correction",
+    openaiModel: "gpt-4.1",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -369,9 +450,8 @@ async function requestPlanCorrection(
         content: `This plan breaks the mandatory progression rules for this athlete:\n- ${violations.join("\n- ")}\n\nRevise the plan so every rule is satisfied — change only what is needed, keep the same JSON structure, week count and sessions per week. Return the complete corrected JSON.`,
       },
     ],
-    response_format: { type: "json_object" },
     temperature: 0.3,
-    max_tokens: 32000,
+    maxTokens: 32000,
   });
   if (res.choices[0].finish_reason === "length") throw new Error("Correction response truncated");
   const raw = (res.choices[0].message.content || "{}").replace(/```json\n?/g, "").replace(/\n?```/g, "").trim();
@@ -1392,15 +1472,15 @@ App capabilities available in every session: real-time GPS pace/distance, live a
           )
         : prompt;
 
-      const res = await openai.chat.completions.create({
-        model: "gpt-4.1",
+      const res = await planChat({
+        task: "plan-block-1",
+        openaiModel: "gpt-4.1",
         messages: [
           { role: "system", content: systemPromptContent },
           { role: "user",   content: userPrompt }
         ],
-        response_format: { type: "json_object" },
         temperature: 0.5,
-        max_tokens: 32000,
+        maxTokens: 32000,
       });
 
       const reason = res.choices[0].finish_reason;
@@ -1484,6 +1564,11 @@ App capabilities available in every session: real-time GPS pace/distance, live a
           console.error(`[Training Plan] Progression correction failed — keeping original plan:`, correctionErr);
         }
         if (violations.length > 0) {
+          const moved = repairNoviceSpacing(planData.weeks, daysPerWeek);
+          if (moved.length) console.warn(`[Training Plan] Progression guard: moved for rest days:\n  ${moved.join('\n  ')}`);
+          violations = findProgressionViolations(planData.weeks, guardOpts);
+        }
+        if (violations.length > 0) {
           console.warn(`[Training Plan] Progression guard: ${violations.length} violation(s) remain:\n  ${violations.join('\n  ')}`);
         } else {
           console.log(`[Training Plan] Progression guard: ✅ corrected plan passes`);
@@ -1498,6 +1583,12 @@ App capabilities available in every session: real-time GPS pace/distance, live a
     } else {
       recomputeWeekTotals(planData.weeks, guardPaceMinPerKm * 60);
     }
+    await reviewPlanText(planData.weeks, {
+      goal: `${goalType} (${targetDistance} km)${targetTime ? `, target ${fmtDuration(targetTime)}` : ", no target time"}${targetDate ? ` on ${targetDate.toDateString()}` : ""}`,
+      fitnessLevel: experienceLevel,
+      easyPaceSecs: needsProgressionGuard ? guardPaceMinPerKm * 60 : easyPaceSecs,
+      regularSessions: regularSessions.map(r => `${r.name} (${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][r.dayOfWeek] ?? "?"})`),
+    }, 'Training Plan');
     explainLongerThanGoal(planData.weeks, targetDistance, easyPaceSecs);
 
     // Sanitise numeric fields before DB insert — Postgres rejects NaN for integer/real columns
@@ -1980,15 +2071,15 @@ STRUCTURAL CONSTRAINTS:
 - Do not include a coachingProgrammeSummary — just the weeks array`;
 
   const systemPrompt = `You are an elite AI running coach continuing a personalised multi-block training programme. You have full creative authority. Use the previous block summary and athlete profile to design the next logical training phase. Always respond with valid JSON only, no extra text.${runnerProfileBlock(aiRunnerProfile)}`;
-  const response = await openai.chat.completions.create({
-    model: "gpt-4.1",
+  const response = await planChat({
+    task: "plan-next-block",
+    openaiModel: "gpt-4.1",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt }
     ],
-    response_format: { type: "json_object" },
     temperature: 0.5,
-    max_tokens: 32000,
+    maxTokens: 32000,
   });
 
   if (response.choices[0].finish_reason === 'length') {
@@ -2023,6 +2114,11 @@ STRUCTURAL CONSTRAINTS:
         console.error(`[NextBlock] Progression correction failed — keeping original block:`, correctionErr);
       }
       if (violations.length > 0) {
+        const moved = repairNoviceSpacing(blockData.weeks, daysPerWeek);
+        if (moved.length) console.warn(`[NextBlock] Progression guard: moved for rest days:\n  ${moved.join('\n  ')}`);
+        violations = findProgressionViolations(blockData.weeks, guardOpts);
+      }
+      if (violations.length > 0) {
         console.warn(`[NextBlock] Progression guard: ${violations.length} violation(s) remain:\n  ${violations.join('\n  ')}`);
       }
     }
@@ -2034,6 +2130,11 @@ STRUCTURAL CONSTRAINTS:
   } else {
     recomputeWeekTotals(blockData.weeks, guardPaceMinPerKm * 60);
   }
+  await reviewPlanText(blockData.weeks, {
+    goal: `${plan.goalType} (${plan.targetDistance} km)${plan.targetTime ? `, target ${fmtDuration(plan.targetTime)}` : ", no target time"}${plan.targetDate ? ` on ${new Date(plan.targetDate).toDateString()}` : ""}, weeks ${nextBlockStart}–${nextBlockEnd} of ${totalWeeks}`,
+    fitnessLevel: plan.experienceLevel || blockUser?.fitnessLevel || "regular",
+    easyPaceSecs: needsProgressionGuard ? guardPaceMinPerKm * 60 : blockEasyPaceSecs,
+  }, 'NextBlock');
   explainLongerThanGoal(blockData.weeks, plan.targetDistance, blockEasyPaceSecs);
 
   // ── 5. Plan calendar anchor + nextBlockAt ─────────────────────────────────
@@ -2043,7 +2144,11 @@ STRUCTURAL CONSTRAINTS:
   // Inverting block 1's own date formula on an existing workout keeps the same timezone basis.
   const userTimezone = blockUser?.timezone ?? null;
   const planWeekStart: Date = (() => {
-    const ref = existingWorkouts.find(r => r.workout.scheduledDate && r.weekNumber != null);
+    // The LATEST week's session: a plan moved back a week after a missed week (plan-stall.ts)
+    // has later weeks shifted but week 1 not, and the next block must follow the shifted ones.
+    const ref = existingWorkouts
+      .filter(r => r.workout.scheduledDate && r.weekNumber != null)
+      .sort((a, b) => (b.weekNumber - a.weekNumber) || (new Date(b.workout.scheduledDate!).getTime() - new Date(a.workout.scheduledDate!).getTime()))[0];
     if (ref) {
       const anchor = new Date(ref.workout.scheduledDate!);
       const dayOffsetFromMonday = (((ref.workout.dayOfWeek ?? 1) % 7) + 6) % 7;
@@ -2531,8 +2636,9 @@ Respond with ONLY valid JSON in this exact format:
   ]
 }`;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+    const response = await planChat({
+      task: "plan-adaptation",
+      openaiModel: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -2543,9 +2649,8 @@ Respond with ONLY valid JSON in this exact format:
           content: prompt
         }
       ],
-      response_format: { type: "json_object" },
       temperature: 0.6,
-      max_tokens: 800,
+      maxTokens: 800,
     });
 
     const adaptation = JSON.parse(response.choices[0].message.content || "{}");
@@ -2833,8 +2938,9 @@ Provide your assessment in JSON format:
 
         const aiRunnerProfileForReassess = (await getRunnerProfile(userId).catch(() => null))?.profile ?? null;
 
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o",
+        const response = await planChat({
+          task: "plan-reassessment",
+          openaiModel: "gpt-4o",
           messages: [
             {
               role: "system",
@@ -2845,9 +2951,8 @@ Provide your assessment in JSON format:
               content: prompt,
             },
           ],
-          response_format: { type: "json_object" },
           temperature: 0.7,
-          max_tokens: 600,
+          maxTokens: 600,
         });
 
         const assessment = JSON.parse(

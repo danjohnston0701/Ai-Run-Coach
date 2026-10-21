@@ -32,7 +32,7 @@
  *   preceding weeks — genuinely adaptive, not guessed at day one.
  */
 
-import OpenAI from "openai";
+import { planChat } from "./plan-ai";
 import { db } from "./db";
 import {
   plannedWorkouts,
@@ -46,7 +46,6 @@ import { getOrGenerateSessionCoaching } from "./session-coaching-service";
 import { HeartRateZones } from "./heart-rate-zones";
 import { derivePaceAnchor, describeAnchor, classifySession, fmtPace, type PaceBand } from "./plan-quality";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ─── Pace helpers ─────────────────────────────────────────────────────────────
 
@@ -371,15 +370,15 @@ Your targets must be internally consistent: if you assign Zone 2, the pace must 
 Apply your exercise physiology knowledge to ANY session type, including novel ones you haven't seen before. Read the intent, understand the physiological demand, assign appropriate targets.`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+    const response = await planChat({
+      task: "session-enrichment",
+      openaiModel: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      response_format: { type: "json_object" },
       temperature: 0.2, // Low temperature — numeric precision matters here
-      max_tokens: 3000,
+      maxTokens: 3000,
     });
 
     const parsed = JSON.parse(response.choices[0].message.content ?? "{}");
