@@ -2673,9 +2673,44 @@ function transformRunForAndroid(run: any) {
   // ── Helper: server-side auto-complete of a linked planned workout ────────
   // Called whenever a run is saved (new, Case-0 merge, or Case-2 merge).
   // Idempotent — skips silently if already completed or no link exists.
+  // ── Helper: the first run after a plan is created completes its orientation ──
+  // A new user's plan only gets real targets once its orientation is done, and only a run
+  // started FROM the orientation session used to count. Julie (2026-10-20) ran 5 km the
+  // morning after creating her plan as a free run, and every session stayed on placeholders.
+  // That run is exactly the calibration data the orientation exists to collect.
+  async function linkRunToPendingOrientation(run: any): Promise<string | null> {
+    if (!run?.userId || String(run.sessionType ?? "run").toLowerCase() === "walk") return null;
+    const km = run.distance > 200 ? run.distance / 1000 : run.distance;
+    if (!(km >= 1)) return null;
+    const runAt = new Date(run.completedAt ?? run.createdAt ?? Date.now());
+    const [pending] = await db
+      .select({ id: plannedWorkouts.id, planId: trainingPlans.id, intensity: plannedWorkouts.intensity, description: plannedWorkouts.description })
+      .from(plannedWorkouts)
+      .innerJoin(trainingPlans, eq(plannedWorkouts.trainingPlanId, trainingPlans.id))
+      .where(and(
+        eq(trainingPlans.userId, run.userId),
+        eq(trainingPlans.status, "active"),
+        eq(plannedWorkouts.workoutType, "orientation"),
+        eq(plannedWorkouts.isCompleted, false),
+        lt(trainingPlans.createdAt, runAt),
+      ))
+      .orderBy(desc(trainingPlans.createdAt))
+      .limit(1);
+    if (!pending) return null;
+    await db.update(runs).set({
+      linkedWorkoutId: pending.id,
+      linkedPlanId: pending.planId,
+      workoutType: "orientation",
+      workoutIntensity: pending.intensity ?? null,
+      workoutDescription: pending.description ?? null,
+    } as any).where(eq(runs.id, run.id));
+    console.log(`✅ [autoComplete] Run ${run.id} linked to pending orientation ${pending.id}`);
+    return pending.id;
+  }
+
   async function autoCompleteLinkedWorkout(runId: string): Promise<void> {
     const [savedRun] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    const wid = (savedRun as any)?.linkedWorkoutId;
+    const wid = (savedRun as any)?.linkedWorkoutId ?? (savedRun ? await linkRunToPendingOrientation(savedRun) : null);
     if (!wid) return;
 
     const [pw] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, wid)).limit(1);
@@ -18060,6 +18095,14 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     }
   });
 
+  // Complete/skip used to accept any workout id from any signed-in user.
+  async function ownsPlan(planId: string | null | undefined, userId: string): Promise<boolean> {
+    if (!planId) return false;
+    const [plan] = await db.select({ id: trainingPlans.id }).from(trainingPlans)
+      .where(and(eq(trainingPlans.id, planId), eq(trainingPlans.userId, userId))).limit(1);
+    return !!plan;
+  }
+
   // Complete a workout (link to a run session)
   app.put("/api/training-plans/workouts/:workoutId/complete", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
@@ -18070,6 +18113,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
 
       // Fetch the workout first so we can copy plan context onto the run
       const [workoutBefore] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));
+      if (!workoutBefore || !(await ownsPlan(workoutBefore.trainingPlanId, req.user!.userId))) {
+        return res.status(404).json({ error: "Workout not found" });
+      }
 
       // Update the workout
       await db.update(plannedWorkouts)
@@ -18159,6 +18205,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
     try {
       const { workoutId } = req.params;
       const [before] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, workoutId));
+      if (!before || !(await ownsPlan(before.trainingPlanId, req.user!.userId))) {
+        return res.status(404).json({ error: "Workout not found" });
+      }
       await db.update(plannedWorkouts).set({ isCompleted: true }).where(eq(plannedWorkouts.id, workoutId));
       // A skipped orientation has no run data, but weeks 1-2 must still leave placeholder
       // targets — enrichment falls back to DOB/fitness-level zones.

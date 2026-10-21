@@ -127,6 +127,26 @@ Android (`WorkoutDetailScreen.kt`) reflects this: it shows a full-screen "Genera
 
 `ensureClosingStageMilestones()` in `ai-service.ts` guarantees a `session_complete` trigger exists even if OpenAI's response omits one, for both distance-based (`distance >= X`) and time-based (`elapsed_min >= X`) sessions — the time-based fallback is a relatively recent addition, so don't assume every historically-cached plan has one (cache version gate will regenerate them, but only on next open past a version bump).
 
+### AI plan quality gate (`server/plan-quality.ts`)
+Every plan block (`generateTrainingPlan` and `generateNextBlock`) goes through this gate before it is saved, at every fitness level. Novice and injured runners also keep their stricter time-based rules (`findProgressionViolations`).
+- **Starting point:** weekly volume and longest run come from the last 30 days of runs, measured over the span actually recorded. With fewer than 3 runs it combines those with what the stated fitness level means (`LEVEL_BASELINES`, taken from the apps' own level descriptions). Never invent a figure.
+- **Pace anchor:** the best effort of 3 km or more is projected to a 5K (Riegel) and gives the easy, tempo and interval pace bands.
+- **The rules** (`buildLoadRulesPrompt`, checked by `findLoadViolations`):
+  - Week-1 and week-on-week volume caps.
+  - Long-run growth cap and a long-run floor.
+  - The long run is the longest session of its week.
+  - No walk-run for runners who already run continuously.
+  - Minimum session length.
+  - Never three running days in a row, across week boundaries too.
+  - At most 2 quality sessions a week.
+  - Deload weeks are lower in both volume and long run.
+  - Tempo/threshold is Zone 4.
+- **Enforcement:** the model gets two correction rounds, then `repairPlanLoad` fixes whatever is left.
+- **Enrichment** (`session-enrichment-service.ts`) uses the same anchor to clamp paces and the same category to set HR zones.
+- **Orientation:** the first run saved after a new plan is created completes its orientation (`linkRunToPendingOrientation` in `routes.ts`), even if it was a free run.
+
+When a reviewed plan is wrong, add the missing rule here, not a prompt patch.
+
 ### Progress check-ins: on time or not at all (`utils/ProgressMilestones.kt`, iOS `ProgressMilestones.swift`)
 The free-run 25/50/75% check-ins and any coaching-plan trigger keyed on `distance_pct` ("halfway_milestone") get a short window just past their point (~8 s of travel, 20–50 m). They fire inside it only when nothing is playing, queued or being generated, and are skipped once it closes. The generated audio must also come back within 8 s and find the slot still clear (`deliverIf` gate on `fireEliteCoaching` / `fireLiveTriggerMessage`, and on iOS `executeEliteCoaching` / `fireDynamicCue`), or it's dropped. Don't put them back into the elite cooldown chain or let them queue: that's what produced "halfway" at 60% and "25%" at 1.4 km of 3 km. Milestones on a km marker go to the km split, ones inside the final 500 m to the finish cues. The two files are line-for-line ports, so change both together.
 

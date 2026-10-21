@@ -17,6 +17,11 @@ import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 import { generateOrientationCoachingPrompt } from "./orientation-session-service";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { jsonrepair } from "jsonrepair";
+import {
+  levelBaseline, derivePaceAnchor, describeAnchor, anchorRunKm, anchorRunSecs, fmtDuration,
+  buildLoadRulesPrompt, findLoadViolations, repairPlanLoad, normaliseIntensity, recomputeWeekTotals,
+  weekKm, continuousRunMin, longRunCeilingKm, explainLongerThanGoal, type LoadRuleOptions,
+} from "./plan-quality";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
@@ -377,6 +382,51 @@ async function requestPlanCorrection(
   }
 }
 
+/**
+ * Holds a non-novice plan to the load rules (plan-quality.ts): up to two correction rounds
+ * with the model, then deterministic repair of whatever is still wrong. Returns the plan
+ * fields to keep (the model may also revise its summary while correcting).
+ */
+async function enforceLoadRules(
+  planData: any,
+  rawJson: string,
+  opts: LoadRuleOptions,
+  systemPrompt: string,
+  userPrompt: string,
+  weeksToGenerate: number,
+  tag: string,
+): Promise<any> {
+  let current = planData;
+  let currentJson = rawJson;
+  let violations = findLoadViolations(current.weeks, opts);
+  for (let attempt = 1; attempt <= 2 && violations.length > 0; attempt++) {
+    console.warn(`[${tag}] Load rules: ${violations.length} violation(s), correction ${attempt}/2:\n  ${violations.join('\n  ')}`);
+    try {
+      const corrected = await requestPlanCorrection(systemPrompt, userPrompt, currentJson, violations);
+      if (!Array.isArray(corrected?.weeks) || corrected.weeks.length < weeksToGenerate) break;
+      const correctedWeeks = coercePlanWeeks(corrected.weeks).slice(0, weeksToGenerate);
+      correctedWeeks.forEach((w: any) => (w.workouts ?? []).forEach(normaliseIntensity));
+      const remaining = findLoadViolations(correctedWeeks, opts);
+      if (remaining.length >= violations.length) break;
+      current = { ...current, ...corrected, weeks: correctedWeeks };
+      currentJson = JSON.stringify(corrected);
+      violations = remaining;
+    } catch (err) {
+      console.error(`[${tag}] Load-rule correction failed:`, err);
+      break;
+    }
+  }
+  if (violations.length > 0) {
+    const repairs = repairPlanLoad(current.weeks, opts);
+    const left = findLoadViolations(current.weeks, opts);
+    console.warn(`[${tag}] Load rules: repaired ${repairs.length} item(s):\n  ${repairs.join('\n  ')}${left.length ? `\n  still flagged:\n  ${left.join('\n  ')}` : ''}`);
+  } else {
+    console.log(`[${tag}] Load rules: ✅ plan passes`);
+  }
+  recomputeWeekTotals(current.weeks, opts.easyPaceSecs);
+  return current;
+}
+
 export async function generateTrainingPlan(
   userId: string,
   goalType: string, // 5k, 10k, half_marathon, marathon, ultra
@@ -458,27 +508,38 @@ export async function generateTrainingPlan(
       hrZoneScenario = 'history';
     }
 
-    // ── Weekly mileage base (last 30 days only to reflect current load)
+    // ── Starting point: weekly volume (last 30 days only to reflect current load) ──
+    // Measured over the span the athlete has actually been recording (1–4 weeks), so a new
+    // user's first runs aren't divided by four. With fewer than 3 runs the data is too thin to
+    // stand alone, so it's combined with what their stated fitness level means
+    // (plan-quality.ts LEVEL_BASELINES). No history at all: their own onboarding answer, else
+    // the level — never an invented per-event figure (the old 20 km/week fallback put a
+    // Regular runner whose longest run was 5 km onto 9–11 km long runs in weeks 1–2).
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const runsLast30 = recentRuns.filter(r => r.completedAt && new Date(r.completedAt) >= thirtyDaysAgo);
-    const totalDistanceLast30 = runsLast30.reduce((sum, r) => sum + (r.distance || 0), 0);
-    // Fallback when no run history — scale to the event type so the AI anchors volume correctly.
-    // A 20km/week fallback is appropriate for 5k/10k/half but far too low for ultra/marathon events;
-    // using it for a 50km+ goal causes the AI to produce tiny session distances.
-    const noHistoryFallbackKm = (() => {
-      if (goalType === 'ultra' || targetDistance > 42.2) return 45;
-      if (goalType === 'marathon') return 30;
-      if (goalType === 'half_marathon') return 20;
-      return 20;
-    })();
-    // Newcomers / beginners with no history are genuinely starting from (near) zero — anchoring
-    // them to the 20 km/week event fallback produced plans far beyond what they can do.
-    // Prefer the athlete's own onboarding answer when they gave one.
+    const totalDistanceLast30 = runsLast30.reduce((sum, r) => sum + (anchorRunKm(r) || 0), 0);
     const isNovice = isNoviceFitnessLevel(experienceLevel) || isNoviceFitnessLevel(user[0]?.fitnessLevel);
+    const level = levelBaseline(experienceLevel || user[0]?.fitnessLevel);
+    const sparseHistory = runsLast30.length < 3;
+    const observedWeeklyKm = (() => {
+      if (runsLast30.length === 0) return 0;
+      const oldest = Math.min(...runsLast30.map(r => new Date(r.completedAt!).getTime()));
+      const weeks = Math.min(4, Math.max(1, (Date.now() - oldest) / (7 * 24 * 60 * 60 * 1000)));
+      return totalDistanceLast30 / weeks;
+    })();
     const profileWeeklyKm = Number(user[0]?.averageWeeklyMileage) || 0;
-    const noHistoryBaselineKm = profileWeeklyKm > 0 ? profileWeeklyKm : isNovice ? 0 : noHistoryFallbackKm;
-    const weeklyMileageBase = runsLast30.length > 0 ? (totalDistanceLast30 / 4) : noHistoryBaselineKm;
+    const noHistoryBaselineKm = profileWeeklyKm > 0 ? profileWeeklyKm : level.weeklyKm;
+    const weeklyMileageBase = runsLast30.length === 0
+      ? noHistoryBaselineKm
+      : sparseHistory ? Math.max(observedWeeklyKm, isNovice ? 0 : level.weeklyKm) : observedWeeklyKm;
+    const baselineSource = runsLast30.length === 0
+      ? `no runs recorded in the app yet — starting point from their stated fitness level "${experienceLevel}"${profileWeeklyKm > 0 ? ` and their reported ${profileWeeklyKm} km/week` : ""}`
+      : sparseHistory
+        ? `only ${runsLast30.length} run${runsLast30.length === 1 ? "" : "s"} recorded in the last 30 days — combined with their stated fitness level "${experienceLevel}"`
+        : `${runsLast30.length} runs recorded in the last 30 days`;
+    // Best recent effort → estimated 5K and training-pace bands (null without a 3 km+ run).
+    const paceAnchor = derivePaceAnchor(recentRuns);
     const hasActiveInjuries = injuries.some(i =>
       ['active', 'recovering', 'chronic'].includes(String(i.status).toLowerCase())
     );
@@ -750,9 +811,23 @@ export async function generateTrainingPlan(
 
     // Progression guard inputs (novice / injured athletes) — see findProgressionViolations()
     const needsProgressionGuard = isNovice || hasActiveInjuries;
-    const longestRecentRunMin = runsLast30.reduce((max, r) => Math.max(max, (runSecs(r) ?? 0) / 60), 0);
-    const startingLongestRunMin = longestRecentRunMin > 0 ? longestRecentRunMin : isNovice ? 2 : 10;
-    const guardPaceMinPerKm = avgPaceSecs ? Math.max(avgPaceSecs / 60, 5) : 9;
+    const longestRecentRunMin = runsLast30.reduce((max, r) => Math.max(max, (anchorRunSecs(r) ?? 0) / 60), 0);
+    // Non-novice: thin history is combined with the stated level, like the weekly volume above.
+    const startingLongestRunMin = needsProgressionGuard
+      ? (longestRecentRunMin > 0 ? longestRecentRunMin : isNovice ? 2 : 10)
+      : sparseHistory ? Math.max(longestRecentRunMin, level.longestRunMin) : (longestRecentRunMin || level.longestRunMin);
+    // Easy pace for time ↔ distance conversions: from the best recent effort when there is one.
+    const easyPaceSecs = paceAnchor ? (paceAnchor.easy.min + paceAnchor.easy.max) / 2 : level.easyPaceSecs;
+    const guardPaceMinPerKm = paceAnchor ? easyPaceSecs / 60 : avgPaceSecs ? Math.max(avgPaceSecs / 60, 5) : 9;
+    const loadRuleOpts: LoadRuleOptions = {
+      daysPerWeek,
+      baselineWeeklyKm: weeklyMileageBase,
+      startingLongestRunMin,
+      easyPaceSecs,
+      continuousCapable: !isNovice && !hasActiveInjuries && startingLongestRunMin >= 25,
+      sparseHistory,
+      longRunCeilingKm: longRunCeilingKm(targetDistance, experienceLevel || user[0]?.fitnessLevel),
+    };
 
     const walkRunOrientationRule = `🔑 ORIENTATION SESSION RULE (new users only):
 Set the FIRST workout's workoutType to "orientation". For this athlete it is a gentle WALK-RUN calibration — NOT a continuous run.
@@ -799,8 +874,7 @@ DO NOT treat the absence of run data as evidence of low fitness. Instead:
 
   if (isLongDistanceGoal) {
     return `IMPORTANT: This runner has NO previous run data recorded in this app — they are NEW to this app only.
-Build the OPTIMAL plan for this ${targetDistance}km goal. Key principle: fitness level (${experienceLevel}) informs session intensity only — it does NOT cap session distances or weekly volume.
-- Session distances and weekly volume must be built to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks
+Build the OPTIMAL plan for this ${targetDistance}km goal. Session distances and weekly volume must build to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks — but they START from where the athlete is today and progress within the STARTING POINT & LOAD RULES below.
 - ${weeklyMileageBase > 0 ? `Start at ~${Math.round(weeklyMileageBase)}km/week and build to meet the event requirements` : `This athlete is not currently running (0 km/week) — start from walk-run and build gradually (see the PROGRESSION RULES below)`}
 - Paces will be set after their first session using real performance data — focus on session structure, not numeric targets
 
@@ -971,6 +1045,10 @@ ${targetTime ? (() => {
   return `Target finish time: ${Math.floor(targetTime / 60)}:${String(Math.round((targetTime % 60))).padStart(2,'0')} — equivalent to a ${goalPaceStr} goal pace
 Current performance at ${targetDistance}km: ${avgTimeAtGoalDistanceSecs ? `averages ${currentTimeStr} (${currentPaceStr}/km)` : `extrapolate from average pace of ${currentPaceStr}`}
 Apply your coaching expertise to determine appropriate training paces across all session types based on this athlete's current fitness and target goal.`;
+})() : paceAnchor && !isPreEventPlan && targetDistance > 0 && paceAnchor.sourceKm >= targetDistance * 0.9 ? (() => {
+  // Already covers the goal distance: a "completion" plan would aim at something they can do today.
+  const projected = paceAnchor.est5kSecs * Math.pow(targetDistance / 5, 1.06);
+  return `No target time set — but this athlete ALREADY runs ${paceAnchor.sourceKm.toFixed(1)} km (estimated current ${targetDistance}km ≈ ${fmtDuration(projected)}). Completing ${targetDistance}km is not the objective; running it faster and more comfortably is. Design for a realistic improvement over ${weeksUntilTarget} weeks (typically 3–6% for a runner at this level) and say what that target is in coachingProgrammeSummary.comment.`;
 })() : `No target time set — design for goal completion and optimal performance at this athlete's current fitness level.`}
 
 ━━━ CURRENT PERFORMANCE DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -998,7 +1076,8 @@ ${similarDistanceRuns.length > 0 ? `
 Performance at goal distance (${targetDistance}km — ${similarDistanceRuns.length} sessions found):
 ${avgTimeAtGoalDistanceStr ? `- Average completion time: ${avgTimeAtGoalDistanceStr}` : ''}
 ${bestTimeAtGoalStr ? `- Personal best: ${bestTimeAtGoalStr}` : ''}` : `
-No recorded sessions at exactly ${targetDistance}km — extrapolate from average pace and weekly volume.`}` : isPreEventPlan ? `NEW TO THIS APP — no run history in this system. The athlete has confirmed this is a pre-event block; they are already race-capable. Do NOT interpret missing data as low fitness.` : `NEW TO THIS APP — no run history yet. Design a plan appropriate for a ${experienceLevel} runner targeting ${targetDistance}km. The adaptive coaching system will refine future plan adaptations as real performance data accumulates.`}
+No recorded sessions at exactly ${targetDistance}km — extrapolate from average pace and weekly volume.`}
+${paceAnchor ? `- ${describeAnchor(paceAnchor)}` : ''}` : isPreEventPlan ? `NEW TO THIS APP — no run history in this system. The athlete has confirmed this is a pre-event block; they are already race-capable. Do NOT interpret missing data as low fitness.` : `NEW TO THIS APP — no run history yet. Design a plan appropriate for a ${experienceLevel} runner targeting ${targetDistance}km. The adaptive coaching system will refine future plan adaptations as real performance data accumulates.`}
 ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
 
 ━━━ SCHEDULE & LIFESTYLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1152,7 +1231,9 @@ Your coaching expertise should determine:
 ⚠️ MANDATORY JSON OUTPUT: Include a "safetyDisclaimer" object (see output spec). The disclaimer text must explicitly state this plan is AI-generated training guidance, not medical advice.`;
 })() : `No current injuries or health limitations reported.`}
 
-${needsProgressionGuard ? buildProgressionSafetyRules({ isNovice, hasInjury: hasActiveInjuries, daysPerWeek, longestContinuousRunMin: startingLongestRunMin, targetDistance }) + '\n\n' : ''}━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${needsProgressionGuard ? buildProgressionSafetyRules({ isNovice, hasInjury: hasActiveInjuries, daysPerWeek, longestContinuousRunMin: startingLongestRunMin, targetDistance }) : buildLoadRulesPrompt(loadRuleOpts, paceAnchor, baselineSource)}
+
+━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 WEEK-BY-WEEK PROGRESSION — THIS IS THE MOST IMPORTANT QUALITY STANDARD:
 Every week MUST be distinct. No two weeks should have identical sessions, distances, or intensity distribution. A plan where week 1 looks the same as week 8 is not a coaching plan — it is a repeated template and is unacceptable.
@@ -1306,7 +1387,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
           { role: "user",   content: userPrompt }
         ],
         response_format: { type: "json_object" },
-        temperature: 0.7,
+        temperature: 0.5,
         max_tokens: 32000,
       });
 
@@ -1397,6 +1478,15 @@ App capabilities available in every session: real-time GPS pace/distance, live a
         }
       }
     }
+
+    // ── Load rules for everyone else (plan-quality.ts) ────────────────────
+    planData.weeks.forEach((w: any) => (w.workouts ?? []).forEach(normaliseIntensity));
+    if (!needsProgressionGuard) {
+      planData = await enforceLoadRules(planData, rawContent, loadRuleOpts, systemPromptContent, prompt, weeksToGenerate, 'Training Plan');
+    } else {
+      recomputeWeekTotals(planData.weeks, guardPaceMinPerKm * 60);
+    }
+    explainLongerThanGoal(planData.weeks, targetDistance, easyPaceSecs);
 
     // Sanitise numeric fields before DB insert — Postgres rejects NaN for integer/real columns
     const safeTargetTime   = (targetTime != null && !isNaN(targetTime) && targetTime > 0) ? Math.round(targetTime) : null;
@@ -1764,7 +1854,15 @@ export async function generateNextBlock(planId: string, userId: string): Promise
     try { return plan.safetyDisclaimer ? (JSON.parse(plan.safetyDisclaimer).progressionGates ?? []) : []; } catch { return []; }
   })();
   const needsProgressionGuard = isNovice || hasActiveInjuries;
-  const guardPaceMinPerKm = 9;
+  // Easy pace from the athlete's best recent effort (plan-quality.ts), else their level.
+  const blockLevel = levelBaseline(plan.experienceLevel || blockUser?.fitnessLevel);
+  const blockRecentRuns = await db.select({
+    distance: runs.distance, duration: runs.duration, movingTime: runs.movingTime, completedAt: runs.completedAt,
+  }).from(runs).where(and(eq(runs.userId, userId), gte(runs.completedAt, new Date(Date.now() - 90 * 24 * 60 * 60 * 1000))))
+    .orderBy(desc(runs.completedAt)).limit(60);
+  const blockAnchor = derivePaceAnchor(blockRecentRuns);
+  const blockEasyPaceSecs = blockAnchor ? (blockAnchor.easy.min + blockAnchor.easy.max) / 2 : blockLevel.easyPaceSecs;
+  const guardPaceMinPerKm = needsProgressionGuard ? 9 : blockEasyPaceSecs / 60;
 
   const sessionWorkouts = existingWorkouts.filter(r => r.workout.workoutType !== 'rest');
   const completedWorkouts = sessionWorkouts.filter(r => r.workout.isCompleted);
@@ -1777,6 +1875,19 @@ export async function generateNextBlock(planId: string, userId: string): Promise
     completedWorkouts.length > 0 ? longestOf(completedWorkouts) : longestOf(sessionWorkouts),
     isNovice ? 2 : 10,
   );
+  // Earlier weeks' volumes (oldest first) — the next block progresses from these.
+  const priorWeeklyKms = previousWeeks.map(w =>
+    weekKm({ workouts: existingWorkouts.filter(r => r.weekNumber === w.weekNumber).map(r => r.workout) }, blockEasyPaceSecs));
+  const blockLoadOpts: LoadRuleOptions = {
+    daysPerWeek,
+    baselineWeeklyKm: Math.max(0, ...priorWeeklyKms),
+    startingLongestRunMin,
+    easyPaceSecs: blockEasyPaceSecs,
+    continuousCapable: !isNovice && !hasActiveInjuries && startingLongestRunMin >= 25,
+    sparseHistory: false,
+    priorWeeklyKms,
+    longRunCeilingKm: longRunCeilingKm(plan.targetDistance, plan.experienceLevel || blockUser?.fitnessLevel),
+  };
 
   // ── 4. Build the next-block prompt ────────────────────────────────────────
   const isLastBlock = nextBlockEnd >= totalWeeks;
@@ -1819,7 +1930,9 @@ All the same rules apply as block 1:
 - Session types, paces, and intensity must evolve across these weeks
 - Name each week's training phase explicitly in weekDescription
 
-${needsProgressionGuard ? buildProgressionSafetyRules({ isNovice, hasInjury: hasActiveInjuries, daysPerWeek, longestContinuousRunMin: startingLongestRunMin, targetDistance: plan.targetDistance ?? 0 }) + '\n\n' : ''}━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${needsProgressionGuard ? buildProgressionSafetyRules({ isNovice, hasInjury: hasActiveInjuries, daysPerWeek, longestContinuousRunMin: startingLongestRunMin, targetDistance: plan.targetDistance ?? 0 }) : buildLoadRulesPrompt(blockLoadOpts, blockAnchor, `weeks 1–${generatedThrough} of this plan as prescribed`)}
+
+━━━ WHAT TO DELIVER ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Generate EXACTLY ${weeksToGenerate} weeks (weeks ${nextBlockStart} to ${nextBlockEnd}).
 weekNumber values must start at ${nextBlockStart} and end at ${nextBlockEnd}.
@@ -1862,7 +1975,7 @@ STRUCTURAL CONSTRAINTS:
       { role: "user", content: prompt }
     ],
     response_format: { type: "json_object" },
-    temperature: 0.7,
+    temperature: 0.5,
     max_tokens: 32000,
   });
 
@@ -1902,6 +2015,14 @@ STRUCTURAL CONSTRAINTS:
       }
     }
   }
+
+  blockData.weeks.forEach((w: any) => (w.workouts ?? []).forEach(normaliseIntensity));
+  if (!needsProgressionGuard) {
+    blockData = await enforceLoadRules(blockData, rawContent, blockLoadOpts, systemPrompt, prompt, weeksToGenerate, 'NextBlock');
+  } else {
+    recomputeWeekTotals(blockData.weeks, guardPaceMinPerKm * 60);
+  }
+  explainLongerThanGoal(blockData.weeks, plan.targetDistance, blockEasyPaceSecs);
 
   // ── 5. Plan calendar anchor + nextBlockAt ─────────────────────────────────
   // Week N's dates must be offset from the plan's own week-1 Monday. This used to use the

@@ -44,6 +44,7 @@ import {
 import { eq, and, inArray, desc, isNotNull } from "drizzle-orm";
 import { getOrGenerateSessionCoaching } from "./session-coaching-service";
 import { HeartRateZones } from "./heart-rate-zones";
+import { derivePaceAnchor, describeAnchor, classifySession, fmtPace, type PaceBand } from "./plan-quality";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -188,6 +189,9 @@ export async function enrichWorkoutBlock(
       avgHeartRate: runs.avgHeartRate,
       maxHeartRate: runs.maxHeartRate,
       distance: runs.distance,
+      duration: runs.duration,
+      movingTime: runs.movingTime,
+      completedAt: runs.completedAt,
     })
     .from(runs)
     .where(eq(runs.userId, userId))
@@ -297,8 +301,15 @@ The BPM values above will be applied server-side — your job is to assign the c
     .filter(r => r.avgPace && typeof r.avgPace === "string")
     .slice(0, 20);
 
+  // Best recent effort (3 km+, last 120 days) → training-pace bands. Used even with a single
+  // run — one real effort beats a fitness-level guess — and it bounds the model's paces below.
+  const anchorCutoff = Date.now() - 120 * 24 * 60 * 60 * 1000;
+  const paceAnchor = derivePaceAnchor(recentRuns.filter(r => r.completedAt && new Date(r.completedAt).getTime() >= anchorCutoff));
+
   let zone2PaceHint = "";
-  if (avgPaceRuns.length >= 3) {
+  if (paceAnchor) {
+    zone2PaceHint = `\n- PERFORMANCE ANCHOR: ${describeAnchor(paceAnchor)}\n  Use these bands: easy/long/aerobic sessions inside the easy band, tempo/threshold inside the tempo band, interval work phases inside the interval band, recoveries at recovery pace or slower.`;
+  } else if (avgPaceRuns.length >= 3) {
     const avgSecs = avgPaceRuns.reduce((sum, r) => {
       const parts = (r.avgPace as string).split(":").map(Number);
       return sum + (parts[0] * 60 + (parts[1] ?? 0));
@@ -322,7 +333,7 @@ ${workoutSummaries}
 ENRICHMENT RULES:
 1. Match pace to zone using THIS runner's actual data, not general coaching averages
 2. easy/aerobic/recovery/long_run sessions → GENUINE Zone 1-2. Zone 2 is conversational — "could hold a full conversation". For most runners this is 90–210 seconds/km SLOWER than their average training pace
-3. tempo/threshold sessions → Zone 3-4 pace for this runner
+3. tempo/threshold sessions → Zone 4 (threshold — comfortably hard, 80–90% max HR)
 4. Interval work phases → Zone 4-5 pace. Recovery phases → Zone 1 (easy enough to actually recover, not Zone 2)
 5. ALL assigned paces must be faster than 3:00/km and slower than 15:00/km
 6. HR ranges must be consistent with the pace assigned — if you assign Zone 2, the BPMs must be Zone 2 BPMs (lower range), NOT Zone 3 or 4 BPMs
@@ -396,22 +407,50 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
 
         // Validate pace values before writing — guard against hallucinated numbers
         const targetPaceSecs = parsePaceToSecs(enrichment.targetPace);
-        const safePace =
+        let safePace =
           targetPaceSecs && targetPaceSecs >= 180 && targetPaceSecs <= 1200
             ? enrichment.targetPace
             : null;
 
         const intervalPaceSecs = parsePaceToSecs(enrichment.intervalTargetPace);
-        const safeIntervalPace =
+        let safeIntervalPace =
           intervalPaceSecs && intervalPaceSecs >= 180 && intervalPaceSecs <= 1200
             ? enrichment.intervalTargetPace
             : null;
 
         const restPaceSecs = parsePaceToSecs(enrichment.restTargetPace);
-        const safeRestPace =
+        let safeRestPace =
           restPaceSecs && restPaceSecs >= 180 && restPaceSecs <= 1200
             ? enrichment.restTargetPace
             : null;
+
+        // Zone the session type requires — the model sometimes labels tempo z3 (giving
+        // 70–80% "threshold" targets) or easy runs z3. The server owns this mapping.
+        const category = classifySession(workoutRecord.workoutType, workoutRecord.effortLabel);
+        const modelZone = enrichment.hrZoneNumber ?? null;
+        enrichment.hrZoneNumber =
+          category === "easy" || category === "long" ? 2
+          : category === "recovery" ? (modelZone === 1 ? 1 : 2)
+          : category === "tempo" ? 4
+          : category === "interval" ? (modelZone === 4 || modelZone === 5 ? modelZone : 5)
+          : modelZone;
+
+        // Keep paces inside the bands from the athlete's own best effort.
+        if (paceAnchor) {
+          const clamp = (secs: number | null, band: PaceBand): string =>
+            fmtPace(secs == null ? (band.min + band.max) / 2 : Math.min(band.max, Math.max(band.min, secs)));
+          const mainBand =
+            category === "easy" || category === "long" ? paceAnchor.easy
+            : category === "recovery" ? paceAnchor.recovery
+            : category === "tempo" ? paceAnchor.tempo
+            : null;
+          if (mainBand) safePace = clamp(parsePaceToSecs(safePace), mainBand);
+          if (category === "interval" && (safeIntervalPace || workoutRecord.intervalCount)) {
+            safeIntervalPace = clamp(parsePaceToSecs(safeIntervalPace), paceAnchor.interval);
+            const rest = parsePaceToSecs(safeRestPace);
+            if (rest != null && rest < paceAnchor.recovery.min) safeRestPace = fmtPace(paceAnchor.recovery.min);
+          }
+        }
 
         // BPM validation — always enforce Tanaka zone boundaries when DOB is known.
         // GPT's zone NUMBER is the coaching decision (which zone this session targets).
