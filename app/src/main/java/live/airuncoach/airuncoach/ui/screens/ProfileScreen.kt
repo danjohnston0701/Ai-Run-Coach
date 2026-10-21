@@ -1,6 +1,7 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.BuildConfig
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -324,7 +325,7 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "AI Run Coach v1.0.0",
+                    text = "AI Run Coach v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                     style = AppTextStyles.caption,
                     color = Colors.textMuted
                 )
