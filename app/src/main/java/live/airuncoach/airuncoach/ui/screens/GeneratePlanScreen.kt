@@ -1083,7 +1083,7 @@ fun GeneratingScreen() {
         label = "alpha"
     )
 
-    // Cycle through progress messages to keep the user engaged during the ~60s wait
+    // Cycle through progress messages to keep the user engaged during the 1–3 min wait
     val steps = listOf(
         "Analysing your fitness level...",
         "Reviewing your training history...",
@@ -1145,7 +1145,7 @@ fun GeneratingScreen() {
                 )
             }
             Text(
-                "This usually takes around 60 seconds.\nPlease keep the app open.",
+                "This usually takes 1 to 3 minutes.\nPlease keep the app open.",
                 style = AppTextStyles.small,
                 color = Colors.textSecondary.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center

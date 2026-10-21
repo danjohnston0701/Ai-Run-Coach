@@ -483,6 +483,9 @@ interface ApiService {
     @POST("/api/training-plans/generate")
     suspend fun generateTrainingPlan(@Body request: GeneratePlanRequest): GeneratePlanResponse
 
+    @GET("/api/training-plans/jobs/{jobId}")
+    suspend fun getPlanJob(@Path("jobId") jobId: String): PlanJobResponse
+
     @GET("/api/training-plans/{userId}")
     suspend fun getUserTrainingPlans(
         @Path("userId") userId: String,

@@ -50,13 +50,27 @@ data class GeneratePlanRequest(
     // block rather than a build-up plan. Flips the AI prompt away from "start conservatively".
     @SerializedName("isPreEventPlan") val isPreEventPlan: Boolean = false,
     // Default activity type for the user — used to specify if this plan is for running or walking
-    @SerializedName("activityType") val activityType: String = "run" // "run" or "walk"
+    @SerializedName("activityType") val activityType: String = "run", // "run" or "walk"
+    // Build the plan in the background: the server answers at once with a jobId to poll
+    // (GET /api/training-plans/jobs/{jobId}) instead of holding the request for 1–3 minutes.
+    @SerializedName("async") val async: Boolean = true
 )
 
-/** Response from generate */
+/** Response from generate: planId when built straight away (older servers), jobId when building in the background. */
 data class GeneratePlanResponse(
-    @SerializedName("planId") val planId: String,
+    @SerializedName("planId") val planId: String? = null,
+    @SerializedName("jobId") val jobId: String? = null,
+    @SerializedName("status") val status: String? = null,
     @SerializedName("message") val message: String? = null
+)
+
+/** GET /api/training-plans/jobs/{jobId} — status is "generating", "ready" (planId set) or "failed" (error set). */
+data class PlanJobResponse(
+    @SerializedName("jobId") val jobId: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("planId") val planId: String? = null,
+    @SerializedName("error") val error: String? = null,
+    @SerializedName("code") val code: String? = null
 )
 
 /** Flat plan row returned from GET /api/training-plans/:userId */

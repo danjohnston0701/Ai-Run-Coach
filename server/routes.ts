@@ -105,8 +105,10 @@ import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
 import { registerHowToVideoRoutes } from "./routes-how-to-videos";
-import { registerUserActivityRoutes } from "./user-activity";
+import { registerUserActivityRoutes, logUserActivity, clientPlatform } from "./user-activity";
 import { autoCompleteLinkedWorkout, enrichWeeksAfterOrientation } from "./plan-run-sync";
+import { createPlanJob, finishPlanJob, failPlanJob, getPlanJob, getGeneratingPlanJob } from "./plan-jobs";
+import { whileRunnerWaits } from "./plan-ai";
 import { recognizeRoute, updateKnownRoutes, dropMismatchedRouteContext } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
 import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime, defaultRunName } from "./utils/run-derivation";
@@ -16940,12 +16942,12 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   const planGenerationInProgress = new Set<string>();
 
   app.post("/api/training-plans/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    let keepLock = false; // a background job releases the lock itself when it finishes
     try {
       const userId = req.user!.userId;
       const {
         goalType,
         targetDistance,
-        targetTime,
         targetDate,
         durationWeeks,  // user-selected duration (takes priority over targetDate)
         experienceLevel,
@@ -16953,15 +16955,18 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         firstSessionStart = "flexible", // "today" | "tomorrow" | "flexible"
         regularSessions = [],  // recurring runs the user already does each week
         injuries = [],  // [{ bodyPart, status, notes }]
-        goalId = null,  // optional: goal ID to link this plan to
         userTimezone = null,  // IANA timezone name, e.g. "Pacific/Auckland"
-        isPreEventPlan = false,  // true = pre-race sharpening block, not a build-up plan
         // User demographics — used as override if DB profile is incomplete
         age = null,
         gender = null,
         height = null,
         weight = null,
       } = req.body;
+      // iOS sends targetTimeSeconds / linkedGoalId / is_pre_event_plan; these were silently
+      // dropped, so iPhone plans lost the target time, the goal link and pre-race mode.
+      const targetTime = req.body.targetTime ?? req.body.targetTimeSeconds;
+      const goalId = req.body.goalId ?? req.body.linkedGoalId ?? null;
+      const isPreEventPlan = req.body.isPreEventPlan ?? req.body.is_pre_event_plan ?? false;
 
       // ── Tier limit check ─────────────────────────────────────────────────
       const planUser = await storage.getUser(userId);
@@ -16971,6 +16976,15 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       // ── Deduplication guard ───────────────────────────────────────────────
       // 1. In-memory lock: reject if this user's plan is already being generated
       //    (handles rapid repeated taps within the same server process).
+      //    A background job on any instance counts too — hand back its id so the app polls it.
+      const runningJob = await getGeneratingPlanJob(userId);
+      if (runningJob) {
+        return res.status(429).json({
+          error: "Your training plan is already being built. It will be ready in a moment.",
+          code: "PLAN_GENERATION_IN_PROGRESS",
+          jobId: runningJob.id,
+        });
+      }
       if (planGenerationInProgress.has(userId)) {
         console.warn(`[Training Plan] Duplicate request rejected for user ${userId} — already generating`);
         return res.status(429).json({
@@ -17079,63 +17093,107 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         }
       }
 
-      const planId = await generateTrainingPlan(
-        userId,
-        goalType,
-        safeTargetDistance ?? targetDistance,
-        safeTargetTime,
-        parsedTargetDate,
-        experienceLevel || "intermediate",
-        safeDaysPerWeek,
-        regularSessions,
-        firstSessionStart,
-        durationWeeks,
-        effectiveInjuries,
-        userTimezone || null,
-        goalId || null,
-        // Pass demographics as overrides — used when user's DB profile is missing values
-        safeAge,
-        gender || null,
-        safeHeight,
-        safeWeight,
-        // Plan intent: pre-event sharpening vs building up
-        isPreEventPlan === true,
-      );
-      
-      // Link plan to goal if goalId was provided
-      if (goalId) {
-        try {
-          await db
-            .update(goals)
-            .set({ linkedTrainingPlanId: planId })
-            .where(eq(goals.id, goalId));
-        } catch (linkErr) {
-          console.warn(`[Training Plan] Could not link plan ${planId} to goal ${goalId}:`, linkErr);
-          // Don't fail the entire request if linking fails
-        }
-      }
-      
-      // ── Record successful plan generation against monthly quota ──────────
-      recordUsage(userId, "trainingPlansGenerated");
+      // Everything after validation: generate, link the goal, count it, email the team.
+      const buildPlan = async (): Promise<string> => {
+        const planId = await generateTrainingPlan(
+          userId,
+          goalType,
+          safeTargetDistance ?? targetDistance,
+          safeTargetTime,
+          parsedTargetDate,
+          experienceLevel || "intermediate",
+          safeDaysPerWeek,
+          regularSessions,
+          firstSessionStart,
+          durationWeeks,
+          effectiveInjuries,
+          userTimezone || null,
+          goalId || null,
+          // Pass demographics as overrides — used when user's DB profile is missing values
+          safeAge,
+          gender || null,
+          safeHeight,
+          safeWeight,
+          // Plan intent: pre-event sharpening vs building up
+          isPreEventPlan === true,
+        );
 
+        // Link plan to goal if goalId was provided
+        if (goalId) {
+          try {
+            await db
+              .update(goals)
+              .set({ linkedTrainingPlanId: planId })
+              .where(eq(goals.id, goalId));
+          } catch (linkErr) {
+            console.warn(`[Training Plan] Could not link plan ${planId} to goal ${goalId}:`, linkErr);
+            // Don't fail the entire request if linking fails
+          }
+        }
+
+        // ── Record successful plan generation against monthly quota ──────────
+        recordUsage(userId, "trainingPlansGenerated");
+
+        // Review copy to the team — background, never affects the response.
+        setImmediate(() => {
+          sendNewPlanReviewEmail(planId).catch(err => console.error(`[PlanReview] Failed for plan ${planId}:`, err?.message ?? err));
+        });
+        return planId;
+      };
+
+      // Apps that can wait in the background (async: true) get a job id now and poll
+      // GET /api/training-plans/jobs/:jobId — a Claude-written plan takes longer than the
+      // apps wait on one request. Older apps keep the waiting path below.
+      if (req.body?.async === true) {
+        const jobId = await createPlanJob(userId);
+        keepLock = true;
+        res.status(202).json({ jobId, status: "generating" });
+        setImmediate(async () => {
+          try {
+            const planId = await buildPlan();
+            await finishPlanJob(jobId, planId);
+            console.log(`[Training Plan] Job ${jobId} ready: plan ${planId}`);
+            logUserActivity({ userId, email: req.user?.email, action: "Generated AI plan", outcome: "success",
+              platform: clientPlatform(req), details: { jobId, planId, background: true } });
+          } catch (err: any) {
+            console.error(`[Training Plan] Job ${jobId} failed:`, err);
+            logUserActivity({ userId, email: req.user?.email, action: "Generated AI plan", outcome: "error",
+              errorMessage: err?.message ?? String(err), platform: clientPlatform(req), details: { jobId, background: true } });
+            await failPlanJob(jobId, "We couldn't build your plan this time. Please try again.", "PLAN_GENERATION_FAILED")
+              .catch(e => console.error(`[Training Plan] Could not mark job ${jobId} failed:`, e));
+          } finally {
+            planGenerationInProgress.delete(userId);
+          }
+        });
+        return;
+      }
+
+      const planId = await whileRunnerWaits(buildPlan);
       res.status(201).json({
         planId,
         message: "Training plan generated successfully"
-      });
-
-      // Review copy to the team — background, never affects the response.
-      setImmediate(() => {
-        sendNewPlanReviewEmail(planId).catch(err => console.error(`[PlanReview] Failed for plan ${planId}:`, err?.message ?? err));
       });
     } catch (error: any) {
       console.error("Generate training plan error:", error);
       res.status(500).json({ error: error.message || "Failed to generate training plan" });
     } finally {
       // Always release the lock so the user can try again if something fails
-      planGenerationInProgress.delete(req.user!.userId);
+      if (!keepLock) planGenerationInProgress.delete(req.user!.userId);
     }
   });
   
+  // Background plan generation status (plan-jobs.ts): generating → ready (planId) | failed (error).
+  app.get("/api/training-plans/jobs/:jobId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const job = await getPlanJob(req.params.jobId, req.user!.userId);
+      if (!job) return res.status(404).json({ error: "Plan job not found" });
+      res.json({ jobId: job.id, status: job.status, planId: job.planId, error: job.error, code: job.errorCode });
+    } catch (error: any) {
+      console.error("Plan job status error:", error);
+      res.status(500).json({ error: "Failed to check plan status" });
+    }
+  });
+
   // Get user's training plans
   app.get("/api/training-plans/:userId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {

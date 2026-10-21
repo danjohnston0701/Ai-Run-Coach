@@ -7,6 +7,7 @@
 // Returns the OpenAI chat-completion shape the call sites already parse
 // (choices[0].message.content / finish_reason "length" when truncated), so moving a call
 // site here is a one-line change.
+import { AsyncLocalStorage } from "node:async_hooks";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -18,14 +19,33 @@ export const CLAUDE_PLAN_MODEL = "claude-sonnet-5-5";
 let openaiClient: OpenAI | null = null;
 let anthropicClient: Anthropic | null = null;
 
+// Set while a runner's request is waiting on the result (older apps that create a plan in one
+// request, with a 90–120 s client timeout). Background jobs run outside it.
+const runnerWaiting = new AsyncLocalStorage<boolean>();
+
+export function whileRunnerWaits<T>(fn: () => Promise<T>): Promise<T> {
+  return runnerWaiting.run(true, fn);
+}
+
 /**
- * PLAN_AI_PROVIDER sets every task; PLAN_AI_PROVIDER_<TASK> overrides one (task name in
- * capitals, dashes as underscores — e.g. PLAN_AI_PROVIDER_PLAN_BLOCK_1=openai keeps the
- * block the runner waits for on the faster model while everything else uses Claude).
+ * Which model family a task uses, first match wins:
+ *   while a runner waits: PLAN_AI_PROVIDER_WAITING_<TASK>, then PLAN_AI_PROVIDER_WAITING
+ *   PLAN_AI_PROVIDER_<TASK>
+ *   PLAN_AI_PROVIDER
+ * Task names in capitals with dashes as underscores (plan-block-1 → PLAN_BLOCK_1). E.g.
+ * PLAN_AI_PROVIDER=anthropic + PLAN_AI_PROVIDER_WAITING_PLAN_BLOCK_1=openai: Claude everywhere,
+ * except the block an older app is waiting for.
  */
 export function planAiProvider(task?: string): PlanAiProvider {
-  const override = task ? process.env[`PLAN_AI_PROVIDER_${task.toUpperCase().replace(/-/g, "_")}`] : undefined;
-  return String(override ?? process.env.PLAN_AI_PROVIDER ?? "").toLowerCase() === "anthropic" ? "anthropic" : "openai";
+  const key = task ? task.toUpperCase().replace(/-/g, "_") : null;
+  const env = process.env;
+  const waiting = runnerWaiting.getStore() === true;
+  const choice =
+    (waiting && key ? env[`PLAN_AI_PROVIDER_WAITING_${key}`] : undefined) ??
+    (waiting ? env.PLAN_AI_PROVIDER_WAITING : undefined) ??
+    (key ? env[`PLAN_AI_PROVIDER_${key}`] : undefined) ??
+    env.PLAN_AI_PROVIDER;
+  return String(choice ?? "").toLowerCase() === "anthropic" ? "anthropic" : "openai";
 }
 
 export interface PlanChatMessage { role: "system" | "user" | "assistant"; content: string }

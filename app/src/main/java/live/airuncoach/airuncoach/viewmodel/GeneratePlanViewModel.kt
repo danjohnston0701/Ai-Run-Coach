@@ -319,10 +319,46 @@ class GeneratePlanViewModel @Inject constructor(
      *    (free trial, or a paid SKU without AI Plans)
      *  - 402 `trial_expired`
      */
-    private fun parseLimitError(e: retrofit2.HttpException): GeneratePlanState.LimitReached? {
-        if (e.code() !in listOf(402, 403, 429)) return null
+    private class PlanJobFailedException(message: String) : Exception(message)
+
+    /** Job id from a 429 "already being built" reply, or null. */
+    private fun runningJobIdFrom(code: Int, errorBody: String?): String? {
+        if (code != 429 || errorBody == null) return null
         return try {
-            val errorBody = e.response()?.errorBody()?.string() ?: return null
+            val json = gson.fromJson(errorBody, Map::class.java) ?: return null
+            if (json["code"]?.toString() == "PLAN_GENERATION_IN_PROGRESS") json["jobId"]?.toString() else null
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * Polls a background plan job until it's ready (returns the planId) or failed (throws
+     * PlanJobFailedException). A failed poll (signal drop) is retried — the plan keeps building
+     * on the server either way. Gives up after 6 minutes; the server marks a job failed at 8.
+     */
+    private suspend fun waitForPlanJob(jobId: String): String {
+        val deadline = System.currentTimeMillis() + 6 * 60_000L
+        while (System.currentTimeMillis() < deadline) {
+            kotlinx.coroutines.delay(3_000L)
+            val job = try {
+                apiService.getPlanJob(jobId)
+            } catch (e: retrofit2.HttpException) {
+                if (e.code() == 404) throw PlanJobFailedException("We couldn't find your plan. Please try again.")
+                null
+            } catch (e: java.io.IOException) {
+                null
+            } ?: continue
+            when (job.status) {
+                "ready" -> return job.planId ?: throw PlanJobFailedException("We couldn't build your plan this time. Please try again.")
+                "failed" -> throw PlanJobFailedException(job.error ?: "We couldn't build your plan this time. Please try again.")
+            }
+        }
+        throw PlanJobFailedException("Your plan is taking longer than usual. Check your plans in a few minutes — it may still appear.")
+    }
+
+    private fun parseLimitError(code: Int, errorBody: String?): GeneratePlanState.LimitReached? {
+        if (code !in listOf(402, 403, 429)) return null
+        return try {
+            if (errorBody == null) return null
             val json = gson.fromJson(errorBody, Map::class.java) ?: return null
             val code = json["error"]?.toString() ?: return null
             val notIncluded = when (code) {
@@ -343,7 +379,7 @@ class GeneratePlanViewModel @Inject constructor(
                 reason = json["reason"]?.toString() ?: if (code == "trial_expired") "trial_expired" else null
             )
         } catch (parseErr: Exception) {
-            Log.e("GeneratePlanVM", "Could not parse ${e.code()} error body", parseErr)
+            Log.e("GeneratePlanVM", "Could not parse $code error body", parseErr)
             null
         }
     }
@@ -415,14 +451,35 @@ class GeneratePlanViewModel @Inject constructor(
                     activityType = userSessionType
                 )
                 val response = apiService.generateTrainingPlan(request)
+                val planId = response.planId
+                    ?: response.jobId?.let { waitForPlanJob(it) }
+                    ?: throw IllegalStateException("The server didn't return a plan")
                 AppAnalytics.logEvent(
                     context, AppAnalytics.Event.PLAN_GENERATED,
                     AppAnalytics.Param.GOAL_TYPE to _goalType.value,
                     AppAnalytics.Param.DURATION_WEEKS to _durationWeeks.value,
                 )
-                _generateState.value = GeneratePlanState.Success(response.planId)
+                _generateState.value = GeneratePlanState.Success(planId)
+            } catch (e: PlanJobFailedException) {
+                Log.e("GeneratePlanVM", "Plan job failed: ${e.message}")
+                _generateState.value = GeneratePlanState.Error(e.message ?: "We couldn't build your plan this time. Please try again.")
             } catch (e: retrofit2.HttpException) {
-                val limitState = parseLimitError(e)
+                val errorBody = try { e.response()?.errorBody()?.string() } catch (_: Exception) { null }
+                // A plan already being built for this account (e.g. after leaving and coming back):
+                // follow that job instead of reporting an error.
+                val runningJobId = runningJobIdFrom(e.code(), errorBody)
+                if (runningJobId != null) {
+                    try {
+                        _generateState.value = GeneratePlanState.Success(waitForPlanJob(runningJobId))
+                    } catch (jobErr: Exception) {
+                        Log.e("GeneratePlanVM", "Following running plan job failed", jobErr)
+                        _generateState.value = GeneratePlanState.Error(
+                            (jobErr as? PlanJobFailedException)?.message ?: "We couldn't build your plan this time. Please try again."
+                        )
+                    }
+                    return@launch
+                }
+                val limitState = parseLimitError(e.code(), errorBody)
                 when {
                     limitState != null -> _generateState.value = limitState
                     e.code() == 429 -> _generateState.value = GeneratePlanState.Error("A plan is already being generated. Please wait for it to complete.")

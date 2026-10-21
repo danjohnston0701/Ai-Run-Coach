@@ -105,7 +105,8 @@ const RULES: Rule[] = [
   { method: "POST", path: "/api/promo-codes/redeem", action: "Redeemed promo code" },
 
   // AI plans
-  { method: "POST", path: "/api/training-plans/generate", action: "Generated AI plan" },
+  // A background job (async: true) is logged as "Generated AI plan" when it finishes (routes.ts).
+  { method: "POST", path: "/api/training-plans/generate", action: (req) => (req.body?.async === true ? "Started AI plan" : "Generated AI plan") },
   { method: "PUT", path: "/api/training-plans/:planId/regenerate", action: "Regenerated AI plan" },
   { method: "POST", path: "/api/training-plans/:planId/next-block", action: "Generated next AI plan block" },
   { method: "POST", path: "/api/training-plans/:planId/adapt", action: "Adapted AI plan" },

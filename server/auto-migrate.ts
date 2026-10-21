@@ -117,6 +117,26 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_user_activity_errors",
       sql: "CREATE INDEX IF NOT EXISTS idx_user_activity_errors ON user_activity(created_at DESC) WHERE outcome = 'error'",
     },
+    // ── plan_generation_jobs — background plan generation (server/plan-jobs.ts) ──
+    {
+      name: "plan_generation_jobs.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS plan_generation_jobs (
+          id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id     VARCHAR NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'generating',
+          plan_id     VARCHAR,
+          error       TEXT,
+          error_code  TEXT,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `,
+    },
+    {
+      name: "idx_plan_generation_jobs_user",
+      sql: "CREATE INDEX IF NOT EXISTS idx_plan_generation_jobs_user ON plan_generation_jobs(user_id, created_at DESC)",
+    },
     {
       name: "known_routes.create_table",
       sql: `
