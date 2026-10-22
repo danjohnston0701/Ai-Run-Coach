@@ -171,6 +171,15 @@ class SamsungWatchManager(
     private var cachedPreparedRunPayload: Map<String, Any>? = null
     private var cachedSessionType: String? = null
 
+    // ── preparedRun delivery retry ──────────────────────────────────────────────
+    // Re-sent until the watch acks it ("sessionTypeAck" — every preparedRun carries sessionType
+    // and the watch acks it once stored), for ~60 s: the first send usually reaches a watch app
+    // that is still opening. Same as GarminWatchManager.
+    private val preparedRunRetryHandler = Handler(Looper.getMainLooper())
+    private var preparedRunRetryRunnable: Runnable? = null
+    private val PREPARED_RUN_RETRY_MAX = 20
+    private val PREPARED_RUN_RETRY_DELAY_MS = 3000L
+
     // ── sessionType delivery retry (Data Layer MessageClient is also fire-and-forget) ──
     private val sessionTypeRetryHandler = Handler(Looper.getMainLooper())
     private var sessionTypeRetryRunnable: Runnable? = null
@@ -330,10 +339,33 @@ class SamsungWatchManager(
         cachedPreparedRunPayload = payload
         sendToWatch(payload)
         openWatchApp()
+        startPreparedRunResend()
+    }
+
+    private fun startPreparedRunResend() {
+        stopPreparedRunResend()
+        var retriesLeft = PREPARED_RUN_RETRY_MAX
+        val runnable = object : Runnable {
+            override fun run() {
+                val payload = cachedPreparedRunPayload ?: return
+                if (retriesLeft <= 0) return
+                retriesLeft--
+                Log.d(TAG, "No preparedRun ack yet — re-sending ($retriesLeft left)")
+                sendToWatch(payload)
+                preparedRunRetryHandler.postDelayed(this, PREPARED_RUN_RETRY_DELAY_MS)
+            }
+        }
+        preparedRunRetryRunnable = runnable
+        preparedRunRetryHandler.postDelayed(runnable, PREPARED_RUN_RETRY_DELAY_MS)
+    }
+
+    private fun stopPreparedRunResend() {
+        preparedRunRetryRunnable?.let { preparedRunRetryHandler.removeCallbacks(it) }
+        preparedRunRetryRunnable = null
     }
 
     /**
-     * Opens AI Run Coach on the Galaxy Watch, so preparing on the phone is all the runner does —
+     * Opens Ai Run Coach on the Galaxy Watch, so preparing on the phone is all the runner does —
      * like Garmin, rather than also having to find and open the watch app. The Data Layer message
      * above only reaches a watch app that is already running; once this one opens it sends
      * "watchReady" and gets the cached prepared run back. Needs Wear 1.0.11+, which declares the
@@ -358,6 +390,7 @@ class SamsungWatchManager(
 
     fun clearPendingPreparedRun() {
         cachedPreparedRunPayload = null
+        stopPreparedRunResend()
         Log.d(TAG, "Pending prepared-run cache cleared")
     }
 
@@ -369,6 +402,7 @@ class SamsungWatchManager(
     fun cancelPreparedRun() {
         if (cachedPreparedRunPayload == null) return
         cachedPreparedRunPayload = null
+        stopPreparedRunResend()
         sendToWatch(mapOf("type" to "preparedRunCancelled"))
         Log.d(TAG, "preparedRunCancelled sent to watch")
     }
@@ -543,6 +577,7 @@ class SamsungWatchManager(
 
         if (action == "sessionTypeAck") {
             onSessionTypeAcked()
+            stopPreparedRunResend()
             return
         }
 
@@ -585,6 +620,7 @@ class SamsungWatchManager(
             cachedPreparedRunPayload?.let { payload ->
                 Log.d(TAG, "watchReady received — resending cached preparedRun to watch")
                 sendToWatch(payload)
+                startPreparedRunResend()
             }
             cachedSessionType?.let { sType ->
                 Log.d(TAG, "watchReady received — resending cached sessionType to watch: $sType")
@@ -596,6 +632,7 @@ class SamsungWatchManager(
 
         if (action == "start") {
             cachedPreparedRunPayload = null
+            stopPreparedRunResend()
             if (_hasPendingWatchSync.value) {
                 Log.d(TAG, "Watch START received — clearing stale hasPendingWatchSync flag")
                 _hasPendingWatchSync.value = false

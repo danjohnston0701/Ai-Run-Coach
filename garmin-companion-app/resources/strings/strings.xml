@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <strings>
-    <string id="AppName">AI Run Coach</string>
+    <string id="AppName">Ai Run Coach</string>
     <string id="Ready">Ready to Start</string>
     <string id="Connecting">Connecting...</string>
     <string id="NotConnected">Not Connected</string>

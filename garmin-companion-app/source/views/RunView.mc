@@ -56,6 +56,13 @@ class RunView extends Ui.View {
     // Set when the runner chooses "Continue without coaching" on the prepare-on-phone screen
     // (see isPrepareGateActive()). Reset whenever _isPrepared is, so every new session asks again.
     private var _prepareGateDismissed = false;
+    // Asks the phone for its prepared run a few times after the app opens. The phone's single
+    // re-send on "watchReady" can be lost when the app has just been launched from the phone's
+    // "open Ai Run Coach?" prompt, leaving the prepare-on-phone screen up for a prepared session.
+    private var _prepareRequestsLeft = 0;
+    private var _prepareRequestTick  = 0;
+    private const PREPARE_REQUEST_MAX      = 5;
+    private const PREPARE_REQUEST_INTERVAL = 12;  // 12 x 250ms = 3s between requests
 
     // Prepared-run data
     private var _prepRunType      = "";
@@ -907,6 +914,8 @@ class RunView extends Ui.View {
         // Include hasPendingSync so phone dashboard shows a sync indicator, and forward
         // any crash breadcrumb from the previous run so it lands in the phone's logcat.
         _phoneLink.sendWatchReady(_hasPendingOfflineBatch(), _pendingCrashMsg);
+        _prepareRequestsLeft = PREPARE_REQUEST_MAX;
+        _prepareRequestTick  = 0;
         // Also surface it on screen — real hardware has no accessible crash log for
         // sideloaded apps, so this is the only way to see what went wrong without
         // either a USB/simulator console or the phone nearby.
@@ -1064,6 +1073,9 @@ class RunView extends Ui.View {
             }
 
             _isPrepared = true;
+            _prepareRequestsLeft = 0;
+            // Stops the phone re-sending this prepared run (GarminWatchManager.sendPreparedRun).
+            _phoneLink.sendCommand("preparedRunAck");
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
             }
@@ -1249,7 +1261,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.11"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.12"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");
@@ -1332,6 +1344,16 @@ class RunView extends Ui.View {
         _dotCount = (_dotCount + 1) % 4;
         // Grace period: count up for first 8s so UI does not flash OFFLINE before auth arrives
         if (_connectWaitTicks < CONNECT_WAIT_MAX) { _connectWaitTicks += 1; }
+
+        // ── Prepared-run request (see _prepareRequestsLeft) ────────────────────
+        if (_prepareRequestsLeft > 0 && isPrepareGateActive()) {
+            _prepareRequestTick += 1;
+            if (_prepareRequestTick >= PREPARE_REQUEST_INTERVAL) {
+                _prepareRequestTick   = 0;
+                _prepareRequestsLeft -= 1;
+                _phoneLink.sendCommand("requestPreparedRun");
+            }
+        }
 
         // ── Start-command retry (BT drop recovery) ─────────────────────────────
         // If the watch-issued "start" command was dropped (common on FR55 when the

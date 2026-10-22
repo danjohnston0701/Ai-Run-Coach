@@ -394,6 +394,19 @@ class GarminWatchManager(
     // arrives so the user can open phone/watch in any order.
     private var cachedPreparedRunPayload: Map<String, Any>? = null
 
+    // ── preparedRun delivery ──────────────────────────────────────────────────
+    // The first send usually reaches a closed watch app and is lost; the copy re-sent on
+    // "watchReady" after the runner accepts the "open Ai Run Coach?" prompt could be lost too
+    // (fire-and-forget, BT link only just up), leaving the watch on its prepare-on-phone screen
+    // for a prepared session. So it is re-sent until the watch acks it: "preparedRunAck" from
+    // watch 3.4.12+, "sessionTypeAck" from older watches (every preparedRun carries sessionType).
+    // ~60 s covers the time to notice and accept the prompt.
+    private val preparedRunRetryHandler = Handler(Looper.getMainLooper())
+    private var preparedRunRetryRunnable: Runnable? = null
+    private val PREPARED_RUN_RETRY_MAX = 20
+    private val PREPARED_RUN_RETRY_DELAY_MS = 3000L
+    private val PREPARED_RUN_ACK_MIN_WATCH_VERSION = "3.4.12"
+
     // ── Cached session type ("run" | "walk") ──────────────────────────────────
     // Set by sendSessionType(), called as soon as the phone-side session-setup
     // screen knows its activity type (setRunConfig()) — NOT gated behind the
@@ -608,11 +621,34 @@ class GarminWatchManager(
         cachedPreparedRunPayload = payload
         sendToWatch(payload)
         openWatchApp()
+        startPreparedRunResend()
+    }
+
+    private fun startPreparedRunResend() {
+        stopPreparedRunResend()
+        var retriesLeft = PREPARED_RUN_RETRY_MAX
+        val runnable = object : Runnable {
+            override fun run() {
+                val payload = cachedPreparedRunPayload ?: return
+                if (retriesLeft <= 0) return
+                retriesLeft--
+                Log.d(TAG, "No preparedRun ack yet — re-sending ($retriesLeft left)")
+                sendToWatch(payload)
+                preparedRunRetryHandler.postDelayed(this, PREPARED_RUN_RETRY_DELAY_MS)
+            }
+        }
+        preparedRunRetryRunnable = runnable
+        preparedRunRetryHandler.postDelayed(runnable, PREPARED_RUN_RETRY_DELAY_MS)
+    }
+
+    private fun stopPreparedRunResend() {
+        preparedRunRetryRunnable?.let { preparedRunRetryHandler.removeCallbacks(it) }
+        preparedRunRetryRunnable = null
     }
 
     /**
-     * Asks the watch to open AI Run Coach. Connect IQ never opens an app silently: the watch shows
-     * an "open AI Run Coach?" prompt, one press to accept. Once open, the watch sends "watchReady"
+     * Asks the watch to open Ai Run Coach. Connect IQ never opens an app silently: the watch shows
+     * an "open Ai Run Coach?" prompt, one press to accept. Once open, the watch sends "watchReady"
      * and gets the cached prepared run back. If the app is already running, nothing is shown.
      */
     private fun openWatchApp() {
@@ -637,6 +673,7 @@ class GarminWatchManager(
      */
     fun clearPendingPreparedRun() {
         cachedPreparedRunPayload = null
+        stopPreparedRunResend()
         Log.d(TAG, "Pending prepared-run cache cleared")
     }
 
@@ -648,6 +685,7 @@ class GarminWatchManager(
     fun cancelPreparedRun() {
         if (cachedPreparedRunPayload == null) return
         cachedPreparedRunPayload = null
+        stopPreparedRunResend()
         sendToWatch(mapOf("type" to "preparedRunCancelled"))
         Log.d(TAG, "preparedRunCancelled sent to watch")
     }
@@ -932,6 +970,27 @@ class GarminWatchManager(
                     // the resend loop in sendSessionType(). See that function's retry comment.
                     if (action == "sessionTypeAck") {
                         onSessionTypeAcked()
+                        val installed = getInstalledWatchVersion()
+                        if (installed == null || isVersionOlder(installed, PREPARED_RUN_ACK_MIN_WATCH_VERSION)) {
+                            stopPreparedRunResend()
+                        }
+                        return
+                    }
+
+                    // Watch (3.4.12+) stored the prepared run — stops the re-send loop.
+                    if (action == "preparedRunAck") {
+                        stopPreparedRunResend()
+                        Log.d(TAG, "Watch acked preparedRun")
+                        return
+                    }
+
+                    // Watch (3.4.12+) is on its prepare-on-phone screen and asks for the
+                    // prepared run, in case the copy sent on "watchReady" was lost.
+                    if (action == "requestPreparedRun") {
+                        cachedPreparedRunPayload?.let { payload ->
+                            Log.d(TAG, "requestPreparedRun — re-sending cached preparedRun")
+                            sendToWatch(payload)
+                        }
                         return
                     }
 
@@ -1001,6 +1060,7 @@ class GarminWatchManager(
                         cachedPreparedRunPayload?.let { payload ->
                             Log.d(TAG, "watchReady received — resending cached preparedRun to watch")
                             sendToWatch(payload)
+                            startPreparedRunResend()
                         }
                         // Resend the current session type too — a watch that reconnects
                         // (e.g. after a BT drop) must have this before its next physical
@@ -1022,6 +1082,7 @@ class GarminWatchManager(
                     // re-signal via "pendingSync" once the run ends and it tries to upload.
                     if (action == "start") {
                         cachedPreparedRunPayload = null
+                        stopPreparedRunResend()
                         if (_hasPendingWatchSync.value) {
                             Log.d(TAG, "Watch START received — clearing stale hasPendingWatchSync flag")
                             _hasPendingWatchSync.value = false
