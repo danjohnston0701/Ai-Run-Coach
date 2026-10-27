@@ -12375,6 +12375,19 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
     }
   }
 
+  // True when a run session's runner is walking right now (struggle/cadence cues are skipped).
+  async function isWalkingInRun(reqBody: Record<string, any>): Promise<boolean> {
+    const { assessWalkingInRun } = await import("./ai-service");
+    const { resolveActivityType } = await import("./coaching-activity");
+    return assessWalkingInRun({
+      activityType: resolveActivityType(reqBody as any),
+      cadence: Number(reqBody.cadence ?? reqBody.cadence_spm) || undefined,
+      currentPace: reqBody.currentPace ?? reqBody.current_pace,
+      workoutType: reqBody.workoutType ?? reqBody.workout_type,
+      workoutDescription: reqBody.workoutDescription ?? reqBody.workout_description,
+    }).walking;
+  }
+
   // Pace Update Coaching with TTS
   app.post("/api/coaching/pace-update", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
@@ -12609,6 +12622,9 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         }
       }
 
+      // A pace drop because the runner is walking isn't a struggle — see assessWalkingInRun().
+      if (await isWalkingInRun(req.body)) return res.json({ skipped: true, reason: 'walking' });
+
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('struggle-coaching', req.body, coachingUserId);
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));
@@ -12669,6 +12685,9 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   // Cadence/Stride Coaching with TTS - analyzes overstriding/understriding
   app.post("/api/coaching/cadence-coaching", requireEntitledUser, requireCoachingQuota, async (req: Request, res: Response) => {
     try {
+      // Walking cadence is not a running cadence to fix — see assessWalkingInRun().
+      if (await isWalkingInRun(req.body)) return res.json({ skipped: true, reason: 'walking' });
+
       const coachingUserId = req.body.userId ?? req.body.user_id ?? null;
       const cooldown = await checkCooldown('cadence-coaching', req.body, coachingUserId);
       if (!cooldown.allowed) return res.json(buildSkipResponse(cooldown));

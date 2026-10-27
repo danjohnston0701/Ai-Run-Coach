@@ -63,6 +63,7 @@ class RunView extends Ui.View {
     private var _prepareRequestTick  = 0;
     private const PREPARE_REQUEST_MAX      = 5;
     private const PREPARE_REQUEST_INTERVAL = 12;  // 12 x 250ms = 3s between requests
+    private var _lastPrepAckMs = 0;  // Sys.getTimer() of the last preparedRunAck sent
 
     // Prepared-run data
     private var _prepRunType      = "";
@@ -990,6 +991,25 @@ class RunView extends Ui.View {
         }
     }
 
+    // True when a preparedRun message matches the run already prepared on the watch.
+    private function _isSamePreparedRun(data) {
+        var dist = data.get("distance");
+        if (dist == null || (dist.toFloat() - _prepRunDist).abs() > 0.001) { return false; }
+        return _sameStr(data.get("runType"), _prepRunType)
+            && _sameStr(data.get("workoutType"), _prepWorkoutType)
+            && _sameStr(data.get("targetPace"), _prepTargetPace)
+            && _sameStr(data.get("workoutDesc"), _prepWorkoutDesc)
+            && _sameStr(data.get("plannedWorkoutId"), App.Storage.getValue("plannedWorkoutId"))
+            && (data.get("sessionType") == null
+                || _sameStr(data.get("sessionType"), App.Storage.getValue("sessionType")));
+    }
+
+    private function _sameStr(a, b) {
+        var sa = (a == null) ? "" : a.toString();
+        var sb = (b == null) ? "" : b.toString();
+        return sa.equals(sb);
+    }
+
     function _onPhoneMessageInner(data) {
         if (data == null) { return; }
         var t = data.get("type");
@@ -1025,6 +1045,18 @@ class RunView extends Ui.View {
             Ui.requestUpdate();
 
         } else if (t.equals("preparedRun")) {
+            // A copy of the run already prepared: the phone's re-send, or a burst of them queued
+            // while the app was closed and delivered all at once on launch. Ack at most every
+            // 2 s and skip the storage writes — answering each copy with two transmits and two
+            // writes is the suspected cause of the IQ! crash on accepting the open prompt.
+            if (_isPrepared && !_isRunning && !_isPaused && _isSamePreparedRun(data)) {
+                var now = Sys.getTimer();
+                if (now - _lastPrepAckMs > 2000) {
+                    _lastPrepAckMs = now;
+                    _phoneLink.sendCommand("preparedRunAck");
+                }
+                return;
+            }
             var dist = data.get("distance");
             var rt   = data.get("runType");
             var wt   = data.get("workoutType");
@@ -1075,6 +1107,7 @@ class RunView extends Ui.View {
             _isPrepared = true;
             _prepareRequestsLeft = 0;
             // Stops the phone re-sending this prepared run (GarminWatchManager.sendPreparedRun).
+            _lastPrepAckMs = Sys.getTimer();
             _phoneLink.sendCommand("preparedRunAck");
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
@@ -1261,7 +1294,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.12"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.13"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");

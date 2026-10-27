@@ -621,7 +621,9 @@ class GarminWatchManager(
         cachedPreparedRunPayload = payload
         sendToWatch(payload)
         openWatchApp()
-        startPreparedRunResend()
+        // No re-send loop here: while the watch app is closed, Connect IQ queues every send in
+        // its mailbox and delivers them all at launch; a burst of 20 copies is the likely cause of
+        // the IQ! crash seen when accepting the open prompt (2.0.68). The loop starts on "watchReady".
     }
 
     private fun startPreparedRunResend() {

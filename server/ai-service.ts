@@ -346,6 +346,51 @@ export function freeSessionEffortRule(hasTarget: boolean, activity: 'run' | 'wal
   return `EFFORT PHILOSOPHY (free ${activity} — no target pace, target time or target heart-rate zone): the ${person} has chosen their own effort and it is legitimate, however hard it looks. Do NOT suggest they slow down, ease off, hold back, back off, dial it down or pace themselves. Coach consistency instead: encourage them to hold what they are doing, stay relaxed and keep the effort steady. Noting how pace naturally changes with terrain is fine (steady effort up a climb means a slower pace) as long as it is not framed as conserving energy or as a warning.`;
 }
 
+// ── Walking during a run (2026-10-28) ────────────────────────────────────────────────
+// A run that has turned into a walk (walk break, or a stroll with someone) kept getting
+// "pick up the pace", "close the gap to your target", cadence targets and Struggle cues — 19
+// of them on one 2026-10-24 run with splits of 6:27, 7:58, 8:54, 11:10, 9:45 and cadence
+// 112–143. Running cadence is almost never under ~140 spm and walking almost never over ~130,
+// so cadence is the signal; pace alone only when there is no cadence, and only when it is
+// slower than any jog. Planned walk-run sessions walk by design and are left alone.
+export const WALKING_CADENCE_MAX_SPM = 135;
+export const WALKING_PACE_MIN_SEC_PER_KM = 630; // 10:30/km
+
+export interface WalkingInRunAssessment {
+  walking: boolean;
+  cadence?: number;
+  paceSecPerKm?: number;
+}
+
+export function assessWalkingInRun(params: {
+  activityType?: string | null;
+  cadence?: number | null;
+  currentPace?: string | null;
+  workoutType?: string | null;
+  workoutDescription?: string | null;
+}): WalkingInRunAssessment {
+  const notWalking: WalkingInRunAssessment = { walking: false };
+  if (params.activityType === 'walk') return notWalking;
+  const planText = `${params.workoutType ?? ''} ${params.workoutDescription ?? ''}`.toLowerCase();
+  if (planText.includes('walk')) return notWalking;
+  const cadence = typeof params.cadence === 'number' && params.cadence > 0 ? params.cadence : undefined;
+  const paceSecPerKm = parsePaceSeconds(params.currentPace);
+  if (cadence !== undefined) {
+    return { walking: cadence < WALKING_CADENCE_MAX_SPM, cadence, paceSecPerKm };
+  }
+  if (paceSecPerKm !== undefined && paceSecPerKm >= WALKING_PACE_MIN_SEC_PER_KM && paceSecPerKm < 1800) {
+    return { walking: true, paceSecPerKm };
+  }
+  return notWalking;
+}
+
+/** Prompt rule for a run session where the runner is currently walking; '' otherwise. */
+export function walkingInRunRule(a: WalkingInRunAssessment): string {
+  if (!a.walking) return '';
+  const evidence = a.cadence !== undefined ? `cadence ${Math.round(a.cadence)} spm` : 'their current pace';
+  return `WALKING RIGHT NOW (overrides every instruction above): ${evidence} shows the runner is walking at the moment — a walk break, or the run has become a walk. That is their choice and it is fine. Do NOT tell them to speed up, pick up the pace, kick it up, get back on track, close the gap to their target pace or target time, or raise their cadence, and do not frame it as a struggle or a fade. Do not mention cadence at all. Report the numbers neutrally, coach the walk itself (tall posture, relaxed shoulders, easy breathing), and at most once offer a light, optional invitation to ease back into a jog whenever they feel ready.`;
+}
+
 // ── Shared live-context helpers (2026-09-20) ──────────────────────────────────────────
 // Built after a half-marathon field review where the coaching (a) repeated "settle back to
 // your target pace" a dozen times to a runner who was consistently and comfortably 15–20%
@@ -1278,12 +1323,16 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
     runnerProfile: params.runnerProfile, accentRule,
   };
   const { system, user } = (isWalkSession ? walkPrompts : runPrompts).paceUpdatePrompt(promptCtx);
+  const walkingRule = walkingInRunRule(assessWalkingInRun({
+    activityType, cadence: params.cadence,
+    currentPace: params.currentPace, workoutType,
+  }));
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: system },
-      { role: "user", content: user }
+      { role: "user", content: walkingRule ? `${user}\n\n${walkingRule}` : user }
     ],
     max_tokens: 110,
     temperature: 0.75,
@@ -6259,7 +6308,12 @@ Give a 2-3 sentence message that reinforces what's working. Reference real data.
       break;
 
     case 'target_eta': {
-      const diff = projectedFinishTime && targetTime ? Math.round((projectedFinishTime - targetTime) / 60) : 0;
+      // Gap in seconds, ON TARGET only within ±30 s. It used to be rounded to whole minutes with
+      // "behind" meaning > 1, so a runner 76 s over (rounds to 1) was told "ON TARGET — executing
+      // perfectly" and the model filled the gap with "ease back to 7:00/km, manage your energy".
+      const gapSec = projectedFinishTime && targetTime ? Math.round(projectedFinishTime - targetTime) : 0;
+      const behind = gapSec > 30;
+      const ahead = gapSec < -30;
 
       typePrompt = `COACHING TYPE: Target time ETA update.
 
@@ -6268,8 +6322,8 @@ ${noTerrainRule}
 
 Target: ${targetTime ? formatDurationSpoken(targetTime) : 'no target set'}
 Projected finish: ${projectedFinishTime ? formatDurationSpoken(projectedFinishTime, true) : 'insufficient data'}
-${diff > 1 ? `STATUS: ${formatDurationSpoken(Math.abs(diff) * 60)} BEHIND target. They need to pick up the pace gradually — not panic.` :
-  diff < -1 ? `STATUS: ${formatDurationSpoken(Math.abs(diff) * 60)} AHEAD of target. They have a cushion — smart pacing.` :
+${behind ? `STATUS: ${formatDurationSpoken(gapSec)} BEHIND target. They need to pick up the pace gradually — not panic.` :
+  ahead ? `STATUS: ${formatDurationSpoken(-gapSec)} AHEAD of target. They have a cushion — smart pacing.` :
   `STATUS: ON TARGET. They're executing their race plan perfectly.`}
 ${targetPace ? `Target pace: ${spokenTargetPace} (current: ${spokenPace})` : ''}
 
@@ -6277,9 +6331,11 @@ Give a brief ETA coaching message (2 sentences):
 1. State their projected finish time clearly vs their target
 2. ${eliteSettled.settled
   ? 'Reinforce holding exactly what they are doing — do NOT suggest easing off, settling back or slowing to target pace (see TARGET PACE rule above); the cushion is theirs to keep.'
-  : diff < -1
+  : ahead
     ? 'Coach on pacing strategy — maintain or push slightly. Never tell them to ease off or slow down to protect a cushion; being ahead is not a problem to fix.'
-    : 'Coach on pacing strategy — should they maintain or push slightly?'}
+    : behind
+      ? 'Coach a gradual lift toward target pace. They are BEHIND, so never tell them to ease back, settle, slow down or manage their energy — that is the wrong direction.'
+      : 'Coach on pacing strategy — should they maintain or push slightly? Never tell them to ease back or manage their energy.'}
 ${PACE_FORMAT_RULE}`;
       systemExtra = 'Give clear projected finish time updates with actionable pacing advice.';
       break;
@@ -6493,15 +6549,20 @@ Give the most intense, powerful 1-2 sentence motivational burst possible, in you
     }
   }
 
+  const walkingRule = walkingInRunRule(assessWalkingInRun({
+    activityType: isWalkSession ? 'walk' : 'run', cadence, currentPace, workoutType, workoutDescription,
+  }));
+
   const prompt = `You are ${coachName}, an ELITE ${isWalkSession ? 'walking' : 'running'} coach with a ${coachTone} style. You're coaching this ${isWalkSession ? 'walker' : 'runner'} IN REAL-TIME via audio.
 ${walkSessionRule}
 ${typePrompt}
+${walkingRule}
 ${PACE_FORMAT_RULE}
 ${VARIETY_INSTRUCTION}
 
 Keep it to 2-3 spoken sentences (under 20 seconds of audio). Every word must add value.`;
 
-  const systemMsg = `You are ${coachName}, an elite ${coachTone} ${isWalkSession ? 'walking' : 'running'} coach delivering real-time audio coaching. You combine data-driven insight with elite technique coaching. Reference actual numbers. Never give empty motivation — every word is backed by data or technique knowledge.${isWalkSession ? ' WALKING SESSION: use "walker/walking" vocabulary. NEVER mention cadence, spm, or step frequency targets.' : ''} ${systemExtra} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${runnerProfileBlock(params.runnerProfile)}`;
+  const systemMsg = `You are ${coachName}, an elite ${coachTone} ${isWalkSession ? 'walking' : 'running'} coach delivering real-time audio coaching. You combine data-driven insight with elite technique coaching. Reference actual numbers. Never give empty motivation — every word is backed by data or technique knowledge.${isWalkSession ? ' WALKING SESSION: use "walker/walking" vocabulary. NEVER mention cadence, spm, or step frequency targets.' : ''} ${systemExtra} ${effortPhilosophyRule(isWalkSession ? 'walker' : 'runner')} ${PACE_FORMAT_RULE} ${toneDirective(coachTone)}${runnerProfileBlock(params.runnerProfile)}`;
 
   try {
     const completion = await openai.chat.completions.create({
