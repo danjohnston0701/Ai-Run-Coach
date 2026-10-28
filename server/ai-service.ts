@@ -828,6 +828,30 @@ export interface RouteIntelligenceContext {
   typicalDistanceKm?: number;
 }
 
+// A split more than this far from a past figure isn't a like-for-like comparison: a different
+// route matched by its start point, or a history mixed with walks (Wayne, 10-24: "261 seconds
+// slower than your recent average" while running 5:07/km against a ~9:30 walk-skewed average).
+const MAX_COMPARABLE_PACE_GAP_SEC = 75;
+
+/**
+ * One past-vs-now pace comparison, worked out here so the model never does the sum or picks
+ * the direction itself — left to the model, consecutive splits of one run came out as "13 s
+ * slower", "32 s slower" and "59 s faster" than the same last run. Null when there's nothing
+ * comparable.
+ */
+export function describePaceDelta(nowSecPerKm: number | undefined, pastSecPerKm: number | undefined, pastLabel: string): string | null {
+  if (!nowSecPerKm || !pastSecPerKm || nowSecPerKm <= 0 || pastSecPerKm <= 0) return null;
+  const diff = Math.round(nowSecPerKm - pastSecPerKm); // positive = slower now
+  if (Math.abs(diff) > MAX_COMPARABLE_PACE_GAP_SEC) return null;
+  if (Math.abs(diff) < 3) return `about the same pace as ${pastLabel}`;
+  return diff < 0
+    ? `${-diff} seconds per km QUICKER than ${pastLabel} (an improvement)`
+    : `${diff} seconds per km SLOWER than ${pastLabel}`;
+}
+
+/** Appended to every prompt that carries past-run figures. */
+export const PAST_RUN_COMPARISON_RULE = `PAST-RUN COMPARISONS: only compare with past runs using a comparison line given above, quoting its number and its direction (quicker/slower) exactly. Never work out a difference yourself from paces or times, and never compare with a past run when no comparison line is given. Mention at most one comparison per update.`;
+
 /** Build a concise context block from the Route Intelligence packet for coaching prompts. */
 function buildRouteIntelligenceContext(
   routeCtx: RouteIntelligenceContext,
@@ -850,16 +874,10 @@ function buildRouteIntelligenceContext(
   if (splitKm && currentKmSplitSec && routeCtx.splitComparisons) {
     const cmp = routeCtx.splitComparisons.find((s) => s.km === splitKm);
     if (cmp) {
-      if (cmp.lastRunSecPerKm) {
-        const deltaLast = cmp.lastRunSecPerKm - currentKmSplitSec; // positive = runner is faster
-        const label = deltaLast > 0 ? `${Math.abs(Math.round(deltaLast))}s FASTER than last run` : `${Math.abs(Math.round(deltaLast))}s SLOWER than last run`;
-        lines.push(`Km ${splitKm} vs last run: ${label}`);
-      }
-      if (cmp.avgSecPerKm) {
-        const deltaAvg = cmp.avgSecPerKm - currentKmSplitSec;
-        const label = deltaAvg > 0 ? `${Math.abs(Math.round(deltaAvg))}s FASTER than their average` : `${Math.abs(Math.round(deltaAvg))}s SLOWER than their average`;
-        lines.push(`Km ${splitKm} vs average: ${label}`);
-      }
+      const last = describePaceDelta(currentKmSplitSec, cmp.lastRunSecPerKm, `km ${splitKm} of their last run on this route`);
+      if (last) lines.push(`Km ${splitKm} vs last run: ${last}`);
+      const avg = describePaceDelta(currentKmSplitSec, cmp.avgSecPerKm, `their average km ${splitKm} on this route`);
+      if (avg) lines.push(`Km ${splitKm} vs route average: ${avg}`);
     }
   }
 
@@ -910,7 +928,7 @@ export interface RunHistoryStats {
  * Build a concise natural-language context string from run history stats.
  * Compares current pace to their recent average so the AI can comment meaningfully.
  */
-function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string, isWalkSession?: boolean): string {
+function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string, isWalkSession?: boolean, paceLabel = 'current pace'): string {
   if (!history || history.runsAnalysed === 0) return '';
 
   // Don't compare walk pace to run pace history (and vice versa) — they're completely different baselines
@@ -923,20 +941,14 @@ function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string, 
 
   let ctx = `Based on their last ${history.runsAnalysed} ${walkSession ? 'walks' : 'runs'}: avg pace ${history.avgPaceFormatted}/km`;
 
-  if (currentPace && history.avgPaceSecondsPerKm > 0 && !mismatch) {
-    // Parse current pace to seconds
-    const parts = currentPace.replace('/km', '').split(':');
-    if (parts.length === 2) {
-      const currentSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
-      const diff = currentSec - history.avgPaceSecondsPerKm;
-      if (diff < -10) {
-        ctx += ` — they're ${walkSession ? 'walking' : 'running'} ${Math.abs(Math.round(diff))}s/km FASTER than their usual pace (performing above average today)`;
-      } else if (diff > 10) {
-        ctx += ` — they're ${walkSession ? 'walking' : 'running'} ${Math.round(diff)}s/km SLOWER than their usual pace`;
-      } else {
-        ctx += ` — they're ${walkSession ? 'walking' : 'running'} close to their typical pace`;
-      }
-    }
+  const toSec = (p?: string) => {
+    const parts = (p ?? '').replace('/km', '').split(':');
+    return parts.length === 2 ? parseInt(parts[0]) * 60 + parseInt(parts[1]) : undefined;
+  };
+  const nowSec = toSec(currentPace);
+  if (nowSec && history.avgPaceSecondsPerKm > 0 && !mismatch) {
+    const vsAvg = describePaceDelta(nowSec, history.avgPaceSecondsPerKm, 'their recent average');
+    if (vsAvg) ctx += `. Comparison: ${paceLabel} is ${vsAvg}`;
   } else if (mismatch) {
     // Activity type mismatch — don't make pace comparisons
     ctx += ` (note: this history is from ${walkSession ? 'runs' : 'walks'}, not ${walkSession ? 'walks' : 'runs'})`;
@@ -948,7 +960,10 @@ function buildRunHistoryContext(history: RunHistoryStats, currentPace?: string, 
     const trendLabel = { improving: 'on an improving trend', declining: 'on a recent dip in form', inconsistent: 'running inconsistently lately' }[history.consistencyTrend];
     ctx += `. Trend: ${trendLabel}`;
   }
-  if (history.lastRunPaceFormatted) ctx += `. Last run: ${history.lastRunPaceFormatted}/km (${history.lastRunDate || 'recently'})`;
+  if (nowSec && history.lastRunPaceFormatted && !mismatch) {
+    const vsLast = describePaceDelta(nowSec, toSec(history.lastRunPaceFormatted), `their last run's average pace (${history.lastRunDate || 'recently'})`);
+    if (vsLast) ctx += `. Comparison: ${paceLabel} is ${vsLast}`;
+  }
 
   return ctx + '.';
 }
@@ -1159,7 +1174,9 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
   if (runnerFirstNamePace) runnerContext += `${isWalkSession ? 'Walker' : 'Runner'}: ${runnerFirstNamePace}. `;
   if (fitnessLevel) runnerContext += `Fitness level: ${fitnessLevel}. `;
   if (runHistory) {
-    runnerContext += buildRunHistoryContext(runHistory, currentPace, isWalkSession);
+    runnerContext += (isSplit && splitPace)
+      ? buildRunHistoryContext(runHistory, splitPace, isWalkSession, `this km's split`)
+      : buildRunHistoryContext(runHistory, currentPace, isWalkSession);
   }
 
   const spokenCurrentPace = averagePaceResolved ? formatPaceForTTS(averagePaceResolved) : null;  // overall average pace - already includes "per kilometer"
