@@ -16,7 +16,7 @@
  */
 
 import { db } from "./db";
-import { knownRoutes, runs } from "../shared/schema";
+import { knownRoutes, runs, users } from "../shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -151,6 +151,32 @@ function haversineMetres(lat1: number, lng1: number, lat2: number, lng2: number)
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ─── Runner's local time ──────────────────────────────────────────────────────
+// Day/time patterns and route names are in the runner's own time zone (users.timezone), not the
+// server's UTC clock — a New Zealand Saturday 08:00 run used to become "Friday Evening Run".
+
+async function getUserTimezone(userId: string): Promise<string | null> {
+  try {
+    const [u] = await db.select({ timezone: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+    return u?.timezone ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/** Day of week (0 = Sunday), hour and minute of `when` in `timezone` (UTC when unknown). */
+function localTimeParts(when: Date, timezone?: string | null): { day: number; hour: number; minute: number } {
+  const parts = (tz: string) => Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(when).map((p) => [p.type, p.value]),
+  );
+  let p: Record<string, string>;
+  try { p = parts(timezone || "UTC"); } catch { p = parts("UTC"); }
+  return { day: WEEKDAY_INDEX[p.weekday] ?? 0, hour: parseInt(p.hour, 10), minute: parseInt(p.minute, 10) };
+}
+
 // ─── Confidence Scoring ───────────────────────────────────────────────────────
 
 /**
@@ -169,7 +195,8 @@ function scoreCandidate(
   lat: number,
   lng: number,
   timestamp: Date,
-  intendedDistanceKm?: number
+  intendedDistanceKm?: number,
+  timezone?: string | null
 ): ConfidenceBreakdown {
   // ── 1. GPS Proximity (40 pts) ──────────────────────────────────────────────
   const distM = haversineMetres(lat, lng, candidate.startLat, candidate.startLng);
@@ -199,7 +226,8 @@ function scoreCandidate(
   }
 
   // ── 3. Day of Week (15 pts) ───────────────────────────────────────────────
-  const currentDay = timestamp.getDay(); // 0=Sun, 6=Sat
+  const local = localTimeParts(timestamp, timezone);
+  const currentDay = local.day; // 0=Sun, 6=Sat
   const typicalDays: number[] = (candidate.typicalDaysOfWeek as number[]) ?? [];
   let dayScore = 0;
   if (typicalDays.length === 0) {
@@ -211,8 +239,8 @@ function scoreCandidate(
   }
 
   // ── 4. Time of Day (10 pts) ───────────────────────────────────────────────
-  const currentHour = timestamp.getHours();
-  const currentMin = timestamp.getMinutes();
+  const currentHour = local.hour;
+  const currentMin = local.minute;
   const currentTotalMin = currentHour * 60 + currentMin;
   const typicalTotalMin =
     (candidate.typicalStartHour ?? 0) * 60 + (candidate.typicalStartMinute ?? 0);
@@ -374,6 +402,7 @@ export async function recognizeRoute(
   if (candidates.length === 0) {
     return { matched: false, confidence: 0, confidenceLabel: "none", knownRoute: null, routeIntelligence: null, confidenceBreakdown: null };
   }
+  const timezone = await getUserTimezone(userId);
 
   // 2. Score every candidate and pick the best
   let bestCandidate: any = null;
@@ -381,7 +410,7 @@ export async function recognizeRoute(
   let bestScore = 0;
 
   for (const candidate of candidates) {
-    const breakdown = scoreCandidate(candidate, lat, lng, timestamp, intendedDistanceKm);
+    const breakdown = scoreCandidate(candidate, lat, lng, timestamp, intendedDistanceKm, timezone);
     if (breakdown.total > bestScore) {
       bestScore = breakdown.total;
       bestCandidate = candidate;
@@ -583,9 +612,8 @@ export async function updateKnownRoutes(
 
   const kmSplits = parseKmSplits(completedRun.kmSplits);
   const runAt = completedRun.completedAt;
-  const dayOfWeek = runAt.getDay();
-  const hour = runAt.getHours();
-  const minute = runAt.getMinutes();
+  const timezone = await getUserTimezone(userId);
+  const { day: dayOfWeek, hour, minute } = localTimeParts(runAt, timezone);
 
   if (matchingRoute) {
     // ── Update existing fingerprint ──────────────────────────────────────────
@@ -704,9 +732,10 @@ export async function updateKnownRoutes(
     const avgKm = ((nearbyPrior.distance ?? distKm) + distKm) / 2;
 
     const priorAt = nearbyPrior.completedAt!;
-    const priorDay = priorAt.getDay();
+    const priorLocal = localTimeParts(priorAt, timezone);
+    const priorDay = priorLocal.day;
     const typicalDays = Array.from(new Set([priorDay, dayOfWeek]));
-    const priorTotalMin = priorAt.getHours() * 60 + priorAt.getMinutes();
+    const priorTotalMin = priorLocal.hour * 60 + priorLocal.minute;
     const avgTotalMin = Math.round((priorTotalMin + (hour * 60 + minute)) / 2);
     const startHour = Math.floor(avgTotalMin / 60);
     const startMinute = avgTotalMin % 60;
