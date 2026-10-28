@@ -1894,7 +1894,13 @@ class RunTrackingService : Service(), SensorEventListener {
                 // Only stop tracking if this service was itself started for a watch-initiated run.
                 // This avoids accidentally aborting a phone-initiated run that happens to be active
                 // while an old offline batch is waiting to sync on the watch.
-                if (wasRunStartedByWatch && isTracking) {
+                if (isFinalizingStop) {
+                    // The stop did arrive and is being saved. The watch sends watchReady with
+                    // hasPendingSync right after its own stop, so this lands ~300 ms into the
+                    // save; the branch below used to stopSelf() here, wiping the run mid-save, so
+                    // the phone never uploaded it or opened the summary (2.0.69, 10-28).
+                    Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — stop already being saved, ignoring")
+                } else if (wasRunStartedByWatch && isTracking) {
                     Log.d("RunTrackingService", "⌚ ACTION_WATCH_RUN_FINISHED — watch run ended (stop was dropped), stopping tracking now")
                     stopTracking()
                 } else {
@@ -5793,17 +5799,23 @@ class RunTrackingService : Service(), SensorEventListener {
      * every ACTION_STOP_TRACKING caller, not just the FCM one which already carries a runId.
      */
     private suspend fun resolveCompanionRunIdFallback(): String? {
-        return try {
-            val recoverable = apiService.getRecoverableGarminCompanionSession()
-            val session = recoverable.session
-            if (session?.status == "completed" && session.runId != null) {
+        // The watch saves its run a second or two after it sends "stop", so a session that is
+        // still active/paused (or completed without its run yet) is asked again a few times.
+        repeat(4) { attempt ->
+            val session = try {
+                apiService.getRecoverableGarminCompanionSession().session
+            } catch (e: Exception) {
+                Log.w("RunTrackingService", "resolveCompanionRunIdFallback lookup failed (non-fatal): ${e.message}")
+                null
+            } ?: return null
+            if (session.status == "completed" && session.runId != null) {
                 Log.d("RunTrackingService", "⌚ Resolved fresh-instance stop to already-saved companion run ${session.runId}")
-                session.runId
-            } else null
-        } catch (e: Exception) {
-            Log.w("RunTrackingService", "resolveCompanionRunIdFallback lookup failed (non-fatal): ${e.message}")
-            null
+                return session.runId
+            }
+            if (session.status == "abandoned") return null
+            if (attempt < 3) delay(1500)
         }
+        return null
     }
 
     /**

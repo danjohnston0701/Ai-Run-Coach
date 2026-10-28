@@ -2340,17 +2340,6 @@ fun BreathingWave(active: Boolean, glow: Boolean, modifier: Modifier = Modifier)
 fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier, isWalk: Boolean = false) {
     val watchName = if (isSamsungWatch) "Samsung" else "Garmin"
 
-    val infiniteTransition = rememberInfiniteTransition(label = "watchStandbyPulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -2366,28 +2355,6 @@ fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier, i
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
-            // Pulsing watch icon
-            Box(contentAlignment = Alignment.Center) {
-                Box(
-                    modifier = Modifier
-                        .size(90.dp)
-                        .scale(pulseScale)
-                        .background(Colors.primary.copy(alpha = 0.06f), CircleShape)
-                )
-                Box(
-                    modifier = Modifier
-                        .size(68.dp)
-                        .scale(pulseScale)
-                        .background(Colors.primary.copy(alpha = 0.12f), CircleShape)
-                )
-                Icon(
-                    painter = painterResource(id = R.drawable.icon_watch_vector),
-                    contentDescription = null,
-                    modifier = Modifier.size(30.dp),
-                    tint = Colors.primary
-                )
-            }
-
             // Heading
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
