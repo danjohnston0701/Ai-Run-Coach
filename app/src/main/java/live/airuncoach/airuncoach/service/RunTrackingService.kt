@@ -3123,6 +3123,12 @@ class RunTrackingService : Service(), SensorEventListener {
 
         val heightCm = currentUser?.height?.toDouble() ?: 170.0
 
+        // The target comes from the run's average speed once there's 1 km of it, not the live
+        // window: live pace swings with every hill, crossing and walk break, so the target quoted
+        // to the runner moved cue to cue (148, then 163, then 148 in one run).
+        val activeSec = getActiveRunDuration() / 1000.0
+        val targetSpeed = if (totalDistance >= 1000 && activeSec > 0) totalDistance / activeSec else currentSpeed
+
         // Terrain context — use real-time smoothed grade, not the whole-run average gradient
         val grade = currentSmoothedGrade
         val terrain = when {
@@ -3134,7 +3140,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // Personalised cadence range using biomechanics model — includes terrain gradient so the
         // target shifts upward on hills (shorter quicker steps) and slightly downward on descents.
         val (cadenceLow, cadenceTarget, cadenceHigh) = calculatePersonalisedCadenceRange(
-            speedMs = currentSpeed,
+            speedMs = targetSpeed,
             heightCm = heightCm,
             age = currentUser?.age,
             gradePercent = grade

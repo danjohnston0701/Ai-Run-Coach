@@ -1560,10 +1560,12 @@ export async function generatePhaseCoaching(params: {
   let cadenceInfo = '';
   let cadenceCoachingDirective = '';
   if (cadence && cadence > 0 && distance >= 0.75) {
-    // Parse current pace to seconds/km for the cadence calculator
+    // The target comes from the whole-run average pace, not the live one, so it stays the same
+    // from cue to cue (matches the apps' own cadence cues).
+    const cadencePace = averagePaceResolved ?? currentPace;
     const paceSecPerKm = (() => {
-      if (!currentPace) return 360; // default to 6:00/km if unknown
-      const parts = currentPace.split(':').map(Number);
+      if (!cadencePace) return 360; // default to 6:00/km if unknown
+      const parts = cadencePace.split(':').map(Number);
       return parts.length === 2 ? parts[0] * 60 + parts[1] : 360;
     })();
 
@@ -2706,7 +2708,7 @@ export async function getElevationCoaching(params: {
   // correctly elsewhere in this file for live cadence coaching) instead of citing
   // a generic number the runner has no way of matching at their actual pace.
   const elevPaceSecPerKm = (() => {
-    const paceStr = params.currentPace || params.averagePace;
+    const paceStr = params.averagePace || params.currentPace; // average first: a stable target
     if (!paceStr) return null;
     const parts = paceStr.split(':').map(Number);
     return parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) ? parts[0] * 60 + parts[1] : null;
