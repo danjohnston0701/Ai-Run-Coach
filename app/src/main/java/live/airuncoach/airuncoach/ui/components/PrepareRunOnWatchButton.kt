@@ -27,15 +27,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * "Prepare for Watch" button — only rendered when the Garmin companion app
+ * "Send to Garmin Watch" / "Send to Samsung Watch" button — only rendered when the companion app
  * is confirmed installed on the paired watch.
  *
- * IDLE state renders as a full-width row button: watch icon left, "Prepare for Watch" text.
+ * IDLE state renders as a full-width row button: watch icon left, "Send to {brand} Watch" text.
  * When isPrimary = true the background is filled teal (watch = primary action).
  * When isPrimary = false it uses a dark background with a teal outline (secondary).
  * SENDING state shows a pulsing "Sending to watch…" indicator.
@@ -50,8 +51,10 @@ fun PrepareRunOnWatchButton(
     sendState: WatchSendState,
     onPrepare: () -> Unit,
     modifier: Modifier = Modifier,
-    isPrimary: Boolean = false
+    isPrimary: Boolean = false,
+    isSamsungWatch: Boolean = false
 ) {
+    val sendLabel = "Send to ${if (isSamsungWatch) "Samsung" else "Garmin"} Watch"
     AnimatedVisibility(
         visible = companionInstalled,
         enter = fadeIn(tween(300)),
@@ -67,7 +70,8 @@ fun PrepareRunOnWatchButton(
                         onClick = onPrepare,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = teal),
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Watch,
@@ -77,8 +81,10 @@ fun PrepareRunOnWatchButton(
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            "Prepare for Watch",
+                            sendLabel,
                             fontSize = 15.sp,
+                            lineHeight = 17.sp,
+                            textAlign = TextAlign.Center,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0A1628)
                         )
@@ -90,7 +96,8 @@ fun PrepareRunOnWatchButton(
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0A1628)),
                         shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.5.dp, teal)
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, teal),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Watch,
@@ -100,8 +107,10 @@ fun PrepareRunOnWatchButton(
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            "Prepare for Watch",
+                            sendLabel,
                             fontSize = 15.sp,
+                            lineHeight = 17.sp,
+                            textAlign = TextAlign.Center,
                             fontWeight = FontWeight.SemiBold,
                             color = teal
                         )
@@ -165,7 +174,7 @@ fun PrepareRunOnWatchButton(
 }
 
 /**
- * Sits directly under "Prepare for Watch" on the session-setup screens. Live AI coaching and
+ * Shown on the Waiting for Watch screen. Live AI coaching and
  * feedback come from the PHONE (the watch only relays them), so a runner who leaves the phone
  * at home, or starts on the watch alone, silently gets no coaching at all — the single most
  * common mismatch between what people expect and what they get. Stated as plainly as possible.

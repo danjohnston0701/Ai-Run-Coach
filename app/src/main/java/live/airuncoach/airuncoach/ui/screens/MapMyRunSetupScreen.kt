@@ -38,7 +38,6 @@ import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.ui.dialogs.FriendPickerDialog
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
-import live.airuncoach.airuncoach.ui.components.WatchNeedsPhoneCaption
 import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
@@ -117,6 +116,7 @@ fun MapMyRunSetupScreen(
         groupRunId?.let { runSessionViewModel.setGroupRunId(it) }
     }
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
+    val connectedWatchIsSamsung by runSessionViewModel.connectedWatchIsSamsung.collectAsState()
     var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
     
     // Load friends for group run invitations
@@ -446,9 +446,8 @@ fun MapMyRunSetupScreen(
                 } else {
                     // no_route mode: conditional layout based on watch availability
                     if (companionInstalled) {
-                        // Stacked when a watch is available: Prepare for Watch, then the "take your
-                        // phone" caption, then Prepare on Phone — so nobody reads the watch option
-                        // as "the watch does it all" and leaves the phone behind.
+                        // Stacked when a watch is available: Send to {brand} Watch, then Prepare on
+                        // Phone. No explainer: sending opens the watch app and prompts the runner there.
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -458,6 +457,7 @@ fun MapMyRunSetupScreen(
                                     companionInstalled = companionInstalled,
                                     sendState = watchSendState,
                                     isPrimary = true,
+                                    isSamsungWatch = connectedWatchIsSamsung,
                                     onPrepare = {
                                         watchSendState = WatchSendState.SENDING
 
@@ -519,8 +519,6 @@ fun MapMyRunSetupScreen(
                                     }
                                 )
                             }
-
-                            WatchNeedsPhoneCaption(isWalk = activityMode == ActivityMode.WALK)
 
                             // Prepare on Phone — secondary outlined action
                             Box(modifier = Modifier.fillMaxWidth()) {

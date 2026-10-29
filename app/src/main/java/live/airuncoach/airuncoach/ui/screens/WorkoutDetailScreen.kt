@@ -74,6 +74,7 @@ fun WorkoutDetailScreen(
     val color = workoutTypeColor(workout.workoutType)
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
+    val connectedWatchIsSamsung by runSessionViewModel.connectedWatchIsSamsung.collectAsState()
     // User age for age-adjusted HR zone calculations (Tanaka formula: 208 - 0.7×age)
     val dashboardViewModel: DashboardViewModel = hiltViewModel()
     val currentUser by dashboardViewModel.user.collectAsState()
@@ -685,7 +686,7 @@ fun WorkoutDetailScreen(
                 }
 
                 // ── Watch vs Phone primary action ─────────────────────────────────
-                // When a watch is connected: "Prepare for Watch" = primary filled teal,
+                // When a watch is connected: "Send to {brand} Watch" = primary filled teal,
                 //   "Start on Phone" = secondary outlined button below.
                 // When no watch connected: "Start on Phone" = primary filled teal (original).
                 val watchReady = companionInstalled && isCoachingReady && !isAudioPreloading
@@ -714,22 +715,23 @@ fun WorkoutDetailScreen(
                     onStartWorkout(workout)
                 }
 
-                // Watch connected: "Prepare for Watch" (primary filled, left) and
-                // "Start on Phone" (secondary outlined, right) side by side.
+                // Watch connected: "Send to {brand} Watch" (primary filled) with
+                // "Start on Phone" (secondary outlined) below it, full width.
                 if (watchReady) {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                        Box(modifier = Modifier.weight(1f)) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             PrepareRunOnWatchButton(
                                 companionInstalled = watchReady,
                                 sendState = watchSendState,
                                 isPrimary = true,
+                                isSamsungWatch = connectedWatchIsSamsung,
                                 onPrepare = onPrepareWatch
                             )
                         }
-                        Box(modifier = Modifier.weight(1f)) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             OutlinedCtaButton(
                                 text = "Start on Phone",
                                 leadingIconRes = R.drawable.icon_play_vector,

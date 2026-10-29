@@ -2,7 +2,6 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
-import live.airuncoach.airuncoach.ui.components.WatchNeedsPhoneCaption
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -995,11 +994,11 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
                                         companionInstalled = true,
                                         sendState = WatchSendState.IDLE,
                                         isPrimary = true,
+                                        isSamsungWatch = watchChoice == TourWatchChoice.SAMSUNG_WATCH,
                                         onPrepare = onProceed,
                                     )
                                 }
                             }
-                            WatchNeedsPhoneCaption(isWalk = activityMode == ActivityMode.WALK)
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 OutlinedCtaButton(
                                     text = if (gpsLocked) "Prepare $verb on Phone" else "WAITING FOR GPS SIGNAL",
@@ -1034,7 +1033,7 @@ private fun MockRunSetupScreen(watchChoice: TourWatchChoice, onProceed: () -> Un
             TourPromptBanner(
                 when {
                     !gpsLocked -> "Locking on to GPS, just like the real thing…"
-                    hasWatch -> "Tap \"Prepare for Watch\" to open the run screen. For live coaching, take your phone with you — the watch on its own still records your run for AI analysis afterwards."
+                    hasWatch -> "Tap \"Send to ${if (watchChoice == TourWatchChoice.SAMSUNG_WATCH) "Samsung" else "Garmin"} Watch\" to open the run screen. For live coaching, take your phone with you — the watch on its own still records your run for AI analysis afterwards."
                     else -> "That's the setup screen. Tap \"PREPARE RUN\" to open the run screen."
                 }
             )

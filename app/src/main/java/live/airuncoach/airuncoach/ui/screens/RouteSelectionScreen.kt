@@ -34,7 +34,6 @@ import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import live.airuncoach.airuncoach.domain.model.RouteDifficulty
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
 import live.airuncoach.airuncoach.ui.components.PrepareRunOnWatchButton
-import live.airuncoach.airuncoach.ui.components.WatchNeedsPhoneCaption
 import live.airuncoach.airuncoach.ui.components.WatchSendState
 import live.airuncoach.airuncoach.viewmodel.RunSessionViewModel
 import kotlin.math.roundToInt
@@ -56,6 +55,7 @@ fun RouteSelectionScreen(
 ) {
     val viewModel: RunSessionViewModel = hiltViewModel()
     val companionInstalled by viewModel.isWatchCompanionInstalled.collectAsState()
+    val connectedWatchIsSamsung by viewModel.connectedWatchIsSamsung.collectAsState()
     var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
 
     // Reset watch send state when route changes
@@ -176,8 +176,7 @@ fun RouteSelectionScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // "Prepare for Watch", the "take your phone" caption, then "Start on Phone",
-                // stacked full width — shown only once a route is selected AND the companion
+                // "Send to {brand} Watch", then "Start on Phone", stacked full width — shown only once a route is selected AND the companion
                 // app is installed; otherwise a single full-width phone button (also covers
                 // "companion installed but no route picked yet").
                 val selectedRoute = routes.find { it.id == selectedRouteId }
@@ -191,6 +190,7 @@ fun RouteSelectionScreen(
                                 companionInstalled = true,
                                 sendState = watchSendState,
                                 isPrimary = true,
+                                isSamsungWatch = connectedWatchIsSamsung,
                                 onPrepare = {
                                     watchSendState = WatchSendState.SENDING
                                     viewModel.prepareRunOnWatch(
@@ -209,7 +209,6 @@ fun RouteSelectionScreen(
                                 }
                             )
                         }
-                        WatchNeedsPhoneCaption(isWalk = activityTypeLabel == "WALK")
                         Box(modifier = Modifier.fillMaxWidth()) {
                             OutlinedCtaButton(
                                 text = "START $activityTypeLabel ON PHONE",
