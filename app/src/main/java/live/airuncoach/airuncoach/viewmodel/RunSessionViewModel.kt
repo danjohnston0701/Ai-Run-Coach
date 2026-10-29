@@ -972,6 +972,10 @@ class RunSessionViewModel @Inject constructor(
     private var user: User? = null
     private var runConfig: RunSetupConfig? = null
     private var isBriefingAudioPlaying = false // Guard against duplicate audio playback
+    // The briefing actually spoken on the prepare screen. coachText can't be used for this: it's
+    // cleared when the briefing finishes, so whether the service heard about it depended on
+    // tapping Start mid-briefing — and when it didn't, the service spoke its own opening line too.
+    private var spokenBriefingText: String? = null
     // Debounce guard: ignore duplicate talk-to-coach triggers within 3 seconds.
     // Protects against the watch + service both firing onWakeWordDetected() for one tap.
     private var lastWakeWordTriggerMs: Long = 0L
@@ -1112,6 +1116,8 @@ class RunSessionViewModel @Inject constructor(
             return
         }
         
+        spokenBriefingText = null
+
         // Fully reset run state to prevent stale data from previous run showing
         // This resets all metrics to zeros and clears navigation/stopping flags
         _runState.value = RunState(
@@ -1322,6 +1328,7 @@ class RunSessionViewModel @Inject constructor(
 
                         if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
                             isBriefingAudioPlaying = true
+                            spokenBriefingText = coachingPlanBrief
                             CoachingAudioQueue.enqueue(
                                 context = context,
                                 base64Audio = briefAudio,
@@ -1349,6 +1356,7 @@ class RunSessionViewModel @Inject constructor(
 
                         if (!isBriefingAudioPlaying && !_runState.value.isMuted) {
                             isBriefingAudioPlaying = true
+                            spokenBriefingText = speechText
                             CoachingAudioQueue.enqueue(
                                 context = context,
                                 base64Audio = briefing.audio,
@@ -1852,11 +1860,13 @@ class RunSessionViewModel @Inject constructor(
                         Log.w("RunSessionViewModel", "Failed to serialize dynamic coaching plan: ${e.message}")
                     }
                 }
-                // Pass pre-run briefing text to record in coaching history
-                _runState.value.coachText?.takeIf { it.isNotBlank() }?.let { briefingText ->
+                // The briefing spoken before Start is the run's opening line: the service records it
+                // and doesn't speak a second one of its own.
+                spokenBriefingText?.takeIf { it.isNotBlank() }?.let { briefingText ->
                     putExtra(RunTrackingService.EXTRA_PRE_RUN_BRIEFING, briefingText)
                     Log.d("RunSessionViewModel", "Passed pre-run briefing to service: ${briefingText.take(80)}...")
                 }
+                spokenBriefingText = null
             }
             
             // If the service is already running in standby (pre-started for watch), just send
@@ -2403,6 +2413,7 @@ class RunSessionViewModel @Inject constructor(
         _runState.update { it.copy(latestCoachMessage = null, coachText = "") }
         // Reset briefing audio flag
         isBriefingAudioPlaying = false
+        spokenBriefingText = null
         // Reset the prepare run flag to allow cleanup
         isPrepareRunInProgress = false
         // Clear any pending run configuration

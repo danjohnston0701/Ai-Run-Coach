@@ -2357,17 +2357,21 @@ class RunTrackingService : Service(), SensorEventListener {
             }
         }
 
-        // Record pre-run briefing in coaching history if provided
-        preRunBriefingText?.takeIf { it.isNotBlank() }?.let { briefingText ->
+        // A briefing spoken on the prepare screen is this run's opening line. Only without one
+        // (watch START with nothing prepared, briefing failed or timed out) does the service
+        // speak its own: both used to play, so the runner heard the briefing and then
+        // "Great start — keep it going." (or a coached session's brief twice).
+        val briefing = preRunBriefingText?.takeIf { it.isNotBlank() }
+        if (briefing != null) {
             coachingHistory.add(AiCoachingNote(
                 time = 0,  // Pre-run briefing is before the run starts
-                message = briefingText
+                message = briefing
             ))
-            Log.d("RunTrackingService", "Pre-run briefing recorded in coaching history: ${briefingText.take(80)}...")
+            Log.d("RunTrackingService", "Pre-run briefing recorded in coaching history, no start prompt: ${briefing.take(80)}...")
+        } else {
+            // Fire start coaching — short motivational prompt to confirm AI is active
+            fireStartCoaching()
         }
-        
-        // Fire start coaching — short motivational prompt to confirm AI is active
-        fireStartCoaching()
     }
 
     // ==================== SIMULATION MODE ====================
