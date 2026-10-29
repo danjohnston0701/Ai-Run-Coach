@@ -1290,6 +1290,27 @@ internal fun AiInsightsTabContent(
             }
         }
 
+        // A session that never got moving (a mistaken start, or GPS that never locked) is saved
+        // like any other — the server keeps every session so watch hand-offs always have a run —
+        // and the runner decides here whether it stays. Keep is remembered per run.
+        if (run.distance < NO_DISTANCE_RUN_METERS) {
+            item {
+                val context = LocalContext.current
+                val prefs = remember { context.getSharedPreferences(NO_DISTANCE_PREFS, android.content.Context.MODE_PRIVATE) }
+                var kept by remember(run.id) { mutableStateOf(prefs.getBoolean(run.id, false)) }
+                if (!kept) {
+                    NoDistanceRunCard(
+                        isWalk = run.sessionType == "walk",
+                        onKeep = {
+                            prefs.edit().putBoolean(run.id, true).apply()
+                            kept = true
+                        },
+                        onDiscard = onDelete
+                    )
+                }
+            }
+        }
+
         // "Forgot to stop" — suggest trimming the walk/standstill recorded after the finish
         if (endTrim?.status == "suggested" || endTrim?.status == "applied") {
             item {
@@ -9450,6 +9471,59 @@ private fun EndTrimCard(
                             Text("Trim run", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Color.Black)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/** Under this a session never really got going; matches RunSessionScreen's Stop dialog. */
+internal const val NO_DISTANCE_RUN_METERS = 50.0
+private const val NO_DISTANCE_PREFS = "no_distance_runs_kept"
+
+@Composable
+private fun NoDistanceRunCard(isWalk: Boolean, onKeep: () -> Unit, onDiscard: () -> Unit) {
+    val noun = if (isWalk) "walk" else "run"
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+        border = BorderStroke(1.dp, Colors.primary.copy(alpha = 0.45f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Text(
+                text = "No distance recorded",
+                style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold),
+                color = Colors.textPrimary
+            )
+            Text(
+                text = "This $noun didn't cover any distance. Discard it, or keep it in your history?",
+                style = AppTextStyles.small,
+                color = Colors.textSecondary
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                OutlinedButton(
+                    onClick = onKeep,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Keep", style = AppTextStyles.small, color = Colors.textSecondary)
+                }
+                Button(
+                    onClick = onDiscard,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Colors.error)
+                ) {
+                    Text("Discard", style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold), color = Color.White)
                 }
             }
         }

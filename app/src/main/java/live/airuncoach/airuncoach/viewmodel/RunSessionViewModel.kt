@@ -115,6 +115,7 @@ class RunSessionViewModel @Inject constructor(
     private val syncQueue: SyncQueue,
     private val garminWatchManager: GarminWatchManager,
     private val samsungWatchManager: SamsungWatchManager,
+    private val runRepository: live.airuncoach.airuncoach.data.repository.RunRepository,
 ) : ViewModel() {
 
     private val _runState = MutableStateFlow(RunState())
@@ -2074,6 +2075,44 @@ class RunSessionViewModel @Inject constructor(
         }
         context.startService(intent)
         _runState.update { it.copy(isRunning = true, isPaused = false) }
+    }
+
+    // Set by "Discard" on the Stop dialog of a session that never covered any distance. The run is
+    // still stopped and saved the normal way (watch, companion and live sessions all end as usual)
+    // and then deleted once the server has it — a separate no-save stop path would have to repeat
+    // all of that.
+    private var discardAfterSave = false
+
+    fun stopAndDiscardRun() {
+        discardAfterSave = true
+        stopRun()
+    }
+
+    /**
+     * Called with the saved run's id when the stop completes. Returns false when nothing is to be
+     * discarded. Otherwise deletes the run and calls [onDone] with whether it worked; on failure
+     * the Run Summary still offers Discard.
+     */
+    fun discardSavedRunIfRequested(runId: String, onDone: (Boolean) -> Unit): Boolean {
+        if (!discardAfterSave) return false
+        discardAfterSave = false
+        viewModelScope.launch {
+            val deleted = try {
+                apiService.deleteRun(runId)
+                true
+            } catch (e: retrofit2.HttpException) {
+                e.code() == 404
+            } catch (e: Exception) {
+                Log.w("RunSessionViewModel", "Discard of run $runId failed: ${e.message}")
+                false
+            }
+            if (deleted) {
+                sharedPrefs.getString("user_id", null)?.let { runRepository.invalidateRunsForUser(it) }
+                Log.d("RunSessionViewModel", "Discarded no-distance run $runId")
+            }
+            onDone(deleted)
+        }
+        return true
     }
 
     fun stopRun() {

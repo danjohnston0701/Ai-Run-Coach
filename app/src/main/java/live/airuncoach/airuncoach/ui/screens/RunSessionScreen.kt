@@ -182,8 +182,13 @@ fun RunSessionScreen(
     LaunchedEffect(runState.backendRunId) {
         runState.backendRunId?.let { backendId ->
             if (runState.isRunning || runState.isPaused || runState.isStopping) {
-                Log.d("RunSessionScreen", "Navigating to run summary: $backendId")
-                onEndRun(backendId)
+                val discarding = viewModel.discardSavedRunIfRequested(backendId) { deleted ->
+                    if (deleted) onCancel() else onEndRun(backendId)
+                }
+                if (!discarding) {
+                    Log.d("RunSessionScreen", "Navigating to run summary: $backendId")
+                    onEndRun(backendId)
+                }
             } else {
                 // Stale value from previous run - ignore
                 Log.d("RunSessionScreen", "Ignoring stale backendRunId from previous run: $backendId")
@@ -735,7 +740,40 @@ fun RunSessionScreen(
         )
     }
 
-    if (showStopConfirm) {
+    // Nothing covered yet (a mistaken start, or GPS that never locked): offer to discard instead.
+    val noDistanceYet = (runSession?.distance ?: 0.0) < NO_DISTANCE_RUN_METERS
+    if (showStopConfirm && noDistanceYet) {
+        val noun = if (sessionActivityType == "walk") "walk" else "run"
+        AlertDialog(
+            onDismissRequest = { showStopConfirm = false },
+            title = { Text("Stop $noun?") },
+            text = { Text("You haven't covered any distance yet. Discard this $noun, or save it anyway?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showStopConfirm = false
+                        viewModel.stopAndDiscardRun()
+                    },
+                    enabled = !runState.isStopping
+                ) { Text("Discard") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = { showStopConfirm = false },
+                        enabled = !runState.isStopping
+                    ) { Text("Cancel") }
+                    TextButton(
+                        onClick = {
+                            showStopConfirm = false
+                            viewModel.stopRun()
+                        },
+                        enabled = !runState.isStopping
+                    ) { Text("Save") }
+                }
+            }
+        )
+    } else if (showStopConfirm) {
         AlertDialog(
             onDismissRequest = { showStopConfirm = false },
             title = { Text(if (sessionActivityType == "walk") "Stop walk?" else "Stop run?") },
