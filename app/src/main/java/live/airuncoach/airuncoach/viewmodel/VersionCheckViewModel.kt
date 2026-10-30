@@ -149,6 +149,12 @@ class VersionCheckViewModel @Inject constructor(
 
         Log.d(TAG, "Garmin companion: installed=$installedVersion latest=$latestVersion min=$minVersion")
 
+        if (latestVersion.isNullOrBlank()) {
+            // GARMIN_LATEST_VERSION unset on the server — no prompt
+            Log.d(TAG, "No latest Garmin version configured — skipping update check")
+            return
+        }
+
         if (installedVersion == null) {
             // Watch has never connected to this phone — no prompt
             Log.d(TAG, "No Garmin watch version on record — skipping update check")

@@ -18917,7 +18917,9 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
   //   ANDROID_LATEST_VERSION_NAME – human-readable e.g. "1.6.0"
   //   ANDROID_PLAY_STORE_URL      – Play Store listing URL
   //   ANDROID_RELEASE_NOTE        – one-sentence what's new for the Android app
-  //   GARMIN_LATEST_VERSION       – latest Connect IQ companion version e.g. "1.4.0"
+  //   GARMIN_LATEST_VERSION       – latest Connect IQ companion version e.g. "3.4.13";
+  //                                 unset = no watch-update prompt ("" rather than null: Android
+  //                                 2.0.74 and older read it as a non-null String)
   //   GARMIN_MIN_VERSION          – optional: minimum required companion version (older = show update prompt)
   //   GARMIN_RELEASE_NOTE         – one-sentence what's new for the Garmin app
   //   GARMIN_CONNECT_IQ_STORE_URL – Connect IQ listing URL
@@ -18941,7 +18943,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
                              "Major user experience improvements, smoother forms, and improved keyboard handling.",
         },
         garmin: {
-          latestVersion:    process.env.GARMIN_LATEST_VERSION     || "3.4.10",
+          latestVersion:    process.env.GARMIN_LATEST_VERSION     || "",
           minVersion:       process.env.GARMIN_MIN_VERSION        || "1.0.0",
           connectIqStoreUrl: process.env.GARMIN_CONNECT_IQ_STORE_URL ||
                              "https://apps.garmin.com/en-NZ/apps/91452a05-d077-4707-a9a3-0e98277f6017",
