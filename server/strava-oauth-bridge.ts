@@ -12,6 +12,8 @@ import { connectedDevices, oauthStateStore, runs } from '@shared/schema';
 import { desc } from 'drizzle-orm';
 import { syncImportedRunWithPlan } from './plan-run-sync';
 import { authMiddleware, type AuthenticatedRequest } from './auth';
+import { storage } from './storage';
+import { canImportFromStrava } from './usage-service';
 import axios from 'axios';
 
 import {
@@ -328,6 +330,11 @@ router.post('/api/strava/import-history', authMiddleware, async (req: Authentica
   try {
     const userId = req.user!.userId;
 
+    const user = await storage.getUser(userId);
+    if (!user || !canImportFromStrava(user)) {
+      return res.status(402).json({ success: false, error: 'Strava import needs an active free trial or plan.', code: 'subscription_required' });
+    }
+
     // 1. Get the active Strava device record for this user
     const [device] = await db
       .select()
@@ -569,6 +576,12 @@ async function processStravaWebhookEvent(event: any): Promise<void> {
   // ── Activity: create ───────────────────────────────────────────────────────
   if (aspect_type === 'create') {
     console.log(`[Strava Webhook] New activity ${object_id} for user ${userId}`);
+
+    const user = await storage.getUser(userId);
+    if (!user || !canImportFromStrava(user)) {
+      console.log(`[Strava Webhook] User ${userId} has no active trial or plan — not importing activity ${object_id}`);
+      return;
+    }
 
     // Check if already imported (idempotent)
     const [existing] = await db

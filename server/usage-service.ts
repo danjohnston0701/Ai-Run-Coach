@@ -57,6 +57,34 @@ export function effectiveTier(
   return (tier ?? "free").toLowerCase().trim();
 }
 
+/** Statuses the apps treat as a lapsed subscription once the tier is gone. */
+const LAPSED_STATUSES = ["expired", "refunded", "cancelled", "canceled", "on_hold", "paused", "inactive"];
+
+/**
+ * Strava runs are imported only for a free trial still running or a current plan. Not for an
+ * expired trial, a lapsed subscription or a comped plan past its end date (admin grants have
+ * no lifecycle events, so their tier stays set after that date). The stores clear the tier
+ * themselves and allow for grace periods, so their end date isn't checked here.
+ */
+export function canImportFromStrava(user: {
+  subscriptionTier?: string | null;
+  subscriptionStatus?: string | null;
+  entitlementType?: string | null;
+  entitlementExpiresAt?: Date | null;
+  trialExpiresAt?: Date | null;
+  createdAt?: Date | null;
+}): boolean {
+  const tier = (user.subscriptionTier ?? "").toLowerCase().trim();
+  if (tier === "" || tier === "free" || tier === "null") {
+    const status = (user.subscriptionStatus ?? "").toLowerCase().trim();
+    if (LAPSED_STATUSES.includes(status)) return false;
+    return !isTrialExpired(user.subscriptionTier, user.trialExpiresAt, user.createdAt);
+  }
+  const entitlement = (user.entitlementType ?? "").toLowerCase();
+  const storeManaged = entitlement.startsWith("apple_") || entitlement.startsWith("google_play_");
+  return storeManaged || !user.entitlementExpiresAt || user.entitlementExpiresAt > new Date();
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Returns the current calendar month as "YYYY-MM" in UTC. */
