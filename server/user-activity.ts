@@ -257,6 +257,8 @@ export const CLIENT_ACTIONS = new Set([
   "Started run without route",
   "Started run with route",
   "Generated share video",
+  "Watch app no answer after prompt",
+  "Watch app answered late after prompt",
 ]);
 
 export function registerUserActivityRoutes(app: Express) {

@@ -1,5 +1,6 @@
 package live.airuncoach.airuncoach.service
 
+import live.airuncoach.airuncoach.data.UserActivityReporter
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -420,6 +421,19 @@ class GarminWatchManager(
     private val OPEN_APP_RESEND_AFTER_MS = 2_500L
     private val OPEN_APP_PROMPT_AFTER_MS = 5_000L
 
+    // Silence after the prompt. The SDK says the prompt was shown, not whether it was accepted,
+    // so this can be a crash on launch (IQ!, Daniel's 10-31 parkrun), a decline or a missed
+    // prompt. The session is still queued, so the runner is told to open the app, and it's
+    // logged so we can see how often it happens.
+    private val PROMPT_NO_ANSWER_AFTER_MS = 20_000L
+    private var promptNoAnswerRunnable: Runnable? = null
+    private var promptSentAtMs = 0L
+    private var promptNoAnswerReported = false
+    private var lastPromptStatus: String? = null
+    private var sdkAppVersion: Int? = null
+    private val _watchAppNotAnswering = MutableStateFlow(false)
+    val watchAppNotAnswering: StateFlow<Boolean> = _watchAppNotAnswering
+
     // Last message of any kind from the watch app. Connect IQ keeps everything sent to a closed
     // app and delivers it all at launch, so a phone-led run at one update a second could queue
     // thousands of runUpdates for the next launch.
@@ -668,6 +682,7 @@ class GarminWatchManager(
             if (cachedPreparedRunPayload === payload) {
                 Log.d(TAG, "No answer from the watch app — asking the watch to open it")
                 openWatchApp()
+                watchForPromptAnswer()
             }
         }
         openAppRunnables = listOf(resend, prompt)
@@ -678,6 +693,65 @@ class GarminWatchManager(
     private fun cancelPendingOpenApp() {
         openAppRunnables.forEach { openAppHandler.removeCallbacks(it) }
         openAppRunnables = emptyList()
+        clearPromptWatch()
+    }
+
+    private fun watchForPromptAnswer() {
+        clearPromptWatch()
+        promptSentAtMs = System.currentTimeMillis()
+        refreshSdkAppVersion()
+        val noAnswer = Runnable {
+            promptNoAnswerRunnable = null
+            promptNoAnswerReported = true
+            _watchAppNotAnswering.value = true
+            Log.w(TAG, "Watch app hasn't answered the open prompt")
+            reportPromptOutcome(
+                UserActivityReporter.WATCH_APP_NO_ANSWER,
+                error = "No message from the watch ${PROMPT_NO_ANSWER_AFTER_MS / 1000} s after the open prompt"
+            )
+        }
+        promptNoAnswerRunnable = noAnswer
+        openAppHandler.postDelayed(noAnswer, PROMPT_NO_ANSWER_AFTER_MS)
+    }
+
+    // The watch spoke. "No answer, then fine later" is what a crash and a relaunch look like.
+    private fun onWatchAnsweredAfterPrompt() {
+        if (promptSentAtMs == 0L) return
+        if (promptNoAnswerReported) reportPromptOutcome(UserActivityReporter.WATCH_APP_ANSWERED_LATE)
+        clearPromptWatch()
+    }
+
+    // iqApp is from when the watch connected, so it can predate an update.
+    private fun refreshSdkAppVersion() {
+        val device = connectedDevice ?: return
+        try {
+            connectIQ?.getApplicationInfo(APP_ID, device, object : ConnectIQ.IQApplicationInfoListener {
+                override fun onApplicationInfoReceived(app: IQApp?) { sdkAppVersion = app?.version() }
+                override fun onApplicationNotInstalled(appId: String?) {}
+            })
+        } catch (e: Exception) {
+            Log.d(TAG, "refreshSdkAppVersion: ${e.message}")
+        }
+    }
+
+    private fun clearPromptWatch() {
+        promptNoAnswerRunnable?.let { openAppHandler.removeCallbacks(it) }
+        promptNoAnswerRunnable = null
+        promptSentAtMs = 0L
+        promptNoAnswerReported = false
+        _watchAppNotAnswering.value = false
+    }
+
+    // sdkAppVersion differing from lastWatchVersion means a new version hasn't run yet.
+    private fun reportPromptOutcome(action: String, error: String? = null) {
+        val api = apiService ?: return
+        UserActivityReporter.report(api, action, mapOf(
+            "watch" to "garmin",
+            "promptStatus" to lastPromptStatus,
+            "lastWatchVersion" to getInstalledWatchVersion(),
+            "sdkAppVersion" to sdkAppVersion,
+            "secondsSincePrompt" to (System.currentTimeMillis() - promptSentAtMs) / 1000
+        ), error)
     }
 
     private fun startPreparedRunResend() {
@@ -715,6 +789,7 @@ class GarminWatchManager(
             connectIQ?.openApplication(device, app, object : ConnectIQ.IQOpenApplicationListener {
                 override fun onOpenApplicationResponse(d: IQDevice?, a: IQApp?, status: ConnectIQ.IQOpenApplicationStatus?) {
                     Log.d(TAG, "openApplication on watch: $status")
+                    lastPromptStatus = status?.name
                 }
             })
         } catch (e: InvalidStateException) {
@@ -985,6 +1060,7 @@ class GarminWatchManager(
             val map    = data?.firstOrNull() as? Map<String, Any> ?: return
             val type   = map["type"] as? String ?: return
             lastWatchMessageAtMs = System.currentTimeMillis()
+            onWatchAnsweredAfterPrompt()
             // The watch app answered, so it's open: no prompt. Keep sending until it acks.
             if (openAppRunnables.isNotEmpty()) {
                 cancelPendingOpenApp()

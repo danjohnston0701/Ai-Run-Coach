@@ -19,6 +19,8 @@ object UserActivityReporter {
     const val PREPARED_RUN_FOR_WATCH = "Prepared run for watch"
     const val STARTED_RUN_WITHOUT_ROUTE = "Started run without route"
     const val STARTED_RUN_WITH_ROUTE = "Started run with route"
+    const val WATCH_APP_NO_ANSWER = "Watch app no answer after prompt"
+    const val WATCH_APP_ANSWERED_LATE = "Watch app answered late after prompt"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

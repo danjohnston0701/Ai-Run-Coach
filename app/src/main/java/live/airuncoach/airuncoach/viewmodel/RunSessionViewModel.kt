@@ -412,6 +412,9 @@ class RunSessionViewModel @Inject constructor(
         combine(garminWatchManager.isCompanionAppInstalled, samsungWatchManager.isCompanionAppInstalled) { g, s -> g || s }
             .stateIn(viewModelScope, SharingStarted.Lazily, false)
 
+    /** The Garmin app hasn't answered its open prompt: the standby banner says what to do. */
+    val garminWatchNotAnswering: StateFlow<Boolean> = garminWatchManager.watchAppNotAnswering
+
     /** Which watch brand the standby banner should talk about — whichever is actually
      * connected right now. Garmin wins on a tie (mirrors prepareRunOnWatch's existing
      * Garmin-first ordering elsewhere), since a user with only a Samsung watch paired

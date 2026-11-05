@@ -152,6 +152,7 @@ fun RunSessionScreen(
     val liveTrackingError by viewModel.liveTrackingError.collectAsState()
     val isPowerSaverWarningVisible by viewModel.isPowerSaverWarningVisible.collectAsState()
     val connectedWatchIsSamsung by viewModel.connectedWatchIsSamsung.collectAsState()
+    val garminWatchNotAnswering by viewModel.garminWatchNotAnswering.collectAsState()
 
     var showMap by remember { mutableStateOf(hasRoute) }
     var routePolyline by remember { mutableStateOf<String?>(null) }
@@ -525,6 +526,7 @@ fun RunSessionScreen(
                     WatchStandbyBanner(
                         isSamsungWatch = connectedWatchIsSamsung,
                         isWalk = sessionActivityType == "walk",
+                        watchNotAnswering = garminWatchNotAnswering,
                         modifier = Modifier
                             .padding(horizontal = Spacing.md)
                             .padding(top = Spacing.sm)
@@ -2375,7 +2377,12 @@ fun BreathingWave(active: Boolean, glow: Boolean, modifier: Modifier = Modifier)
 ===================================================================================== */
 
 @Composable
-fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier, isWalk: Boolean = false) {
+fun WatchStandbyBanner(
+    isSamsungWatch: Boolean,
+    modifier: Modifier = Modifier,
+    isWalk: Boolean = false,
+    watchNotAnswering: Boolean = false
+) {
     val watchName = if (isSamsungWatch) "Samsung" else "Garmin"
 
     Card(
@@ -2408,6 +2415,13 @@ fun WatchStandbyBanner(isSamsungWatch: Boolean, modifier: Modifier = Modifier, i
                     style = AppTextStyles.small.copy(color = Colors.textSecondary),
                     textAlign = TextAlign.Center
                 )
+                if (watchNotAnswering) {
+                    Text(
+                        text = "Haven't heard from your watch yet. If you missed the prompt or it showed IQ!, open Ai Run Coach on your watch. Your session will be waiting.",
+                        style = AppTextStyles.small.copy(color = Colors.warning, fontWeight = FontWeight.SemiBold),
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
             // Step-by-step instructions
