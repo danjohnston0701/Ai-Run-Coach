@@ -151,6 +151,9 @@ class SamsungWatchManager(
     /** Invoked when the watch sends the full biometric + dynamics frame (~2 s). */
     var onWatchSensorData: ((WatchBiometricFrame) -> Unit)? = null
 
+    /** The watch's final timer in seconds, from its "stop" command (Wear 1.0.12+). Fires before the command. */
+    var onWatchStopClock: ((seconds: Int) -> Unit)? = null
+
     /** Invoked when the watch companion app is resolved and ready to receive messages. */
     var onWatchAppReady: (() -> Unit)? = null
 
@@ -644,6 +647,7 @@ class SamsungWatchManager(
         }
 
         if (action == "stop") {
+            (map["elap"] as? Number)?.toInt()?.let { onWatchStopClock?.invoke(it) }
             sendStopAck()
             Log.d(TAG, "Watch STOP received — sent stopAck immediately")
         }

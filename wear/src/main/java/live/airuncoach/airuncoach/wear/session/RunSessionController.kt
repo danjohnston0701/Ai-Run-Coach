@@ -132,8 +132,10 @@ class RunSessionController(
     private val startRetry = RetryLoop(scope, START_RETRY_MAX, START_RETRY_INTERVAL_MS) {
         dataLayer.sendCommand("start")
     }
+    // The final timer goes with "stop": live frames can be just short of what the runner read.
+    private var finalElapsedSec = 0
     private val stopRetry = RetryLoop(scope, STOP_RETRY_MAX, STOP_RETRY_INTERVAL_MS) {
-        dataLayer.sendCommand("stop")
+        dataLayer.sendCommand("stop", mapOf("elap" to finalElapsedSec))
     }
     // Ported from the Garmin side (2026-09): pause/resume previously had no retry at all, unlike
     // start/stop above — a dropped Data Layer message left the phone never finding out the watch
@@ -519,6 +521,7 @@ class RunSessionController(
             _state.update { it.copy(elapsedMs = clock.elapsedMs(now)) }
         }
         val s = _state.value
+        finalElapsedSec = (s.elapsedMs / 1000).toInt()
         val record = if (!phoneControlled && !videoDemo) buildRecord(now, s) else null
         _state.update { it.copy(isRunning = false, isPaused = false, isFinished = true, overlay = Overlay.NONE,
                 isPrepared = false, prepareGateDismissed = false, preparedDistanceKm = null,
@@ -534,7 +537,7 @@ class RunSessionController(
             return
         }
 
-        dataLayer.sendCommand("stop")
+        dataLayer.sendCommand("stop", mapOf("elap" to finalElapsedSec))
         stopRetry.start()
 
         health.endExercise()

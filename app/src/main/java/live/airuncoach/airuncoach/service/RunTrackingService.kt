@@ -309,6 +309,9 @@ class RunTrackingService : Service(), SensorEventListener {
     // below carries the watch clock forward on the phone clock once frames go stale.
     private var watchElapsedAnchorWallMs: Long = 0L
     private var watchElapsedAnchorPhoneActiveMs: Long = -1L
+    // Set the moment stopTracking() runs: the session clock stops there, not when the save gets
+    // round to reading it after the weather fetch. 0 = not stopping.
+    private var stopClockFrozenAtMs: Long = 0L
     // Last accepted Garmin distance. Kept separately from totalDistance because a
     // transient phone-GPS update must not prevent a later valid Garmin total from
     // correcting it.
@@ -1297,6 +1300,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 manager.onWatchSensorData = { frame ->
                     updateWatchSensorData(frame)
                 }
+                manager.onWatchStopClock = { seconds -> applyWatchStopClock(seconds) }
 
                 // Watch app resolved & ready — proactively push auth token so the
                 // watch authenticates immediately without waiting for "watchReady"
@@ -1371,6 +1375,8 @@ class RunTrackingService : Service(), SensorEventListener {
                 manager.onWatchGpsUpdate = { lat, lng, altM, speedMs ->
                     injectWatchLocation(lat, lng, altM, speedMs)
                 }
+
+                manager.onWatchStopClock = { seconds -> applyWatchStopClock(seconds) }
 
                 manager.onWatchSensorData = { frame ->
                     updateWatchSensorData(frame)
@@ -2121,6 +2127,7 @@ class RunTrackingService : Service(), SensorEventListener {
         }
         totalPausedMs = 0      // Reset pause tracking for new run
         pauseStartTime = 0
+        stopClockFrozenAtMs = 0L
         isFinalizingStop = false  // Re-arm stopTracking() for this new run
         startWatchSessionEndWatchdog()
         splitPausedMs = 0
@@ -3533,6 +3540,18 @@ class RunTrackingService : Service(), SensorEventListener {
         if (staleMs < WATCH_CLOCK_STALE_MS || watchElapsedAnchorPhoneActiveMs < 0L || startTime <= 0L) return watchMs
         val phoneSinceAnchor = (getActiveRunDuration() - watchElapsedAnchorPhoneActiveMs).coerceAtLeast(0L)
         return watchMs + phoneSinceAnchor
+    }
+
+    /**
+     * The final timer the watch showed, carried on its "stop" command (Garmin 3.4.14+, Wear
+     * 1.0.12+). Live frames only come every ~2 s, so the last one can be just short of what the
+     * runner read on the watch. Runs before stopTracking() reads the clock.
+     */
+    private fun applyWatchStopClock(seconds: Int) {
+        if (seconds <= 0 || !wasRunStartedByWatch) return
+        watchElapsedSeconds = seconds
+        watchElapsedAnchorWallMs = System.currentTimeMillis()
+        watchElapsedAnchorPhoneActiveMs = if (startTime > 0L) getActiveRunDuration() else -1L
     }
 
     /** Whole-second form of [currentWatchClockMs] for the km-split clock. */
@@ -5233,8 +5252,11 @@ class RunTrackingService : Service(), SensorEventListener {
      * Use this instead of raw (System.currentTimeMillis() - startTime) everywhere.
      */
     private fun getActiveRunDuration(): Long {
-        val totalElapsed = System.currentTimeMillis() - startTime
-        return totalElapsed - totalPausedMs
+        val now = if (stopClockFrozenAtMs > 0L) stopClockFrozenAtMs else System.currentTimeMillis()
+        // totalPausedMs only takes in a pause on resume, so a pause in progress is counted here.
+        // Leaving it out made the clock keep running through a pause.
+        val currentPauseMs = if (pauseStartTime > 0L) (now - pauseStartTime).coerceAtLeast(0L) else 0L
+        return now - startTime - totalPausedMs - currentPauseMs
     }
 
     private fun stopTracking(companionRunId: String? = null) {
@@ -5255,6 +5277,11 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
         isFinalizingStop = true
+        // Read the session clock now. wasRunStartedByWatch is reset just below and the save runs
+        // later, after the weather fetch: reading it there returned the phone clock instead of
+        // the watch's timer, so a run the watch timed at 22:47 saved as 23:03 (Daniel's parkrun).
+        stopClockFrozenAtMs = System.currentTimeMillis()
+        val finalWatchClockMs = if (wasRunStartedByWatch && watchElapsedSeconds > 0) currentWatchClockMs() else null
         isTracking = false
         isSimulating = false
         // Tell observers the run is over BEFORE clearing the ID. Without this the live session
@@ -5269,7 +5296,7 @@ class RunTrackingService : Service(), SensorEventListener {
             endedLiveSessionId = endingLiveSessionId
             val finalLastPoint = routePoints.lastOrNull()
             val finalDistKm = totalDistance / 1000.0
-            val finalElapsedSecs = (getActiveRunDuration() / 1000L).toInt()
+            val finalElapsedSecs = ((finalWatchClockMs ?: getActiveRunDuration()) / 1000L).toInt()
             val finalPace = currentPace
             val finalHr = currentHeartRate.takeIf { it > 0 }
             serviceScope.launch {
@@ -5305,13 +5332,6 @@ class RunTrackingService : Service(), SensorEventListener {
                 runCrashRecoveryStore.clear(stoppedRunStartTime)
             }
         }
-        // Snapshot BEFORE resetting — used below to decide whether to skip the phone upload.
-        // The watch calls session/end (creating a run record) only when it was disconnected at
-        // run end.  If the watch was connected, the phone's upload is the sole record.
-        // If the watch was disconnected, the phone may have also been tracking (the "start"
-        // command was delivered early), which would produce a duplicate — the snapshot lets us
-        // avoid that.
-        val watchInitiatedRun = wasRunStartedByWatch
         wasRunStartedByWatch = false   // Reset for next run
         lastWatchGpsMs = 0L            // Reset so phone GPS works normally after session ends
         _isServiceRunning.value = false
@@ -5364,14 +5384,6 @@ class RunTrackingService : Service(), SensorEventListener {
                         Log.w("RunTrackingService", "Failed to fetch end weather (non-fatal): ${e.message}")
                     }
                     _currentRunSession.value?.let { session ->
-                        // If the run was stopped while paused, pauseStartTime is still set but
-                        // hasn't been added to totalPausedMs yet (that only happens in resumeTracking).
-                        // Account for it now so the final active duration is correct.
-                        val finalPausedMs = if (pauseStartTime > 0) {
-                            totalPausedMs + (System.currentTimeMillis() - pauseStartTime)
-                        } else {
-                            totalPausedMs
-                        }
                         // Guard: if startTime == 0 this service instance was restarted (e.g. Android
                         // OS killed the old instance mid-pause, and the user pressed Stop on the phone
                         // which delivered ACTION_STOP_TRACKING to a fresh instance).  The companion-
@@ -5393,14 +5405,15 @@ class RunTrackingService : Service(), SensorEventListener {
                         // the phone-clock delta here silently re-shortens the SAVED duration by that
                         // same gap even though the live in-session display already accounts for it.
                         //
-                        // currentWatchClockMs() rather than watchElapsedSeconds directly: if the
-                        // watch died before Stop, the raw watch value is frozen at the moment of
-                        // death and would save a duration short by however long the runner kept
-                        // going on phone GPS afterwards (see that helper's comment).
-                        val finalDurationMs = if (watchInitiatedRun && watchElapsedSeconds > 0) {
-                            currentWatchClockMs()
+                        // finalWatchClockMs came from currentWatchClockMs() rather than
+                        // watchElapsedSeconds directly: if the watch died before Stop, the raw watch
+                        // value is frozen at the moment of death and would save a duration short by
+                        // however long the runner kept going on phone GPS afterwards (see that
+                        // helper's comment).
+                        val finalDurationMs = if (finalWatchClockMs != null) {
+                            finalWatchClockMs
                         } else if (startTime > 0L) {
-                            (System.currentTimeMillis() - startTime) - finalPausedMs
+                            getActiveRunDuration()
                         } else {
                             Log.w("RunTrackingService", "stopTracking: startTime=0 — service was restarted, falling back to session.duration=${session.duration}ms")
                             session.duration.coerceAtLeast(0L)

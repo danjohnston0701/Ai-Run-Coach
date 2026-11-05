@@ -344,6 +344,9 @@ class GarminWatchManager(
     /** Invoked when a command message arrives from the watch. */
     var onWatchCommand: ((action: String) -> Unit)? = null
 
+    /** The watch's final timer in seconds, from its "stop" command (3.4.14+). Fires before the command. */
+    var onWatchStopClock: ((seconds: Int) -> Unit)? = null
+
     /** Returns the last version string received from the watch, or null if never connected. */
     fun getInstalledWatchVersion(): String? =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -406,6 +409,26 @@ class GarminWatchManager(
     private val PREPARED_RUN_RETRY_MAX = 20
     private val PREPARED_RUN_RETRY_DELAY_MS = 3000L
     private val PREPARED_RUN_ACK_MIN_WATCH_VERSION = "3.4.12"
+
+    // ── Is the watch app open? ────────────────────────────────────────────────
+    // Connect IQ can't tell us, and openApplication() prompted and relaunched an app that was
+    // already open, losing its GPS fix and connection state. So the prepared run itself is the
+    // probe: an open app answers within seconds, a closed one can't (the copy waits in its
+    // mailbox). Only silence gets the "open Ai Run Coach?" prompt.
+    private val openAppHandler = Handler(Looper.getMainLooper())
+    private var openAppRunnables: List<Runnable> = emptyList()
+    private val OPEN_APP_RESEND_AFTER_MS = 2_500L
+    private val OPEN_APP_PROMPT_AFTER_MS = 5_000L
+
+    // Last message of any kind from the watch app. Connect IQ keeps everything sent to a closed
+    // app and delivers it all at launch, so a phone-led run at one update a second could queue
+    // thousands of runUpdates for the next launch.
+    @Volatile private var lastWatchMessageAtMs = 0L
+    private var lastRunUpdateSentAtMs = 0L
+    private var lastRunUpdateRunning: Boolean? = null
+    private var lastRunUpdatePaused: Boolean? = null
+    private val WATCH_HEARD_WINDOW_MS = 60_000L
+    private val UNHEARD_RUN_UPDATE_INTERVAL_MS = 30_000L
 
     // ── Cached session type ("run" | "walk") ──────────────────────────────────
     // Set by sendSessionType(), called as soon as the phone-side session-setup
@@ -540,8 +563,18 @@ class GarminWatchManager(
         isRunning: Boolean,
         isPaused: Boolean
     ) {
+        // Not heard from the watch app, so it may be closed: don't fill its mailbox. A slow
+        // update, plus any pause/resume, still reaches an open app that has nothing to send yet.
+        val now = System.currentTimeMillis()
+        val stateChanged = isRunning != lastRunUpdateRunning || isPaused != lastRunUpdatePaused
+        if (now - lastWatchMessageAtMs > WATCH_HEARD_WINDOW_MS && !stateChanged &&
+            now - lastRunUpdateSentAtMs < UNHEARD_RUN_UPDATE_INTERVAL_MS) return
+        lastRunUpdateSentAtMs = now
+        lastRunUpdateRunning = isRunning
+        lastRunUpdatePaused = isPaused
         sendToWatch(mapOf(
             "type"        to "runUpdate",
+            "ts"          to (now / 1000L).toInt(),
             "pace"        to paceSecPerKm,
             "distance"    to distanceMetres,
             "hr"          to heartRate,
@@ -553,7 +586,7 @@ class GarminWatchManager(
     }
 
     fun sendStartRun() {
-        sendToWatch(mapOf("type" to "startRun"))
+        sendToWatch(mapOf("type" to "startRun", "ts" to (System.currentTimeMillis() / 1000L).toInt()))
     }
 
     /**
@@ -620,10 +653,29 @@ class GarminWatchManager(
         Log.d(TAG, "Sending preparedRun to watch: type=$runType dist=${distanceKm}km workout=$workoutType")
         cachedPreparedRunPayload = payload
         sendToWatch(payload)
-        openWatchApp()
+        openWatchAppUnlessItAnswers(payload)
         // No re-send loop here: while the watch app is closed, Connect IQ queues every send in
-        // its mailbox and delivers them all at launch; a burst of 20 copies is the likely cause of
-        // the IQ! crash seen when accepting the open prompt (2.0.68). The loop starts on "watchReady".
+        // its mailbox and delivers them all at launch. The loop starts once the watch is heard.
+    }
+
+    private fun openWatchAppUnlessItAnswers(payload: Map<String, Any>) {
+        cancelPendingOpenApp()
+        val resend = Runnable { if (cachedPreparedRunPayload === payload) sendToWatch(payload) }
+        val prompt = Runnable {
+            openAppRunnables = emptyList()
+            if (cachedPreparedRunPayload === payload) {
+                Log.d(TAG, "No answer from the watch app — asking the watch to open it")
+                openWatchApp()
+            }
+        }
+        openAppRunnables = listOf(resend, prompt)
+        openAppHandler.postDelayed(resend, OPEN_APP_RESEND_AFTER_MS)
+        openAppHandler.postDelayed(prompt, OPEN_APP_PROMPT_AFTER_MS)
+    }
+
+    private fun cancelPendingOpenApp() {
+        openAppRunnables.forEach { openAppHandler.removeCallbacks(it) }
+        openAppRunnables = emptyList()
     }
 
     private fun startPreparedRunResend() {
@@ -651,7 +703,8 @@ class GarminWatchManager(
     /**
      * Asks the watch to open Ai Run Coach. Connect IQ never opens an app silently: the watch shows
      * an "open Ai Run Coach?" prompt, one press to accept. Once open, the watch sends "watchReady"
-     * and gets the cached prepared run back. If the app is already running, nothing is shown.
+     * and gets the cached prepared run back. Only for an app that didn't answer: on an open app
+     * this prompts anyway, and accepting relaunches it.
      */
     private fun openWatchApp() {
         val device = connectedDevice ?: return
@@ -676,6 +729,7 @@ class GarminWatchManager(
     fun clearPendingPreparedRun() {
         cachedPreparedRunPayload = null
         stopPreparedRunResend()
+        cancelPendingOpenApp()
         Log.d(TAG, "Pending prepared-run cache cleared")
     }
 
@@ -688,6 +742,7 @@ class GarminWatchManager(
         if (cachedPreparedRunPayload == null) return
         cachedPreparedRunPayload = null
         stopPreparedRunResend()
+        cancelPendingOpenApp()
         sendToWatch(mapOf("type" to "preparedRunCancelled"))
         Log.d(TAG, "preparedRunCancelled sent to watch")
     }
@@ -922,6 +977,12 @@ class GarminWatchManager(
         try {
             val map    = data?.firstOrNull() as? Map<String, Any> ?: return
             val type   = map["type"] as? String ?: return
+            lastWatchMessageAtMs = System.currentTimeMillis()
+            // The watch app answered, so it's open: no prompt. Keep sending until it acks.
+            if (openAppRunnables.isNotEmpty()) {
+                cancelPendingOpenApp()
+                startPreparedRunResend()
+            }
             when (type) {
                 "hello" -> {
                     // Watch reports its installed app version on first connect.
@@ -989,6 +1050,9 @@ class GarminWatchManager(
                     // Watch (3.4.12+) is on its prepare-on-phone screen and asks for the
                     // prepared run, in case the copy sent on "watchReady" was lost.
                     if (action == "requestPreparedRun") {
+                        // Auth too: if "watchReady" was lost, this is the only sign the app is open,
+                        // and the prepared run alone left it showing OFFLINE with a session ready.
+                        cachedAuthToken?.let { sendAuth(it, cachedRunnerName) }
                         cachedPreparedRunPayload?.let { payload ->
                             Log.d(TAG, "requestPreparedRun — re-sending cached preparedRun")
                             sendToWatch(payload)
@@ -1105,6 +1169,7 @@ class GarminWatchManager(
                     // receive duplicate "stop" signals — stopTracking() is idempotent so this is
                     // safe, but the ack eliminates the unnecessary noise.
                     if (action == "stop") {
+                        (map["elap"] as? Number)?.toInt()?.let { onWatchStopClock?.invoke(it) }
                         sendStopAck()
                         Log.d(TAG, "Watch STOP received — sent stopAck immediately")
                         // Deliberately NOT clearing activeCompanionSessionId here — the stop/finalize

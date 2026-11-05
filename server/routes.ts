@@ -10,6 +10,7 @@ import { toClientUser, normalizeSessionType } from "./user-serializer";
 import { db } from "./db";
 import { onWatchCompanionSeen, onRunSavedForWatchOnboarding } from "./watch-onboarding";
 import { onRunSaved, onRunDeleted } from "./user-stats-cache";
+import { claimCompanionSessionRun } from "./companion-run-claim";
 import { getRunForReader, getRunForOwner, ONBOARDING_TOUR_DEMO_RUN_ID } from "./run-access";
 import { getRunnerProfile, runnerProfileBlock, persistCoachingObservation, refreshRunnerProfile } from "./runner-profile-service";
 import { 
@@ -2913,6 +2914,180 @@ function transformRunForAndroid(run: any) {
         }
       };
 
+      // The watch's run is the master: the phone only fills in what the watch doesn't have
+      // (coaching notes, plan link, weather...), never its time, distance or pace.
+      const mergePhoneUploadIntoWatchRun = async (garminDup: any) => {
+        console.log(`[POST /api/runs] Case 2 — phone upload matches watch run ${garminDup.id} — merging phone data in`);
+
+        const c2Merge: Record<string, any> = {};
+
+        // heartRateData: phone's watchHrSeries is a flat number[] at 1-sample/sec — far
+        // richer than either the garmin_companion session/end stub ({time,value} kmSplit
+        // objects) OR the upload-batch's per-GPS-point {time,value} series.
+        // Upgrade whenever the existing data is absent OR is still an object array.
+        // Only preserve if the existing is already a flat number[] (from a previous phone sync).
+        const c2ExistingHR = (garminDup as any).heartRateData;
+        const c2IncomingHRIsFlat = Array.isArray(runData.heartRateData) && (runData.heartRateData as any[]).length > 0 &&
+          typeof (runData.heartRateData as any[])[0] !== 'object';
+        const c2ExistingHRIsFlatArray = Array.isArray(c2ExistingHR) && (c2ExistingHR as any[]).length > 0 &&
+          typeof c2ExistingHR[0] !== 'object';
+        if (c2IncomingHRIsFlat && !c2ExistingHRIsFlatArray) {
+          c2Merge.heartRateData = runData.heartRateData;
+          console.log(`[POST /api/runs] Case 2: upgrading heartRateData to phone flat watchHrSeries (${(runData.heartRateData as any[]).length} samples)`);
+        }
+
+        // GPS track: phone has full array with embedded HR/cadence per point
+        const c2ExistingGps = (garminDup as any).gpsTrack;
+        if (runData.gpsTrack != null && (!Array.isArray(c2ExistingGps) && Array.isArray(runData.gpsTrack))) {
+          c2Merge.gpsTrack = runData.gpsTrack;
+        }
+
+        // Coaching notes, struggle points, km splits (computed by phone only)
+        const c2IncomingNotes = runData.aiCoachingNotes;
+        if (Array.isArray(c2IncomingNotes) && c2IncomingNotes.length > 0 &&
+            (!(garminDup as any).aiCoachingNotes || (garminDup as any).aiCoachingNotes?.length === 0)) {
+          c2Merge.aiCoachingNotes = c2IncomingNotes;
+        }
+        if (runData.strugglePoints != null && (garminDup as any).strugglePoints == null) {
+          c2Merge.strugglePoints = runData.strugglePoints;
+        }
+        if (runData.kmSplits != null && (garminDup as any).kmSplits == null) {
+          c2Merge.kmSplits = runData.kmSplits;
+        }
+
+        // Cadence / altitude time-series
+        // paceData: phone's watchPaceSeries is a flat number[] at 1-sample/sec, but it is a
+        // heavily SMOOTHED series — Garmin's BT frames report a rolling-average pace that looks
+        // almost flat (all values clustered around avg pace with < 5 sec/km variation).
+        //
+        // The watch's offline upload-batch produces a per-second {time,value} object array
+        // with real pace variation (20–80 sec/km range across the run) that is far superior
+        // for chart rendering and pacing analysis.
+        //
+        // Rule: only upgrade from the minimal kmSplits stub (≤ 5 entries, one per km) to the
+        // phone's flat series.  If the existing paceData already has ≥ 20 entries it has
+        // been populated by the offline batch — NEVER overwrite it with the smoothed BT data.
+        const c2ExistingPace = (garminDup as any).paceData;
+        const c2IncomingPaceIsFlat = Array.isArray(runData.paceData) && (runData.paceData as any[]).length > 0 &&
+          typeof (runData.paceData as any[])[0] !== 'object';
+        const c2ExistingPaceIsFlatArray = Array.isArray(c2ExistingPace) && c2ExistingPace.length > 0 &&
+          typeof c2ExistingPace[0] !== 'object';
+        // Rich = offline batch already stored per-second data (>= 20 entries, object format)
+        const c2ExistingPaceIsRich = Array.isArray(c2ExistingPace) && c2ExistingPace.length >= 20;
+        if (c2IncomingPaceIsFlat && !c2ExistingPaceIsFlatArray && !c2ExistingPaceIsRich) {
+          c2Merge.paceData = runData.paceData;
+          console.log(`[POST /api/runs] Case 2: upgrading paceData to phone flat watchPaceSeries (${(runData.paceData as any[]).length} samples)`);
+        } else if (c2ExistingPaceIsRich) {
+          console.log(`[POST /api/runs] Case 2: preserved rich offline-batch paceData (${(c2ExistingPace as any[]).length} entries) — phone BT series skipped`);
+        }
+
+        // cadenceData: same logic — upgrade from object array to flat number[]
+        const c2ExistingCad = (garminDup as any).cadenceData;
+        const c2IncomingCadIsFlat = Array.isArray(runData.cadenceData) && (runData.cadenceData as any[]).length > 0 &&
+          typeof (runData.cadenceData as any[])[0] !== 'object';
+        const c2ExistingCadIsFlatArray = Array.isArray(c2ExistingCad) && c2ExistingCad.length > 0 &&
+          typeof c2ExistingCad[0] !== 'object';
+        if (c2IncomingCadIsFlat && !c2ExistingCadIsFlatArray) c2Merge.cadenceData = runData.cadenceData;
+
+        const c2AltArr = Array.isArray(runData.altitudeData) && (runData.altitudeData as any[]).length > 0;
+        const c2ExistingAlt = (garminDup as any).altitudeData;
+        // For altitude we PRESERVE the upload-batch's GPS-based {time,value} series —
+        // it is more accurate than the phone's barometric watchAltSeries (which is a
+        // raw flat float[]).  Only overwrite if existing is the OLD {km,value} kmSplits
+        // stub (which has only 1 value per km and can't be deserialized by Android).
+        // We identify the old format by the presence of a 'km' key on the first element.
+        const c2ExistingAltIsKmFormat = Array.isArray(c2ExistingAlt) &&
+          c2ExistingAlt.length > 0 && typeof c2ExistingAlt[0] === 'object' && 'km' in c2ExistingAlt[0];
+        if (c2AltArr && (!c2ExistingAlt || c2ExistingAltIsKmFormat)) {
+          c2Merge.altitudeData = runData.altitudeData;
+          console.log(`[POST /api/runs] Case 2: upgrading altitudeData from ${c2ExistingAltIsKmFormat ? '{km,value} kmSplits stub' : 'null'} to phone series`);
+        } else if (c2ExistingAlt && !c2ExistingAltIsKmFormat) {
+          console.log(`[POST /api/runs] Case 2: preserved existing GPS altitude data (${c2ExistingAlt.length} pts) — phone barometric series skipped`);
+        }
+
+        // Weather data — phone captures weather at run start; watch record never has it
+        if (runData.weatherData != null && (garminDup as any).weatherData == null) {
+          c2Merge.weatherData = runData.weatherData;
+          console.log(`[POST /api/runs] Case 2: merging weatherData from phone upload`);
+        }
+
+        // Target / achievement
+        if (targetDistance != null && (garminDup as any).targetDistance == null) c2Merge.targetDistance = targetDistance;
+        if (targetTime    != null && (garminDup as any).targetTime    == null) c2Merge.targetTime    = targetTime;
+        if (wasTargetAchieved != null && (garminDup as any).wasTargetAchieved == null) c2Merge.wasTargetAchieved = wasTargetAchieved;
+
+        // See the matching block in Case 0 for why these three are here.
+        {
+          const inSteps = runData.totalSteps ?? runData.total_steps;
+          const inCals  = runData.calories;
+          const inAi    = runData.aiCoachEnabled ?? runData.ai_coach_enabled;
+          if (typeof inSteps === 'number' && inSteps > 0 && (garminDup as any).totalSteps == null) c2Merge.totalSteps = inSteps;
+          if (typeof inCals  === 'number' && inCals  > 0 && (garminDup as any).calories   == null) c2Merge.calories   = inCals;
+          if (typeof inAi    === 'boolean'                && (garminDup as any).aiCoachEnabled == null) c2Merge.aiCoachEnabled = inAi;
+        }
+
+        // Training plan linking — the garmin_companion run has no knowledge of the
+        // coaching plan; only the phone knows which workout was being executed.
+        // Transfer all plan context so the run is properly linked and the workout
+        // can be marked complete (both server-side and in RunSummaryViewModel).
+        if (runData.linkedWorkoutId   && !(garminDup as any).linkedWorkoutId)   c2Merge.linkedWorkoutId   = runData.linkedWorkoutId;
+        if (runData.linkedPlanId      && !(garminDup as any).linkedPlanId)      c2Merge.linkedPlanId      = runData.linkedPlanId;
+        if (runData.workoutType       && !(garminDup as any).workoutType)       c2Merge.workoutType       = runData.workoutType;
+        if (runData.workoutIntensity  && !(garminDup as any).workoutIntensity)  c2Merge.workoutIntensity  = runData.workoutIntensity;
+        if (runData.workoutDescription && !(garminDup as any).workoutDescription) c2Merge.workoutDescription = runData.workoutDescription;
+        if (runData.planProgressWeek  && !(garminDup as any).planProgressWeek)  c2Merge.planProgressWeek  = runData.planProgressWeek;
+        if (runData.planProgressWeeks && !(garminDup as any).planProgressWeeks) c2Merge.planProgressWeeks = runData.planProgressWeeks;
+        // Group run link — Garmin-created run won't have this; phone knows it
+        if (groupRunId && !(garminDup as any).groupRunId) {
+          c2Merge.groupRunId = groupRunId;
+          console.log(`[POST /api/runs] Case 2: merging groupRunId=${groupRunId} into run ${garminDup.id}`);
+        }
+        mergeMissingRunSummary(garminDup as any, {
+          ...runData,
+          startedAt,
+          steepestIncline,
+          steepestDecline,
+        }, c2Merge);
+
+        if (Object.keys(c2Merge).length > 0) {
+          await db.update(runs).set(c2Merge).where(eq(runs.id, garminDup.id));
+          console.log(`[POST /api/runs] Case 2 merge applied to run ${garminDup.id}:`, Object.keys(c2Merge).join(', '));
+        }
+
+        // Kick off profile refresh with the enriched data
+        refreshRunnerProfile(userId).catch((err: any) =>
+          console.error('[POST /api/runs] Case 2 merge: runner profile refresh failed:', err)
+        );
+
+        // Auto-complete the linked workout now that the plan context has been merged in
+        autoCompleteLinkedWorkout(garminDup.id).catch((err: any) =>
+          console.error('[POST /api/runs] Case 2: workout auto-complete failed (non-fatal):', err)
+        );
+
+        // If this match came from the fuzzy-distance fallback (not already ID-linked),
+        // record the link now so any future lookup for this session is deterministic.
+        // Awaited — a fast-following /session/end request reads this same row to decide
+        // whether a run is already linked; if this write weren't committed yet, that read
+        // would see stale pre-link state and could create a duplicate run.
+        if (companionSessionId) {
+          try {
+            await db.update(garminCompanionSessions)
+              .set({ runId: garminDup.id })
+              .where(and(
+                eq(garminCompanionSessions.sessionId, companionSessionId),
+                eq(garminCompanionSessions.userId, userId),
+              ));
+          } catch (err) {
+            console.error('[POST /api/runs] Case 2: Failed to link companion session:', err);
+          }
+        }
+
+        if (groupRunId) await linkRunToGroupRun(groupRunId, userId, garminDup.id);
+
+        const [updated2] = await db.select().from(runs).where(eq(runs.id, garminDup.id)).limit(1);
+        return res.status(200).json(transformRunForAndroid(updated2 ?? garminDup));
+      };
+
       // ── Deduplication guard ──────────────────────────────────────────────────
       // Three cases to catch, checked in order of specificity:
       //
@@ -3250,175 +3425,7 @@ function transformRunForAndroid(run: any) {
           });
         }
         if (garminDup) {
-          console.log(`[POST /api/runs] Case 2 — phone upload matches watch run ${garminDup.id} — merging phone data in`);
-
-          const c2Merge: Record<string, any> = {};
-
-          // heartRateData: phone's watchHrSeries is a flat number[] at 1-sample/sec — far
-          // richer than either the garmin_companion session/end stub ({time,value} kmSplit
-          // objects) OR the upload-batch's per-GPS-point {time,value} series.
-          // Upgrade whenever the existing data is absent OR is still an object array.
-          // Only preserve if the existing is already a flat number[] (from a previous phone sync).
-          const c2ExistingHR = (garminDup as any).heartRateData;
-          const c2IncomingHRIsFlat = Array.isArray(runData.heartRateData) && (runData.heartRateData as any[]).length > 0 &&
-            typeof (runData.heartRateData as any[])[0] !== 'object';
-          const c2ExistingHRIsFlatArray = Array.isArray(c2ExistingHR) && (c2ExistingHR as any[]).length > 0 &&
-            typeof c2ExistingHR[0] !== 'object';
-          if (c2IncomingHRIsFlat && !c2ExistingHRIsFlatArray) {
-            c2Merge.heartRateData = runData.heartRateData;
-            console.log(`[POST /api/runs] Case 2: upgrading heartRateData to phone flat watchHrSeries (${(runData.heartRateData as any[]).length} samples)`);
-          }
-
-          // GPS track: phone has full array with embedded HR/cadence per point
-          const c2ExistingGps = (garminDup as any).gpsTrack;
-          if (runData.gpsTrack != null && (!Array.isArray(c2ExistingGps) && Array.isArray(runData.gpsTrack))) {
-            c2Merge.gpsTrack = runData.gpsTrack;
-          }
-
-          // Coaching notes, struggle points, km splits (computed by phone only)
-          const c2IncomingNotes = runData.aiCoachingNotes;
-          if (Array.isArray(c2IncomingNotes) && c2IncomingNotes.length > 0 &&
-              (!(garminDup as any).aiCoachingNotes || (garminDup as any).aiCoachingNotes?.length === 0)) {
-            c2Merge.aiCoachingNotes = c2IncomingNotes;
-          }
-          if (runData.strugglePoints != null && (garminDup as any).strugglePoints == null) {
-            c2Merge.strugglePoints = runData.strugglePoints;
-          }
-          if (runData.kmSplits != null && (garminDup as any).kmSplits == null) {
-            c2Merge.kmSplits = runData.kmSplits;
-          }
-
-          // Cadence / altitude time-series
-          // paceData: phone's watchPaceSeries is a flat number[] at 1-sample/sec, but it is a
-          // heavily SMOOTHED series — Garmin's BT frames report a rolling-average pace that looks
-          // almost flat (all values clustered around avg pace with < 5 sec/km variation).
-          //
-          // The watch's offline upload-batch produces a per-second {time,value} object array
-          // with real pace variation (20–80 sec/km range across the run) that is far superior
-          // for chart rendering and pacing analysis.
-          //
-          // Rule: only upgrade from the minimal kmSplits stub (≤ 5 entries, one per km) to the
-          // phone's flat series.  If the existing paceData already has ≥ 20 entries it has
-          // been populated by the offline batch — NEVER overwrite it with the smoothed BT data.
-          const c2ExistingPace = (garminDup as any).paceData;
-          const c2IncomingPaceIsFlat = Array.isArray(runData.paceData) && (runData.paceData as any[]).length > 0 &&
-            typeof (runData.paceData as any[])[0] !== 'object';
-          const c2ExistingPaceIsFlatArray = Array.isArray(c2ExistingPace) && c2ExistingPace.length > 0 &&
-            typeof c2ExistingPace[0] !== 'object';
-          // Rich = offline batch already stored per-second data (>= 20 entries, object format)
-          const c2ExistingPaceIsRich = Array.isArray(c2ExistingPace) && c2ExistingPace.length >= 20;
-          if (c2IncomingPaceIsFlat && !c2ExistingPaceIsFlatArray && !c2ExistingPaceIsRich) {
-            c2Merge.paceData = runData.paceData;
-            console.log(`[POST /api/runs] Case 2: upgrading paceData to phone flat watchPaceSeries (${(runData.paceData as any[]).length} samples)`);
-          } else if (c2ExistingPaceIsRich) {
-            console.log(`[POST /api/runs] Case 2: preserved rich offline-batch paceData (${(c2ExistingPace as any[]).length} entries) — phone BT series skipped`);
-          }
-
-          // cadenceData: same logic — upgrade from object array to flat number[]
-          const c2ExistingCad = (garminDup as any).cadenceData;
-          const c2IncomingCadIsFlat = Array.isArray(runData.cadenceData) && (runData.cadenceData as any[]).length > 0 &&
-            typeof (runData.cadenceData as any[])[0] !== 'object';
-          const c2ExistingCadIsFlatArray = Array.isArray(c2ExistingCad) && c2ExistingCad.length > 0 &&
-            typeof c2ExistingCad[0] !== 'object';
-          if (c2IncomingCadIsFlat && !c2ExistingCadIsFlatArray) c2Merge.cadenceData = runData.cadenceData;
-
-          const c2AltArr = Array.isArray(runData.altitudeData) && (runData.altitudeData as any[]).length > 0;
-          const c2ExistingAlt = (garminDup as any).altitudeData;
-          // For altitude we PRESERVE the upload-batch's GPS-based {time,value} series —
-          // it is more accurate than the phone's barometric watchAltSeries (which is a
-          // raw flat float[]).  Only overwrite if existing is the OLD {km,value} kmSplits
-          // stub (which has only 1 value per km and can't be deserialized by Android).
-          // We identify the old format by the presence of a 'km' key on the first element.
-          const c2ExistingAltIsKmFormat = Array.isArray(c2ExistingAlt) &&
-            c2ExistingAlt.length > 0 && typeof c2ExistingAlt[0] === 'object' && 'km' in c2ExistingAlt[0];
-          if (c2AltArr && (!c2ExistingAlt || c2ExistingAltIsKmFormat)) {
-            c2Merge.altitudeData = runData.altitudeData;
-            console.log(`[POST /api/runs] Case 2: upgrading altitudeData from ${c2ExistingAltIsKmFormat ? '{km,value} kmSplits stub' : 'null'} to phone series`);
-          } else if (c2ExistingAlt && !c2ExistingAltIsKmFormat) {
-            console.log(`[POST /api/runs] Case 2: preserved existing GPS altitude data (${c2ExistingAlt.length} pts) — phone barometric series skipped`);
-          }
-
-          // Weather data — phone captures weather at run start; watch record never has it
-          if (runData.weatherData != null && (garminDup as any).weatherData == null) {
-            c2Merge.weatherData = runData.weatherData;
-            console.log(`[POST /api/runs] Case 2: merging weatherData from phone upload`);
-          }
-
-          // Target / achievement
-          if (targetDistance != null && (garminDup as any).targetDistance == null) c2Merge.targetDistance = targetDistance;
-          if (targetTime    != null && (garminDup as any).targetTime    == null) c2Merge.targetTime    = targetTime;
-          if (wasTargetAchieved != null && (garminDup as any).wasTargetAchieved == null) c2Merge.wasTargetAchieved = wasTargetAchieved;
-
-          // See the matching block in Case 0 for why these three are here.
-          {
-            const inSteps = runData.totalSteps ?? runData.total_steps;
-            const inCals  = runData.calories;
-            const inAi    = runData.aiCoachEnabled ?? runData.ai_coach_enabled;
-            if (typeof inSteps === 'number' && inSteps > 0 && (garminDup as any).totalSteps == null) c2Merge.totalSteps = inSteps;
-            if (typeof inCals  === 'number' && inCals  > 0 && (garminDup as any).calories   == null) c2Merge.calories   = inCals;
-            if (typeof inAi    === 'boolean'                && (garminDup as any).aiCoachEnabled == null) c2Merge.aiCoachEnabled = inAi;
-          }
-
-          // Training plan linking — the garmin_companion run has no knowledge of the
-          // coaching plan; only the phone knows which workout was being executed.
-          // Transfer all plan context so the run is properly linked and the workout
-          // can be marked complete (both server-side and in RunSummaryViewModel).
-          if (runData.linkedWorkoutId   && !(garminDup as any).linkedWorkoutId)   c2Merge.linkedWorkoutId   = runData.linkedWorkoutId;
-          if (runData.linkedPlanId      && !(garminDup as any).linkedPlanId)      c2Merge.linkedPlanId      = runData.linkedPlanId;
-          if (runData.workoutType       && !(garminDup as any).workoutType)       c2Merge.workoutType       = runData.workoutType;
-          if (runData.workoutIntensity  && !(garminDup as any).workoutIntensity)  c2Merge.workoutIntensity  = runData.workoutIntensity;
-          if (runData.workoutDescription && !(garminDup as any).workoutDescription) c2Merge.workoutDescription = runData.workoutDescription;
-          if (runData.planProgressWeek  && !(garminDup as any).planProgressWeek)  c2Merge.planProgressWeek  = runData.planProgressWeek;
-          if (runData.planProgressWeeks && !(garminDup as any).planProgressWeeks) c2Merge.planProgressWeeks = runData.planProgressWeeks;
-          // Group run link — Garmin-created run won't have this; phone knows it
-          if (groupRunId && !(garminDup as any).groupRunId) {
-            c2Merge.groupRunId = groupRunId;
-            console.log(`[POST /api/runs] Case 2: merging groupRunId=${groupRunId} into run ${garminDup.id}`);
-          }
-          mergeMissingRunSummary(garminDup as any, {
-            ...runData,
-            startedAt,
-            steepestIncline,
-            steepestDecline,
-          }, c2Merge);
-
-          if (Object.keys(c2Merge).length > 0) {
-            await db.update(runs).set(c2Merge).where(eq(runs.id, garminDup.id));
-            console.log(`[POST /api/runs] Case 2 merge applied to run ${garminDup.id}:`, Object.keys(c2Merge).join(', '));
-          }
-
-          // Kick off profile refresh with the enriched data
-          refreshRunnerProfile(userId).catch((err: any) =>
-            console.error('[POST /api/runs] Case 2 merge: runner profile refresh failed:', err)
-          );
-
-          // Auto-complete the linked workout now that the plan context has been merged in
-          autoCompleteLinkedWorkout(garminDup.id).catch((err: any) =>
-            console.error('[POST /api/runs] Case 2: workout auto-complete failed (non-fatal):', err)
-          );
-
-          // If this match came from the fuzzy-distance fallback (not already ID-linked),
-          // record the link now so any future lookup for this session is deterministic.
-          // Awaited — a fast-following /session/end request reads this same row to decide
-          // whether a run is already linked; if this write weren't committed yet, that read
-          // would see stale pre-link state and could create a duplicate run.
-          if (companionSessionId) {
-            try {
-              await db.update(garminCompanionSessions)
-                .set({ runId: garminDup.id })
-                .where(and(
-                  eq(garminCompanionSessions.sessionId, companionSessionId),
-                  eq(garminCompanionSessions.userId, userId),
-                ));
-            } catch (err) {
-              console.error('[POST /api/runs] Case 2: Failed to link companion session:', err);
-            }
-          }
-
-          if (groupRunId) await linkRunToGroupRun(groupRunId, userId, garminDup.id);
-
-          const [updated2] = await db.select().from(runs).where(eq(runs.id, garminDup.id)).limit(1);
-          return res.status(200).json(transformRunForAndroid(updated2 ?? garminDup));
+          return await mergePhoneUploadIntoWatchRun(garminDup);
         }
       } catch (dupErr) {
         console.warn('[POST /api/runs] Dedup check failed (non-fatal):', dupErr);
@@ -3532,12 +3539,21 @@ function transformRunForAndroid(run: any) {
       // duplicate run to be created for the same session.
       if (companionSessionId) {
         try {
-          await db.update(garminCompanionSessions)
-            .set({ runId: run.id })
-            .where(and(
-              eq(garminCompanionSessions.sessionId, companionSessionId),
-              eq(garminCompanionSessions.userId, userId),
-            ));
+          const sessionRunId = await claimCompanionSessionRun(companionSessionId, userId, run.id);
+          if (sessionRunId !== run.id) {
+            // The watch's session/end saved its run while this one was inserting. The watch's
+            // run is the master, so this copy goes once its extras are merged in.
+            const [watchRun] = await db.select().from(runs)
+              .where(and(eq(runs.id, sessionRunId), eq(runs.userId, userId)))
+              .limit(1);
+            if (watchRun) {
+              console.log(`[POST /api/runs] Watch saved run ${watchRun.id} at the same moment — merging and removing phone copy ${run.id}`);
+              const merged = await mergePhoneUploadIntoWatchRun(watchRun);
+              await storage.deleteRun(run.id);
+              void onRunDeleted(userId);
+              return merged;
+            }
+          }
           console.log(`[POST /api/runs] Linked companion session ${companionSessionId} → run ${run.id}`);
         } catch (err) {
           console.error('[POST /api/runs] Failed to link companion session:', err);
@@ -14354,34 +14370,25 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             if (kmAlt.length > 0)                     altitudeData  = kmAlt;
           }
 
-          if (phoneMatchedRun) {
-            // ── Merge instead of silently discarding ──────────────────────────
-            // Previously this branch just linked the session to the existing phone
-            // run and threw away everything computed above — including the case
-            // this dedup guard's own comment already calls out: "a paused/frozen
-            // phone track." A phone-side bug (stale watch command resetting live
-            // tracking, an OS-kill reattach with no server-side telemetry to
-            // recover from, etc.) can leave the phone's uploaded run with a
-            // near-zero distance/duration while the watch — which tracked the
-            // whole session independently and has no knowledge anything went
-            // wrong on the phone — has the correct, complete data. Mirrors the
-            // POST /api/runs Case-0 external-id merge: only fill genuine gaps or
-            // replace data that looks clearly deficient, never overwrite a
-            // healthy phone record for cosmetic reasons (phone vs watch GPS
-            // distance can legitimately differ by the ±15% tolerance above).
-            const existingDistance = phoneMatchedRun.distance ?? 0;
-            const phoneDistanceLooksDeficient = existingDistance < distanceKm * 0.5;
+          const applyWatchDataToPhoneRun = async (phoneMatchedRun: { id: string; distance: number | null; totalSteps?: number | null }) => {
+            // The phone saved first, but the watch's numbers are the master: they replace the
+            // phone's whenever the watch reports a session. The row stays because the phone is
+            // already showing this run ID. The phone's own numbers only stand if the watch never
+            // gets here (it died mid-run). A phone time 16 s out stood on Daniel's 10-31 parkrun.
             const mergeFields: Record<string, any> = {};
-            if (phoneDistanceLooksDeficient) {
+            if (distanceKm > 0 && durationSecs > 0) {
               mergeFields.distance = distanceKm;
               mergeFields.duration = durationSecs;
+              mergeFields.movingTime = durationSecs;
+              mergeFields.elapsedTime = durationSecs;
+              mergeFields.avgSpeed = (distanceKm * 1000) / durationSecs;
               if (avgPaceStr) mergeFields.avgPace = avgPaceStr;
               if (stats.avgHeartRate != null) mergeFields.avgHeartRate = stats.avgHeartRate;
               if (stats.maxHeartRate != null) mergeFields.maxHeartRate = stats.maxHeartRate;
               if (stats.avgCadence != null) mergeFields.cadence = stats.avgCadence;
               if (stats.totalAscent != null) mergeFields.elevationGain = stats.totalAscent;
               if (stats.totalDescent != null) mergeFields.elevationLoss = stats.totalDescent;
-              console.log(`[Companion] session/end — existing phone run ${phoneMatchedRun.id} distance (${existingDistance.toFixed(2)}km) looks deficient vs watch's own ${distanceKm.toFixed(2)}km — overwriting core stats from watch data`);
+              console.log(`[Companion] session/end — phone run ${phoneMatchedRun.id} takes the watch's ${distanceKm.toFixed(2)}km in ${durationSecs}s`);
             }
             // Additive gap-fills regardless of the distance check — only written
             // when the watch actually has data, so there's no risk of clobbering
@@ -14403,6 +14410,11 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
               .set({ runId: phoneMatchedRun.id })
               .where(eq(garminCompanionSessions.sessionId, sessionId));
             newRunId = phoneMatchedRun.id;
+            void onRunDeleted(userId); // full stats recompute: this run's numbers just changed
+          };
+
+          if (phoneMatchedRun) {
+            await applyWatchDataToPhoneRun(phoneMatchedRun);
           } else {
 
           const watchLocalStart = await runLocalStart(userId, new Date(now.getTime() - durationSecs * 1000));
@@ -14451,16 +14463,24 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             // GPS track built from garminRealtimeData per-second points (standalone runs)
             gpsTrack: gpsTrackFromData,
           }).returning();
-          void ensureRunWeather(newRun.id); // companion runs carry no weather of their own
-
           newRunId = newRun.id;
 
-          // Link the companion session to the run
-          await db.update(garminCompanionSessions)
-            .set({ runId: newRunId })
-            .where(eq(garminCompanionSessions.sessionId, sessionId));
-
-          console.log(`[Companion] Created run record ${newRunId} from standalone Garmin session ${sessionId} (${distanceKm.toFixed(2)}km)`);
+          // Link the companion session to the run. If the phone linked its own run while this
+          // one was inserting, keep that row (the phone is showing its ID) with the watch's numbers.
+          const sessionRunId = await claimCompanionSessionRun(sessionId, userId, newRun.id);
+          if (sessionRunId !== newRun.id) {
+            await db.delete(runs).where(eq(runs.id, newRun.id));
+            const [phoneRun] = await db.select({ id: runs.id, distance: runs.distance })
+              .from(runs)
+              .where(eq(runs.id, sessionRunId))
+              .limit(1);
+            newRunId = sessionRunId;
+            if (phoneRun) await applyWatchDataToPhoneRun(phoneRun);
+            console.log(`[Companion] Phone saved run ${sessionRunId} at the same moment — gave it the watch's data instead of keeping a second run`);
+          } else {
+            void ensureRunWeather(newRun.id); // companion runs carry no weather of their own
+            console.log(`[Companion] Created run record ${newRunId} from standalone Garmin session ${sessionId} (${distanceKm.toFixed(2)}km)`);
+          }
           } // end else (no phone run found)
         }
       } catch (runCreateError: any) {

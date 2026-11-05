@@ -35,6 +35,7 @@ class PhoneLink {
     // cap; control commands (start/stop/pause) always go through.
     private var _pendingTransmits = 0;
     private const MAX_DATA_PENDING = 2;   // max queued watchData frames
+    private const MAX_ACK_PENDING  = 4;   // beyond this, acks wait for the phone's next re-send
 
     function initialize() {}
 
@@ -63,6 +64,25 @@ class PhoneLink {
         };
         _transmit(msg);
         Sys.println("PhoneLink tx command: " + action);
+    }
+
+    // ── "stop" with the final timer ───────────────────────────────────────────
+    // Live frames only come every ~2 s, so this is what lets the phone save exactly the time
+    // the runner read on the watch.
+    function sendStop(elapsedSeconds) {
+        _transmit({ "type" => "command", "action" => "stop", "elap" => elapsedSeconds });
+        Sys.println("PhoneLink tx stop: " + elapsedSeconds + "s");
+    }
+
+    // ── Ack that can safely be skipped ────────────────────────────────────────
+    // The phone re-sends until it is acked. A launch can deliver a whole mailbox of messages at
+    // once, and each pending transmit holds heap, so don't let the replies pile up with them.
+    function sendAck(action) {
+        if (_pendingTransmits >= MAX_ACK_PENDING) {
+            Sys.println("PhoneLink.sendAck: dropped " + action + " (pending=" + _pendingTransmits + ")");
+            return;
+        }
+        sendCommand(action);
     }
 
     // ── Notify phone that an offline run batch is waiting in watch storage ────────

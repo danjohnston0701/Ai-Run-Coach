@@ -22,6 +22,7 @@ using Toybox.ActivityRecording as Record;
 using Toybox.Activity;
 using Toybox.Application as App;
 using Toybox.Communications as Comm;
+using Toybox.Time;
 
 (:gui)
 class RunView extends Ui.View {
@@ -43,6 +44,19 @@ class RunView extends Ui.View {
     // Grace period before showing "OFFLINE" label (lets auth message arrive first)
     private var _connectWaitTicks = 0;
     private const CONNECT_WAIT_MAX = 32; // 32 x 250ms = 8 seconds
+    // "watchReady" is sent once on open and can be lost with the BT link only just up. It is what
+    // gets the phone to send auth, so without a retry the app stayed OFFLINE beside a live phone.
+    private var _watchReadyRetriesLeft = 0;
+    private var _watchReadyRetryTick   = 0;
+    private const WATCH_READY_RETRY_MAX      = 8;
+    private const WATCH_READY_RETRY_INTERVAL = 12;  // 12 x 250ms = 3s between sends
+    // Connect IQ delivers everything sent to a closed app at launch: possibly many auth messages,
+    // each one costing a storage write and transmits. Handle a repeat at most this often.
+    private const AUTH_REPEAT_MIN_MS = 10000;
+    private var _lastAuthToken = null;
+    private var _lastAuthMs    = 0;
+    // A live-state message older than this was sitting in the mailbox, not sent just now.
+    private const STALE_PHONE_MSG_SECS = 15;
 
     // Wall-clock start of the current session, epoch seconds. The offline batch's GPS points
     // carry ELAPSED seconds only, so without this the backend has no absolute time for a
@@ -782,7 +796,7 @@ class RunView extends Ui.View {
         _gpsListening = false;
         Sensor.enableSensorEvents(null);
         // Always notify phone, always stop local recording
-        _phoneLink.sendCommand("stop");
+        _phoneLink.sendStop(_elapsedTime);
         // Arm stop-command retry: resend "stop" every STOP_RETRY_INTERVAL ticks
         // until the phone confirms with "sessionEnded" or "stopAck". Recovers from
         // BT delivery failures (ConnectIQ transmit is fire-and-forget).
@@ -915,6 +929,8 @@ class RunView extends Ui.View {
         // Include hasPendingSync so phone dashboard shows a sync indicator, and forward
         // any crash breadcrumb from the previous run so it lands in the phone's logcat.
         _phoneLink.sendWatchReady(_hasPendingOfflineBatch(), _pendingCrashMsg);
+        _watchReadyRetriesLeft = WATCH_READY_RETRY_MAX;
+        _watchReadyRetryTick   = 0;
         _prepareRequestsLeft = PREPARE_REQUEST_MAX;
         _prepareRequestTick  = 0;
         // Also surface it on screen — real hardware has no accessible crash log for
@@ -1004,6 +1020,13 @@ class RunView extends Ui.View {
                 || _sameStr(data.get("sessionType"), App.Storage.getValue("sessionType")));
     }
 
+    // True for a time-stamped message that sat in the mailbox instead of arriving just now.
+    // Phones before Android 2.0.75 / iOS 1.8.20 don't stamp them.
+    private function _isStalePhoneMessage(data) {
+        var ts = data.get("ts");
+        return ts != null && (Time.now().value() - ts.toNumber()) > STALE_PHONE_MSG_SECS;
+    }
+
     private function _sameStr(a, b) {
         var sa = (a == null) ? "" : a.toString();
         var sb = (b == null) ? "" : b.toString();
@@ -1014,6 +1037,12 @@ class RunView extends Ui.View {
         if (data == null) { return; }
         var t = data.get("type");
         if (t == null) { return; }
+
+        // Whatever the phone sent, it's there: never show OFFLINE beside a session it just pushed.
+        if (!t.equals("disconnect")) {
+            _isConnected      = true;
+            _connectWaitTicks = CONNECT_WAIT_MAX;
+        }
 
         if (t.equals("auth")) {
             var tok   = data.get("authToken");
@@ -1028,6 +1057,8 @@ class RunView extends Ui.View {
             Sys.println("Phone startAck received — retry cancelled");
 
         } else if (t.equals("startRun")) {
+            // A run that started long before this app was opened, replayed from the mailbox.
+            if (_isStalePhoneMessage(data)) { return; }
             // Scenario A: phone initiates the run — watch acts as companion display.
             // Phone owns the backend session + GPS; watch just mirrors the metrics.
             _startRetryCount = 0;      // Cancel any start-retry (phone confirmed)
@@ -1053,7 +1084,7 @@ class RunView extends Ui.View {
                 var now = Sys.getTimer();
                 if (now - _lastPrepAckMs > 2000) {
                     _lastPrepAckMs = now;
-                    _phoneLink.sendCommand("preparedRunAck");
+                    _phoneLink.sendAck("preparedRunAck");
                 }
                 return;
             }
@@ -1101,14 +1132,14 @@ class RunView extends Ui.View {
                 if (_dataStreamer != null) { _dataStreamer.setActivityType(st); }
                 // Ack so the phone's retry loop (GarminWatchManager.sendSessionType) stops —
                 // Comm.transmit() is fire-and-forget with no delivery guarantee otherwise.
-                _phoneLink.sendCommand("sessionTypeAck");
+                _phoneLink.sendAck("sessionTypeAck");
             }
 
             _isPrepared = true;
             _prepareRequestsLeft = 0;
             // Stops the phone re-sending this prepared run (GarminWatchManager.sendPreparedRun).
             _lastPrepAckMs = Sys.getTimer();
-            _phoneLink.sendCommand("preparedRunAck");
+            _phoneLink.sendAck("preparedRunAck");
             if (!_isRunning) {
                 _overlayState = _gpsReady ? OVERLAY_COACHED : OVERLAY_GPS_WAIT;
             }
@@ -1147,9 +1178,11 @@ class RunView extends Ui.View {
             // defaults to Running even when the phone side is correctly showing Walk.
             var sType = data.get("sessionType");
             if (sType != null) {
-                App.Storage.setValue("sessionType", sType);
+                if (!_sameStr(sType, App.Storage.getValue("sessionType"))) {
+                    App.Storage.setValue("sessionType", sType);
+                }
                 if (_dataStreamer != null) { _dataStreamer.setActivityType(sType); }
-                _phoneLink.sendCommand("sessionTypeAck");
+                _phoneLink.sendAck("sessionTypeAck");
             }
 
         } else if (t.equals("disconnect")) {
@@ -1167,6 +1200,14 @@ class RunView extends Ui.View {
             // updates from the phone — they would restore _isRunning=true and trap the
             // watch in a pause/start loop.
             if (_isFinishing) { return; }
+            // Not in a run. A leftover from a run that's over, replayed from the mailbox at launch,
+            // must not flip this idle app to "running" with no session behind it. Only a current
+            // update means the phone is running a session now, and then the phone owns it.
+            if (!_isRunning && !_phoneControlled) {
+                if (data.get("isRunning") != true || data.get("ts") == null || _isStalePhoneMessage(data)) { return; }
+                _phoneControlled = true;
+                _isFinished      = false;
+            }
             // Phone is active — cancel any pending start-command retry
             if (_startRetryCount > 0) {
                 _startRetryCount = 0;
@@ -1230,7 +1271,15 @@ class RunView extends Ui.View {
             // Ack first: the phone re-sends sessionEnded until it hears this, because a single
             // dropped message left the watch recording after the phone had saved the run, and
             // the runner then had to stop the watch by hand (Damion, 2026-10-08 and 10-12).
-            _phoneLink.sendCommand("sessionEndedAck");
+            _phoneLink.sendAck("sessionEndedAck");
+            // Not in a run: a re-send, or a leftover replayed at launch. The cleanup below would
+            // turn GPS off under an app waiting for a fix and clear a session just prepared.
+            if (!_isRunning && !_isPaused) {
+                _stopRetryCount = 0;
+                _stopRetryTick  = 0;
+                _isFinishing    = false;
+                return;
+            }
             // Watch-started run that the phone ended: close the backend session too. Only
             // finishRun() used to, so these sessions were left 'active' on the server. A no-op
             // when the watch already finished (its session ID is cleared) or on a re-send.
@@ -1274,6 +1323,11 @@ class RunView extends Ui.View {
     // step below is itself idempotent (guarded by _gpsListening / _isRunning checks).
     private function _applyAuthToken(tok, rname, maxHr, source) {
         if (tok == null || tok.length() == 0) { return; }
+        if (maxHr != null && maxHr > 0) { _maxHr = maxHr; _maxHrKnown = true; }
+        var nowMs = Sys.getTimer();
+        if (_lastAuthToken != null && tok.equals(_lastAuthToken) && (nowMs - _lastAuthMs) < AUTH_REPEAT_MIN_MS) { return; }
+        _lastAuthToken = tok;
+        _lastAuthMs    = nowMs;
         App.Storage.setValue("authToken", tok);
         _isAuthenticated  = true;
         _isConnected      = true;
@@ -1294,7 +1348,7 @@ class RunView extends Ui.View {
         Sys.println("Auth received (source=" + source + ") — overlayState=" + _overlayState);
         // Tell the phone which watch app version is installed so the
         // "Watch App Update" notification screen can show the diff.
-        _phoneLink.sendHello("3.4.13"); // keep in sync with manifest.xml's iq:application version
+        _phoneLink.sendHello("3.4.14"); // keep in sync with manifest.xml's iq:application version
         // If GPS was already locked before auth arrived, notify phone now
         if (_gpsReady && !_isRunning && !_sessionReadySent) {
             _phoneLink.sendCommand("sessionReady");
@@ -1378,6 +1432,16 @@ class RunView extends Ui.View {
         // Grace period: count up for first 8s so UI does not flash OFFLINE before auth arrives
         if (_connectWaitTicks < CONNECT_WAIT_MAX) { _connectWaitTicks += 1; }
 
+        // ── watchReady retry (see _watchReadyRetriesLeft) ──────────────────────
+        if (_watchReadyRetriesLeft > 0 && !_isConnected && !_isRunning) {
+            _watchReadyRetryTick += 1;
+            if (_watchReadyRetryTick >= WATCH_READY_RETRY_INTERVAL) {
+                _watchReadyRetryTick    = 0;
+                _watchReadyRetriesLeft -= 1;
+                _phoneLink.sendWatchReady(_hasPendingOfflineBatch(), null);
+            }
+        }
+
         // ── Prepared-run request (see _prepareRequestsLeft) ────────────────────
         if (_prepareRequestsLeft > 0 && isPrepareGateActive()) {
             _prepareRequestTick += 1;
@@ -1412,7 +1476,7 @@ class RunView extends Ui.View {
             if (_stopRetryTick >= STOP_RETRY_INTERVAL) {
                 _stopRetryTick  = 0;
                 _stopRetryCount -= 1;
-                _phoneLink.sendCommand("stop");
+                _phoneLink.sendStop(_elapsedTime);
                 Sys.println(">>> finishRun retry — " + _stopRetryCount + " remaining");
             }
         }
