@@ -172,6 +172,9 @@ class SamsungWatchManager(
     // GarminWatchManager.
     private var cachedUserMaxHr: Int? = null
     private var cachedPreparedRunPayload: Map<String, Any>? = null
+    // A Data Layer message only reaches a watch app that's open, but the watch saves a prepared
+    // run. A cancel sent while it's closed is lost, so it goes again on the next "watchReady".
+    private var preparedRunCancelPending = false
     private var cachedSessionType: String? = null
 
     // ── preparedRun delivery retry ──────────────────────────────────────────────
@@ -340,6 +343,7 @@ class SamsungWatchManager(
 
         Log.d(TAG, "Sending preparedRun to watch: type=$runType dist=${distanceKm}km workout=$workoutType")
         cachedPreparedRunPayload = payload
+        preparedRunCancelPending = false
         sendToWatch(payload)
         openWatchApp()
         startPreparedRunResend()
@@ -405,6 +409,7 @@ class SamsungWatchManager(
     fun cancelPreparedRun() {
         if (cachedPreparedRunPayload == null) return
         cachedPreparedRunPayload = null
+        preparedRunCancelPending = true
         stopPreparedRunResend()
         sendToWatch(mapOf("type" to "preparedRunCancelled"))
         Log.d(TAG, "preparedRunCancelled sent to watch")
@@ -620,6 +625,10 @@ class SamsungWatchManager(
                 Log.d(TAG, "watchReady received — no cached auth, firing onWatchAppReady")
                 onWatchAppReady?.invoke()
             }
+            if (preparedRunCancelPending) {
+                preparedRunCancelPending = false
+                sendToWatch(mapOf("type" to "preparedRunCancelled"))
+            }
             cachedPreparedRunPayload?.let { payload ->
                 Log.d(TAG, "watchReady received — resending cached preparedRun to watch")
                 sendToWatch(payload)
@@ -635,6 +644,7 @@ class SamsungWatchManager(
 
         if (action == "start") {
             cachedPreparedRunPayload = null
+            preparedRunCancelPending = false
             stopPreparedRunResend()
             if (_hasPendingWatchSync.value) {
                 Log.d(TAG, "Watch START received — clearing stale hasPendingWatchSync flag")

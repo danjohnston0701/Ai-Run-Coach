@@ -586,6 +586,7 @@ class GarminWatchManager(
     }
 
     fun sendStartRun() {
+        stopSessionEndedResend()
         sendToWatch(mapOf("type" to "startRun", "ts" to (System.currentTimeMillis() / 1000L).toInt()))
     }
 
@@ -634,6 +635,7 @@ class GarminWatchManager(
         plannedWorkoutId: String? = null,
         sessionType: String = "run"    // "run" | "walk" — used by watch to classify FIT file and notify backend
     ) {
+        stopSessionEndedResend()
         val payload = mutableMapOf<String, Any>(
             "type"        to "preparedRun",
             "distance"    to distanceKm,
@@ -824,10 +826,15 @@ class GarminWatchManager(
     }
 
     private fun onSessionEndedAcked() {
+        stopSessionEndedResend()
+        Log.d(TAG, "Watch acked sessionEnded")
+    }
+
+    // Also when a new session begins: a late re-send must not end it.
+    private fun stopSessionEndedResend() {
         sessionEndedRetriesLeft = 0
         sessionEndedRetryRunnable?.let { sessionEndedRetryHandler.removeCallbacks(it) }
         sessionEndedRetryRunnable = null
-        Log.d(TAG, "Watch acked sessionEnded")
     }
 
     /** True when dotted version [a] is strictly older than [b]. */

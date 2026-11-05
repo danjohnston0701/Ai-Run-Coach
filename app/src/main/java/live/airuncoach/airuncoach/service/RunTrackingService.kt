@@ -283,6 +283,14 @@ class RunTrackingService : Service(), SensorEventListener {
     // can't be used for this (a legitimate stop can arrive while genuinely paused, i.e. while
     // isTracking is already false).
     private var isFinalizingStop = false
+    // True from the start of a run until stopTracking() has told the watch it ended. A standby
+    // that was cancelled before starting never sets it, so the watch isn't told a session ended.
+    private var watchRunOpen = false
+    // What this instance put on the shared watch managers, so onDestroy() removes only its own.
+    private var garminCommandHandler: ((String) -> Unit)? = null
+    private var samsungCommandHandler: ((String) -> Unit)? = null
+    private var garminAppReadyBeforeService: (() -> Unit)? = null
+    private var samsungAppReadyBeforeService: (() -> Unit)? = null
     // Polls the server for the end of this run's Garmin companion session — see
     // startWatchSessionEndWatchdog().
     private var watchSessionEndWatchdog: Job? = null
@@ -1289,6 +1297,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     }
                 }
                 
+                garminCommandHandler = manager.onWatchCommand
+
                 // Watch GPS stream — inject Garmin coordinates into the tracking pipeline.
                 // The watch enables its own GPS during phone-controlled runs and streams
                 // fixes every ~2 s.  These are preferred over phone GPS (3 m vs 10–25 m).
@@ -1304,6 +1314,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
                 // Watch app resolved & ready — proactively push auth token so the
                 // watch authenticates immediately without waiting for "watchReady"
+                garminAppReadyBeforeService = manager.onWatchAppReady
                 manager.onWatchAppReady = {
                     Log.d("RunTrackingService", "Watch app ready — pushing auth token proactively")
                     serviceScope.launch {
@@ -1371,6 +1382,7 @@ class RunTrackingService : Service(), SensorEventListener {
                         }
                     }
                 }
+                samsungCommandHandler = manager.onWatchCommand
 
                 manager.onWatchGpsUpdate = { lat, lng, altM, speedMs ->
                     injectWatchLocation(lat, lng, altM, speedMs)
@@ -1382,6 +1394,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     updateWatchSensorData(frame)
                 }
 
+                samsungAppReadyBeforeService = manager.onWatchAppReady
                 manager.onWatchAppReady = {
                     Log.d("RunTrackingService", "Wear watch app ready — pushing auth token proactively")
                     serviceScope.launch {
@@ -2085,6 +2098,7 @@ class RunTrackingService : Service(), SensorEventListener {
 
         // Now safely initialize everything else
         isTracking = true
+        watchRunOpen = true
         isInWatchStandby = false
         preCacheSystemAudio()  // Warm the pause/resume audio cache before any pause can happen
         _currentRunSession.value = null  // Clear stale data from previous run
@@ -5277,6 +5291,7 @@ class RunTrackingService : Service(), SensorEventListener {
             return
         }
         isFinalizingStop = true
+        watchRunOpen = false
         // Read the session clock now. wasRunStartedByWatch is reset just below and the save runs
         // later, after the weather fetch: reading it there returned the phone clock instead of
         // the watch's timer, so a run the watch timed at 22:47 saved as 23:03 (Daniel's parkrun).
@@ -6609,27 +6624,36 @@ class RunTrackingService : Service(), SensorEventListener {
             _currentRunSession.value = null
             Log.d("RunTrackingService", "onDestroy: cleared companion _currentRunSession (was not tracking)")
         }
-        // Notify watch the session has ended, then shut down ConnectIQ bridge
-        // NOTE: May race with ongoing upload, but sendSessionEnded() is idempotent
+        // Tell the watch if a run ended without stopTracking(). Not while one is live or paused:
+        // that's the OS killing the service, and the watch's run must carry on.
+        val runEndedWithoutStop = watchRunOpen && !isTracking && pauseStartTime == 0L
+        // The watch managers are app-wide and only MainActivity starts them, so they stay up. Shutting
+        // them down here left the phone believing no watch app was installed until the app was
+        // killed, so the next session had no "Send to Watch" button. Only this instance's
+        // callbacks go, so a "start" from the watch reaches the managers' no-listener path.
         try {
-            if (garminWatchManager?.isWatchConnected?.value == true) {
-                Log.d("RunTrackingService", "Notifying watch of session end...")
-                garminWatchManager?.sendSessionEnded()
+            garminWatchManager?.let { manager ->
+                if (runEndedWithoutStop && manager.isWatchConnected.value) manager.sendSessionEnded()
+                if (manager.onWatchCommand === garminCommandHandler) manager.onWatchCommand = null
+                manager.onWatchGpsUpdate = null
+                manager.onWatchSensorData = null
+                manager.onWatchStopClock = null
+                manager.onWatchAppReady = garminAppReadyBeforeService
             }
-            garminWatchManager?.shutdown()
-            Log.d("RunTrackingService", "GarminWatchManager shutdown complete")
         } catch (e: Exception) {
-            Log.w("RunTrackingService", "GarminWatchManager shutdown error (non-fatal): ${e.message}")
+            Log.w("RunTrackingService", "GarminWatchManager detach error (non-fatal): ${e.message}")
         }
         try {
-            if (samsungWatchManager?.isWatchConnected?.value == true) {
-                Log.d("RunTrackingService", "Notifying Wear watch of session end...")
-                samsungWatchManager?.sendSessionEnded()
+            samsungWatchManager?.let { manager ->
+                if (runEndedWithoutStop && manager.isWatchConnected.value) manager.sendSessionEnded()
+                if (manager.onWatchCommand === samsungCommandHandler) manager.onWatchCommand = null
+                manager.onWatchGpsUpdate = null
+                manager.onWatchSensorData = null
+                manager.onWatchStopClock = null
+                manager.onWatchAppReady = samsungAppReadyBeforeService
             }
-            samsungWatchManager?.shutdown()
-            Log.d("RunTrackingService", "SamsungWatchManager shutdown complete")
         } catch (e: Exception) {
-            Log.w("RunTrackingService", "SamsungWatchManager shutdown error (non-fatal): ${e.message}")
+            Log.w("RunTrackingService", "SamsungWatchManager detach error (non-fatal): ${e.message}")
         }
         serviceScope.cancel()
         Log.d("RunTrackingService", "Service destroyed")

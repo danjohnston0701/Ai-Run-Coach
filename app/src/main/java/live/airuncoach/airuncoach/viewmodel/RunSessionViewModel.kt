@@ -425,6 +425,11 @@ class RunSessionViewModel @Inject constructor(
     val watchSendState: StateFlow<live.airuncoach.airuncoach.ui.components.WatchSendState> =
         _watchSendState.asStateFlow()
 
+    /** Back on the screen after a send: offer the button again instead of a stale "Watch Ready". */
+    fun resetWatchSendState() {
+        _watchSendState.value = live.airuncoach.airuncoach.ui.components.WatchSendState.IDLE
+    }
+
     // ── AI Coaching generation state ─────────────────────────────────────────
     /** Tracks the state of AI coaching plan generation for the current workout preview. */
     enum class CoachingGenerationState {

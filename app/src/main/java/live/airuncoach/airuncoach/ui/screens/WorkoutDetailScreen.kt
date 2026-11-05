@@ -83,6 +83,7 @@ fun WorkoutDetailScreen(
         ?: 190  // Tanaka fallback for unknown age
     // Drive watch send state from ViewModel (supports async prepare-coaching flow)
     val watchSendState by runSessionViewModel.watchSendState.collectAsState()
+    LaunchedEffect(Unit) { runSessionViewModel.resetWatchSendState() }
 
     // ── Live Tracking observer invites (same picker as the free-run setup screen) ──
     val friendsViewModel: FriendsViewModel = remember {
