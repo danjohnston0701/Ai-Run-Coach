@@ -516,6 +516,7 @@ fun MainScreen(
                 }
                 
                 MapMyRunSetupScreen(
+                    onGetGarminWatchApp = { navController.navigate("garmin_watch_app") },
                     mode = mode,
                     initialDistance = dist,
                     initialTargetTimeEnabled = timeOn,
@@ -1428,6 +1429,7 @@ fun MainScreen(
             composable("group_run_setup/{groupRunId}") { backStackEntry ->
                 val groupRunId = backStackEntry.arguments?.getString("groupRunId") ?: return@composable
                 MapMyRunSetupScreen(
+                    onGetGarminWatchApp = { navController.navigate("garmin_watch_app") },
                     mode = "no_route",
                     isGroupRun = true,
                     groupRunId = groupRunId,

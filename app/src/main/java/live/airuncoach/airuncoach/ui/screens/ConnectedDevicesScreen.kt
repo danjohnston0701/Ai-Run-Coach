@@ -39,9 +39,9 @@ import live.airuncoach.airuncoach.viewmodel.ConnectedDevicesViewModel
 // OAuth handling are untouched either way.
 //  • Strava import: hidden 2026-10-09 while the Strava API application was inactive, shown again
 //    2026-10-13 (server side is gated separately by STRAVA_NEW_CONNECTIONS_ENABLED).
-//  • Galaxy Watch: shown under "Coming Soon" until the Wear OS app is live on Google Play.
+//  • Galaxy Watch: own section since 2026-11-09 (was under "Coming Soon" until then).
 private const val SHOW_STRAVA_IMPORT = true
-private const val SAMSUNG_WATCH_APP_AVAILABLE = false
+private const val SAMSUNG_WATCH_APP_AVAILABLE = true
 
 // Generic device info for the "Coming Soon" section
 data class DeviceInfo(
@@ -470,7 +470,7 @@ private fun GarminWatchAppCard(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Icon(
-                    Icons.Default.Share,
+                    Icons.Default.Download,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
@@ -512,7 +512,7 @@ private fun SamsungWatchAppCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Download from Play Store",
+                        "Included with Ai Run Coach",
                         style = AppTextStyles.h3,
                         color = Colors.textPrimary
                     )
@@ -538,7 +538,7 @@ private fun SamsungWatchAppCard(
 
             // Description
             Text(
-                "Install the Ai Run Coach companion app on your Galaxy Watch4 or later (Wear OS). Run with your phone for live coaching and full charts, or leave it at home — the watch buffers your run and uploads everything when you're back in range.",
+                "The watch app comes with Ai Run Coach, so there's nothing extra to download or pay for: install it on your Galaxy Watch4 or later (Wear OS) in one tap. Run with your phone for live coaching and full charts, or leave it at home — the watch buffers your run and uploads everything when you're back in range.",
                 style = AppTextStyles.caption,
                 color = Colors.textSecondary,
                 lineHeight = 18.sp
@@ -621,7 +621,7 @@ private fun SamsungWatchAppCard(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Icon(
-                    Icons.Default.Share,
+                    Icons.Default.Download,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )

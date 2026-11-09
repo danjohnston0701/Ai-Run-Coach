@@ -412,6 +412,11 @@ class RunSessionViewModel @Inject constructor(
         combine(garminWatchManager.isCompanionAppInstalled, samsungWatchManager.isCompanionAppInstalled) { g, s -> g || s }
             .stateIn(viewModelScope, SharingStarted.Lazily, false)
 
+    /** A Garmin is connected but Ai Run Coach isn't on it: the setup screen links to the install screen. */
+    val garminConnectedWithoutApp: StateFlow<Boolean> =
+        combine(garminWatchManager.isWatchConnected, garminWatchManager.isCompanionAppInstalled) { c, i -> c && !i }
+            .stateIn(viewModelScope, SharingStarted.Lazily, false)
+
     /** The Garmin app hasn't answered its open prompt: the standby banner says what to do. */
     val garminWatchNotAnswering: StateFlow<Boolean> = garminWatchManager.watchAppNotAnswering
 

@@ -102,23 +102,6 @@ fun StravaOAuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // ── Strava Logo Section ───────────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .background(Color(0xFFFC5200), RoundedCornerShape(20.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "S",
-                    style = AppTextStyles.h1.copy(
-                        fontSize = 56.sp,
-                        color = Color.White
-                    ),
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
             // ── Title ─────────────────────────────────────────────────────────
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,

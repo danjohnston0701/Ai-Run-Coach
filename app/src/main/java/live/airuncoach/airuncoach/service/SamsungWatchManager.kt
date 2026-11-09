@@ -490,10 +490,46 @@ class SamsungWatchManager(
         try {
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 data = android.net.Uri.parse("market://details?id=live.airuncoach.airuncoach")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open Play Store: ${e.message}")
+        }
+    }
+
+    /**
+     * Opens the Ai Run Coach listing in the Play Store on the paired Galaxy Watch, so installing
+     * is one tap on the watch. The watch app ships in the phone app's own Play listing, so there's
+     * nothing separate to buy or find. Uses any connected watch, since one without our app has
+     * no capability node. Falls back to the phone's Play Store when no watch is reachable.
+     * [onResult] gets true when the listing opened on the watch.
+     */
+    fun openPlayStoreOnWatch(onResult: (Boolean) -> Unit = {}) {
+        scope.launch(Dispatchers.IO) {
+            val opened = try {
+                val nodes = Tasks.await(Wearable.getNodeClient(context).connectedNodes)
+                val node = nodes.firstOrNull { it.isNearby } ?: nodes.firstOrNull()
+                if (node == null) {
+                    false
+                } else {
+                    val intent = Intent(Intent.ACTION_VIEW)
+                        .addCategory(Intent.CATEGORY_BROWSABLE)
+                        .setData(android.net.Uri.parse("market://details?id=${context.packageName}"))
+                    RemoteActivityHelper(context, Executors.newSingleThreadExecutor())
+                        .startRemoteActivity(intent, node.id)
+                        .get()
+                    Log.d(TAG, "Opened Play Store on ${node.displayName}")
+                    true
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't open Play Store on the watch: ${e.message}")
+                false
+            }
+            withContext(Dispatchers.Main) {
+                if (!opened) openPlayStoreForWatchApp()
+                onResult(opened)
+            }
         }
     }
 

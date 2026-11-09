@@ -137,6 +137,11 @@ class GarminWatchManager(
         private const val NOTIF_ID_WATCH_RUN    = 9001
         private const val NOTIF_ID_SYNC_COMPLETE = 9002
         private const val NOTIF_ID_PENDING_SYNC  = 9003   // "open watch app to sync" prompt
+        // Posted just before the "open Ai Run Coach?" prompt. Garmin Connect forwards it to the
+        // watch, and a forwarded notification lights the screen, which the prompt itself doesn't.
+        private const val NOTIF_CHANNEL_WAKE = "garmin_watch_wake"
+        private const val NOTIF_ID_WAKE_WATCH = 9004
+        private const val WAKE_NOTIFICATION_TIMEOUT_MS = 60_000L
     }
 
     // ── Scenario 3: passive notification for watch-initiated runs ────────────
@@ -303,6 +308,60 @@ class GarminWatchManager(
         }
     }
 
+    /**
+     * Lights the watch screen for the open prompt. Connect IQ can't wake the screen and the
+     * firmware's prompt often arrives dark, but Garmin Connect forwards phone notifications and
+     * the watch lights up for those. Silent on the phone: the runner is looking at it already.
+     * Only reaches the watch when Ai Run Coach is allowed in Garmin Connect's smart notifications.
+     */
+    private fun showWakeWatchNotification() {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    NOTIF_CHANNEL_WAKE,
+                    "Watch prompts",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
+                    description = "Lights your Garmin screen when Ai Run Coach asks to open on it"
+                    setSound(null, null)
+                    enableVibration(false)
+                }
+                nm.createNotificationChannel(channel)
+            }
+            val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
+            launch.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            val tapIntent = PendingIntent.getActivity(
+                context, NOTIF_ID_WAKE_WATCH, launch,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val notif = NotificationCompat.Builder(context, NOTIF_CHANNEL_WAKE)
+                .setSmallIcon(R.drawable.notification_icon)
+                .setContentTitle("Your session is on your watch")
+                .setContentText("Press to open Ai Run Coach on your Garmin.")
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setSilent(true)
+                .setAutoCancel(true)
+                .setTimeoutAfter(WAKE_NOTIFICATION_TIMEOUT_MS)
+                .setContentIntent(tapIntent)
+                .build()
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                NotificationManagerCompat.from(context).notify(NOTIF_ID_WAKE_WATCH, notif)
+                Log.d(TAG, "Wake-the-watch notification posted")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "showWakeWatchNotification failed: ${e.message}")
+        }
+    }
+
+    private fun cancelWakeWatchNotification() {
+        try {
+            NotificationManagerCompat.from(context).cancel(NOTIF_ID_WAKE_WATCH)
+        } catch (_: Exception) {}
+    }
+
     private fun cancelWatchRunNotification() {
         NotificationManagerCompat.from(context).cancel(NOTIF_ID_WATCH_RUN)
         Log.d(TAG, "Watch-initiated run notification dismissed")
@@ -420,6 +479,8 @@ class GarminWatchManager(
     private var openAppRunnables: List<Runnable> = emptyList()
     private val OPEN_APP_RESEND_AFTER_MS = 2_500L
     private val OPEN_APP_PROMPT_AFTER_MS = 5_000L
+    // The wake notification goes first so the prompt lands on a lit screen, on top of it.
+    private val OPEN_APP_WAKE_AFTER_MS = 3_500L
 
     // Silence after the prompt. The SDK says the prompt was shown, not whether it was accepted,
     // so this can be a crash on launch (IQ!, Daniel's 10-31 parkrun), a decline or a missed
@@ -677,6 +738,7 @@ class GarminWatchManager(
     private fun openWatchAppUnlessItAnswers(payload: Map<String, Any>) {
         cancelPendingOpenApp()
         val resend = Runnable { if (cachedPreparedRunPayload === payload) sendToWatch(payload) }
+        val wake = Runnable { if (cachedPreparedRunPayload === payload) showWakeWatchNotification() }
         val prompt = Runnable {
             openAppRunnables = emptyList()
             if (cachedPreparedRunPayload === payload) {
@@ -685,8 +747,9 @@ class GarminWatchManager(
                 watchForPromptAnswer()
             }
         }
-        openAppRunnables = listOf(resend, prompt)
+        openAppRunnables = listOf(resend, wake, prompt)
         openAppHandler.postDelayed(resend, OPEN_APP_RESEND_AFTER_MS)
+        openAppHandler.postDelayed(wake, OPEN_APP_WAKE_AFTER_MS)
         openAppHandler.postDelayed(prompt, OPEN_APP_PROMPT_AFTER_MS)
     }
 
@@ -694,6 +757,7 @@ class GarminWatchManager(
         openAppRunnables.forEach { openAppHandler.removeCallbacks(it) }
         openAppRunnables = emptyList()
         clearPromptWatch()
+        cancelWakeWatchNotification()
     }
 
     private fun watchForPromptAnswer() {
@@ -717,6 +781,7 @@ class GarminWatchManager(
     // The watch spoke. "No answer, then fine later" is what a crash and a relaunch look like.
     private fun onWatchAnsweredAfterPrompt() {
         if (promptSentAtMs == 0L) return
+        cancelWakeWatchNotification()
         if (promptNoAnswerReported) reportPromptOutcome(UserActivityReporter.WATCH_APP_ANSWERED_LATE)
         clearPromptWatch()
     }
@@ -993,7 +1058,11 @@ class GarminWatchManager(
         }
     }
 
-    private fun resolveApp(device: IQDevice) {
+    private val resolveAppHandler = Handler(Looper.getMainLooper())
+    private val RESOLVE_APP_RETRIES = 3
+    private val RESOLVE_APP_RETRY_MS = 5_000L
+
+    private fun resolveApp(device: IQDevice, attempt: Int = 1) {
         try {
             connectIQ?.getApplicationInfo(APP_ID, device,
                 object : ConnectIQ.IQApplicationInfoListener {
@@ -1007,6 +1076,16 @@ class GarminWatchManager(
                     }
 
                     override fun onApplicationNotInstalled(appId: String?) {
+                        // Connect IQ also lands here when the query itself fails (busy BLE link,
+                        // app mid-launch), and nothing else re-checks until the watch reconnects.
+                        // So the state is left as it is and the check retried a few times before
+                        // the Send button is hidden.
+                        if (attempt < RESOLVE_APP_RETRIES) {
+                            Log.w(TAG, "Install check said not installed (attempt $attempt), retrying")
+                            resolveAppHandler.postDelayed({ resolveApp(device, attempt + 1) }, RESOLVE_APP_RETRY_MS)
+                            return
+                        }
+                        iqApp = null
                         _isCompanionAppInstalled.value = false
                         Log.w(TAG, "Watch app not installed on device (appId=$appId)")
                     }
@@ -1060,6 +1139,11 @@ class GarminWatchManager(
             val map    = data?.firstOrNull() as? Map<String, Any> ?: return
             val type   = map["type"] as? String ?: return
             lastWatchMessageAtMs = System.currentTimeMillis()
+            // A message from the app proves it's installed, whatever the last install check said.
+            if (!_isCompanionAppInstalled.value) {
+                Log.d(TAG, "Watch app spoke while marked not installed; marking installed")
+                _isCompanionAppInstalled.value = true
+            }
             onWatchAnsweredAfterPrompt()
             // The watch app answered, so it's open: no prompt. Keep sending until it acks.
             if (openAppRunnables.isNotEmpty()) {

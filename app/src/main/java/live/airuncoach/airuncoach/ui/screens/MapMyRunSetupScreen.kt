@@ -99,7 +99,9 @@ fun MapMyRunSetupScreen(
         activityType: String,
         isWatchMode: Boolean,
         aiCoachEnabled: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _ -> }
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _ -> },
+    /** Opens the "Run with AI Run Coach on Your Garmin" install screen. */
+    onGetGarminWatchApp: () -> Unit = {}
 ) {
     val context = LocalContext.current
     // Remembers the last-picked target distance/time so it survives a full app close/reopen
@@ -117,6 +119,7 @@ fun MapMyRunSetupScreen(
     }
     val companionInstalled by runSessionViewModel.isWatchCompanionInstalled.collectAsState()
     val connectedWatchIsSamsung by runSessionViewModel.connectedWatchIsSamsung.collectAsState()
+    val garminWithoutApp by runSessionViewModel.garminConnectedWithoutApp.collectAsState()
     var watchSendState by remember { mutableStateOf(WatchSendState.IDLE) }
     
     // Load friends for group run invitations
@@ -234,11 +237,11 @@ fun MapMyRunSetupScreen(
     val isKeyboardVisible = WindowInsets.isImeVisible
     val density = LocalDensity.current
     // Bottom padding = the fixed CTA bar's height, so the Social / Group Run section can always be
-    // scrolled fully above it (140.dp floor = one button + padding + the target caption).
+    // scrolled fully above it (100.dp floor = one button + padding).
     // Measured, not fixed: the bar is roughly twice as tall when the watch options (Prepare for
     // Watch + the "take your phone" caption + Prepare on Phone) are stacked in it.
     var ctaBarHeightPx by remember { mutableIntStateOf(0) }
-    val ctaBarHeight = with(density) { ctaBarHeightPx.toDp() }.coerceAtLeast(140.dp)
+    val ctaBarHeight = with(density) { ctaBarHeightPx.toDp() }.coerceAtLeast(100.dp)
     val bottomContentPadding = if (isKeyboardVisible) {
         with(density) { WindowInsets.ime.getBottom(this).toDp() } + ctaBarHeight
     } else {
@@ -396,7 +399,8 @@ fun MapMyRunSetupScreen(
                 .fillMaxWidth()
                 .onSizeChanged { ctaBarHeightPx = it.height }
                 .background(Colors.backgroundRoot)
-                .padding(Spacing.lg)
+                // Tight bottom padding so the actions sit just above the app's bottom navigation.
+                .padding(start = Spacing.lg, end = Spacing.lg, top = Spacing.md, bottom = Spacing.sm)
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -644,15 +648,20 @@ fun MapMyRunSetupScreen(
                     }
                 }
 
-                Text(
-                    text = "Target: ${TargetDistance.format(targetDistance, targetDistanceDecimals)} km",
-                    style = AppTextStyles.caption,
-                    color = Colors.textMuted,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = Spacing.xs),
-                    textAlign = TextAlign.Center
-                )
+                // A Garmin is paired but our app isn't on it, so there's no Send to Watch option.
+                if (garminWithoutApp && !companionInstalled) {
+                    Text(
+                        text = "Get Ai Run Coach for your Garmin",
+                        style = AppTextStyles.caption.copy(fontWeight = FontWeight.SemiBold),
+                        color = Colors.primary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onGetGarminWatchApp)
+                            .padding(vertical = Spacing.sm)
+                    )
+                }
             }
         }
     }

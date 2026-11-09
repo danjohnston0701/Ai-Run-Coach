@@ -86,26 +86,12 @@ fun GarminConnectScreen(
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
-            // Garmin Connect logo + header
+            // Header
             item {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(80.dp)
-                            .background(Colors.backgroundSecondary, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_garmin_logo),
-                            contentDescription = "Garmin Connect",
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(52.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         "Connect your Garmin account to import completed run activities and historical training data.",
                         style = AppTextStyles.body,

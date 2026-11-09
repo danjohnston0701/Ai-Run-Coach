@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
@@ -95,39 +96,6 @@ fun GarminWatchUpdateScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(Spacing.xl))
-
-            // Watch icon with update badge
-            Box(contentAlignment = Alignment.TopEnd) {
-                Box(
-                    modifier = Modifier
-                        .size(96.dp)
-                        .background(Colors.primary.copy(alpha = 0.12f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.icon_timer_vector),
-                        contentDescription = "Garmin Watch",
-                        tint = Colors.primary,
-                        modifier = Modifier.size(56.dp)
-                    )
-                }
-                // Green update dot
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .background(Colors.success, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(Spacing.lg))
 
             // Title
             Text(
@@ -272,7 +240,7 @@ fun GarminWatchUpdateScreen(
                 )
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.icon_timer_vector),
+                    imageVector = Icons.Default.Download,
                     contentDescription = null,
                     modifier = Modifier.size(22.dp)
                 )

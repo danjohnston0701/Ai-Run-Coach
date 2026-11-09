@@ -3,7 +3,6 @@ package live.airuncoach.airuncoach.ui.screens
 import live.airuncoach.airuncoach.ui.components.WatchPhoneHowItWorks
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -11,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,11 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import live.airuncoach.airuncoach.R
+import dagger.hilt.android.EntryPointAccessors
+import live.airuncoach.airuncoach.di.SamsungWatchManagerEntryPoint
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
 import live.airuncoach.airuncoach.ui.theme.Colors
@@ -59,17 +60,7 @@ fun GarminCompanionPromptScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(Spacing.md))
-
-        // Watch icon/image
-        Icon(
-            painter = painterResource(id = R.drawable.icon_timer_vector),
-            contentDescription = "Garmin Watch",
-            tint = Colors.primary,
-            modifier = Modifier.size(80.dp)
-        )
-
-        Spacer(modifier = Modifier.height(Spacing.lg))
+        Spacer(modifier = Modifier.height(Spacing.sm))
 
         // Title
         Text(
@@ -199,7 +190,7 @@ fun GarminCompanionPromptScreen(
             )
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.icon_timer_vector),
+                imageVector = Icons.Default.Download,
                 contentDescription = null,
                 modifier = Modifier.size(24.dp)
             )
@@ -229,9 +220,10 @@ fun GarminCompanionPromptScreen(
 }
 
 /**
- * Wear OS / Samsung Galaxy Watch equivalent of [GarminCompanionPromptScreen] — same layout
- * and benefit list, wording and install link swapped for the Wear OS app (Play Store instead
- * of Connect IQ Store).
+ * Galaxy Watch (Wear OS) counterpart of [GarminCompanionPromptScreen]. Unlike Garmin there's no
+ * separate store listing: the watch app ships inside the phone app's Play listing, so the runner
+ * has nothing to buy or search for. It still has to be installed on the watch once, and the
+ * button does that by opening the Play Store on the watch itself.
  */
 @Composable
 fun SamsungCompanionPromptScreen(
@@ -241,6 +233,15 @@ fun SamsungCompanionPromptScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val samsungWatchManager = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            SamsungWatchManagerEntryPoint::class.java
+        ).samsungWatchManager()
+    }
+    val installed by samsungWatchManager.isCompanionAppInstalled.collectAsState()
+    // null = not tapped yet, true = opened on the watch, false = no watch reachable (phone store opened)
+    var openedOnWatch by remember { mutableStateOf<Boolean?>(null) }
 
     Column(
         modifier = Modifier
@@ -263,16 +264,7 @@ fun SamsungCompanionPromptScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(Spacing.md))
-
-        Icon(
-            painter = painterResource(id = R.drawable.icon_timer_vector),
-            contentDescription = "Samsung Galaxy Watch",
-            tint = Colors.primary,
-            modifier = Modifier.size(80.dp)
-        )
-
-        Spacer(modifier = Modifier.height(Spacing.lg))
+        Spacer(modifier = Modifier.height(Spacing.sm))
 
         Text(
             text = "Run with AI Run Coach on Your Galaxy Watch",
@@ -284,11 +276,53 @@ fun SamsungCompanionPromptScreen(
         Spacer(modifier = Modifier.height(Spacing.sm))
 
         Text(
-            text = "Install our companion app on your Wear OS watch to start sessions from your wrist, with your watch's sensors feeding your AI coach",
+            text = "The watch app comes with Ai Run Coach, so there's nothing extra to find or pay for. It just needs installing on your watch once.",
             style = AppTextStyles.body,
             color = Colors.textSecondary,
             textAlign = TextAlign.Center
         )
+
+        Spacer(modifier = Modifier.height(Spacing.xl))
+
+        if (installed) {
+            StatusCard(
+                title = "Installed on your Galaxy Watch",
+                body = "You're set. When you prepare a run, tap Send to Samsung Watch and Ai Run Coach opens on your watch."
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary),
+                shape = RoundedCornerShape(BorderRadius.md)
+            ) {
+                Column(modifier = Modifier.padding(Spacing.md)) {
+                    Text(
+                        text = "How to install",
+                        style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
+                        color = Colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    InstallStep(1, "Tap Install on Galaxy Watch below. The Play Store opens on your watch.")
+                    InstallStep(2, "Tap Install on your watch.")
+                    InstallStep(3, "Open Ai Run Coach on your watch. It signs in through your phone, so keep it nearby.")
+                    Spacer(modifier = Modifier.height(Spacing.sm))
+                    Text(
+                        text = "Or from this phone: open Ai Run Coach in the Play Store, tap the arrow next to Install / Update and choose your watch.",
+                        style = AppTextStyles.small,
+                        color = Colors.textMuted
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.md))
+
+            Text(
+                text = "Needs a Galaxy Watch4 or later, paired with this phone in the Galaxy Wearable app.",
+                style = AppTextStyles.small,
+                color = Colors.textMuted,
+                textAlign = TextAlign.Center
+            )
+        }
 
         Spacer(modifier = Modifier.height(Spacing.xl))
 
@@ -317,17 +351,17 @@ fun SamsungCompanionPromptScreen(
         Spacer(modifier = Modifier.height(Spacing.sm))
 
         BenefitCard(
-            icon = "📊",
-            title = "Advanced Running Metrics",
-            description = "Cadence, stride length, ground contact time, vertical oscillation & more"
+            icon = "🎯",
+            title = "One Session, Watch + Phone",
+            description = "Start on your watch and your phone follows automatically — one session, no need to start it twice"
         )
 
         Spacer(modifier = Modifier.height(Spacing.sm))
 
         BenefitCard(
-            icon = "🎯",
-            title = "One Session, Watch + Phone",
-            description = "Start on your watch and your phone follows automatically — one session, no need to start it twice"
+            icon = "📴",
+            title = "Leave Your Phone at Home",
+            description = "Run with just your watch. It records GPS, heart rate and pace, and uploads everything when you're back with your phone"
         )
 
         Spacer(modifier = Modifier.height(Spacing.xl))
@@ -336,81 +370,96 @@ fun SamsungCompanionPromptScreen(
 
         Spacer(modifier = Modifier.height(Spacing.xl))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = Colors.backgroundSecondary
-            ),
-            shape = RoundedCornerShape(BorderRadius.md)
-        ) {
-            Column(
-                modifier = Modifier.padding(Spacing.md)
-            ) {
-                Text(
-                    text = "Data You'll Stream:",
-                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold),
-                    color = Colors.textPrimary
+        if (!installed) {
+            Button(
+                onClick = {
+                    onInstall()
+                    samsungWatchManager.openPlayStoreOnWatch { openedOnWatch = it }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(BorderRadius.lg),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Colors.primary,
+                    contentColor = Colors.buttonText
                 )
-
-                Spacer(modifier = Modifier.height(Spacing.sm))
-
-                DataComparisonRow("Without Companion", "With Companion")
-                Spacer(modifier = Modifier.height(Spacing.xs))
-                HorizontalDivider(color = Colors.backgroundTertiary)
-                Spacer(modifier = Modifier.height(Spacing.xs))
-
-                DataItemRow("Heart Rate", hasBasic = false, hasAdvanced = true)
-                DataItemRow("GPS Route", hasBasic = false, hasAdvanced = true)
-                DataItemRow("Pace & Cadence", hasBasic = false, hasAdvanced = true)
-                DataItemRow("Offline Buffering", hasBasic = false, hasAdvanced = true)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(Spacing.sm))
+                Text(
+                    "Install on Galaxy Watch",
+                    style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
+                )
             }
+
+            openedOnWatch?.let { onWatch ->
+                Spacer(modifier = Modifier.height(Spacing.sm))
+                Text(
+                    text = if (onWatch) "Check your watch: the Play Store is open on Ai Run Coach."
+                    else "Couldn't reach your watch, so the Play Store opened here. Choose your watch from the Install menu.",
+                    style = AppTextStyles.small,
+                    color = Colors.textSecondary,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Spacer(modifier = Modifier.height(Spacing.md))
         }
-
-        Spacer(modifier = Modifier.height(Spacing.xl))
-
-        // Install button — Play Store, not Connect IQ Store
-        Button(
-            onClick = {
-                onInstall()
-                val playStoreUrl = "https://play.google.com/store/apps/details?id=live.airuncoach.airuncoach"
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(playStoreUrl))
-                context.startActivity(intent)
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            shape = RoundedCornerShape(BorderRadius.lg),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Colors.primary,
-                contentColor = Colors.buttonText
-            )
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.icon_timer_vector),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(Spacing.sm))
-            Text(
-                "Install on Galaxy Watch",
-                style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(Spacing.md))
 
         TextButton(
             onClick = onMaybeLater,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                "Maybe Later",
+                if (installed) "Done" else "Maybe Later",
                 style = AppTextStyles.body,
                 color = Colors.textSecondary
             )
         }
 
         Spacer(modifier = Modifier.height(Spacing.lg))
+    }
+}
+
+@Composable
+private fun StatusCard(title: String, body: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Colors.success.copy(alpha = 0.12f)),
+        shape = RoundedCornerShape(BorderRadius.md)
+    ) {
+        Row(modifier = Modifier.padding(Spacing.md), verticalAlignment = Alignment.Top) {
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = Colors.success,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Column {
+                Text(title, style = AppTextStyles.h4.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                Spacer(modifier = Modifier.height(Spacing.xs))
+                Text(body, style = AppTextStyles.small, color = Colors.textSecondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun InstallStep(number: Int, text: String) {
+    Row(modifier = Modifier.padding(vertical = Spacing.xs), verticalAlignment = Alignment.Top) {
+        Text(
+            text = "$number.",
+            style = AppTextStyles.small.copy(fontWeight = FontWeight.Bold),
+            color = Colors.primary,
+            modifier = Modifier.width(20.dp)
+        )
+        Text(text = text, style = AppTextStyles.small, color = Colors.textPrimary)
     }
 }
 
