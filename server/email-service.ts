@@ -2,6 +2,14 @@ import { Resend } from "resend";
 
 // Resend integration via Replit Connectors — never cache this client
 export async function getResendClient(): Promise<{ client: Resend; fromEmail: string }> {
+  // A plain secret wins over the Replit connector (simpler to set, and works outside Replit).
+  if (process.env.RESEND_API_KEY) {
+    return {
+      client: new Resend(process.env.RESEND_API_KEY),
+      fromEmail: process.env.RESEND_FROM_EMAIL || "noreply@airuncoach.live",
+    };
+  }
+
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY
