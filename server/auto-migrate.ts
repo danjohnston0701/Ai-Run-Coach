@@ -117,6 +117,18 @@ export async function runAutoMigrations(): Promise<void> {
       name: "idx_user_activity_errors",
       sql: "CREATE INDEX IF NOT EXISTS idx_user_activity_errors ON user_activity(created_at DESC) WHERE outcome = 'error'",
     },
+    // ── lifecycle_emails — one row per lifecycle email sent (server/lifecycle-emails.ts) ──
+    {
+      name: "lifecycle_emails.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS lifecycle_emails (
+          user_id     VARCHAR NOT NULL,
+          email_type  TEXT NOT NULL,
+          sent_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (user_id, email_type)
+        )
+      `,
+    },
     // ── plan_generation_jobs — background plan generation (server/plan-jobs.ts) ──
     {
       name: "plan_generation_jobs.create_table",

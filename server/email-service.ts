@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 
 // Resend integration via Replit Connectors — never cache this client
-async function getResendClient(): Promise<{ client: Resend; fromEmail: string }> {
+export async function getResendClient(): Promise<{ client: Resend; fromEmail: string }> {
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY

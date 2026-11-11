@@ -457,6 +457,20 @@ export function startScheduler(): void {
   setTimeout(sweepStaleCompanionSessions, 150_000);
   console.log('[Scheduler] Stale companion session sweep scheduled (hourly at :25)');
 
+  // Lifecycle emails: welcome (1 h after sign-up), trial 7 / 2 days left, trial ended.
+  const sweepLifecycle = async () => {
+    try {
+      const { sweepLifecycleEmails } = await import('./lifecycle-emails');
+      const r = await sweepLifecycleEmails();
+      const total = Object.values(r).reduce((a, b) => a + b, 0);
+      if (total > 0) console.log(`[Scheduler] Lifecycle emails sent: ${JSON.stringify(r)}`);
+    } catch (err) {
+      console.error('[Scheduler] Lifecycle email sweep error:', err);
+    }
+  };
+  cron.schedule('*/10 * * * *', sweepLifecycle);
+  console.log('[Scheduler] Lifecycle email sweep scheduled (every 10 minutes)');
+
   // Run BPM self-heal once on startup to fix any existing wrong values immediately
   setImmediate(async () => {
     try {

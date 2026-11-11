@@ -287,6 +287,8 @@ export async function checkAndEnforceLimit(
       message += `Upgrade to a higher tier, or wait until ${nextMonth} to try again.`;
     }
 
+    if (isFreeUser) void notifyIfTrialLimitReached(userId, feature, current);
+
     res.status(429).json({
       error: "monthly_limit_reached",
       feature,
@@ -353,7 +355,10 @@ export function recordUsage(
   const yearMonth = currentYearMonth();
   storage
     .incrementUsage(userId, yearMonth, { [feature]: amount } as any)
-    .then((row) => maybeSendUsageAlert(userId, yearMonth, feature, row))
+    .then(async (row) => {
+      await notifyIfTrialLimitReached(userId, feature, row[feature]);
+      await maybeSendUsageAlert(userId, yearMonth, feature, row);
+    })
     .catch((err) => {
       console.error(`[UsageService] Failed to record usage for user=${userId} feature=${feature}:`, err);
     });
@@ -382,6 +387,8 @@ async function maybeSendUsageAlert(
 
   const used = row[feature];
   if (used < limit * USAGE_ALERT_THRESHOLD) return;
+  // A trial user who went straight past the limit gets the "allowance used" email instead.
+  if (resolvedTier === "free" && used >= limit) return;
 
   // Mark first so a slow/failed send can't double up on the next increment.
   await storage.markUsageAlertSent(userId, yearMonth, feature);
@@ -398,6 +405,34 @@ async function maybeSendUsageAlert(
     yearMonth,
     resetMonth: nextMonthLabel(yearMonth),
   });
+}
+
+/**
+ * "You've used your trial allowance": once a month, when a free-trial user's usage of a feature
+ * reaches its limit (or a request is refused for it). See lifecycle-emails.ts.
+ */
+async function notifyIfTrialLimitReached(userId: string, feature: GatedFeature, used: number): Promise<void> {
+  try {
+    const user = await storage.getUser(userId);
+    if (!user?.email) return;
+    if (effectiveTier(user.subscriptionTier, user.trialExpiresAt, user.createdAt) !== "free") return;
+    const limit = getLimitsForTier("free")[feature];
+    if (!Number.isFinite(limit) || limit <= 0 || used < limit) return;
+    const { maybeSendTrialLimitEmail } = await import("./lifecycle-emails");
+    await maybeSendTrialLimitEmail(
+      {
+        id: user.id,
+        email: user.email,
+        name: user.name ?? null,
+        timezone: user.timezone ?? null,
+        deviceSource: user.deviceSource ?? null,
+        trialExpiresAt: user.trialExpiresAt ?? null,
+      },
+      feature
+    );
+  } catch (err) {
+    console.error(`[UsageService] Trial limit email check failed for user=${userId}:`, err);
+  }
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────

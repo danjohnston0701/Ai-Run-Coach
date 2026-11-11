@@ -105,6 +105,7 @@ import { rankGroupResults } from "./group-run-results";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
 import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
+import { registerLifecycleEmailRoutes } from "./routes-lifecycle-emails";
 import { registerHowToVideoRoutes } from "./routes-how-to-videos";
 import { registerUserActivityRoutes, logUserActivity, clientPlatform } from "./user-activity";
 import { autoCompleteLinkedWorkout, enrichWeeksAfterOrientation } from "./plan-run-sync";
@@ -175,6 +176,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", guestTourRouter); // pre-login "Take a Tour" tracking — see routes-guest-tour.ts
   registerSessionCoachingRoutes(app);
   registerRunEndTrimRoutes(app, transformRunForAndroid); // "forgot to stop" Run Summary trim
+  registerLifecycleEmailRoutes(app); // welcome / trial reminder emails: unsubscribe + admin preview
   registerHowToVideoRoutes(app); // Connected Devices "watch the demo" videos
   registerUserActivityRoutes(app); // POST /api/user-activity — app-side actions for the user_activity log
 
