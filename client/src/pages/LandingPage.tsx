@@ -8,6 +8,7 @@ import {
   Map as MapIcon,
   ArrowRight,
   BarChart3,
+  Check,
 } from "lucide-react";
 
 import heroImage from "@assets/stock_images/cinematic_runner_nig_a3303f7d.jpg";
