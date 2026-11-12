@@ -2360,11 +2360,15 @@ class RunView extends Ui.View {
         y = _drawWrapped(dc, cx, y, (w * 0.84).toNumber(), Gfx.FONT_XTINY, "for live AI coaching");
 
         if (y + 2 + fh <= btnY - 4) {
-            var dots = ""; for (var i = 0; i < _dotCount; i++) { dots = dots + "."; }
             var statusY = y + ((btnY - 4 - y - fh) / 2);   // centred in the gap
             if (_isConnected) {
                 dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-                dc.drawText(cx, statusY, Gfx.FONT_XTINY, "Waiting for phone" + dots, Gfx.TEXT_JUSTIFY_CENTER);
+                // Say what to do, not that we're waiting: the runner has to act on the phone.
+                var openText = "Open the app on your phone";
+                if (dc.getTextWidthInPixels(openText, Gfx.FONT_XTINY) > (w * 0.80).toNumber()) {
+                    openText = "Open app on phone";
+                }
+                dc.drawText(cx, statusY, Gfx.FONT_XTINY, openText, Gfx.TEXT_JUSTIFY_CENTER);
             } else {
                 dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);
                 dc.drawText(cx, statusY, Gfx.FONT_XTINY, "Phone not connected", Gfx.TEXT_JUSTIFY_CENTER);

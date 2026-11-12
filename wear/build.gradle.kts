@@ -36,8 +36,8 @@ android {
         // Version codes are shared with the phone app's listing (phone is ~100 and counts
         // up by 1), so the watch lives in its own 1,000,000+ range to never collide.
         // Increment by 1 for every Play upload.
-        versionCode = 1_000_013
-        versionName = "1.0.12"
+        versionCode = 1_000_014
+        versionName = "1.0.13"
     }
 
     // ── Release signing ─────────────────────────────────────────────────────
