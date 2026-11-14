@@ -1,0 +1,45 @@
+# Keep the server image to what server/, client/ and shared/schema.ts need.
+
+# Built locally / reinstalled in the image
+node_modules
+dist
+server_dist
+build
+
+# Native apps and watch apps (built in Android Studio / Xcode / Connect IQ, not here)
+app
+wear
+garmin-companion-app
+ios
+android
+gradle
+.gradle
+.kotlin
+*.apk
+*.aab
+*.iq
+*.gradle.kts
+gradlew
+gradlew.bat
+gradle.properties
+local.properties
+
+# Tooling, docs and marketing material
+.git
+.idea
+.firebender
+.agents
+.claude
+marketing
+docs
+tools
+*.md
+*.txt
+*.sh
+*.patch
+*.sql
+!migrations/*.sql
+
+# Secrets never go in the image — the host injects them as variables
+.env
+.env.*
