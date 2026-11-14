@@ -7,6 +7,8 @@ The `Start application` workflow runs `npm run server:dev` (Express via tsx). In
 
 **Consequence:** editing anything under `client/` has **no effect** on the running site until you run `npx vite build` (outputs to `dist/public`). There is no hot reload for the web frontend.
 
-**How to apply:** after changing web (`client/`) code, run `npx vite build`, then the change is live on port 3000. The build also doubles as the real type/alias compile check (root `tsconfig.json` misconfigures `@/*` → `./client/*` instead of `./client/src/*`, so `tsc --noEmit` reports false "Cannot find module '@/...'" errors — trust the Vite build, not `npm run check:types`, for `@/` imports).
+**How to apply:** rebuild current source before browser checks, including after Git synchronization. Use aliases matching Vite when type-checking web code rather than interpreting unrelated root Expo alias errors. Vite bundles TypeScript but does not type-check missing JSX identifiers. A successful bundle is not proof that a page renders.
+
+**Why:** a working prebuilt Preview masked source with a missing icon import; publishing rebuilt the broken source. Verify the changed route and uncaught browser errors against a fresh build, not just HTTP status or an old Preview.
 
 **Also:** the `app_preview` screenshot tool sometimes returns `ERR_CONNECTION_REFUSED` for this app even when `curl localhost:3000` returns 200 — don't assume the server is down; verify with curl.
