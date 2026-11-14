@@ -267,12 +267,13 @@ export async function sendObserverInvitationEmail(
     const webLink = `https://airuncoach.live/observe/${primaryCode}`;
 
     // Build email content — inviteCode SHOULD always be present in new invitations
-    const codeDisplayHtml = `<p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6; font-size: 14px;"><strong>Your 8-character invite code:</strong> Type this code in the app to watch instantly:</p>
-         <div style="background: #1a1a2e; padding: 16px; border-radius: 8px; text-align: center; margin: 0 0 16px;">
-           <code style="font-family: monospace; color: #00D4FF; font-size: 28px; font-weight: 700; letter-spacing: 6px;">${inviteCode}</code>
+    // The link opens the live run in any browser (client/src/pages/ObserveLive.tsx) — no app or
+    // account needed — so the email leads with that. The code is only for people who already
+    // have the app and prefer it.
+    const codeDisplayHtml = `<p style="margin: 24px 0 8px; color: #94a3b8; line-height: 1.6; font-size: 14px;">Already have the Ai Run Coach app? Tap "Observe Live Run" on the login screen and enter this code:</p>
+         <div style="background: #1a1a2e; padding: 12px; border-radius: 8px; text-align: center; margin: 0 0 16px;">
+           <code style="font-family: monospace; color: #00D4FF; font-size: 22px; font-weight: 700; letter-spacing: 5px;">${inviteCode}</code>
          </div>`;
-
-    const codeDisplayText = `Your 8-character invite code: ${inviteCode}\n`;
 
     await client.emails.send({
       from: `AI Run Coach <${fromEmail}>`,
@@ -286,22 +287,19 @@ export async function sendObserverInvitationEmail(
           <div style="padding: 40px 32px;">
             <h2 style="margin: 0 0 16px; font-size: 20px; color: #ffffff;">Watch ${runnerName}'s live run</h2>
             <p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6;">${runnerName} has invited you to watch their run in real-time.</p>
-            <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">See their live location, route, and metrics as they run — no account needed!</p>
+            <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">Follow their live location, route and stats right in your browser. No app to download and no account needed.</p>
+            <div style="text-align: center;">
+              <a href="${webLink}" style="display: inline-block; background: #00D4FF; color: #0A0A1A; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 999px; text-decoration: none; letter-spacing: 1px; text-transform: uppercase;">Watch Live Run →</a>
+            </div>
+            <p style="margin: 12px 0 0; color: #64748b; line-height: 1.6; font-size: 12px; text-align: center;">Or open this link: <a href="${webLink}" style="color: #00D4FF;">${webLink}</a></p>
             ${codeDisplayHtml}
-            <a href="${webLink}" style="display: inline-block; background: #00D4FF; color: #0A0A1A; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 999px; text-decoration: none; letter-spacing: 1px; text-transform: uppercase;">Watch Live Run →</a>
-            <p style="margin: 24px 0 0; color: #94a3b8; line-height: 1.6; font-size: 14px;">No app? Or if the link above doesn't work:</p>
-            <ol style="margin: 12px 0; color: #94a3b8; padding-left: 20px;">
-              <li style="margin: 6px 0;">Download AI Run Coach from the app store</li>
-              <li style="margin: 6px 0;">On the login screen, tap "Observe Live Run"</li>
-              <li style="margin: 6px 0;">Enter the 8-character code: <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #00D4FF; font-weight: 600;">${inviteCode}</code></li>
-            </ol>
             <p style="margin: 24px 0 0; color: #64748b; font-size: 12px;">This link will expire in 7 days.</p>
             <hr style="border: none; border-top: 1px solid #1a1a2e; margin: 32px 0; opacity: 0.5;" />
             <p style="margin: 0; color: #64748b; font-size: 12px;">AI Run Coach — Your personal running coach</p>
           </div>
         </div>
       `,
-      text: `${runnerName} invited you to watch their run!\n\nSee their live location, route, and metrics as they run — no account needed!\n\n${codeDisplayText}\nOption 1: Open this link\n${webLink}\n(or, with the app installed: ${deepLink})\n\nOption 2: Download the app and enter your invite code\n1. Download AI Run Coach from the app store\n2. On the login screen, tap "Observe Live Run"\n3. Enter this 8-character code: ${inviteCode}\n\nThis link will expire in 7 days.\n\n---\nAI Run Coach — Your personal running coach`,
+      text: `${runnerName} invited you to watch their run!\n\nFollow their live location, route and stats right in your browser. No app to download and no account needed:\n${webLink}\n\nAlready have the Ai Run Coach app? Tap "Observe Live Run" on the login screen and enter the code ${inviteCode} (or open ${deepLink}).\n\nThis link will expire in 7 days.\n\n---\nAI Run Coach — Your personal running coach`,
     });
 
     console.log(`[Email] Observer invitation sent to ${email} for session ${sessionId} (code: ${inviteCode || 'MISSING'})`);
@@ -331,9 +329,9 @@ export async function sendFriendLiveRunInvitationEmail(
     const appLink = `airuncoach://observe/${inviteCode}`;
     const webLink = `https://airuncoach.live/observe/${inviteCode}`;
     const codeHtml = inviteCode
-      ? `<p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6; font-size: 14px;"><strong>Your 8-character invite code:</strong> Type this in the app to watch instantly:</p>
-         <div style="background: #1a1a2e; padding: 16px; border-radius: 8px; text-align: center; margin: 0 0 16px;">
-           <code style="font-family: monospace; color: #00D4FF; font-size: 28px; font-weight: 700; letter-spacing: 6px;">${inviteCode}</code>
+      ? `<p style="margin: 24px 0 8px; color: #94a3b8; line-height: 1.6; font-size: 14px;">Prefer the app? Open Ai Run Coach, tap "Observe Live Run" (login screen or Live Share) and enter this code:</p>
+         <div style="background: #1a1a2e; padding: 12px; border-radius: 8px; text-align: center; margin: 0 0 16px;">
+           <code style="font-family: monospace; color: #00D4FF; font-size: 22px; font-weight: 700; letter-spacing: 5px;">${inviteCode}</code>
          </div>`
       : '';
 
@@ -349,24 +347,19 @@ export async function sendFriendLiveRunInvitationEmail(
           <div style="padding: 40px 32px;">
             <h2 style="margin: 0 0 16px; font-size: 20px; color: #ffffff;">Watch ${runnerName}'s run live</h2>
             <p style="margin: 0 0 16px; color: #94a3b8; line-height: 1.6;">Hi ${friendName},</p>
-            <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">${runnerName} has invited you to watch their run in real-time. See their live location, route, and metrics as they run!</p>
-            ${codeHtml}
+            <p style="margin: 0 0 24px; color: #94a3b8; line-height: 1.6;">${runnerName} has invited you to watch their run in real-time. Follow their live location, route and stats right in your browser, no app needed.</p>
             <div style="text-align: center;">
               <a href="${webLink}" style="display: inline-block; background: #00D4FF; color: #0A0A1A; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 999px; text-decoration: none; letter-spacing: 1px; text-transform: uppercase;">Watch Now →</a>
             </div>
-            <p style="margin: 24px 0 0; color: #94a3b8; line-height: 1.6; font-size: 14px;">If the button doesn't open the app:</p>
-            <ol style="margin: 12px 0; color: #94a3b8; padding-left: 20px;">
-              <li style="margin: 6px 0;">Open AI Run Coach</li>
-              <li style="margin: 6px 0;">On the login screen (or Live Share), tap "Observe Live Run"</li>
-              <li style="margin: 6px 0;">Enter the 8-character code: <code style="background: #1a1a2e; padding: 2px 6px; border-radius: 3px; font-family: monospace; color: #00D4FF; font-weight: 600;">${inviteCode}</code></li>
-            </ol>
+            <p style="margin: 12px 0 0; color: #64748b; line-height: 1.6; font-size: 12px; text-align: center;">Or open this link: <a href="${webLink}" style="color: #00D4FF;">${webLink}</a></p>
+            ${codeHtml}
             <p style="margin: 24px 0 0; color: #64748b; font-size: 12px; text-align: center;">You may also receive a push notification in the app</p>
             <hr style="border: none; border-top: 1px solid #1a1a2e; margin: 32px 0; opacity: 0.5;" />
             <p style="margin: 0; color: #64748b; font-size: 12px;">AI Run Coach — Your personal running coach</p>
           </div>
         </div>
       `,
-      text: `${runnerName} invited you to watch their run!\n\nYour 8-character invite code: ${inviteCode}\n\nWatch their live location, route, and metrics as they run.\n\nOpen this link: ${webLink}\n(or, with the app installed: ${appLink})\n\nOr open AI Run Coach, tap "Observe Live Run" on the login screen and enter the code: ${inviteCode}\n\n---\nAI Run Coach — Your personal running coach`,
+      text: `${runnerName} invited you to watch their run!\n\nFollow their live location, route and stats right in your browser, no app needed:\n${webLink}\n\nPrefer the app? Open Ai Run Coach, tap "Observe Live Run" and enter the code ${inviteCode} (or open ${appLink}).\n\n---\nAI Run Coach — Your personal running coach`,
     });
 
     console.log(`[Email] Friend live-run invitation sent to ${email} from ${runnerName} (code: ${inviteCode || 'MISSING'})`);

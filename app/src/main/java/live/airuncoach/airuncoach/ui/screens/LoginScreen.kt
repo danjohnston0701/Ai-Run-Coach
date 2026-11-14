@@ -19,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.focus.onFocusEvent
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -159,14 +160,21 @@ fun LoginScreen(
             // If user logged in with saved credentials, don't prompt to save the same credentials again.
             if (!loginState.credentialsFromPasswordManager) {
                 // Offer to save credentials to Samsung Pass / Google Password Manager.
-                // This shows the system "Save password?" bottom sheet before navigating away.
+                // Never awaited here: createCredential() can stay pending indefinitely (e.g. the
+                // provider's sheet never appears after a password change), which used to leave
+                // the user on a blank screen until they backgrounded the app. Launched on the
+                // activity's scope so leaving this screen doesn't cancel the prompt.
                 val activity = context as? ComponentActivity
                 if (activity != null) {
-                    CredentialManagerHelper.saveCredential(
-                        activity = activity,
-                        email = loginState.email,
-                        password = loginState.password
-                    )
+                    val email = loginState.email
+                    val password = loginState.password
+                    activity.lifecycleScope.launch {
+                        CredentialManagerHelper.saveCredential(
+                            activity = activity,
+                            email = email,
+                            password = password
+                        )
+                    }
                 }
             } else {
                 android.util.Log.d("LoginScreen", "Credentials from password manager — skipping save prompt")
