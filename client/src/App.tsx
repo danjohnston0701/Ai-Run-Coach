@@ -1,155 +1,141 @@
-import { useState, useEffect } from "react";
-import { Switch, Route, useLocation } from "wouter";
-import { queryClient } from "./lib/queryClient";
+import { lazy, Suspense, useEffect, type ComponentType } from "react";
+import { Redirect, Route, Switch, useLocation, useParams } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { Toaster as SonnerToaster } from "sonner";
+import { queryClient } from "./lib/queryClient";
+import { AuthProvider, useAuth } from "./lib/auth";
 import { Toaster } from "@/components/ui/toaster";
-import { Toaster as SonnerToaster, toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppShell } from "@/components/app/AppShell";
+import { Loading } from "@/components/app/kit";
 import NotFound from "@/pages/not-found";
-import LandingPage from "@/pages/LandingPage";
-import Home from "@/pages/Home";
-import RoutePreview from "@/pages/RoutePreview";
-import RunSession from "@/pages/RunSession";
-import RunHistory from "@/pages/RunHistory";
-import RunInsights from "@/pages/RunInsights";
-import ProfileSetup from "@/pages/ProfileSetup";
-import Profile from "@/pages/Profile";
-import Notifications from "@/pages/Notifications";
-import ManageNotifications from "@/pages/ManageNotifications";
-import PrivacyPolicy from "@/pages/PrivacyPolicy";
-import TermsOfUse from "@/pages/TermsOfUse";
-import Login from "@/pages/Login";
-import AdminAIConfig from "@/pages/AdminAIConfig";
-import AdminCostDashboard from "@/pages/AdminCostDashboard";
-import AdminHub from "@/pages/AdminHub";
-import Routes from "@/pages/Routes";
-import Events from "@/pages/Events";
-import PreEvent from "@/pages/PreEvent";
-import Goals from "@/pages/Goals";
-import FriendProfile from "@/pages/FriendProfile";
-import Features from "@/pages/Features";
-import ForgotPassword from "@/pages/ForgotPassword";
-import ResetPassword from "@/pages/ResetPassword";
-import Support from "@/pages/Support";
-import RunVideoShare from "@/pages/RunVideoShare";
-import ObserveLive from "@/pages/ObserveLive";
-import { migrateLocalDataToDatabase } from "@/lib/dataMigration";
+
+// Public pages
+const Landing = lazy(() => import("@/pages/marketing/Landing"));
+const Login = lazy(() => import("@/pages/marketing/Login"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
+const PrivacyPolicy = lazy(() => import("@/pages/PrivacyPolicy"));
+const TermsOfUse = lazy(() => import("@/pages/TermsOfUse"));
+const Support = lazy(() => import("@/pages/Support"));
+const ObserveLive = lazy(() => import("@/pages/ObserveLive"));
+const RunVideoShare = lazy(() => import("@/pages/RunVideoShare"));
+const AdminHub = lazy(() => import("@/pages/AdminHub"));
+const AdminAIConfig = lazy(() => import("@/pages/AdminAIConfig"));
+const AdminCostDashboard = lazy(() => import("@/pages/AdminCostDashboard"));
+
+// Signed-in app
+const Dashboard = lazy(() => import("@/pages/app/Dashboard"));
+const Runs = lazy(() => import("@/pages/app/Runs"));
+const RunDetail = lazy(() => import("@/pages/app/RunDetail"));
+const Training = lazy(() => import("@/pages/app/Training"));
+const PlanDetail = lazy(() => import("@/pages/app/PlanDetail"));
+const NewPlan = lazy(() => import("@/pages/app/NewPlan"));
+const Goals = lazy(() => import("@/pages/app/Goals"));
+const MyData = lazy(() => import("@/pages/app/MyData"));
+const GroupRuns = lazy(() => import("@/pages/app/GroupRuns"));
+const GroupRunDetail = lazy(() => import("@/pages/app/GroupRunDetail"));
+const Friends = lazy(() => import("@/pages/app/Friends"));
+const RoutesPage = lazy(() => import("@/pages/app/Routes"));
+const Notifications = lazy(() => import("@/pages/app/Notifications"));
+const Settings = lazy(() => import("@/pages/app/Settings"));
 
 function ScrollToTop() {
   const [location] = useLocation();
-  
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [location]);
-  
   return null;
 }
 
-function Router() {
-  const [hasProfile, setHasProfile] = useState(false);
-  const [loading, setLoading] = useState(true);
+const PageFallback = () => <div className="min-h-screen bg-root" />;
 
-  useEffect(() => {
-    const userProfile = localStorage.getItem("userProfile");
-    setHasProfile(!!userProfile);
-    setLoading(false);
-    
-    // One-time cleanup: remove dummy/test runs from localStorage
-    const CLEANUP_KEY = "dummyRunsCleanedUp";
-    if (!localStorage.getItem(CLEANUP_KEY)) {
-      const runHistory = localStorage.getItem("runHistory");
-      if (runHistory) {
-        try {
-          const runs = JSON.parse(runHistory);
-          const dummyIds = ["run-1", "run-2", "run-3"];
-          const filteredRuns = runs.filter((run: { id: string }) => !dummyIds.includes(run.id));
-          if (filteredRuns.length !== runs.length) {
-            localStorage.setItem("runHistory", JSON.stringify(filteredRuns));
-            console.log(`Cleaned up ${runs.length - filteredRuns.length} dummy runs from localStorage`);
-          }
-        } catch (e) {
-          console.warn("Failed to cleanup dummy runs:", e);
-        }
-      }
-      localStorage.setItem(CLEANUP_KEY, "true");
-    }
-    
-    // Auto-migrate local data to database for logged-in users
-    if (userProfile) {
-      try {
-        const profile = JSON.parse(userProfile);
-        if (profile.id) {
-          migrateLocalDataToDatabase(profile.id).then((result) => {
-            if (result.runs > 0) {
-              toast.success(`Synced ${result.runs} run${result.runs > 1 ? 's' : ''} to your account!`);
-            }
-          });
-        }
-      } catch (e) {
-        console.warn("Failed to trigger data migration:", e);
-      }
-    }
-  }, []);
-
-  if (loading) {
-    return <div className="min-h-screen bg-background" />;
-  }
-
+/** Signed-in route: redirects to /login (and back afterwards) without a session. */
+function Private({ component: C }: { component: ComponentType<any> }) {
+  const { session } = useAuth();
+  const [location] = useLocation();
+  if (!session) return <Redirect to={`/login?next=${encodeURIComponent(location)}`} />;
   return (
-    <Switch>
-      <Route path="/privacy" component={PrivacyPolicy} />
-      <Route path="/terms" component={TermsOfUse} />
-      <Route path="/support" component={Support} />
-      <Route path="/login" component={Login} />
-      <Route path="/forgot-password" component={ForgotPassword} />
-      <Route path="/reset-password" component={ResetPassword} />
-      <Route path="/features" component={Features} />
-      <Route path="/admin" component={AdminHub} />
-      <Route path="/admin/ai-config" component={AdminAIConfig} />
-      <Route path="/admin/costs" component={AdminCostDashboard} />
-      <Route path="/observe/:code" component={ObserveLive} />
-      {!hasProfile && (
-        <>
-          <Route path="/" component={LandingPage} />
-          <Route path="/setup" component={ProfileSetup} />
-        </>
-      )}
-      {hasProfile && (
-        <>
-          <Route path="/" component={Home} />
-          <Route path="/setup" component={ProfileSetup} />
-          <Route path="/route-preview" component={RoutePreview} />
-          <Route path="/run" component={RunSession} />
-          <Route path="/history" component={RunHistory} />
-          <Route path="/history/:id" component={RunInsights} />
-          <Route path="/goals" component={Goals} />
-          <Route path="/profile" component={Profile} />
-          <Route path="/friend/:friendId" component={FriendProfile} />
-          <Route path="/notifications" component={Notifications} />
-          <Route path="/notifications/manage" component={ManageNotifications} />
-          <Route path="/routes" component={Routes} />
-          <Route path="/events" component={Events} />
-          <Route path="/event/:id" component={PreEvent} />
-          <Route path="/run-video/:id" component={RunVideoShare} />
-        </>
-      )}
-      <Route path="/run-video/:id" component={RunVideoShare} />
-      <Route component={NotFound} />
-    </Switch>
+    <AppShell>
+      <Suspense fallback={<Loading />}>
+        <C />
+      </Suspense>
+    </AppShell>
   );
 }
 
-function App() {
+function Home() {
+  const { session } = useAuth();
+  if (session) return <Redirect to="/dashboard" />;
+  return <Landing />;
+}
+
+function LegacyRunRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Redirect to={`/runs/${id}`} />;
+}
+
+function Router() {
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <Switch>
+        {/* Public */}
+        <Route path="/" component={Home} />
+        <Route path="/features" component={Landing} />
+        <Route path="/login" component={Login} />
+        <Route path="/forgot-password" component={ForgotPassword} />
+        <Route path="/reset-password" component={ResetPassword} />
+        <Route path="/privacy" component={PrivacyPolicy} />
+        <Route path="/terms" component={TermsOfUse} />
+        <Route path="/support" component={Support} />
+        <Route path="/observe/:code" component={ObserveLive} />
+        <Route path="/run-video/:id" component={RunVideoShare} />
+        <Route path="/admin" component={AdminHub} />
+        <Route path="/admin/ai-config" component={AdminAIConfig} />
+        <Route path="/admin/costs" component={AdminCostDashboard} />
+
+        {/* Signed in */}
+        <Route path="/dashboard">{() => <Private component={Dashboard} />}</Route>
+        <Route path="/runs">{() => <Private component={Runs} />}</Route>
+        <Route path="/runs/:id">{() => <Private component={RunDetail} />}</Route>
+        <Route path="/training">{() => <Private component={Training} />}</Route>
+        <Route path="/training/new">{() => <Private component={NewPlan} />}</Route>
+        <Route path="/training/:planId">{() => <Private component={PlanDetail} />}</Route>
+        <Route path="/goals">{() => <Private component={Goals} />}</Route>
+        <Route path="/my-data">{() => <Private component={MyData} />}</Route>
+        <Route path="/group-runs">{() => <Private component={GroupRuns} />}</Route>
+        <Route path="/group-runs/:id">{() => <Private component={GroupRunDetail} />}</Route>
+        <Route path="/friends">{() => <Private component={Friends} />}</Route>
+        <Route path="/routes">{() => <Private component={RoutesPage} />}</Route>
+        <Route path="/notifications">{() => <Private component={Notifications} />}</Route>
+        <Route path="/settings">{() => <Private component={Settings} />}</Route>
+
+        {/* Old MVP URLs (bookmarks, emails, the apps' links) */}
+        <Route path="/history">{() => <Redirect to="/runs" />}</Route>
+        <Route path="/history/:id" component={LegacyRunRedirect} />
+        <Route path="/profile">{() => <Redirect to="/settings" />}</Route>
+        <Route path="/setup">{() => <Redirect to="/settings" />}</Route>
+        <Route path="/notifications/manage">{() => <Redirect to="/settings?tab=notifications" />}</Route>
+        <Route path="/events">{() => <Redirect to="/routes" />}</Route>
+        <Route path="/run">{() => <Redirect to="/dashboard" />}</Route>
+
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
+  );
+}
+
+export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <ScrollToTop />
-        <Toaster />
-        <SonnerToaster position="top-center" richColors />
-        <Router />
-      </TooltipProvider>
+      <AuthProvider>
+        <TooltipProvider>
+          <ScrollToTop />
+          <Toaster />
+          <SonnerToaster position="top-center" theme="dark" richColors />
+          <Router />
+        </TooltipProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
-
-export default App;

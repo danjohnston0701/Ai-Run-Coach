@@ -4,34 +4,24 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+// Brand buttons — Android: primary cyan with dark text, outlined secondary, warm orange accent.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0" +
-" hover-elevate active-elevate-2",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-semibold transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-offset-2 focus-visible:ring-offset-root disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default:
-           // @replit: no hover, and add primary border
-           "bg-primary text-primary-foreground border border-primary-border",
-        destructive:
-          "bg-destructive text-destructive-foreground shadow-sm border-destructive-border",
-        outline:
-          // @replit Shows the background color of whatever card / sidebar / accent background it is inside of.
-          // Inherits the current text color. Uses shadow-xs. no shadow on active
-          // No hover state
-          " border [border-color:var(--button-outline)] shadow-xs active:shadow-none ",
-        secondary:
-          // @replit border, no hover, no shadow, secondary border.
-          "border bg-secondary text-secondary-foreground border border-secondary-border ",
-        // @replit no hover, transparent border
-        ghost: "border border-transparent",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "bg-brand text-root hover:bg-[#33ddff] shadow-[0_0_0_1px_rgba(0,212,255,0.4),0_8px_24px_-8px_rgba(0,212,255,0.55)]",
+        accent: "bg-orange text-white hover:bg-[#ff7d4d] shadow-[0_8px_24px_-8px_rgba(255,107,53,0.6)]",
+        destructive: "bg-danger/15 text-danger border border-danger/40 hover:bg-danger/25",
+        outline: "border border-line-strong/80 bg-transparent text-ink hover:bg-surface-2 hover:border-line-strong",
+        secondary: "bg-surface-2 text-ink border border-line hover:bg-surface-3/70",
+        ghost: "text-ink-2 hover:text-ink hover:bg-surface-2",
+        link: "text-brand underline-offset-4 hover:underline px-0",
       },
       size: {
-        // @replit changed sizes
-        default: "min-h-9 px-4 py-2",
-        sm: "min-h-8 rounded-md px-3 text-xs",
-        lg: "min-h-10 rounded-md px-8",
+        default: "h-10 px-4",
+        sm: "h-8 rounded-lg px-3 text-xs",
+        lg: "h-12 px-6 text-base",
         icon: "h-9 w-9",
       },
     },

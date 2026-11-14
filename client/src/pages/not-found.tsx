@@ -1,21 +1,21 @@
-import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle } from "lucide-react";
+import { Link } from "wouter";
+import { Logo } from "@/components/brand/Logo";
+import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md mx-4">
-        <CardContent className="pt-6">
-          <div className="flex mb-4 gap-2">
-            <AlertCircle className="h-8 w-8 text-red-500" />
-            <h1 className="text-2xl font-bold text-gray-900">404 Page Not Found</h1>
-          </div>
-
-          <p className="mt-4 text-sm text-gray-600">
-            Did you forget to add the page to the router?
-          </p>
-        </CardContent>
-      </Card>
+    <div className="grid min-h-screen place-items-center bg-root px-4">
+      <div className="text-center">
+        <Link href="/" className="inline-block">
+          <Logo />
+        </Link>
+        <div className="num mt-10 text-7xl font-extrabold text-gradient">404</div>
+        <h1 className="mt-3 text-xl font-bold text-ink">This page went off route</h1>
+        <p className="mt-2 text-sm text-ink-2">The link may be old, or the page has moved.</p>
+        <Button asChild className="mt-6">
+          <Link href="/">Back to Ai Run Coach</Link>
+        </Button>
+      </div>
     </div>
   );
 }
