@@ -294,6 +294,14 @@ async function sendCoachingPlanReminders(): Promise<void> {
 }
 
 export function startScheduler(): void {
+  // CRON_ENABLED=false turns every scheduled job off on this host. Used while two hosts
+  // (Replit and Railway) serve traffic during the migration, so only one of them runs the
+  // sweeps, emails and reconciles. Unset or any other value = jobs run, as before.
+  if (process.env.CRON_ENABLED === 'false') {
+    console.log('[Scheduler] CRON_ENABLED=false — background jobs are OFF on this host');
+    return;
+  }
+
   console.log('[Scheduler] Starting background scheduler (Garmin sync every 6 hours)');
   
   // Garmin wellness data sync — DISABLED (Garmin API no longer available)

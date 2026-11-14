@@ -19,9 +19,13 @@ console.log("🔌 Connecting to database:", connectionString.substring(0, 30) + 
 export const pool = new Pool({ 
   connectionString,
   ssl: { rejectUnauthorized: false },
-  max: 10,
+  max: parseInt(process.env.DB_POOL_MAX || "10", 10),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
+  // TCP keepalive so idle connections dropped by the network/Neon are detected
+  // instead of surfacing later as "Connection terminated unexpectedly".
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 });
 
 pool.on("error", (err) => {

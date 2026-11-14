@@ -1,44 +1,14 @@
 import { Resend } from "resend";
 
-// Resend integration via Replit Connectors — never cache this client
+// Resend client from plain secrets (works on any host). The old Replit Connectors
+// fallback is gone so email never silently depends on Replit.
 export async function getResendClient(): Promise<{ client: Resend; fromEmail: string }> {
-  // A plain secret wins over the Replit connector (simpler to set, and works outside Replit).
-  if (process.env.RESEND_API_KEY) {
-    return {
-      client: new Resend(process.env.RESEND_API_KEY),
-      fromEmail: process.env.RESEND_FROM_EMAIL || "noreply@airuncoach.live",
-    };
+  if (!process.env.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not set — email cannot be sent");
   }
-
-  const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY
-    ? "repl " + process.env.REPL_IDENTITY
-    : process.env.WEB_REPL_RENEWAL
-    ? "depl " + process.env.WEB_REPL_RENEWAL
-    : null;
-
-  if (!hostname || !xReplitToken) {
-    throw new Error("Resend integration not available in this environment");
-  }
-
-  const data = await fetch(
-    "https://" + hostname + "/api/v2/connection?include_secrets=true&connector_names=resend",
-    {
-      headers: {
-        Accept: "application/json",
-        "X-Replit-Token": xReplitToken,
-      },
-    }
-  ).then((r) => r.json());
-
-  const settings = data.items?.[0];
-  if (!settings?.settings?.api_key) {
-    throw new Error("Resend not connected — please link your Resend account in Replit integrations");
-  }
-
   return {
-    client: new Resend(settings.settings.api_key),
-    fromEmail: settings.settings.from_email || "noreply@airuncoach.live",
+    client: new Resend(process.env.RESEND_API_KEY),
+    fromEmail: process.env.RESEND_FROM_EMAIL || "noreply@airuncoach.live",
   };
 }
 
