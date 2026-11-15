@@ -12,8 +12,8 @@ Nothing is deleted until Railway has run cleanly for 7 days.
 
 | | Status |
 |---|---|
-| Server code ready for any host (`migration/railway-prep`) | ✅ jobs switch, health check, Resend-only email, lockfile fix, Dockerfile |
-| Railway service (US East, `ai-run-coach-production.up.railway.app`) | ✅ running on a **test copy** of the database, jobs off |
+| Server code ready for any host | ✅ merged to `main` (PR #1, `fb6c18a9`) and **live on Replit** since 2026-11-15 (deploy `b2e06617`), no behaviour change |
+| Railway service (US East, `ai-run-coach-production.up.railway.app`) | ✅ deploys from `main` (auto-deploy on push), on a **test copy** of the database, jobs off |
 | All 47 secrets on Railway, checked against the code | ✅ |
 | Every page and API response matches live Replit | ✅ login ~25% faster server-side |
 | Domain DNS can point at Railway | ❌ **blocked:** see Phase 0 |
@@ -34,6 +34,11 @@ supports the bare-domain CNAME that Railway needs).
       The `A @` record stays pointing at Replit for now, so nothing changes yet.
 - [ ] **0.3** Contact **Replit Support** and ask them to either change the nameservers to the two Cloudflare gives you,
       or unlock the domain and send the transfer (EPP/auth) code. Ask for both; nameservers first is fastest.
+      Message to send (fill in the two nameservers from step 0.1):
+      > Hi, I own the domain **airuncoach.live**, registered through Replit Domains on this account. I'm moving its DNS to Cloudflare.
+      > Could you please (1) change the domain's nameservers to `<ns1>.ns.cloudflare.com` and `<ns2>.ns.cloudflare.com`,
+      > and (2) unlock the domain and send me the transfer authorisation (EPP) code so I can transfer the registration afterwards?
+      > My deployment should keep running unchanged; I've already copied every DNS record to Cloudflare. Thanks!
 - [ ] **0.4** Once the nameservers are on Cloudflare (24–48 h to settle), check that the site, app, `support@` email and app emails all work.
 - [ ] **0.5** Transfer the registration to Cloudflare Registrar (about 5–7 days; the site keeps working throughout).
 
@@ -63,12 +68,12 @@ supports the bare-domain CNAME that Railway needs).
 
 Production then runs the same code Railway will run, so the switch only changes *where* it runs.
 
-- [ ] **1.1** Open a PR `migration/railway-prep` → `main`, review, merge.
-- [ ] **1.2** Replit: **Git → Pull**, then **Republish**. Check:
+- [x] **1.1** Open a PR `migration/railway-prep` → `main`, review, merge.
+- [x] **1.2** Replit: **Git → Pull**, then **Republish**. Check:
   - `https://airuncoach.live/health/ready` shows `"db":"ok"`
-  - a test email (support form) arrives
+  - a test email (support form) arrives — **not yet tried**; email config didn't change in practice (Replit already used `RESEND_API_KEY`)
   - the app works normally
-- [ ] **1.3** Railway: switch the service's branch from `migration/railway-prep` to `main`.
+- [x] **1.3** Railway: switch the service's branch from `migration/railway-prep` to `main`.
       Decide: **auto-deploy on push to `main`** (simple, and how Claude would ship fixes) or turn auto-deploy off and deploy by hand.
 
 ## Phase 2: Railway on the real database, still no traffic (day before switch)
@@ -92,7 +97,9 @@ Jobs only need the database, so they can move before any traffic does. This prov
 
 ## Phase 4: Switch traffic (quiet hour)
 
-- [ ] **4.1** Pick the quietest hour from Replit's request logs. Avoid the morning and evening run peaks, and avoid a parkrun Saturday.
+- [ ] **4.1** Pick the quietest hour. From 60 days of runs and user activity (checked 2026-11-15), the quietest window is
+      **23:00–01:00 UTC** (noon–2 pm NZDT, 10 am–noon AEDT): 2–3 runs in progress in that hour across 60 days, against 30+ at the
+      09:00 and 19:00 UTC peaks. Avoid weekends (parkrun) and Neon's maintenance window (**Tuesday 06:00–07:00 UTC**).
 - [ ] **4.2** Cloudflare: point `@` and `www` at the Railway targets from step 2.3 (DNS only, grey cloud, so Railway can issue the certificate).
 - [ ] **4.3** Within about 5 minutes, traffic shifts as caches expire. Requests landing on either server work, because both use the same database.
 - [ ] **4.4** Check Railway logs: traffic climbing, no new error patterns. Check the certificate: `https://airuncoach.live` and `https://www.airuncoach.live` both load, and `www` lands on the site.
@@ -127,6 +134,8 @@ In-memory rate limits reset. Nothing else is held in server memory.
 - [ ] **5.7** Set up Claude error monitoring on Railway's logs (scheduled check, flags new errors and error spikes).
 
 ## Decisions to make
-- **Auto-deploy on push to `main`?** (step 1.3) Recommended yes, with care about what's merged to `main`.
+- ~~Auto-deploy on push to `main`?~~ Yes (2026-11-15). Until cutover Railway only uses the test database, so a bad push can't affect users.
+  After cutover, every push to `main` goes live, the same as a Replit republish.
 - **One Railway instance or two?** Replit Autoscale could run several; Railway starts with one and restarts it on a crash. Two replicas in US East add redundancy for roughly double the compute cost.
-- **Longer term:** most users are likely in NZ/Australia. Moving both the database (Neon Sydney) and the server (Railway Singapore) closer to them would cut response times further. It's a separate project, after this migration.
+- **Longer term:** Replit's production server runs in **Australia**, while Neon is in US East, so every Replit query crosses the Pacific
+  (`/health/ready` reports ~200 ms there against ~2 ms from Railway). Railway in US East removes that hop. Most users are likely in NZ/Australia. Moving both the database (Neon Sydney) and the server (Railway Singapore) closer to them would cut response times further. It's a separate project, after this migration.
