@@ -49,7 +49,7 @@ export function smooth(values: (number | null)[], window = 5): (number | null)[]
   });
 }
 
-export type SeriesPoint = { km: number; pace?: number | null; hr?: number | null; elevation?: number | null; cadence?: number | null };
+export type SeriesPoint = { km: number; min: number; pace?: number | null; hr?: number | null; elevation?: number | null; cadence?: number | null };
 
 /**
  * Builds a distance-indexed series for the charts. Each data array is spread across the route
@@ -75,6 +75,16 @@ export function buildSeries(run: Run, totalKm: number, maxPoints = 300): SeriesP
       return cum[lo] + (cum[hi] - cum[lo]) * (idx - lo);
     }
     return frac * totalKm;
+  };
+  // Elapsed minutes: from GPS timestamps when present, else spread over the recorded duration.
+  const ts = pts.length > 1 && pts[0].timestamp && pts[pts.length - 1].timestamp ? pts.map((p) => Number(p.timestamp) || 0) : null;
+  const totalMin = (Number(run.duration) || 0) / 60000;
+  const minAt = (frac: number) => {
+    if (ts) {
+      const idx = Math.round(frac * (ts.length - 1));
+      return Math.max(0, (ts[idx] - ts[0]) / 60000);
+    }
+    return frac * totalMin;
   };
   const pick = (arr: number[] | null | undefined, frac: number) => {
     if (!arr || arr.length < 2) return null;
@@ -102,6 +112,7 @@ export function buildSeries(run: Run, totalKm: number, maxPoints = 300): SeriesP
     const cad = pick(run.cadenceData, frac);
     raw.push({
       km: Number(kmAt(frac).toFixed(3)),
+      min: Number(minAt(frac).toFixed(2)),
       pace,
       hr: hr != null && hr > 30 && hr < 240 ? hr : null,
       elevation: pick(altSrc as number[] | null, frac),
@@ -115,6 +126,7 @@ export function buildSeries(run: Run, totalKm: number, maxPoints = 300): SeriesP
   const sc = smooth(raw.map((r) => r.cadence ?? null), w);
   return raw.map((r, i) => ({
     km: r.km,
+    min: r.min,
     pace: sp[i] != null ? Math.round(sp[i]!) : null,
     hr: sh[i] != null ? Math.round(sh[i]!) : null,
     elevation: se[i] != null ? Number(se[i]!.toFixed(1)) : null,

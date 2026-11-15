@@ -3,7 +3,6 @@ import { Link, useLocation, useParams } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Activity,
   AlertTriangle,
   Brain,
   CheckCircle2,
@@ -45,9 +44,8 @@ import {
   runPaceSec,
   runSeconds,
   titleCase,
-  ZONE_COLORS,
 } from "@/lib/format";
-import { buildSeries, validPoints } from "@/lib/series";
+import { validPoints } from "@/lib/series";
 import { ErrorState, KV, Loading, Panel, Pill, SectionTitle, StatTile, TabBar } from "@/components/app/kit";
 import { PaceLegend, RunMap } from "@/components/app/RunMap";
 import { ChartCard, MetricAreaChart, SplitBars } from "@/components/app/charts";
@@ -56,6 +54,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Markdown } from "@/components/app/Markdown";
+import { EffortScoreCard, GraphsTab } from "@/components/app/RunGraphs";
+import { consistencyFraction } from "@/lib/analytics";
 
 type Tab = "insights" | "group" | "summary" | "graphs" | "dynamics" | "data";
 
@@ -798,13 +798,12 @@ function SummaryTab({ run }: { run: Run }) {
   const splits = (run.kmSplits ?? [])
     .map((s) => ({ km: s.km, paceSec: parsePace(s.pace) ?? s.time / 1000, time: s.time }))
     .filter((s) => s.paceSec > 0);
-  const zones = [run.timeInZone1, run.timeInZone2, run.timeInZone3, run.timeInZone4, run.timeInZone5].map((v) => Number(v) || 0);
-  const zoneTotal = zones.reduce((a, b) => a + b, 0);
   const fastest = splits.length ? Math.min(...splits.map((s) => s.paceSec)) : null;
   const slowest = splits.length ? Math.max(...splits.map((s) => s.paceSec)) : null;
   const avg = splits.length ? splits.reduce((a, s) => a + s.paceSec, 0) / splits.length : null;
-  const sd = splits.length > 1 && avg ? Math.sqrt(splits.reduce((a, s) => a + (s.paceSec - avg) ** 2, 0) / splits.length) : null;
-  const consistency = sd != null && avg ? Math.max(0, Math.round(100 - (sd / avg) * 100 * 4)) : null;
+  // Same score as the Run score ring and the app (RunMetricRingsRow).
+  const cf = consistencyFraction(run);
+  const consistency = cf != null ? Math.round(cf * 100) : null;
   const firstHalf = splits.slice(0, Math.floor(splits.length / 2));
   const secondHalf = splits.slice(Math.ceil(splits.length / 2));
   const mean = (xs: typeof splits) => xs.reduce((a, s) => a + s.paceSec, 0) / Math.max(1, xs.length);
@@ -864,30 +863,9 @@ function SummaryTab({ run }: { run: Run }) {
             </div>
           </Panel>
         )}
-        {zoneTotal > 0 && (
-          <Panel className="panel-pad">
-            <SectionTitle>
-              <span className="flex items-center gap-2">
-                <Heart className="h-4 w-4 text-danger" /> Heart rate zones
-              </span>
-            </SectionTitle>
-            <div className="mb-4 flex h-3 overflow-hidden rounded-full">
-              {zones.map((z, i) => (z > 0 ? <div key={i} style={{ width: `${(z / zoneTotal) * 100}%`, background: ZONE_COLORS[i] }} /> : null))}
-            </div>
-            <div className="space-y-2">
-              {zones.map((z, i) => (
-                <div key={i} className="flex items-center gap-3 text-sm">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: ZONE_COLORS[i] }} />
-                  <span className="w-16 text-ink-2">Zone {i + 1}</span>
-                  <span className="num flex-1 text-right text-ink">{fmtClock(z)}</span>
-                  <span className="num w-12 text-right text-ink-3">{Math.round((z / zoneTotal) * 100)}%</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        )}
+        <EffortScoreCard run={run} />
         <Panel className="panel-pad">
-          <SectionTitle>Effort</SectionTitle>
+          <SectionTitle>Details</SectionTitle>
           <div className="divide-y divide-line/50">
             <KV label="Avg heart rate" value={run.heartRate ? `${run.heartRate} bpm` : "—"} />
             <KV label="Min heart rate" value={run.minHeartRate ? `${run.minHeartRate} bpm` : "—"} />
@@ -898,39 +876,6 @@ function SummaryTab({ run }: { run: Run }) {
           </div>
         </Panel>
       </div>
-    </div>
-  );
-}
-
-/* ── Graphs ───────────────────────────────────────────────────────────────── */
-
-function GraphsTab({ run, km }: { run: Run; km: number }) {
-  const series = useMemo(() => buildSeries(run, km), [run, km]);
-  const avgPace = runPaceSec(run);
-  const has = (k: "pace" | "hr" | "elevation" | "cadence") => series.filter((p) => p[k] != null).length > 5;
-  if (!series.length) return <Panel className="panel-pad text-sm text-ink-3">No time-series data was recorded for this session.</Panel>;
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {has("pace") && (
-        <ChartCard title="Pace" subtitle="Faster is higher" right={<Activity className="h-4 w-4 text-brand" />}>
-          <MetricAreaChart data={series} y="pace" color="#00d4ff" invert format={(v) => fmtPace(v)} unit="/km" reference={avgPace ? { value: avgPace, label: `avg ${fmtPace(avgPace)}` } : undefined} />
-        </ChartCard>
-      )}
-      {has("hr") && (
-        <ChartCard title="Heart rate" right={<Heart className="h-4 w-4 text-danger" />}>
-          <MetricAreaChart data={series} y="hr" color="#ff5252" unit="bpm" reference={run.heartRate ? { value: run.heartRate, label: `avg ${run.heartRate}` } : undefined} />
-        </ChartCard>
-      )}
-      {has("elevation") && (
-        <ChartCard title="Elevation" subtitle={run.totalElevationGain ? `+${Math.round(run.totalElevationGain)} m / −${Math.round(run.totalElevationLoss ?? 0)} m` : undefined} right={<Mountain className="h-4 w-4 text-amber" />}>
-          <MetricAreaChart data={series} y="elevation" color="#ffb300" unit="m" domainPad={0.3} />
-        </ChartCard>
-      )}
-      {has("cadence") && (
-        <ChartCard title="Cadence" right={<Footprints className="h-4 w-4 text-violet" />}>
-          <MetricAreaChart data={series} y="cadence" color="#8b7cf6" unit="spm" />
-        </ChartCard>
-      )}
     </div>
   );
 }
