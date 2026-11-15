@@ -6,6 +6,7 @@ import { startScheduler } from "./scheduler";
 import { runAutoMigrations } from "./auto-migrate";
 import { userActivityMiddleware } from "./user-activity";
 import { configureWebServing } from "./web-serving";
+import { pool } from "./db";
 
 const app = express();
 const log = console.log;
@@ -18,8 +19,21 @@ declare module "http" {
 
 function setupCors(app: express.Application) {
   app.use((req, res, next) => {
-    const origins = new Set<string>();
+    const origins = new Set<string>([
+      "https://airuncoach.live",
+      "https://www.airuncoach.live",
+    ]);
 
+    // Host-neutral list of extra allowed origins, comma-separated full origins
+    // (e.g. "https://ai-run-coach-production.up.railway.app").
+    if (process.env.ALLOWED_ORIGINS) {
+      process.env.ALLOWED_ORIGINS.split(",").forEach((o) => {
+        const trimmed = o.trim().replace(/\/+$/, "");
+        if (trimmed) origins.add(trimmed);
+      });
+    }
+
+    // Replit-provided domains (kept until Replit is switched off; harmless elsewhere).
     if (process.env.REPLIT_DEV_DOMAIN) {
       origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
     }
@@ -169,6 +183,24 @@ function setupErrorHandler(app: express.Application) {
   // Healthcheck endpoint — registered BEFORE routes so Replit's probe always gets 200
   app.get(["/health", "/api/health"], (_req, res) => {
     res.json({ status: "ok", service: "AI Run Coach API" });
+  });
+
+  // Deep health check: also proves the database answers. Used by the new host's deploy
+  // health check and by monitoring; /health above stays instant for Replit's probe.
+  app.get(["/health/ready", "/api/health/ready"], async (_req, res) => {
+    const started = Date.now();
+    try {
+      await Promise.race([
+        pool.query("SELECT 1"),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("db timeout after 5s")), 5000)),
+      ]);
+      res.setHeader("Cache-Control", "no-store");
+      res.json({ status: "ok", db: "ok", dbLatencyMs: Date.now() - started });
+    } catch (err: any) {
+      console.error("[Health] Database check failed:", err?.message);
+      res.setHeader("Cache-Control", "no-store");
+      res.status(503).json({ status: "error", db: "unreachable", error: err?.message });
+    }
   });
 
   // Run schema auto-migrations before anything else touches the DB

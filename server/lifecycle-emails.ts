@@ -215,17 +215,17 @@ const UPGRADE_HOW = "In the app, go to Profile → Subscription to choose Lite o
 export function renderWelcome(u: { name: string | null }): { subject: string; text: string } {
   const founder = (process.env.FOUNDER_NAME || "Daniel Johnston").split(" ")[0];
   return {
-    subject: "Thanks for joining AI Run Coach",
+    subject: "Thanks for joining Ai Run Coach",
     text:
       `Hi ${firstName(u.name)},\n\n` +
-      `I'm ${founder}, the founder of AI Run Coach, and I wanted to say a personal thank you for signing up.\n\n` +
+      `I'm ${founder}, the founder of Ai Run Coach, and I wanted to say a personal thank you for signing up.\n\n` +
       `Your ${FREE_TRIAL_DAYS}-day free trial has started. There's no card on file, so there's nothing to cancel. ` +
       `Take your coach out on a few runs or walks and see how it feels to have someone in your ear who knows ` +
       `your pace, your heart rate and what you're working towards.\n\n` +
       `I'd really value your feedback: what you like, what's confusing, or anything that doesn't work the ` +
       `way you expected. Just reply to this email. It comes straight to me and I read every one.\n\n` +
       `All the best with your trial, and happy running!\n\n` +
-      `${founder}\nFounder, AI Run Coach`,
+      `${founder}\nFounder, Ai Run Coach`,
   };
 }
 

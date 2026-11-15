@@ -1,16 +1,9 @@
 package live.airuncoach.airuncoach.wear.ui.screens
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
@@ -38,15 +31,6 @@ fun PrepareGateOverlay(
     onContinueWithoutCoaching: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val transition = rememberInfiniteTransition(label = "prepare-dots")
-    val dotPhase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 4f,
-        animationSpec = infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
-        label = "dots"
-    )
-    val dots = ".".repeat(dotPhase.toInt().coerceIn(0, 3))
-
     ScrollingScreen(modifier = modifier, verticalArrangement = Arrangement.Top) {
         OverlayHeader()
         Text(
@@ -62,7 +46,7 @@ fun PrepareGateOverlay(
             modifier = Modifier.padding(top = 2.dp)
         )
         Text(
-            text = if (isPhoneConnected) "Waiting for phone$dots" else "Phone not connected",
+            text = if (isPhoneConnected) "Open Ai Run Coach on your phone" else "Phone not connected",
             color = if (isPhoneConnected) WearColors.LightGray else WearColors.AmberWarning,
             style = TextStyle(fontSize = 10.sp, textAlign = TextAlign.Center),
             modifier = Modifier.padding(top = 6.dp)
