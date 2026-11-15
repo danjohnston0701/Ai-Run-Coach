@@ -495,6 +495,20 @@ interface ApiService {
     @GET("/api/training-plans/details/{planId}")
     suspend fun getTrainingPlanDetails(@Path("planId") planId: String): TrainingPlanDetails
 
+    // ── One-off AI sessions (server/routes-single-sessions.ts) ──────────────────
+    @POST("/api/single-sessions")
+    suspend fun createSingleSession(@Body body: live.airuncoach.airuncoach.network.model.CreateSingleSessionRequest): live.airuncoach.airuncoach.network.model.CreateSingleSessionResponse
+
+    @GET("/api/single-sessions")
+    suspend fun getSingleSessions(@Query("limit") limit: Int = 30): List<live.airuncoach.airuncoach.network.model.SingleSessionItem>
+
+    @DELETE("/api/single-sessions/{workoutId}")
+    suspend fun deleteSingleSession(@Path("workoutId") workoutId: String): retrofit2.Response<Unit>
+
+    /** The runner's open plan session today (or workout = null) — for the "count it / leave it open" prompt. */
+    @GET("/api/plan-sessions/open-today")
+    suspend fun getOpenPlanSessionToday(@Query("date") date: String? = null): live.airuncoach.airuncoach.network.model.OpenPlanSessionTodayResponse
+
     @GET("/api/training-plans/{planId}/today")
     suspend fun getTodayWorkout(
         @Path("planId") planId: String,

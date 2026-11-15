@@ -9,6 +9,12 @@
 // Order of matching for a run with no linked workout:
 //   1. the plan's pending orientation (first run after the plan was created)
 //   2. an open planned session scheduled on the same date as the run
+//
+// The runner can override this (runs.plan_session_choice, asked by the apps when a one-off AI
+// session or a typed free run starts on a day with an open plan session):
+//   "leave_open" — never match this run to a plan session, orientation included.
+//   "count"      — complete today's plan session with this run even when the run is linked to
+//                  a one-off session, and even when it wouldn't pass the distance/walk filters.
 import { db } from "./db";
 import { runs, trainingPlans, weeklyPlans, plannedWorkouts, sessionInstructions as sessionInstructionsTable } from "@shared/schema";
 import { eq, and, desc, lt, inArray, ne, sql } from "drizzle-orm";
@@ -106,6 +112,20 @@ export async function linkRunToSameDayWorkout(run: any): Promise<string | null> 
   if (!run?.userId) return null;
   const km = runKm(run);
   if (!(km >= 1) || !plausiblePace(run)) return null;
+  const w = await findSameDayOpenSession(run, false);
+  if (!w) return null;
+  await linkRun(run, w);
+  console.log(`✅ [planSync] Run ${run.id} linked to same-day ${w.workoutType} ${w.id}`);
+  return w.id;
+}
+
+/**
+ * Today's open plan session for this run (active plans only, so one-off sessions under a
+ * `single_session` plan never match). `explicit` = the runner said "count it", so the walk and
+ * half-distance filters don't apply.
+ */
+export async function findSameDayOpenSession(run: any, explicit: boolean): Promise<{ id: string; planId: string; workoutType: string; intensity: string | null; description: string | null; distance: number | null } | null> {
+  const km = runKm(run);
   const runDate: string | null = run.runDate
     ?? (run.completedAt ? new Date(run.completedAt).toISOString().slice(0, 10) : null);
   if (!runDate) return null;
@@ -124,14 +144,18 @@ export async function linkRunToSameDayWorkout(run: any): Promise<string | null> 
       ne(plannedWorkouts.workoutType, "orientation"),
       sql`${plannedWorkouts.scheduledDate}::date = ${runDate}::date`,
     ));
-  const fits = candidates.filter(w =>
+  const fits = explicit ? candidates : candidates.filter(w =>
     (!isWalk(run) || String(w.workoutType).includes("walk")) &&
     (w.distance == null || km >= w.distance * 0.5));
   if (fits.length === 0) return null;
   fits.sort((a, b) => Math.abs((a.distance ?? km) - km) - Math.abs((b.distance ?? km) - km));
-  await linkRun(run, fits[0]);
-  console.log(`✅ [planSync] Run ${run.id} (${runDate}) linked to same-day ${fits[0].workoutType} ${fits[0].id}`);
-  return fits[0].id;
+  return fits[0];
+}
+
+/** Normalises the apps' answer to "should this count for today's plan session?". */
+export function normalizePlanSessionChoice(v: unknown): "count" | "leave_open" | null {
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "count" ? "count" : s === "leave_open" ? "leave_open" : null;
 }
 
 // ── Server-side auto-complete of the run's planned workout ───────────────
@@ -140,10 +164,32 @@ export async function linkRunToSameDayWorkout(run: any): Promise<string | null> 
 export async function autoCompleteLinkedWorkout(runId: string): Promise<void> {
   const [savedRun] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
   if (!savedRun) return;
+  const choice = normalizePlanSessionChoice((savedRun as any).planSessionChoice);
+
+  // "Count it" — today's plan session is completed by this run as well. When the run belongs to
+  // a one-off session it stays linked to that one (a run has one linked workout); the plan
+  // session just records this run as its completing run.
+  if (choice === "count") {
+    const planSession = await findSameDayOpenSession(savedRun, true);
+    if (planSession) {
+      if (!(savedRun as any).linkedWorkoutId) {
+        await linkRun(savedRun, planSession);
+        (savedRun as any).linkedWorkoutId = planSession.id;
+      } else if (planSession.id !== (savedRun as any).linkedWorkoutId) {
+        await completeWorkoutRow(planSession.id, runId, (savedRun as any).userId);
+      }
+    }
+  }
+
   const wid = (savedRun as any).linkedWorkoutId
-    ?? await linkRunToPendingOrientation(savedRun)
-    ?? await linkRunToSameDayWorkout(savedRun);
+    ?? (choice === "leave_open" ? null
+      : await linkRunToPendingOrientation(savedRun) ?? await linkRunToSameDayWorkout(savedRun));
   if (!wid) return;
+  await completeWorkoutRow(wid, runId, (savedRun as any).userId);
+}
+
+/** Marks one planned workout done by a run, then the orientation / week-advance follow-ups. */
+async function completeWorkoutRow(wid: string, runId: string, userId: string): Promise<void> {
 
   const [pw] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, wid)).limit(1);
   // A skipped workout (completed, no run) that the runner then did anyway gets the run.
@@ -158,7 +204,7 @@ export async function autoCompleteLinkedWorkout(runId: string): Promise<void> {
   // When a new user completes their orientation run, we now have real pace + HR data
   // to enrich all week 1-2 sessions with accurate numeric targets.
   if ((pw as any).workoutType === "orientation" && (pw as any).trainingPlanId) {
-    enrichWeeksAfterOrientation((pw as any).trainingPlanId, (savedRun as any).userId, "autoComplete");
+    enrichWeeksAfterOrientation((pw as any).trainingPlanId, userId, "autoComplete");
   }
 
   // Advance the week if all workouts in this week are now done

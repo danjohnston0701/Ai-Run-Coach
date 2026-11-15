@@ -1230,7 +1230,7 @@ CRITICAL: No GPS elevation data available for this ${isWalkSession ? 'walk' : 'r
   // the prompt would actively contradict the race-day block in their profile.
   const isRaceDaySplit = profileIndicatesRaceDay(params.runnerProfile);
   const trainingSessionContext = isTrainingSession && !isRaceDaySplit
-    ? `\nTraining Session Context: This km split is part of a SCHEDULED TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) in the ${personLabel}'s coaching plan — NOT a race or goal attempt. Do NOT compare their pace to their long-term race goal. Instead, frame the coaching around what this session is building.${sessionSplitContext}`
+    ? `\nTraining Session Context: This km split is part of a TRAINING SESSION (${workoutType!.replace(/_/g, ' ')} workout) the ${personLabel} chose or was set — NOT a race or goal attempt. It may be a plan session or one they picked themselves, so don't mention a plan unless the context says there is one. Do NOT compare their pace to their long-term race goal. Instead, frame the coaching around what this session is building.${sessionSplitContext}`
     : '';
 
   // Compute target pace comparison for split coaching (so AI can tell runner if they're on track)

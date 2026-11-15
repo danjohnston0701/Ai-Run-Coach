@@ -107,12 +107,12 @@ export async function redeemPromoCode(
       .where(eq(couponCodes.id, couponRecord.id));
 
     // Determine which features this code grants
-    const features = ["trainingPlansGenerated", "routesGenerated", "postRunAnalyses"];
+    const features = ["trainingPlansGenerated", "singleSessionsGenerated", "routesGenerated", "postRunAnalyses"];
     if (couponRecord.type === "unlimited_all") {
       // All features get unlimited
     } else if (couponRecord.type === "unlimited_plans") {
       features.length = 0;
-      features.push("trainingPlansGenerated");
+      features.push("trainingPlansGenerated", "singleSessionsGenerated");
     } else if (couponRecord.type === "unlimited_routes") {
       features.length = 0;
       features.push("routesGenerated");
@@ -140,6 +140,7 @@ export async function redeemPromoCode(
 const FEATURE_TO_COUPON_TYPES: Record<string, string[]> = {
   aiCoachingKm:            ["unlimited_all", "unlimited_coaching"],
   trainingPlansGenerated:  ["unlimited_all", "unlimited_plans"],
+  singleSessionsGenerated: ["unlimited_all", "unlimited_plans"],
   routesGenerated:         ["unlimited_all", "unlimited_routes"],
   postRunAnalyses:         ["unlimited_all", "unlimited_analyses"],
 };

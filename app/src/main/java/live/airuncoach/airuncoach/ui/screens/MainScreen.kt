@@ -2,6 +2,9 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import live.airuncoach.airuncoach.util.WorkoutPlanContext
+import live.airuncoach.airuncoach.util.SINGLE_SESSION_GOAL_TYPE
+import live.airuncoach.airuncoach.domain.model.withChosenSession
 import android.Manifest
 import android.content.Context
 import android.os.Build
@@ -526,7 +529,7 @@ fun MainScreen(
                     initialAiCoachEnabled = aiCoach,
                     initialSessionType = sessionType,
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, latitude, longitude, aiCoach, activityTypeString ->
+                    onGenerateRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, latitude, longitude, aiCoach, activityTypeString, chosenSession ->
                         // Guard against double-taps - only allow one navigation at a time
                         if (isNavigatingToRoute) return@MapMyRunSetupScreen
                         isNavigatingToRoute = true
@@ -553,11 +556,12 @@ fun MainScreen(
                             groupRunParticipants = groupRunParticipants,
                             activityType = activityTypeString
                         )
+                        live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.chosenSession = chosenSession
                         
                         // Navigate to check_route_availability - it will handle the API check itself
                         navController.navigate("check_route_availability")
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, activityTypeString, isWatchMode, aiCoachEnabled ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, isGroupRun, groupRunParticipants, activityTypeString, isWatchMode, aiCoachEnabled, chosenSession ->
                         // Create RunSetupConfig and start run without route — preserve social settings
                         val activityType = if (activityTypeString.equals("walk", ignoreCase = true)) PhysicalActivityType.WALK else PhysicalActivityType.RUN
                         val config = RunSetupConfig(
@@ -575,7 +579,7 @@ fun MainScreen(
                             isGroupRun = isGroupRun,
                             groupRunParticipants = groupRunParticipants,
                             isWatchMode = isWatchMode
-                        )
+                        ).withChosenSession(chosenSession)
                         RunConfigHolder.setConfig(config)
                         navController.navigate("run_session") {
                             popUpTo("map_my_run_setup") { inclusive = true }
@@ -821,7 +825,7 @@ fun MainScreen(
                         liveTrackingObservers = liveTrackingObservers,
                         isGroupRun = isGroupRun,
                         groupRunParticipants = groupRunParticipants
-                    )
+                    ).withChosenSession(live.airuncoach.airuncoach.util.RouteGenerationParamsHolder.chosenSession)
                     RunConfigHolder.setConfig(config)
 
                     navController.navigate("run_session/$routeId") {
@@ -1030,7 +1034,31 @@ fun MainScreen(
                     },
                     onOpenPlan = { planId -> navController.navigate("training_plan/$planId") },
                     onNavigateToSubscription = { navController.navigate(Screen.Profile.route) },
-                    isActiveDestination = currentBackStack?.destination?.route == "coaching_programme"
+                    isActiveDestination = currentBackStack?.destination?.route == "coaching_programme",
+                    onDesignSession = { navController.navigate("create_single_session") },
+                    onOpenSession = { item ->
+                        WorkoutHolder.currentWorkout = item.workout
+                        WorkoutHolder.planContext = WorkoutPlanContext(
+                            planId = item.planId, goalType = SINGLE_SESSION_GOAL_TYPE, weekNumber = 1, totalWeeks = 1
+                        )
+                        navController.navigate("workout_detail")
+                    }
+                )
+            }
+            // ── One-off AI session (routes-single-sessions.ts) ──────────────
+            composable("create_single_session") {
+                CreateSingleSessionScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onReady = { workout, planId ->
+                        WorkoutHolder.currentWorkout = workout
+                        WorkoutHolder.planContext = WorkoutPlanContext(
+                            planId = planId, goalType = SINGLE_SESSION_GOAL_TYPE, weekNumber = 1, totalWeeks = 1
+                        )
+                        navController.navigate("workout_detail") {
+                            popUpTo("create_single_session") { inclusive = true }
+                        }
+                    },
+                    onUpgrade = { navController.navigate("subscription") }
                 )
             }
             // ── AI Plan Availability Check ──────────────────────────────────
@@ -1324,6 +1352,8 @@ fun MainScreen(
                                 // Coaching programme context
                                 trainingPlanId      = planCtx?.planId,
                                 workoutId           = w.id,
+                                // One-off AI session: whether it also completes today's plan session
+                                planSessionChoice   = WorkoutHolder.planSessionChoice,
                                 workoutType         = w.workoutType,
                                 workoutIntensity    = w.intensity,
                                 workoutDescription  = w.description,
@@ -1438,10 +1468,10 @@ fun MainScreen(
                     initialAiCoachEnabled = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
                         .getBoolean("ai_coach_enabled", true),
                     onNavigateBack = { navController.popBackStack() },
-                    onGenerateRoute = { _, _, _, _, _, _, _, _, _, _, _, _, _ ->
+                    onGenerateRoute = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ ->
                         // Group runs don't support route generation - ignore this callback
                     },
-                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, activityTypeString, isWatchMode, aiCoachEnabled ->
+                    onStartRunWithoutRoute = { distance, hasTime, hours, minutes, seconds, liveTrackingEnabled, liveTrackingObservers, _, _, activityTypeString, isWatchMode, aiCoachEnabled, _ ->
                         // Create RunSetupConfig with group run context
                         val config = RunSetupConfig(
                             // Setup-screen toggle — was hardcoded RUN with the value discarded.

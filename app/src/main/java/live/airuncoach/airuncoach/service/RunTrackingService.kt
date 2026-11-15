@@ -1021,6 +1021,10 @@ class RunTrackingService : Service(), SensorEventListener {
         const val EXTRA_TRAINING_PLAN_ID = "EXTRA_TRAINING_PLAN_ID"
         const val EXTRA_WORKOUT_ID = "EXTRA_WORKOUT_ID"
         const val EXTRA_WORKOUT_TYPE = "EXTRA_WORKOUT_TYPE"
+        /** Session type picked on the setup screen for a run with no plan workout (SessionTypes key). */
+        const val EXTRA_CHOSEN_WORKOUT_TYPE = "EXTRA_CHOSEN_WORKOUT_TYPE"
+        /** "count" / "leave_open" — the runner's answer to "you have a plan session today". */
+        const val EXTRA_PLAN_SESSION_CHOICE = "EXTRA_PLAN_SESSION_CHOICE"
         const val EXTRA_WORKOUT_INTENSITY = "EXTRA_WORKOUT_INTENSITY"
         const val EXTRA_WORKOUT_DESCRIPTION = "EXTRA_WORKOUT_DESCRIPTION"
         const val EXTRA_PLAN_GOAL_TYPE = "EXTRA_PLAN_GOAL_TYPE"
@@ -1420,6 +1424,31 @@ class RunTrackingService : Service(), SensorEventListener {
     // Polyline passed via intent for nav simulation
     private var navSimulationPolyline: String? = null
 
+    // Session type the runner picked on the setup screen for a run with no plan workout
+    // (SessionTypes key, e.g. "intervals", "tempo", "race"). null = Free Run / Free Walk.
+    private var chosenWorkoutType: String? = null
+    // "count" / "leave_open" — saved on the run so the server knows whether it completes today's
+    // open plan session (runs.plan_session_choice).
+    private var planSessionChoice: String? = null
+
+    /** workout_type the AI coaching requests see: the plan's, else the runner's pick — but never a
+     *  race-day pick, which must be coached as a race (goal pace, ETA), not a training session. */
+    private val coachingWorkoutType: String?
+        get() = planWorkoutType ?: chosenWorkoutType?.takeUnless { it in SessionTypes.RACE_KEYS }
+
+    /** workout_type saved on the run. */
+    private val savedWorkoutType: String?
+        get() = planWorkoutType ?: chosenWorkoutType
+
+    /**
+     * A rep-style type (intervals, hill repeats, fartlek, walk-run) picked on the setup screen and
+     * run with no coaching plan: the runner manages the reps. Same rules as an AI interval plan,
+     * minus the plan's own cues: no km-split callouts, pace coaching, struggle or progress
+     * check-ins, finish ETA or pace-trend — HR, form/cadence and encouragement stay on.
+     */
+    private val isSelfManagedRepSession: Boolean
+        get() = !isCoachingPlanActive && chosenWorkoutType in SessionTypes.REP_KEYS
+
     // Coaching programme context (null when not a plan workout)
     private var planTrainingPlanId: String? = null
     private var planWorkoutId: String? = null
@@ -1774,6 +1803,16 @@ class RunTrackingService : Service(), SensorEventListener {
                 currentActivityType = if (requestedType.equals("walk", ignoreCase = true)) "walk" else "run"
                 activityTypeSetFromSessionIntent = true
             }
+            // A full config intent (the ViewModel always sends EXTRA_SESSION_TYPE with one) states
+            // the session type and plan-session choice outright, null included, so a Free Run after
+            // an Intervals run can't inherit it. Bare follow-up intents (watch START) keep them.
+            if (intent?.hasExtra(EXTRA_SESSION_TYPE) == true && !isTracking) {
+                chosenWorkoutType = intent.getStringExtra(EXTRA_CHOSEN_WORKOUT_TYPE)?.takeIf { it.isNotBlank() }
+                planSessionChoice = intent.getStringExtra(EXTRA_PLAN_SESSION_CHOICE)?.takeIf { it.isNotBlank() }
+                if (chosenWorkoutType != null || planSessionChoice != null) {
+                    Log.d("RunTrackingService", "🏷️ Session type=$chosenWorkoutType planSessionChoice=$planSessionChoice")
+                }
+            }
             aiCoachEnabledForSession = intent?.getBooleanExtra(EXTRA_AI_COACH_ENABLED, true) ?: true
             navSimulationPolyline = intent?.getStringExtra("EXTRA_ROUTE_POLYLINE")
             // Coaching programme context — only overwrite if the intent carries plan extras.
@@ -1850,7 +1889,10 @@ class RunTrackingService : Service(), SensorEventListener {
             // saved as an unlinked "free" run (Damion, 2026-10-10, run 6d8ee219).
             if (intent?.action != ACTION_PREPARE_FOR_WATCH) {
                 RunConfigHolder.getConfig()?.let { cfg ->
-                    val isPlanSession = planWorkoutId != null || dynamicCoachingPlan != null
+                    // A self-configured reps plan (SelfConfiguredSessionPlan) is built from the
+                    // free-run config itself, so that config IS this session's.
+                    val isPlanSession = planWorkoutId != null ||
+                        (dynamicCoachingPlan != null && !SelfConfiguredSessionPlan.isSelfConfigured(dynamicCoachingPlan))
                     // Plan context lost (service restart, bare watch START) but the configured
                     // session is a plan workout: adopt its link so the run still completes it.
                     if (planWorkoutId == null && dynamicCoachingPlan != null && cfg.workoutId != null) {
@@ -2024,6 +2066,8 @@ class RunTrackingService : Service(), SensorEventListener {
         sessionCoachingTone = null
         sessionCoachingIntensity = null
         dynamicCoachingPlan = null
+        chosenWorkoutType = null
+        planSessionChoice = null
     }
 
     private fun startTracking() {
@@ -2726,6 +2770,8 @@ class RunTrackingService : Service(), SensorEventListener {
         // generic pace engine to prevent conflicting cues (e.g. "run faster to 5:10" during an aerobic
         // 5:30/km session because the race goal pace is 5:10).
         if (isCoachingPlanActive) return
+        // Self-managed reps: pace swings are the session, not something to correct.
+        if (isSelfManagedRepSession) return
         
         val now = System.currentTimeMillis()
         val tDist = targetDistance ?: inferredTargetDistance ?: return
@@ -4176,7 +4222,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // pace alerts, and periodic check-ins that provide all the effort guidance the runner
         // needs. A generic struggle prompt ("you seem to be slowing down") conflicts with and
         // duplicates the plan's reactive triggers and gives the runner a confusing second voice.
-        if (isCoachingPlanActive) {
+        if (isCoachingPlanActive || isSelfManagedRepSession) {
             isStruggling = false
             return
         }
@@ -4309,6 +4355,11 @@ class RunTrackingService : Service(), SensorEventListener {
             // The AI-generated triggers still fire alongside splits for HR, form, and motivation.
             if (isCoachingPlanActive && isIntervalTypeSession) {
                 Log.d("RunTrackingService", "Skipping km split coaching for interval coached session at ${currentKm}km")
+                return
+            }
+            // Same for reps the runner manages themselves (setup screen → Intervals etc., no plan).
+            if (isSelfManagedRepSession) {
+                Log.d("RunTrackingService", "Skipping km split coaching for self-managed $chosenWorkoutType session at ${currentKm}km")
                 return
             }
 
@@ -4488,7 +4539,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // ── 25/50/75% CHECK-INS — on time or not at all (see ProgressMilestones) ──
         // Evaluated before every other cue so a milestone inside its few-second window gets first
         // claim on a free slot. Plans with their own distance_pct triggers handle progress themselves.
-        if ((!isCoachingPlanActive || !isIntervalTypeSession) && !planHasProgressTriggers()) {
+        if ((!isCoachingPlanActive || !isIntervalTypeSession) && !isSelfManagedRepSession && !planHasProgressTriggers()) {
             maybeFireProgressMilestone(displayDistance, duration, avgSpeed)
         }
 
@@ -4544,9 +4595,9 @@ class RunTrackingService : Service(), SensorEventListener {
             // cues, but the HR timer provides supplemental aerobic zone awareness.
             val allowGenericPrompts = !isCoachingPlanActive || !isIntervalTypeSession
             if (allowGenericPrompts) {
-                checkPhaseChange(phase)
+                if (!isSelfManagedRepSession) checkPhaseChange(phase)
 
-                if (!hasCoachingFiredThisTick) {
+                if (!hasCoachingFiredThisTick && !isSelfManagedRepSession) {
                     val now = System.currentTimeMillis()
                     val isInitial500m = last500mMilestone == 0
                     val timeSinceLastCoaching = now - lastGlobalCoachingTime
@@ -4636,7 +4687,8 @@ class RunTrackingService : Service(), SensorEventListener {
             linkedPlanId = planTrainingPlanId,
             planProgressWeek = planWeekNumber,
             planProgressWeeks = planTotalWeeks,
-            workoutType = planWorkoutType,
+            workoutType = savedWorkoutType,
+            planSessionChoice = planSessionChoice,
             workoutIntensity = planWorkoutIntensity,
             workoutDescription = planWorkoutDescription,
             // Group run link — stamped on the session itself (not just read from the service
@@ -5624,6 +5676,7 @@ class RunTrackingService : Service(), SensorEventListener {
             planProgressWeek = runSession.planProgressWeek,
             planProgressWeeks = runSession.planProgressWeeks,
             workoutType = runSession.workoutType,
+            planSessionChoice = runSession.planSessionChoice ?: planSessionChoice,
             workoutIntensity = runSession.workoutIntensity,
             workoutDescription = runSession.workoutDescription,
             // Group run context if this run is part of a group
@@ -6763,7 +6816,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // Split-proximity lockout: within the last 150 m before a km-split boundary, leave the
         // slot for the split so it is never queued behind a discretionary cue and announced
         // late (iOS heard "you're at 1 kilometre" at 1.10 km on 17 Sep for exactly this reason).
-        if (coachingFeaturePrefs.kmSplitsEnabled && !isCoachingPlanActive) {
+        if (coachingFeaturePrefs.kmSplitsEnabled && !isCoachingPlanActive && !isSelfManagedRepSession) {
             val intervalM = coachingFeaturePrefs.kmSplitIntervalKm.coerceAtLeast(1) * 1000.0
             val toNextSplit = intervalM - (totalDistance % intervalM)
             if (toNextSplit <= 150.0) return false
@@ -6819,6 +6872,8 @@ class RunTrackingService : Service(), SensorEventListener {
         // A plan workout's length comes from its plan; guessing a race distance would fake a
         // finish line inside a time-based session (see startTracking()'s Dashboard fallback).
         if (planWorkoutId != null || dynamicCoachingPlan != null) return
+        // Self-managed reps have no finish line to guess either.
+        if (isSelfManagedRepSession) return
         // Previously the first inference was permanent. With 1000 m in the candidate list that
         // meant every target-less run inferred "1 km" at 850 m, then — once past 1 km —
         // remaining went negative forever: no final cues, no final-stretch quiet zone, and
@@ -8827,7 +8882,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     sessionCoachingIntensity = sessionCoachingIntensity,
                     sessionStructure = sessionInstructions?.sessionStructure,
                     expectedMetricsFilters = sessionInstructions?.insightFilters,
-                    workoutType = planWorkoutType,  // Tells AI this is a training session (not a race)
+                    workoutType = coachingWorkoutType,  // Tells AI this is a training session (not a race)
                     activityType = currentActivityType,
                     garminCompanionSessionId = garminWatchManager?.activeCompanionSessionId
                 )
@@ -8941,7 +8996,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     linkedWorkoutId = planWorkoutId,
                     sessionCoachingTone = sessionCoachingTone,
                     currentSessionPhase = null,  // Phase detection can be added later if needed
-                    workoutType = planWorkoutType,  // Tells AI this is a training session (not a race)
+                    workoutType = coachingWorkoutType,  // Tells AI this is a training session (not a race)
                     // ========== Route Memory Engine ==========
                     routeIntelligence = routeIntelligenceContext,
                     lastKmSplitSeconds = (split.time / 1000).toInt(),
@@ -9308,7 +9363,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     runnerName = currentUser?.name,
                     // Plan context so HR coaching can tell runner if they're in target zone
                     workoutIntensity = planWorkoutIntensity,
-                    workoutType = planWorkoutType,
+                    workoutType = coachingWorkoutType,
                     // ========== Session Coaching Context ==========
                     sessionCoachingTone = sessionCoachingTone,
                     linkedWorkoutId = planWorkoutId,
@@ -9592,9 +9647,11 @@ class RunTrackingService : Service(), SensorEventListener {
         // Priority order: target ETA > pace trend > positive reinforcement > technique > elevation.
         // 25/50/75% milestones are not in this chain: they need an exact moment, not a free elite
         // slot, and fire from maybeFireProgressMilestone() instead.
+        // Self-managed reps: no finish ETA or pace trend (pace swings are the session).
+        val paceTopicsAllowed = !isSelfManagedRepSession
         when {
-            shouldTriggerTargetEta(currentKm, distKm, duration) -> fireTargetEtaCoaching(distKm, duration, avgSpeed)
-            shouldTriggerPaceTrend(currentKm) -> firePaceTrendCoaching(distKm, duration, avgSpeed)
+            paceTopicsAllowed && shouldTriggerTargetEta(currentKm, distKm, duration) -> fireTargetEtaCoaching(distKm, duration, avgSpeed)
+            paceTopicsAllowed && shouldTriggerPaceTrend(currentKm) -> firePaceTrendCoaching(distKm, duration, avgSpeed)
             shouldTriggerPositiveReinforcement(currentKm) -> firePositiveReinforcementCoaching(distKm, duration, avgSpeed)
             shouldTriggerTechnique(now) -> fireTechniqueCoaching(distKm, duration, avgSpeed, phase)
             shouldTriggerElevationInsight(now) -> fireElevationInsightCoaching(distKm, duration, avgSpeed)
@@ -10254,7 +10311,7 @@ class RunTrackingService : Service(), SensorEventListener {
             // Coaching programme context — non-null only when this is a plan workout
             trainingPlanId = planTrainingPlanId,
             workoutId = planWorkoutId,
-            workoutType = planWorkoutType,
+            workoutType = coachingWorkoutType,
             workoutDescription = planWorkoutDescription,
             planGoalType = planGoalType,
             planWeekNumber = planWeekNumber,

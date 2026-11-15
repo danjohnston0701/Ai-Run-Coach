@@ -2,6 +2,7 @@
 
 package live.airuncoach.airuncoach.ui.screens
 
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -66,7 +67,9 @@ fun CoachingProgrammeScreen(
     onCreatePlan: () -> Unit,
     onOpenPlan: (String) -> Unit,  // planId
     onNavigateToSubscription: () -> Unit = {},  // For upgrading subscription
-    isActiveDestination: Boolean = true  // true when this route is the current nav destination
+    isActiveDestination: Boolean = true,  // true when this route is the current nav destination
+    onDesignSession: () -> Unit = {},  // one-off AI session (CreateSingleSessionScreen)
+    onOpenSession: (live.airuncoach.airuncoach.network.model.SingleSessionItem) -> Unit = {},
 ) {
     val trainingPlanViewModel: TrainingPlanViewModel = hiltViewModel()
     val subscriptionViewModel: SubscriptionViewModel = hiltViewModel()
@@ -77,6 +80,10 @@ fun CoachingProgrammeScreen(
     // any plans they created during a trial or paid period.  Only the create action
     // is gated — the list itself is always visible.
     val isFreeTier = subscriptionTier == "free"
+    // "Sessions" (one-off AI sessions) is a 4th tab that isn't a plan status, so it's held here
+    // rather than in TrainingPlanViewModel's status tabs. Survives the return-to-Active reset below.
+    var sessionsTabSelected by rememberSaveable { mutableStateOf(false) }
+    var showCreateMenu by remember { mutableStateOf(false) }
 
     // Reload the plans list whenever this screen becomes the active destination.
     // Load for ALL users — free-tier users may have existing plans from a paid/trial period.
@@ -108,8 +115,37 @@ fun CoachingProgrammeScreen(
         floatingActionButton = {
             // Always show the FAB — the onCreatePlan flow checks feature availability and shows
             // an upsell screen if the user has hit their limit or is on the free tier.
-            FloatingActionButton(onClick = onCreatePlan, containerColor = Colors.primary) {
-                Icon(painterResource(R.drawable.icon_plus_vector), "New plan", tint = Colors.buttonText)
+            Box {
+                FloatingActionButton(
+                    onClick = { if (sessionsTabSelected) onDesignSession() else showCreateMenu = true },
+                    containerColor = Colors.primary
+                ) {
+                    Icon(painterResource(R.drawable.icon_plus_vector), "New plan or session", tint = Colors.buttonText)
+                }
+                DropdownMenu(
+                    expanded = showCreateMenu,
+                    onDismissRequest = { showCreateMenu = false },
+                    modifier = Modifier.background(Colors.backgroundSecondary)
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Full training plan", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
+                                Text("Weeks of sessions toward a goal", style = AppTextStyles.small, color = Colors.textMuted)
+                            }
+                        },
+                        onClick = { showCreateMenu = false; onCreatePlan() }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Single session", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
+                                Text("One AI-designed session for today", style = AppTextStyles.small, color = Colors.textMuted)
+                            }
+                        },
+                        onClick = { showCreateMenu = false; onDesignSession() }
+                    )
+                }
             }
         },
         containerColor = Colors.backgroundRoot,
@@ -119,18 +155,19 @@ fun CoachingProgrammeScreen(
         // Existing plans (active, completed, cancelled) must always be visible.
         Column(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
             // Tab Row: Active / Completed / Cancelled
+            val shownTab = if (sessionsTabSelected) 3 else selectedTab
             TabRow(
-                selectedTabIndex = selectedTab,
+                selectedTabIndex = shownTab,
                 containerColor = Colors.backgroundRoot,
                 contentColor = Colors.primary,
                 indicator = { tabPositions ->
-                    if (selectedTab < tabPositions.size) {
+                    if (shownTab < tabPositions.size) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .wrapContentSize(Alignment.BottomStart)
-                                .offset(x = tabPositions[selectedTab].left)
-                                .width(tabPositions[selectedTab].width)
+                                .offset(x = tabPositions[shownTab].left)
+                                .width(tabPositions[shownTab].width)
                                 .padding(horizontal = Spacing.lg)
                                 .height(3.dp)
                                 .background(Colors.primary)
@@ -139,25 +176,35 @@ fun CoachingProgrammeScreen(
                 },
                 divider = { HorizontalDivider(color = Colors.backgroundSecondary, thickness = 1.dp) }
             ) {
-                val tabs = listOf("Active", "Completed", "Cancelled")
+                val tabs = listOf("Active", "Completed", "Cancelled", "Sessions")
                 tabs.forEachIndexed { index, title ->
                     Tab(
-                        selected = selectedTab == index,
-                        onClick = { trainingPlanViewModel.selectTab(index) },
+                        selected = shownTab == index,
+                        onClick = {
+                            if (index == 3) sessionsTabSelected = true
+                            else { sessionsTabSelected = false; trainingPlanViewModel.selectTab(index) }
+                        },
                         selectedContentColor = Colors.primary,
                         unselectedContentColor = Colors.textMuted
                     ) {
                         Text(
                             text = title,
+                            maxLines = 1,
                             style = AppTextStyles.body.copy(
-                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (shownTab == index) FontWeight.Bold else FontWeight.Normal
                             )
                         )
                     }
                 }
             }
 
-            Box(modifier = Modifier.fillMaxSize()) {
+            if (sessionsTabSelected) {
+                SingleSessionsTab(
+                    onDesignSession = onDesignSession,
+                    onOpenSession = onOpenSession,
+                    isActive = isActiveDestination,
+                )
+            } else Box(modifier = Modifier.fillMaxSize()) {
                 when (val s = state) {
                     is PlansListState.Loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Colors.primary)
 

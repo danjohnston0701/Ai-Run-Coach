@@ -105,18 +105,21 @@ export interface UsageWithLimits {
     trainingPlansGenerated: number;
     routesGenerated: number;
     postRunAnalyses: number;
+    singleSessionsGenerated: number;
   };
   limits: {
     aiCoachingKm: number | null;        // null means "Unlimited"
     trainingPlansGenerated: number | null;
     routesGenerated: number | null;
     postRunAnalyses: number | null;
+    singleSessionsGenerated: number | null;
   };
   remaining: {
     aiCoachingKm: number | null;        // null means "Unlimited"
     trainingPlansGenerated: number | null;
     routesGenerated: number | null;
     postRunAnalyses: number | null;
+    singleSessionsGenerated: number | null;
   };
 }
 
@@ -147,6 +150,7 @@ export async function getUsageWithLimits(
   // already carries a *_noaiplan variant for paid tiers; this covers any tier without one.
   if (!aiPlansEnabled) {
     limits.trainingPlansGenerated = 0;
+    limits.singleSessionsGenerated = 0;
   }
 
   const toApiLimit = (v: number) => (v === Infinity ? null : v);
@@ -161,18 +165,21 @@ export async function getUsageWithLimits(
       trainingPlansGenerated: row.trainingPlansGenerated,
       routesGenerated: row.routesGenerated,
       postRunAnalyses: row.postRunAnalyses,
+      singleSessionsGenerated: row.singleSessionsGenerated ?? 0,
     },
     limits: {
       aiCoachingKm: toApiLimit(limits.aiCoachingKm),
       trainingPlansGenerated: toApiLimit(limits.trainingPlansGenerated),
       routesGenerated: toApiLimit(limits.routesGenerated),
       postRunAnalyses: toApiLimit(limits.postRunAnalyses),
+      singleSessionsGenerated: toApiLimit(limits.singleSessionsGenerated),
     },
     remaining: {
       aiCoachingKm: toRemaining(row.aiCoachingKm, limits.aiCoachingKm),
       trainingPlansGenerated: toRemaining(row.trainingPlansGenerated, limits.trainingPlansGenerated),
       routesGenerated: toRemaining(row.routesGenerated, limits.routesGenerated),
       postRunAnalyses: toRemaining(row.postRunAnalyses, limits.postRunAnalyses),
+      singleSessionsGenerated: toRemaining(row.singleSessionsGenerated ?? 0, limits.singleSessionsGenerated),
     },
   };
 }
@@ -218,7 +225,7 @@ export async function checkAndEnforceLimit(
   // Orthogonal to tier — a "no AI Plans" SKU blocks generation regardless of the
   // tier's normal monthly allowance. A promo-code unlimited grant can still
   // override this (support may need to unlock it for a specific user).
-  if (feature === "trainingPlansGenerated" && !aiPlansEnabled) {
+  if (isAiPlansFeature(feature) && !aiPlansEnabled) {
     try {
       const { hasUnlimitedGrant } = await import("./coupon-service");
       if (await hasUnlimitedGrant(userId, feature)) {
@@ -231,7 +238,9 @@ export async function checkAndEnforceLimit(
       error: "ai_plans_not_included",
       feature,
       reason: "ai_plans_excluded",
-      message: "AI Training Plans aren't included in your current plan. Switch to a Lite or Standard plan with AI Plans to generate one.",
+      message: feature === "singleSessionsGenerated"
+        ? "AI-designed sessions are part of AI Plans, which isn't included in your current plan. Switch to a Lite or Standard plan with AI Plans to have your coach design one."
+        : "AI Training Plans aren't included in your current plan. Switch to a Lite or Standard plan with AI Plans to generate one.",
       upgradeRequired: true,
       isFreeUser: false,
       limit: 0,
@@ -272,7 +281,7 @@ export async function checkAndEnforceLimit(
 
   const yearMonth = currentYearMonth();
   const row = await storage.getMonthlyUsage(userId, yearMonth);
-  const current = row[feature] as number;
+  const current = (row[feature] as number | null | undefined) ?? 0;
 
   if (current + amount > limit) {
     const featureLabel = FEATURE_LABELS;
@@ -311,7 +320,13 @@ export const FEATURE_LABELS: Record<GatedFeature, string> = {
   trainingPlansGenerated: "AI Training Plans",
   routesGenerated: "Route generation",
   postRunAnalyses: "post-run AI analysis",
+  singleSessionsGenerated: "AI-designed sessions",
 };
+
+/** Features that belong to AI Plans: blocked on the *_noaiplan SKUs whatever the tier table says. */
+export function isAiPlansFeature(feature: GatedFeature): boolean {
+  return feature === "trainingPlansGenerated" || feature === "singleSessionsGenerated";
+}
 
 /**
  * Body for a feature whose allowance on the user's current plan is zero.
@@ -323,7 +338,11 @@ export function featureNotIncludedResponse(feature: GatedFeature, resolvedTier: 
   const isFreeTrial = resolvedTier === "free";
   const label = FEATURE_LABELS[feature];
   const message =
-    feature === "trainingPlansGenerated"
+    feature === "singleSessionsGenerated"
+      ? isFreeTrial
+        ? "AI-designed sessions aren't included in the free trial. Upgrade to a Lite or Standard plan with AI Plans to have your coach design one."
+        : "AI-designed sessions are part of AI Plans, which isn't included in your current plan. Switch to a Lite or Standard plan with AI Plans to have your coach design one."
+      : feature === "trainingPlansGenerated"
       ? isFreeTrial
         ? "AI Training Plans aren't included in the free trial. Upgrade to a Lite or Standard plan with AI Plans to have your coach build a programme around your goal."
         : "AI Training Plans aren't included in your current plan. Switch to a Lite or Standard plan with AI Plans to generate one."
@@ -331,7 +350,7 @@ export function featureNotIncludedResponse(feature: GatedFeature, resolvedTier: 
         ? `${label} isn't included in the free trial. Upgrade to a paid plan to unlock it.`
         : `${label} isn't included in your current plan. Upgrade to unlock it.`;
   return {
-    error: feature === "trainingPlansGenerated" ? "ai_plans_not_included" : "feature_not_included",
+    error: isAiPlansFeature(feature) ? "ai_plans_not_included" : "feature_not_included",
     feature,
     reason: isFreeTrial ? "free_trial" : "not_in_tier",
     message,

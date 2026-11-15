@@ -9,6 +9,14 @@ package live.airuncoach.airuncoach.util
 object RouteGenerationParamsHolder {
     private var params: RouteGenerationParams? = null
 
+    /**
+     * Session type / reps / plan-session answer picked on the setup screen for this routed run.
+     * Set every time Generate Routes is pressed (NONE for a free run) and read when the chosen
+     * route is started — kept separately because the route VM consumes [params] long before that.
+     */
+    var chosenSession: live.airuncoach.airuncoach.domain.model.ChosenSession =
+        live.airuncoach.airuncoach.domain.model.ChosenSession.NONE
+
     fun setParams(
         distance: Float,
         hasTime: Boolean,

@@ -228,6 +228,13 @@ fun workoutTypeLabel(type: String): String = when (type) {
     "long_run" -> "Long Run"
     "hill_repeats" -> "Hill Repeats"
     "recovery" -> "Recovery Run"
+    "threshold" -> "Threshold"
+    "fartlek" -> "Fartlek"
+    "race_pace" -> "Race Pace"
+    "walk_run" -> "Walk-Run"
+    "walk" -> "Walk"
+    "race" -> "Run Race Day"
+    "walk_race" -> "Walk Race Day"
     "rest" -> "Rest Day"
     "cross_training" -> "Cross Training"
     else -> type.replace("_", " ").replaceFirstChar { it.uppercase() }

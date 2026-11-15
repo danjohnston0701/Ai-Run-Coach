@@ -92,6 +92,8 @@ data class RunSession(
     val workoutType: String? = null, // "easy", "tempo", "intervals", "long_run", etc.
     val workoutIntensity: String? = null, // "z1", "z2", "z3", "z4", "z5"
     val workoutDescription: String? = null, // e.g., "Zone 2 aerobic building session"
+    // "count" / "leave_open" — see PlanSessionChoice / runs.plan_session_choice
+    val planSessionChoice: String? = null,
     
     // Group run context (if this run is part of a group run)
     val groupRunId: String? = null, // ID of the group run this run belongs to

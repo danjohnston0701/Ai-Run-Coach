@@ -104,11 +104,12 @@ import { runDistanceKm } from "./utils/run-units";
 import { rankGroupResults } from "./group-run-results";
 import realtimeCoachingRouter from "./real-time-coaching-integration";
 import { registerSessionCoachingRoutes } from "./routes-session-coaching";
+import { registerSingleSessionRoutes } from "./routes-single-sessions";
 import { registerRunEndTrimRoutes } from "./routes-run-end-trim";
 import { registerLifecycleEmailRoutes } from "./routes-lifecycle-emails";
 import { registerHowToVideoRoutes } from "./routes-how-to-videos";
 import { registerUserActivityRoutes, logUserActivity, clientPlatform } from "./user-activity";
-import { autoCompleteLinkedWorkout, enrichWeeksAfterOrientation } from "./plan-run-sync";
+import { autoCompleteLinkedWorkout, enrichWeeksAfterOrientation, normalizePlanSessionChoice } from "./plan-run-sync";
 import { createPlanJob, finishPlanJob, failPlanJob, getPlanJob, getGeneratingPlanJob } from "./plan-jobs";
 import { whileRunnerWaits } from "./plan-ai";
 import { recognizeRoute, updateKnownRoutes, dropMismatchedRouteContext } from "./route-recognition-service";
@@ -175,6 +176,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", googlePlayRouter); // Google Play RTDN (Pub/Sub push) — see routes-google-play.ts
   app.use("/api", guestTourRouter); // pre-login "Take a Tour" tracking — see routes-guest-tour.ts
   registerSessionCoachingRoutes(app);
+  registerSingleSessionRoutes(app); // one-off AI-designed sessions — see routes-single-sessions.ts
   registerRunEndTrimRoutes(app, transformRunForAndroid); // "forgot to stop" Run Summary trim
   registerLifecycleEmailRoutes(app); // welcome / trial reminder emails: unsubscribe + admin preview
   registerHowToVideoRoutes(app); // Connected Devices "watch the demo" videos
@@ -2665,6 +2667,9 @@ function transformRunForAndroid(run: any) {
       const sessionType = String(runData.sessionType ?? runData.activityType ?? "")
         .trim()
         .toLowerCase() === "walk" ? "walk" : "run";
+      // "count" / "leave_open": the runner's answer to "you have a plan session today" (see
+      // plan-run-sync.ts). Merged into a watch/duplicate row too, so the matcher always sees it.
+      const planSessionChoice = normalizePlanSessionChoice(runData.planSessionChoice ?? runData.plan_session_choice);
       
       // Validate required fields before processing
       // Support both iOS (distance_meters) and Android (distance in km) formats
@@ -3033,6 +3038,7 @@ function transformRunForAndroid(run: any) {
         // Transfer all plan context so the run is properly linked and the workout
         // can be marked complete (both server-side and in RunSummaryViewModel).
         if (runData.linkedWorkoutId   && !(garminDup as any).linkedWorkoutId)   c2Merge.linkedWorkoutId   = runData.linkedWorkoutId;
+        if (planSessionChoice && !(garminDup as any).planSessionChoice)        c2Merge.planSessionChoice = planSessionChoice;
         if (runData.linkedPlanId      && !(garminDup as any).linkedPlanId)      c2Merge.linkedPlanId      = runData.linkedPlanId;
         if (runData.workoutType       && !(garminDup as any).workoutType)       c2Merge.workoutType       = runData.workoutType;
         if (runData.workoutIntensity  && !(garminDup as any).workoutIntensity)  c2Merge.workoutIntensity  = runData.workoutIntensity;
@@ -3252,6 +3258,9 @@ function transformRunForAndroid(run: any) {
             if (runData.linkedPlanId && !(existingByExternalId as any).linkedPlanId) {
               mergeFields.linkedPlanId = runData.linkedPlanId;
             }
+            if (planSessionChoice && !(existingByExternalId as any).planSessionChoice) {
+              mergeFields.planSessionChoice = planSessionChoice;
+            }
             // Group run link — always merge if incoming has it and existing doesn't.
             // Critical: without this, a watch-run duplicate merge would lose the group run association.
             if (groupRunId && !(existingByExternalId as any).groupRunId) {
@@ -3335,6 +3344,9 @@ function transformRunForAndroid(run: any) {
           }
           if (runData.linkedPlanId && !(rapidDup as any).linkedPlanId) {
             c1Merge.linkedPlanId = runData.linkedPlanId;
+          }
+          if (planSessionChoice && !(rapidDup as any).planSessionChoice) {
+            c1Merge.planSessionChoice = planSessionChoice;
           }
           if (runData.workoutType && !(rapidDup as any).workoutType)             c1Merge.workoutType = runData.workoutType;
           if (runData.workoutIntensity && !(rapidDup as any).workoutIntensity)   c1Merge.workoutIntensity = runData.workoutIntensity;
@@ -3518,6 +3530,7 @@ function transformRunForAndroid(run: any) {
         powerSaverModeDetected: typeof runData.powerSaverModeDetected === 'boolean' ? runData.powerSaverModeDetected : false,
         // Group run link — must be explicit to survive the Drizzle type boundary
         groupRunId,
+        planSessionChoice,
         // Time-series arrays (graphs)
         heartRateData:            heartRateDataArr,
         cadenceData:              cadenceDataArr,
@@ -6469,7 +6482,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       const user = await storage.getUser(userId);
       
       // Validate feature name
-      const validFeatures = ["trainingPlansGenerated", "routesGenerated", "postRunAnalyses", "aiCoachingKm"];
+      const validFeatures = ["trainingPlansGenerated", "singleSessionsGenerated", "routesGenerated", "postRunAnalyses", "aiCoachingKm"];
       if (!validFeatures.includes(featureName)) {
         return res.status(400).json({ 
           error: "Invalid feature name",
@@ -6515,12 +6528,12 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       const notIncluded = !isUnlimited && limit === 0;
       let notIncludedInfo: { reason: string; message: string } | null = null;
       if (notIncluded) {
-        const aiPlansExcluded = gated === "trainingPlansGenerated" && user?.aiPlansEnabled === false;
+        const aiPlansExcluded = (gated === "trainingPlansGenerated" || gated === "singleSessionsGenerated") && user?.aiPlansEnabled === false;
         const resolvedTier = resolveEffectiveTier(user?.subscriptionTier, user?.trialExpiresAt ?? null, user?.createdAt ?? null);
         const body = featureNotIncludedResponse(gated, resolvedTier);
         notIncludedInfo = {
           reason: aiPlansExcluded ? "ai_plans_excluded" : body.reason,
-          message: aiPlansExcluded
+          message: aiPlansExcluded && gated === "trainingPlansGenerated"
             ? "AI Training Plans aren't included in your current plan. Switch to a Lite or Standard plan with AI Plans to generate one."
             : body.message,
         };

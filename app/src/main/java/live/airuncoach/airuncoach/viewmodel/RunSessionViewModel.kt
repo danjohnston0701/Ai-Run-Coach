@@ -683,6 +683,7 @@ class RunSessionViewModel @Inject constructor(
                     cfg.planGoalType?.let   { g  -> putExtra(RunTrackingService.EXTRA_PLAN_GOAL_TYPE, g) }
                     cfg.planWeekNumber?.let { w  -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
                     cfg.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
+                    putSessionTypeExtras(this, cfg)
                 }
                 // Group run context — a watch-started run never goes through startRun() (the
                 // watch's "start" reaches the service directly), so this is the only chance to
@@ -690,7 +691,7 @@ class RunSessionViewModel @Inject constructor(
                 // participant never appeared in the group results.
                 groupRunId?.let { grId -> putExtra(RunTrackingService.EXTRA_GROUP_RUN_ID, grId) }
                 // Legacy session-instructions JSON not passed (retired) — only the rich dynamic plan is used.
-                activeSessionCoachingPlan?.let { plan ->
+                (activeSessionCoachingPlan ?: runConfig?.let { selfConfiguredPlanFor(it) })?.let { plan ->
                     try {
                         putExtra(RunTrackingService.EXTRA_DYNAMIC_COACHING_PLAN_JSON, gson.toJson(plan))
                     } catch (e: Exception) {
@@ -1430,6 +1431,41 @@ class RunSessionViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The runner's open plan session today, for the "count it / leave it open" prompt. Returns
+     * null on any failure or after 4 s — the run must never be blocked by this check.
+     */
+    suspend fun fetchOpenPlanSessionToday(): live.airuncoach.airuncoach.network.model.OpenPlanSessionTodayResponse? =
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                apiService.getOpenPlanSessionToday(java.time.LocalDate.now().toString())
+            }
+        } catch (e: Exception) {
+            Log.w("RunSessionViewModel", "Open plan session check failed (non-fatal): ${e.message}")
+            null
+        }
+
+    /**
+     * Setup-screen session type + plan-session choice for the service. The chosen type only
+     * applies to a run with no plan workout — a plan / one-off session carries its own type.
+     */
+    private fun putSessionTypeExtras(intent: Intent, cfg: RunSetupConfig) {
+        if (cfg.workoutId == null) {
+            cfg.chosenWorkoutType?.let { intent.putExtra(RunTrackingService.EXTRA_CHOSEN_WORKOUT_TYPE, it) }
+        }
+        cfg.planSessionChoice?.let { intent.putExtra(RunTrackingService.EXTRA_PLAN_SESSION_CHOICE, it) }
+    }
+
+    /** "Configure session" reps → a local coaching plan the phase engine runs (free runs only). */
+    private fun selfConfiguredPlanFor(cfg: RunSetupConfig): live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan? {
+        if (cfg.workoutId != null) return null
+        val structure = cfg.manualStructure?.takeIf { it.isValid() } ?: return null
+        val type = SessionTypes.byKey(cfg.chosenWorkoutType)?.takeIf { it.kind == SessionKind.REPS } ?: return null
+        if (user == null) loadUser()
+        val maxHr = user?.age?.toInt()?.takeIf { it in 14..90 }?.let { HeartRateZones.getMaxHeartRate(it) }
+        return SelfConfiguredSessionPlan.build(type, structure, maxHr)
+    }
+
     fun setRunConfig(config: RunSetupConfig) {
         // Reset the cancelled flag when setting a new config - allows a new run attempt
         isSetupCancelled = false
@@ -1859,13 +1895,14 @@ class RunSessionViewModel @Inject constructor(
                     it.planGoalType?.let { g -> putExtra(RunTrackingService.EXTRA_PLAN_GOAL_TYPE, g) }
                     it.planWeekNumber?.let { w -> putExtra(RunTrackingService.EXTRA_PLAN_WEEK_NUMBER, w) }
                     it.planTotalWeeks?.let { total -> putExtra(RunTrackingService.EXTRA_PLAN_TOTAL_WEEKS, total) }
+                    putSessionTypeExtras(this, it)
                 }
                 // Pass group run context if present
                 groupRunId?.let { grId -> putExtra(RunTrackingService.EXTRA_GROUP_RUN_ID, grId) }
                 // Legacy session-instructions JSON is no longer passed — retired in favour of
                 // the rich dynamic coaching plan (prepare-coaching) only.
                 // Pass rich dynamic coaching plan (prepare-coaching) — enables reactive trigger evaluation
-                activeSessionCoachingPlan?.let { plan ->
+                (activeSessionCoachingPlan ?: runConfig?.let { selfConfiguredPlanFor(it) })?.let { plan ->
                     try {
                         val planJson = gson.toJson(plan)
                         putExtra(RunTrackingService.EXTRA_DYNAMIC_COACHING_PLAN_JSON, planJson)

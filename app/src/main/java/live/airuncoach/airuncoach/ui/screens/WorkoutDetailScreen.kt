@@ -1,5 +1,8 @@
 package live.airuncoach.airuncoach.ui.screens
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import live.airuncoach.airuncoach.util.SINGLE_SESSION_GOAL_TYPE
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -83,6 +86,25 @@ fun WorkoutDetailScreen(
         ?: 190  // Tanaka fallback for unknown age
     // Drive watch send state from ViewModel (supports async prepare-coaching flow)
     val watchSendState by runSessionViewModel.watchSendState.collectAsState()
+    // "You have a plan session today" prompt state (one-off AI sessions only)
+    val detailScope = rememberCoroutineScope()
+    var planSessionClash by remember { mutableStateOf<live.airuncoach.airuncoach.network.model.OpenPlanSessionTodayResponse?>(null) }
+    var pendingPlanSessionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var isCheckingPlanSession by remember { mutableStateOf(false) }
+    planSessionClash?.workout?.let { planWorkout ->
+        live.airuncoach.airuncoach.ui.components.PlanSessionChoiceDialog(
+            planSession = planWorkout,
+            planGoalType = planSessionClash?.goalType,
+            onChoice = { choice ->
+                WorkoutHolder.planSessionChoice = choice
+                val action = pendingPlanSessionAction
+                planSessionClash = null
+                pendingPlanSessionAction = null
+                action?.invoke()
+            },
+            onDismiss = { planSessionClash = null; pendingPlanSessionAction = null },
+        )
+    }
     LaunchedEffect(Unit) { runSessionViewModel.resetWatchSendState() }
 
     // ── Live Tracking observer invites (same picker as the free-run setup screen) ──
@@ -715,6 +737,27 @@ fun WorkoutDetailScreen(
                     commitLiveTrackingSelection()
                     onStartWorkout(workout)
                 }
+                // One-off AI session on a day with an open plan session: ask whether it counts
+                // for the plan session first (WorkoutHolder.planSessionChoice → the saved run).
+                val isSingleSession = WorkoutHolder.planContext?.goalType == SINGLE_SESSION_GOAL_TYPE
+                val withPlanSessionCheck: (() -> Unit) -> Unit = { action ->
+                    if (!isSingleSession || isCheckingPlanSession) {
+                        if (!isSingleSession) action()
+                    } else {
+                        isCheckingPlanSession = true
+                        detailScope.launch {
+                            val open = runSessionViewModel.fetchOpenPlanSessionToday()
+                            isCheckingPlanSession = false
+                            if (open?.workout != null) {
+                                planSessionClash = open
+                                pendingPlanSessionAction = action
+                            } else {
+                                WorkoutHolder.planSessionChoice = null
+                                action()
+                            }
+                        }
+                    }
+                }
 
                 // Watch connected: "Send to {brand} Watch" (primary filled) with
                 // "Start on Phone" (secondary outlined) below it, full width.
@@ -729,7 +772,7 @@ fun WorkoutDetailScreen(
                                 sendState = watchSendState,
                                 isPrimary = true,
                                 isSamsungWatch = connectedWatchIsSamsung,
-                                onPrepare = onPrepareWatch
+                                onPrepare = { withPlanSessionCheck(onPrepareWatch) }
                             )
                         }
                         Box(modifier = Modifier.fillMaxWidth()) {
@@ -737,13 +780,13 @@ fun WorkoutDetailScreen(
                                 text = "Start on Phone",
                                 leadingIconRes = R.drawable.icon_play_vector,
                                 enabled = canStart,
-                                onClick = onStartPhone
+                                onClick = { withPlanSessionCheck(onStartPhone) }
                             )
                         }
                     }
                 } else {
                     Button(
-                        onClick = onStartPhone,
+                        onClick = { withPlanSessionCheck(onStartPhone) },
                         enabled = canStart,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         colors = ButtonDefaults.buttonColors(

@@ -455,6 +455,12 @@ export const runs = pgTable("runs", {
   // { status: "dismissed" } once they choose to keep the run as recorded.
   endTrim: jsonb("end_trim"),
 
+  // The runner's answer to "You have a plan session today — should this count?" (asked when
+  // they start a one-off AI session or a typed free run on a day with an open plan session).
+  // "count" = also complete today's plan session; "leave_open" = never auto-match this run to
+  // a plan session (server/plan-run-sync.ts). null = not asked, normal same-day matching.
+  planSessionChoice: text("plan_session_choice"),
+
   // Where the session was recorded: "phone" | "apple_watch" | "garmin_watch" | "wear_os_watch" |
   // "phone_apple_watch" | "phone_garmin_watch" | "phone_wear_os_watch" | "strava_import".
   // Sent by the clients; inferred server-side otherwise (server/utils/run-derivation.ts).
@@ -2108,6 +2114,8 @@ export const monthlyUsage = pgTable("monthly_usage", {
   trainingPlansGenerated: integer("training_plans_generated").notNull().default(0),
   routesGenerated: integer("routes_generated").notNull().default(0),
   postRunAnalyses: integer("post_run_analyses").notNull().default(0),
+  // One-off AI-designed sessions (server/routes-single-sessions.ts)
+  singleSessionsGenerated: integer("single_sessions_generated").notNull().default(0),
   // Features for which the "approaching your monthly limit" email has already gone out
   // this month (values are TierLimits keys) — sent at most once per feature per month.
   // See usage-service.ts maybeSendUsageAlert().

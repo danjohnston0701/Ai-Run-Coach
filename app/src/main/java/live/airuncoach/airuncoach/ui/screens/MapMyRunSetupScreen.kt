@@ -34,6 +34,16 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
+import kotlinx.coroutines.launch
+import live.airuncoach.airuncoach.domain.model.ChosenSession
+import live.airuncoach.airuncoach.domain.model.SessionKind
+import live.airuncoach.airuncoach.domain.model.SessionTypes
+import live.airuncoach.airuncoach.domain.model.withChosenSession
+import live.airuncoach.airuncoach.network.model.OpenPlanSessionTodayResponse
+import live.airuncoach.airuncoach.ui.components.ConfigureSessionCard
+import live.airuncoach.airuncoach.ui.components.ManualStructureDraft
+import live.airuncoach.airuncoach.ui.components.PlanSessionChoiceDialog
+import live.airuncoach.airuncoach.ui.components.SessionTypePickerRow
 import live.airuncoach.airuncoach.domain.model.RunSetupConfig
 import live.airuncoach.airuncoach.ui.dialogs.FriendPickerDialog
 import live.airuncoach.airuncoach.ui.components.OutlinedCtaButton
@@ -84,8 +94,9 @@ fun MapMyRunSetupScreen(
         latitude: Double,
         longitude: Double,
         aiCoachEnabled: Boolean,
-        activityType: String
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+        activityType: String,
+        session: ChosenSession
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
     onStartRunWithoutRoute: (
         distance: Float,
         targetTimeEnabled: Boolean,
@@ -98,8 +109,9 @@ fun MapMyRunSetupScreen(
         groupRunParticipants: List<String>,
         activityType: String,
         isWatchMode: Boolean,
-        aiCoachEnabled: Boolean
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _ -> },
+        aiCoachEnabled: Boolean,
+        session: ChosenSession
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
     /** Opens the "Run with AI Run Coach on Your Garmin" install screen. */
     onGetGarminWatchApp: () -> Unit = {}
 ) {
@@ -129,8 +141,41 @@ fun MapMyRunSetupScreen(
     val friendsState by friendsViewModel.friendsState.collectAsState()
 
     // Minor metadata
-    val defaultActivityMode = if (initialSessionType.equals("walk", ignoreCase = true)) ActivityMode.WALK else ActivityMode.RUN
-    var activityMode by remember { mutableStateOf(defaultActivityMode) }
+    // Session type (replaces the RUN / WALK toggle). Run vs walk follows the type picked.
+    var sessionOption by remember {
+        mutableStateOf(SessionTypes.defaultFor(PhysicalActivityType.fromString(initialSessionType)))
+    }
+    val activityMode = if (sessionOption.activity == PhysicalActivityType.WALK) ActivityMode.WALK else ActivityMode.RUN
+    val isRepSession = sessionOption.kind == SessionKind.REPS
+    // Optional "Configure session" reps (rep types only).
+    var configureSession by remember { mutableStateOf(false) }
+    var structureDraft by remember { mutableStateOf(ManualStructureDraft.defaultFor(sessionOption.key)) }
+    // "You have a plan session today" — asked before a typed (non-free) session starts.
+    val setupScope = rememberCoroutineScope()
+    var clashCheck by remember { mutableStateOf<OpenPlanSessionTodayResponse?>(null) }
+    var pendingStart by remember { mutableStateOf<((String?) -> Unit)?>(null) }
+    var isCheckingPlan by remember { mutableStateOf(false) }
+    fun chosenSession(choice: String?) = ChosenSession(
+        workoutType = sessionOption.key,
+        structure = if (isRepSession && configureSession) structureDraft.toStructure() else null,
+        planSessionChoice = choice,
+    )
+    /** Runs [action] with the runner's plan-session choice, asking first when it applies. */
+    fun withPlanSessionCheck(action: (String?) -> Unit) {
+        if (sessionOption.kind == SessionKind.FREE) { action(null); return }
+        if (isCheckingPlan) return
+        isCheckingPlan = true
+        setupScope.launch {
+            val open = runSessionViewModel.fetchOpenPlanSessionToday()
+            isCheckingPlan = false
+            if (open?.workout != null) {
+                clashCheck = open
+                pendingStart = action
+            } else {
+                action(null)
+            }
+        }
+    }
 
     // Core inputs
     val targetDistanceDecimals = remember { SessionManager(context).targetDistanceDecimals() }
@@ -290,18 +335,40 @@ fun MapMyRunSetupScreen(
 
             item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
-            // Compact mode toggle (Run/Walk) — minor metadata
+            // Session type picker (Free Run / Free Walk / Intervals / Tempo / Race Day …)
             item {
-                CompactModeRow(
-                    mode = activityMode,
-                    onModeChanged = { activityMode = it }
+                SessionTypePickerRow(
+                    selected = sessionOption,
+                    onSelected = {
+                        if (it.key != sessionOption.key || it.activity != sessionOption.activity) {
+                            sessionOption = it
+                            configureSession = false
+                            structureDraft = ManualStructureDraft.defaultFor(it.key)
+                        }
+                    },
+                    // Group runs share one distance, so only the free types make sense there.
+                    options = if (isGroupRun) SessionTypes.all.filter { it.kind == SessionKind.FREE } else SessionTypes.all,
                 )
+            }
+
+            if (isRepSession) {
+                item { Spacer(modifier = Modifier.height(Spacing.md)) }
+                item {
+                    ConfigureSessionCard(
+                        typeLabel = sessionOption.label,
+                        enabled = configureSession,
+                        onEnabledChange = { configureSession = it },
+                        draft = structureDraft,
+                        onDraftChange = { structureDraft = it },
+                    )
+                }
             }
 
             item { Spacer(modifier = Modifier.height(Spacing.xl)) }
 
             // Target distance — HIDE for group runs (distance is already set in group run record)
-            if (!isGroupRun) {
+            // and for rep sessions (the reps, not a distance, define the session).
+            if (!isGroupRun && !isRepSession) {
                 item {
                     TargetDistanceCard(
                         distance = targetDistance,
@@ -321,7 +388,7 @@ fun MapMyRunSetupScreen(
             }
 
             // Target time — same function, more compact / less heavy
-            item {
+            if (!isRepSession) item {
                 CompactTargetTimeSection(
                     isEnabled = isTargetTimeEnabled,
                     onEnabledChange = {
@@ -337,7 +404,7 @@ fun MapMyRunSetupScreen(
                 )
             }
 
-            item { Spacer(modifier = Modifier.height(Spacing.lg)) }
+            if (!isRepSession) item { Spacer(modifier = Modifier.height(Spacing.lg)) }
 
             // AI Coach toggle
             item {
@@ -392,6 +459,22 @@ fun MapMyRunSetupScreen(
             // contentPadding handles bottom clearance above the fixed CTA bar
         }
 
+        clashCheck?.let { open ->
+            open.workout?.let { planWorkout ->
+                PlanSessionChoiceDialog(
+                    planSession = planWorkout,
+                    planGoalType = open.goalType,
+                    onChoice = { choice ->
+                        val action = pendingStart
+                        clashCheck = null
+                        pendingStart = null
+                        action?.invoke(choice)
+                    },
+                    onDismiss = { clashCheck = null; pendingStart = null },
+                )
+            }
+        }
+
         // Bottom CTA — single, clean action. Removes “Prepare → Start” gating.
         Box(
             modifier = Modifier
@@ -418,7 +501,7 @@ fun MapMyRunSetupScreen(
                         leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                             R.drawable.icon_location_vector else null,
                         enabled = canProceed,
-                        onClick = {
+                        onClick = { withPlanSessionCheck { planChoice ->
                             currentLocation?.let { (lat, lng) ->
                                 // Flush any typed-but-not-confirmed observer email, mirroring
                                 // the no-route Prepare Run flush below.
@@ -442,10 +525,11 @@ fun MapMyRunSetupScreen(
                                     lat,
                                     lng,
                                     isAiCoachEnabled,
-                                    if (activityMode == ActivityMode.WALK) "WALK" else "RUN"
+                                    if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
+                                    chosenSession(planChoice)
                                 )
                             }
-                        }
+                        } }
                     )
                 } else {
                     // no_route mode: conditional layout based on watch availability
@@ -462,7 +546,7 @@ fun MapMyRunSetupScreen(
                                     sendState = watchSendState,
                                     isPrimary = true,
                                     isSamsungWatch = connectedWatchIsSamsung,
-                                    onPrepare = {
+                                    onPrepare = { withPlanSessionCheck { planChoice ->
                                         watchSendState = WatchSendState.SENDING
 
                                         // Auto-flush any pending email before building config
@@ -493,7 +577,7 @@ fun MapMyRunSetupScreen(
                                             isGroupRun = isGroupRunEnabled,
                                             groupRunParticipants = groupRunParticipants,
                                             isWatchMode = true
-                                        )
+                                        ).withChosenSession(chosenSession(planChoice))
                                         // Set config BEFORE preparing watch so that
                                         // prepareRunOnWatch() reads the correct sessionType
                                         runSessionViewModel.setRunConfig(config)
@@ -501,7 +585,7 @@ fun MapMyRunSetupScreen(
 
                                         // Prepare watch — now reads correct activityType from runConfig
                                         runSessionViewModel.prepareRunOnWatch(
-                                            distanceKm = targetDistance,
+                                            distanceKm = if (isRepSession) 0f else targetDistance,
                                             runType = "free"
                                         )
                                         watchSendState = WatchSendState.SENT
@@ -518,9 +602,10 @@ fun MapMyRunSetupScreen(
                                             groupRunParticipants,
                                             if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
                                             true,  // isWatchMode — navigate to the watch-standby run screen
-                                            isAiCoachEnabled
+                                            isAiCoachEnabled,
+                                            chosenSession(planChoice)
                                         )
-                                    }
+                                    } }
                                 )
                             }
 
@@ -535,8 +620,8 @@ fun MapMyRunSetupScreen(
                                     },
                                     leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                                         R.drawable.icon_navigation_vector else null,
-                                    enabled = canProceed && !runState.isStopping,
-                                    onClick = {
+                                    enabled = canProceed && !runState.isStopping && !isCheckingPlan,
+                                    onClick = { withPlanSessionCheck { planChoice ->
                                         // Auto-flush any pending email before building config
                                         val phonePending = liveTrackingPendingEmail.trim()
                                         val phoneObservers = if (phonePending.contains("@") && phonePending.isNotEmpty()
@@ -564,7 +649,7 @@ fun MapMyRunSetupScreen(
                                             liveTrackingObservers = phoneObservers,
                                             isGroupRun = isGroupRunEnabled,
                                             groupRunParticipants = groupRunParticipants
-                                        )
+                                        ).withChosenSession(chosenSession(planChoice))
                                         runSessionViewModel.setRunConfig(config)
                                         runSessionViewModel.fetchWellnessData()
 
@@ -580,9 +665,10 @@ fun MapMyRunSetupScreen(
                                             groupRunParticipants,
                                             if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
                                             false,  // isWatchMode — phone starts tracking immediately
-                                            isAiCoachEnabled
+                                            isAiCoachEnabled,
+                                            chosenSession(planChoice)
                                         )
-                                    }
+                                    } }
                                 )
                             }
                         }
@@ -596,8 +682,8 @@ fun MapMyRunSetupScreen(
                             },
                             leadingIconRes = if (hasLocationPermission && currentLocation != null && !isGettingLocation)
                                 R.drawable.icon_navigation_vector else null,
-                            enabled = canProceed && !runState.isStopping,
-                            onClick = {
+                            enabled = canProceed && !runState.isStopping && !isCheckingPlan,
+                            onClick = { withPlanSessionCheck { planChoice ->
                                 // Auto-flush any email the user typed but didn't confirm with ✓
                                 val trimmedPending = liveTrackingPendingEmail.trim()
                                 val finalObservers = if (trimmedPending.contains("@") && trimmedPending.isNotEmpty()
@@ -625,7 +711,7 @@ fun MapMyRunSetupScreen(
                                     liveTrackingObservers = finalObservers,
                                     isGroupRun = isGroupRunEnabled,
                                     groupRunParticipants = groupRunParticipants
-                                )
+                                ).withChosenSession(chosenSession(planChoice))
                                 runSessionViewModel.setRunConfig(config)
                                 runSessionViewModel.fetchWellnessData()
 
@@ -641,9 +727,10 @@ fun MapMyRunSetupScreen(
                                     groupRunParticipants,
                                     if (activityMode == ActivityMode.WALK) "WALK" else "RUN",
                                     false,  // isWatchMode — phone starts tracking immediately
-                                    isAiCoachEnabled
+                                    isAiCoachEnabled,
+                                    chosenSession(planChoice)
                                 )
-                            }
+                            } }
                         )
                     }
                 }

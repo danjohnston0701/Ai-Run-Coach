@@ -426,6 +426,16 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.recording_source",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS recording_source TEXT",
     },
+    {
+      // One-off AI sessions + typed free runs (2026-11-15). Canonical copy:
+      // migrations/20261115_single_sessions.sql
+      name: "runs.plan_session_choice",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS plan_session_choice TEXT",
+    },
+    {
+      name: "monthly_usage.single_sessions_generated",
+      sql: "ALTER TABLE monthly_usage ADD COLUMN IF NOT EXISTS single_sessions_generated INTEGER NOT NULL DEFAULT 0",
+    },
 
     // ── live_run_sessions — columns added after initial table creation ────────
     // These columns exist in shared/schema.ts but may be missing from the DB if

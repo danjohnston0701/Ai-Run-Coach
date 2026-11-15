@@ -249,6 +249,7 @@ class SyncWorker(
                 planProgressWeek = run.planProgressWeek,
                 planProgressWeeks = run.planProgressWeeks,
                 workoutType = run.workoutType,
+                planSessionChoice = run.planSessionChoice,
                 workoutIntensity = run.workoutIntensity,
                 workoutDescription = run.workoutDescription,
                 // Group run link — without it a queued retry uploads unlinked and the runner

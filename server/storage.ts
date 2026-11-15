@@ -187,7 +187,7 @@ export interface IStorage {
 
   // Monthly Usage Tracking
   getMonthlyUsage(userId: string, yearMonth: string): Promise<MonthlyUsage>;
-  incrementUsage(userId: string, yearMonth: string, updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses'>>): Promise<MonthlyUsage>;
+  incrementUsage(userId: string, yearMonth: string, updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses' | 'singleSessionsGenerated'>>): Promise<MonthlyUsage>;
   markUsageAlertSent(userId: string, yearMonth: string, feature: string): Promise<void>;
 
   // Interest Registrations
@@ -1534,7 +1534,7 @@ export class DatabaseStorage implements IStorage {
   async incrementUsage(
     userId: string,
     yearMonth: string,
-    updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses'>>
+    updates: Partial<Pick<MonthlyUsage, 'aiCoachingKm' | 'trainingPlansGenerated' | 'routesGenerated' | 'postRunAnalyses' | 'singleSessionsGenerated'>>
   ): Promise<MonthlyUsage> {
     // Ensure the row exists
     await this.getMonthlyUsage(userId, yearMonth);
@@ -1552,6 +1552,9 @@ export class DatabaseStorage implements IStorage {
     }
     if (updates.postRunAnalyses !== undefined) {
       setClause.postRunAnalyses = sql`${monthlyUsage.postRunAnalyses} + ${updates.postRunAnalyses}`;
+    }
+    if (updates.singleSessionsGenerated !== undefined) {
+      setClause.singleSessionsGenerated = sql`${monthlyUsage.singleSessionsGenerated} + ${updates.singleSessionsGenerated}`;
     }
 
     const [updated] = await db.update(monthlyUsage)

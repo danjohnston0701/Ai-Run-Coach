@@ -26,6 +26,9 @@ object RunNaming {
         "intervals" to "Intervals",
         "short_interval" to "Intervals",
         "park_run" to "parkrun",
+        // Setup-screen race-day picks (SessionTypes) — server/iOS have the same entries.
+        "race" to "Race Day",
+        "walk_race" to "Walk Race Day",
         "pre_race_shakeout" to "Pre-Race Shakeout",
     )
 

@@ -386,6 +386,9 @@ const PLAN_WORKOUT_NAMES: Record<string, string> = {
   short_interval: "Intervals",
   park_run: "parkrun",
   pre_race_shakeout: "Pre-Race Shakeout",
+  // Setup-screen race-day picks (Android SessionTypes / iOS SessionTypes.swift).
+  race: "Race Day",
+  walk_race: "Walk Race Day",
 };
 
 /** Words that already make a name read as a session; anything else gets " Run" appended. */

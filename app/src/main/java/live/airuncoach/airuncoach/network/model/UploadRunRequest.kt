@@ -130,4 +130,7 @@ data class UploadRunRequest(
     // Where the session was recorded: "phone" | "phone_garmin_watch" | "phone_wear_os_watch"
     // (runs.recording_source; the server infers it when absent, e.g. SyncWorker retries).
     val recordingSource: String? = null,
+    // "count" / "leave_open": whether this run also completes today's open plan session
+    // (server/plan-run-sync.ts). Null = not asked.
+    val planSessionChoice: String? = null,
 )

@@ -439,7 +439,7 @@ export async function sendUsageThresholdAlert(opts: {
   email: string;
   name: string;
   tier: string;
-  feature: "aiCoachingKm" | "trainingPlansGenerated" | "routesGenerated" | "postRunAnalyses";
+  feature: "aiCoachingKm" | "trainingPlansGenerated" | "routesGenerated" | "postRunAnalyses" | "singleSessionsGenerated";
   used: number;
   limit: number;
   yearMonth: string;
@@ -453,6 +453,7 @@ export async function sendUsageThresholdAlert(opts: {
     trainingPlansGenerated: "AI training plans",
     routesGenerated: "AI route generations",
     postRunAnalyses: "AI post-run summaries",
+    singleSessionsGenerated: "AI-designed sessions",
   };
   const label = featureLabel[opts.feature];
   const unit = opts.feature === "aiCoachingKm" ? " km" : "";

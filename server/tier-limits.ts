@@ -14,6 +14,14 @@ export interface TierLimits {
   routesGenerated: number;
   /** Maximum post-run AI analyses triggered per calendar month. */
   postRunAnalyses: number;
+  /**
+   * Maximum one-off AI-designed sessions per calendar month (server/routes-single-sessions.ts).
+   * A separate allowance from trainingPlansGenerated so a one-off never uses up the month's
+   * plan. Part of AI Plans: zero on the free trial and on every *_noaiplan SKU. Spent when the
+   * AI designs the session, not when it is run. Starting values (2026-11-15) are a guess —
+   * tune them from the "[SingleSession] cost" log lines.
+   */
+  singleSessionsGenerated: number;
 }
 
 // ── Per-tier limits ───────────────────────────────────────────────────────────
@@ -33,6 +41,7 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
     trainingPlansGenerated: 0,     // Not available on free trial — paid plans only
     routesGenerated: 0,            // Not available on free trial — paid plans only
     postRunAnalyses: 15,           // 15 AI post-run summaries per month during the trial
+    singleSessionsGenerated: 0,    // AI Plans only — not on the free trial
   },
   // Hard block applied server-side when trial_expires_at is in the past for a free user.
   // All limits are 0 — every feature request is rejected with a 402 upgrade required.
@@ -41,30 +50,35 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
     trainingPlansGenerated: 0,
     routesGenerated: 0,
     postRunAnalyses: 0,
+    singleSessionsGenerated: 0,
   },
   lite: {
     aiCoachingKm: 100,
     trainingPlansGenerated: 1,
     routesGenerated: 10,
     postRunAnalyses: 20,
+    singleSessionsGenerated: 5,
   },
   lite_noaiplan: {
     aiCoachingKm: 50,
     trainingPlansGenerated: 0,
     routesGenerated: 10,
     postRunAnalyses: 15,
+    singleSessionsGenerated: 0,
   },
   standard: {
     aiCoachingKm: 400,
     trainingPlansGenerated: 3,
     routesGenerated: 30,
     postRunAnalyses: 75,
+    singleSessionsGenerated: 15,
   },
   standard_noaiplan: {
     aiCoachingKm: 200,
     trainingPlansGenerated: 0,
     routesGenerated: 30,
     postRunAnalyses: 50,
+    singleSessionsGenerated: 0,
   },
 };
 

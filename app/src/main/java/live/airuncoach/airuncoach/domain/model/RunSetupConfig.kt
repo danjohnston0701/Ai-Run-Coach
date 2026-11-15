@@ -57,7 +57,18 @@ data class RunSetupConfig(
     // wait in standby on the RunSessionScreen without auto-starting GPS tracking.
     // The watch fires a "start" command via the Garmin companion which triggers
     // the RunTrackingService to begin — the phone UI then syncs to that.
-    val isWatchMode: Boolean = false
+    val isWatchMode: Boolean = false,
+
+    // ── Session type picked on the setup screen (no plan workout) ────────────────
+    // SessionTypes key ("intervals", "tempo", "race", …); null = Free Run / Free Walk. Drives the
+    // in-run coaching rules for that type and is saved as the run's workout_type. Ignored when
+    // workoutId is set — a plan / one-off session carries its own workoutType.
+    val chosenWorkoutType: String? = null,
+    // Optional "Configure session" reps for a REPS type → SelfConfiguredSessionPlan.
+    val manualStructure: ManualSessionStructure? = null,
+    // "count" / "leave_open" — the runner's answer to "you have a plan session today"
+    // (PlanSessionChoice). null = not asked; the server matches the run to a plan session as usual.
+    val planSessionChoice: String? = null,
 ) {
     /**
      * Get formatted target time string
