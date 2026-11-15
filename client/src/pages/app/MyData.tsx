@@ -2,19 +2,20 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Brain, CloudSun, Medal, Trophy } from "lucide-react";
+import { Brain, CloudSun, Footprints, Heart, HeartPulse, Medal, Mountain, Trophy, Zap } from "lucide-react";
 import { api } from "@/lib/queryClient";
 import { useAuth } from "@/lib/auth";
 import type { PersonalBest } from "@/lib/types";
 import { fmtClock, fmtDate, fmtHuman, fmtMs, fmtPace, titleCase } from "@/lib/format";
 import { Panel, PageHeader, Pill, SectionTitle, Segmented, Skeleton, StatTile } from "@/components/app/kit";
-import { ChartCard, TrendChart } from "@/components/app/charts";
+import { ChartCard } from "@/components/app/charts";
+import { TrendCard } from "@/components/app/TrendCard";
 
 const PERIODS = [
-  { value: 30, label: "1M" },
-  { value: 90, label: "3M" },
-  { value: 180, label: "6M" },
-  { value: 365, label: "1Y" },
+  { value: 30, label: "1M", long: "1 month" },
+  { value: 90, label: "3M", long: "3 months" },
+  { value: 180, label: "6M", long: "6 months" },
+  { value: 365, label: "1Y", long: "1 year" },
 ];
 
 const PB_ORDER = ["1K", "Mile", "5K", "10K", "Half Marathon", "Marathon"];
@@ -133,9 +134,98 @@ function WeatherImpact({ userId }: { userId: string }) {
   );
 }
 
+const TYPE_LABELS: Record<string, string> = {
+  easy_run: "Easy Run",
+  easy: "Easy Run",
+  long_run: "Long Run",
+  tempo: "Tempo",
+  intervals: "Intervals",
+  hill_repeats: "Hill Repeats",
+  recovery: "Recovery",
+  other: "Other",
+};
+
+function CoachingSummary({ cs }: { cs: any }) {
+  if (!cs?.hasCoachingSessions || !cs.sessionsThisPeriod) {
+    return (
+      <Panel className="panel-pad text-sm text-ink-3">
+        No coaching plan sessions in this period. Start a training plan to see insights here.
+      </Panel>
+    );
+  }
+  const ib = cs.intensityBreakdown ?? { easy: 0, moderate: 0, hard: 0 };
+  const total = (ib.easy ?? 0) + (ib.moderate ?? 0) + (ib.hard ?? 0);
+  const trend = String(cs.progressionTrend ?? "STABLE").toUpperCase();
+  const [trendIcon, trendColor] = trend === "IMPROVING" ? ["↗", "#00E676"] : trend === "DECLINING" ? ["↘", "#FF9800"] : ["→", "#00D4FF"];
+  const types = Object.entries(cs.workoutTypeBreakdown ?? {}).sort((a: any, b: any) => b[1] - a[1]) as [string, number][];
+  return (
+    <Panel className="panel-pad space-y-5">
+      <div className="grid grid-cols-3 gap-3">
+        <StatTile label="Sessions" value={cs.sessionsThisPeriod} tone="cyan" size="sm" />
+        <StatTile label="Avg / week" value={Number(cs.avgWeeklyCoachingSessions ?? 0).toFixed(1)} tone="plain" size="sm" />
+        <StatTile label="Target hit" value={`${Math.round(cs.targetAchievementRate ?? 0)}%`} tone="green" size="sm" />
+        <StatTile label="Avg pace" value={cs.avgPaceDisplay && cs.avgPaceDisplay !== "--" ? String(cs.avgPaceDisplay).replace(/\s*\/km$/, "") : "—"} unit={cs.avgPaceDisplay && cs.avgPaceDisplay !== "--" ? "/km" : undefined} tone="plain" size="sm" />
+        <StatTile label="Distance" value={Number(cs.totalDistanceKm ?? 0).toFixed(1)} unit="km" tone="plain" size="sm" />
+        <StatTile label="All time" value={cs.totalSessions} unit="sessions" tone="plain" size="sm" />
+      </div>
+      <div className="flex items-start gap-3 rounded-xl border border-line bg-surface-2/50 p-4">
+        <span className="text-2xl leading-none" style={{ color: trendColor }}>
+          {trendIcon}
+        </span>
+        <div>
+          <div className="text-sm font-semibold text-ink">Progression</div>
+          <p className="mt-0.5 text-sm text-ink-2">{cs.progressionNote}</p>
+        </div>
+      </div>
+      {total > 0 && (
+        <div>
+          <div className="mb-2 text-sm font-semibold text-ink">Intensity mix</div>
+          <div className="flex h-3 overflow-hidden rounded-full">
+            {[
+              [ib.easy, "#4CAF50"],
+              [ib.moderate, "#FF9800"],
+              [ib.hard, "#FF5252"],
+            ].map(([v, c], i) => ((v as number) > 0 ? <div key={i} style={{ width: `${((v as number) / total) * 100}%`, background: c as string }} /> : null))}
+          </div>
+          <div className="mt-2 flex gap-4 text-xs text-ink-2">
+            <span>● <span className="text-[#4CAF50]">Easy</span> {ib.easy}</span>
+            <span>● <span className="text-[#FF9800]">Moderate</span> {ib.moderate}</span>
+            <span>● <span className="text-[#FF5252]">Hard</span> {ib.hard}</span>
+          </div>
+        </div>
+      )}
+      <div>
+        <div className="mb-2 text-sm font-semibold text-ink">Session types</div>
+        {types.length ? (
+          <div className="flex flex-wrap gap-2">
+            {types.map(([k, n]) => (
+              <span key={k} className="rounded-full border border-line bg-surface-2/60 px-3 py-1 text-xs text-ink-2">
+                {TYPE_LABELS[k] ?? titleCase(k)} <span className="num ml-1 font-semibold text-ink">{n}</span>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-ink-3">No session type data available.</p>
+        )}
+      </div>
+      {cs.bestCoachingRun && (
+        <Link href={`/runs/${cs.bestCoachingRun.runId}`} className="flex items-center justify-between rounded-xl border border-amber/30 bg-amber/5 p-4 hover:border-amber/60">
+          <div>
+            <div className="text-sm font-semibold text-amber">⭐ Best coached run</div>
+            <div className="mt-0.5 text-sm text-ink-2">{fmtDate(cs.bestCoachingRun.date)}</div>
+          </div>
+          <div className="num text-right text-sm text-ink">
+            {Number(cs.bestCoachingRun.distanceKm).toFixed(2)} km · {cs.bestCoachingRun.pace}/km
+          </div>
+        </Link>
+      )}
+    </Panel>
+  );
+}
+
 export default function MyData() {
   const { userId } = useAuth();
-  const [days, setDays] = useState(90);
+  const [days, setDays] = useState(30);
   const [exclude, setExclude] = useState(false);
   const ex = `excludeCoachingPlan=${exclude}`;
   const pbs = useMyData<{ personalBests: PersonalBest[] }>(`/api/my-data/personal-bests?${ex}`, ["pbs", exclude]);
@@ -149,7 +239,12 @@ export default function MyData() {
   const at = allTime.data;
   const s = stats.data;
   const t = trends.data;
-  const cs = coaching.data;
+  const periodLabel = PERIODS.find((p) => p.value === days)?.long ?? "";
+
+  // HR zone gridlines, as the app draws them: max = observed max (at least 185 bpm).
+  const hrMax = Math.max(185, ...((t?.hrTrend ?? []) as any[]).map((p) => Number(p.value) || 0));
+  const zoneLines = [0.6, 0.7, 0.8, 0.9].map((f, i) => ({ value: Math.trunc(f * hrMax), label: `Z${i + 2}` }));
+  const anyTrend = t && ["aerobicEfficiencyTrend", "paceTrend", "hrTrend", "cadenceTrend", "elevationTrend"].some((k) => (t[k] ?? []).length > 0);
 
   return (
     <div className="space-y-8">
@@ -164,11 +259,24 @@ export default function MyData() {
         }
       />
 
+      {/* AI coach's review */}
+      {profile.data?.profile && (
+        <Panel className="panel-pad border-brand/30 bg-gradient-to-br from-brand/[0.07] to-transparent">
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <Brain className="h-4 w-4 text-brand" /> Your coach’s review
+            </span>
+          </SectionTitle>
+          <p className="whitespace-pre-line text-sm leading-relaxed text-ink-2">{profile.data.profile}</p>
+          {profile.data.updatedAt && <p className="mt-3 text-xs text-ink-3">Updated {fmtDate(profile.data.updatedAt)}</p>}
+        </Panel>
+      )}
+
       {/* PBs */}
       <section>
         <SectionTitle>
           <span className="flex items-center gap-2">
-            <Trophy className="h-4 w-4 text-amber" /> Personal bests
+            <Trophy className="h-4 w-4 text-amber" /> Personal records
           </span>
         </SectionTitle>
         {pbs.isLoading ? (
@@ -193,7 +301,7 @@ export default function MyData() {
 
       {/* All time */}
       <section>
-        <SectionTitle>All time</SectionTitle>
+        <SectionTitle>All-time achievements</SectionTitle>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <StatTile label="Runs" value={at?.totalRuns ?? "—"} tone="cyan" />
           <StatTile label="Distance" value={at ? Math.round(at.totalDistanceKm).toLocaleString() : "—"} unit="km" tone="green" />
@@ -208,69 +316,79 @@ export default function MyData() {
 
       {/* Period */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-ink sm:text-lg">Trends</h2>
+        <div className="sticky top-14 z-20 -mx-4 flex items-center justify-between gap-3 bg-root/85 px-4 py-2 backdrop-blur lg:top-0">
+          <h2 className="text-base font-semibold text-ink sm:text-lg">Performance trends · {periodLabel}</h2>
           <Segmented value={days} onChange={setDays} options={PERIODS} />
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <StatTile label="Runs" value={s?.totalRuns ?? "—"} tone="plain" size="sm" />
-          <StatTile label="Distance" value={s ? Number(s.totalDistance).toFixed(1) : "—"} unit="km" tone="plain" size="sm" />
-          <StatTile label="Average pace" value={s?.averagePace ? String(s.averagePace).replace("/km", "") : "—"} unit="/km" tone="plain" size="sm" />
-          <StatTile label="Consistency" value={s?.consistencyScore ?? "—"} unit="/100" tone="plain" size="sm" hint={s?.totalDuration ? `${fmtHuman(s.totalDuration / 1000)} running` : undefined} />
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <ChartCard title="Average pace" subtitle="Faster is higher">
-            {t?.paceTrend?.length > 1 ? <TrendChart data={t.paceTrend.map((p: any) => ({ date: p.date, value: p.value * 60 }))} invert format={(v) => fmtPace(v)} unit="/km" /> : <Empty loading={trends.isLoading} />}
-          </ChartCard>
-          <ChartCard title="Heart rate">{t?.hrTrend?.length > 1 ? <TrendChart data={t.hrTrend} color="#ff5252" unit="bpm" /> : <Empty loading={trends.isLoading} />}</ChartCard>
-          <ChartCard title="Cadence">{t?.cadenceTrend?.length > 1 ? <TrendChart data={t.cadenceTrend} color="#8b7cf6" unit="spm" /> : <Empty loading={trends.isLoading} />}</ChartCard>
-          <ChartCard title="Aerobic efficiency" subtitle="Speed per heartbeat — higher is fitter">
-            {t?.aerobicEfficiencyTrend?.length > 1 ? <TrendChart data={t.aerobicEfficiencyTrend} color="#00e676" format={(v) => v.toFixed(1)} /> : <Empty loading={trends.isLoading} />}
-          </ChartCard>
-        </div>
+        {trends.isLoading ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Skeleton className="h-72" />
+            <Skeleton className="h-72" />
+          </div>
+        ) : !anyTrend ? (
+          <Panel className="panel-pad text-sm text-ink-3">No run data for this period. Complete a run to see your trends!</Panel>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            {(t.aerobicEfficiencyTrend ?? []).length >= 2 && (
+              <TrendCard
+                title="Aerobic efficiency"
+                icon={<HeartPulse className="h-4 w-4 text-danger" />}
+                points={t.aerobicEfficiencyTrend}
+                days={days}
+                unit=""
+                note="km/h at 100 bpm — higher = fitter. Rises as your aerobic base develops."
+              />
+            )}
+            {(t.paceTrend ?? []).length > 0 && (
+              <TrendCard
+                title="Avg pace"
+                icon={<Zap className="h-4 w-4 text-amber" />}
+                points={t.paceTrend.map((p: any) => ({ date: p.date, value: p.value * 60 }))}
+                days={days}
+                unit="/km"
+                invert
+                format={(v) => fmtPace(v)}
+              />
+            )}
+            {(t.hrTrend ?? []).length > 0 && (
+              <TrendCard title="Avg heart rate" icon={<Heart className="h-4 w-4 text-danger" />} points={t.hrTrend} days={days} unit=" bpm" gradient={false} format={(v) => String(Math.round(v))} zoneLines={zoneLines} />
+            )}
+            {(t.cadenceTrend ?? []).length > 0 && (
+              <TrendCard title="Avg cadence" icon={<Footprints className="h-4 w-4 text-violet" />} points={t.cadenceTrend} days={days} unit=" spm" format={(v) => String(Math.round(v))} />
+            )}
+            {(t.elevationTrend ?? []).length > 0 && (
+              <TrendCard title="Elevation gain" icon={<Mountain className="h-4 w-4 text-amber" />} points={t.elevationTrend} days={days} unit=" m" gradient={false} format={(v) => String(Math.round(v))} />
+            )}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <SectionTitle>Statistics · {periodLabel}</SectionTitle>
+        {s ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatTile label="Runs" value={s.totalRuns} tone="cyan" size="sm" />
+            <StatTile label="Distance" value={Number(s.totalDistance).toFixed(1)} unit="km" tone="green" size="sm" />
+            <StatTile label="Longest" value={Number(s.longestRun ?? 0).toFixed(1)} unit="km" tone="violet" size="sm" />
+            <StatTile label="Avg pace" value={s.averagePace ? String(s.averagePace).replace("/km", "") : "—"} unit="/km" tone="orange" size="sm" />
+            <StatTile label="Avg cadence" value={s.averageCadence || "—"} unit={s.averageCadence ? "spm" : undefined} tone="plain" size="sm" />
+            <StatTile label="Avg HR" value={s.averageHeartRate || "—"} unit={s.averageHeartRate ? "bpm" : undefined} tone="red" size="sm" />
+            <StatTile label="Elevation" value={Math.round(s.totalElevationGain ?? 0)} unit="m" tone="amber" size="sm" />
+            <StatTile label="Total calories" value={Number(s.totalCalories ?? 0).toLocaleString()} tone="plain" size="sm" />
+            <StatTile label="Consistency" value={`${Math.round(s.consistencyScore ?? 0)}%`} tone="plain" size="sm" hint={s.totalDuration ? `${fmtHuman(s.totalDuration / 1000)} running` : undefined} />
+          </div>
+        ) : (
+          <Skeleton className="h-40" />
+        )}
+      </section>
+
+      <section>
+        <SectionTitle>Coaching plan summary · {periodLabel}</SectionTitle>
+        {coaching.data ? <CoachingSummary cs={coaching.data} /> : <Skeleton className="h-40" />}
       </section>
 
       {userId && <FitnessChart userId={userId} />}
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Panel className="panel-pad">
-          <SectionTitle>
-            <span className="flex items-center gap-2">
-              <Brain className="h-4 w-4 text-brand" /> What your coach knows about you
-            </span>
-          </SectionTitle>
-          {profile.data?.profile ? (
-            <>
-              <p className="whitespace-pre-line text-sm leading-relaxed text-ink-2">{profile.data.profile}</p>
-              {profile.data.updatedAt && <p className="mt-3 text-xs text-ink-3">Updated {fmtDate(profile.data.updatedAt)}</p>}
-            </>
-          ) : (
-            <p className="text-sm text-ink-3">{profile.isLoading ? "Loading…" : "Your coach builds this profile as you run."}</p>
-          )}
-        </Panel>
-        <Panel className="panel-pad">
-          <SectionTitle>AI coaching sessions</SectionTitle>
-          {cs ? (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <StatTile label="Sessions (period)" value={cs.sessionsThisPeriod} tone="cyan" size="sm" />
-                <StatTile label="All time" value={cs.totalSessions} tone="plain" size="sm" />
-                <StatTile label="Target hit rate" value={Math.round(cs.targetAchievementRate ?? 0)} unit="%" tone="green" size="sm" />
-                <StatTile label="Per week" value={Number(cs.avgWeeklyCoachingSessions ?? 0).toFixed(1)} tone="plain" size="sm" />
-              </div>
-              {cs.progressionNote && <p className="mt-4 text-sm text-ink-2">{cs.progressionNote}</p>}
-            </>
-          ) : (
-            <Skeleton className="h-32" />
-          )}
-        </Panel>
-      </div>
-
       {userId && <WeatherImpact userId={userId} />}
     </div>
   );
-}
-
-function Empty({ loading }: { loading?: boolean }) {
-  return <div className="grid h-[180px] place-items-center text-sm text-ink-3">{loading ? "Loading…" : "Not enough runs in this period."}</div>;
 }
