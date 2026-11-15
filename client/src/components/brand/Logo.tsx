@@ -6,7 +6,7 @@ export function Logo({ compact = false, className }: { compact?: boolean; classN
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <img src="/marketing/app-icon.png" alt="" width={compact ? 28 : 34} height={compact ? 28 : 34} className="rounded-[9px] shadow-[0_0_24px_-4px_rgba(0,212,255,0.6)]" />
       <span className={cn("font-bold tracking-tight text-ink", compact ? "text-[15px]" : "text-[17px]")}>
-        Ai Run <span className="text-gradient">Coach</span>
+        Ai Run Coach
       </span>
     </span>
   );
