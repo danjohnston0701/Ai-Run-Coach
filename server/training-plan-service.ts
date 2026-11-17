@@ -5,11 +5,12 @@
  * Plans are tailored to user's fitness level, goals, and current training load.
  */
 
+import { trialWeeksToGenerate, isPlanCapped } from "./plan-trial-cap";
 import { parseWeightKg } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
 import { db } from "./db";
 import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations, sessionInstructions, coachingSessionEvents } from "@shared/schema";
-import { eq, and, desc, gte } from "drizzle-orm";
+import { eq, and, desc, gte, isNotNull } from "drizzle-orm";
 import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
 import { generateSessionInstructions } from "./session-coaching-service";
@@ -526,7 +527,8 @@ export async function generateTrainingPlan(
   overrideGender: string | null = null,
   overrideHeight: number | null = null,  // cm
   overrideWeight: number | null = null,  // kg
-  isPreEventPlan: boolean = false  // true = experienced runner doing a pre-race sharpening block
+  isPreEventPlan: boolean = false,  // true = experienced runner doing a pre-race sharpening block
+  trialSessionCap: number | null = null  // free trial: only this many sessions unlocked, no later blocks (plan-trial-cap.ts)
 ): Promise<string> {
   try {
     // Get user profile
@@ -775,7 +777,10 @@ export async function generateTrainingPlan(
     // weeksUntilTarget is the FULL plan duration (stored in totalWeeks).
     // weeksToGenerate is how many weeks we actually ask OpenAI to produce in this call.
     const blockSize = getBlockSize(daysPerWeek);
-    const weeksToGenerate = Math.min(blockSize, weeksUntilTarget);
+    // Free trial: just enough weeks to hold the free sessions (the rest wait for AI Plans).
+    const weeksToGenerate = trialSessionCap != null
+      ? Math.min(blockSize, weeksUntilTarget, trialWeeksToGenerate(trialSessionCap, daysPerWeek))
+      : Math.min(blockSize, weeksUntilTarget);
     const isRollingPlan = weeksUntilTarget > weeksToGenerate;
 
     console.log(`[Training Plan] Duration: durationWeeks=${durationWeeks}, targetDate=${targetDate}, calculated weeksUntilTarget=${weeksUntilTarget}, blockSize=${blockSize}, weeksToGenerate=${weeksToGenerate}`);
@@ -1652,6 +1657,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
         status: "active",
         aiGenerated: true,
         generatedThroughWeek: weeksToGenerate,  // how many weeks are actually in the DB now
+        trialSessionCap,                         // free-trial cap (null = full plan)
         nextBlockAt,                             // when to generate the next block (null if full plan already generated)
         safetyDisclaimer: safetyDisclaimerJson,  // AI-generated safety/medical disclaimer for injured athletes
         injuriesAtCreation: injuries.length > 0 ? JSON.stringify(injuries) : null,  // Store injuries used at plan creation
@@ -1893,11 +1899,48 @@ App capabilities available in every session: real-time GPS pace/distance, live a
  * Uses the athlete's actual run data since block 1 was generated, plus a
  * summary of the previous block, so each new block genuinely adapts to growth.
  */
+// Plans with a next block being generated on this instance. Lifting a trial cap and the
+// app-start check (checkAndGeneratePendingBlocks) can both ask for the same block at once.
+const nextBlockInFlight = new Set<string>();
+
 export async function generateNextBlock(planId: string, userId: string): Promise<void> {
+  if (nextBlockInFlight.has(planId)) {
+    console.log(`[NextBlock] Plan ${planId} already has a block being generated — skipping`);
+    return;
+  }
+  nextBlockInFlight.add(planId);
+  try {
+    await generateNextBlockInner(planId, userId);
+  } finally {
+    nextBlockInFlight.delete(planId);
+  }
+}
+
+async function generateNextBlockInner(planId: string, userId: string): Promise<void> {
   // ── 1. Load plan + existing weeks ──────────────────────────────────────────
   const [plan] = await db.select().from(trainingPlans).where(eq(trainingPlans.id, planId));
   if (!plan) throw new Error(`Plan ${planId} not found`);
   if (plan.status !== 'active') throw new Error(`Plan ${planId} is not active`);
+  // Free-trial plan: the rest is generated only once the runner has AI Plans. nextBlockAt is
+  // left as it is, so the normal triggers pick it up straight after they upgrade.
+  if (plan.trialSessionCap != null) {
+    if (await isPlanCapped(plan)) {
+      console.log(`[NextBlock] Plan ${planId} is a free-trial plan (first ${plan.trialSessionCap} sessions) — next block waits for AI Plans`);
+      return;
+    }
+    // Upgraded since: lift the cap (activePlanCap claims it atomically). If another request
+    // lifted it first, that request is generating this block.
+    const claimed = await db
+      .update(trainingPlans)
+      .set({ trialSessionCap: null })
+      .where(and(eq(trainingPlans.id, planId), isNotNull(trainingPlans.trialSessionCap)))
+      .returning({ id: trainingPlans.id });
+    if (claimed.length === 0) {
+      console.log(`[NextBlock] Plan ${planId}'s trial cap was lifted by another request — it generates the block`);
+      return;
+    }
+    console.log(`[NextBlock] Plan ${planId}: runner has AI Plans now, trial cap lifted`);
+  }
   if (plan.generatedThroughWeek == null) {
     console.log(`[NextBlock] Plan ${planId} is a legacy plan (all weeks already generated) — skipping`);
     return;

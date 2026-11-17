@@ -117,6 +117,7 @@ import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-re
 import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime, defaultRunName } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
 import { parseGoalDate } from "./utils/parse-goal-date";
+import { capForNewPlan, isWorkoutLocked, lockedWorkoutIdsForPlan, activePlanCap, PLAN_SESSION_LOCKED, TRIAL_PLAN_SESSION_CAP } from "./plan-trial-cap";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -17036,6 +17037,17 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
 
       // ── Tier limit check ─────────────────────────────────────────────────
       const planUser = await storage.getUser(userId);
+      // Free trial: a plan is capped to its first sessions (plan-trial-cap.ts). Only apps that
+      // show the locked weeks send supportsTrialCap; older ones keep the "not in the free
+      // trial" answer rather than showing sessions they'd then be refused.
+      if (
+        planUser &&
+        req.body.supportsTrialCap !== true &&
+        resolveEffectiveTier(planUser.subscriptionTier, planUser.trialExpiresAt, planUser.createdAt) === "free" &&
+        (await capForNewPlan(userId)) != null
+      ) {
+        return res.status(403).json(featureNotIncludedResponse("trainingPlansGenerated", "free"));
+      }
       const planAllowed = await checkAndEnforceLimit(res, userId, planUser?.subscriptionTier, "trainingPlansGenerated", 1, planUser?.trialExpiresAt ?? null, planUser?.createdAt ?? null, planUser?.aiPlansEnabled ?? true);
       if (!planAllowed) return;
 
@@ -17182,6 +17194,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           safeWeight,
           // Plan intent: pre-event sharpening vs building up
           isPreEventPlan === true,
+          // Free trial: only the first sessions are generated and unlocked (plan-trial-cap.ts)
+          await capForNewPlan(userId),
         );
 
         // Link plan to goal if goalId was provided
@@ -17301,8 +17315,10 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             )
           );
 
+        const trialSessionCap = await activePlanCap(plan);
         return {
           ...plan,
+          trialSessionCap,
           totalWorkouts: totalWorkouts[0]?.count || 0,
           completedWorkouts: completedWorkouts[0]?.count || 0
         };
@@ -17332,6 +17348,12 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         return res.status(404).json({ error: "Training plan not found" });
       }
       
+      // Free-trial cap: lifted here if the runner has AI Plans now (and the rest generated).
+      const trialSessionCap = await activePlanCap(plan[0]);
+      const lockedIds = trialSessionCap == null
+        ? new Set<string>()
+        : await lockedWorkoutIdsForPlan({ ...plan[0], trialSessionCap });
+
       // Get weeks
       const weeks = await db
         .select()
@@ -17350,10 +17372,21 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           
           return {
             ...week,
-            workouts
+            workouts: workouts.map((w) => ({ ...w, locked: lockedIds.has(w.id) })),
           };
         })
       );
+
+      // What the apps need to show the cap: free sessions, how many are done, locked count.
+      const allWorkouts: Array<{ locked: boolean; isCompleted: boolean | null; workoutType: string | null }> =
+        weeksWithWorkouts.flatMap((w) => w.workouts as any[]);
+      const trialCap = trialSessionCap == null ? null : {
+        freeSessions: trialSessionCap,
+        freeSessionsCompleted: allWorkouts.filter((w) => !w.locked && w.isCompleted && (w.workoutType ?? "").toLowerCase() !== "rest").length,
+        lockedSessions: lockedIds.size,
+        lockedWeeks: Math.max(0, plan[0].totalWeeks - (plan[0].generatedThroughWeek ?? plan[0].totalWeeks)),
+        message: `Your free trial includes the first ${trialSessionCap} sessions of this plan. Upgrade to a plan with AI Plans to unlock all ${plan[0].totalWeeks} weeks.`,
+      };
       
       // ── Baseline performance data ──────────────────────────────────────────
       // Fetch native AI Run Coach runs only (Garmin data excluded — legal constraint)
@@ -17464,8 +17497,9 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       }
       
       res.json({
-        plan: plan[0],
+        plan: { ...plan[0], trialSessionCap },
         weeks: weeksWithWorkouts,
+        trialCap,
         performanceBaseline
       });
     } catch (error: any) {
@@ -18004,7 +18038,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         .limit(1);
 
       if (todaysWorkouts.length > 0) {
-        return res.json({ workout: todaysWorkouts[0], isToday: true, isOverdue: false });
+        // locked: past a free-trial plan's free sessions (plan-trial-cap.ts)
+        return res.json({ workout: { ...todaysWorkouts[0], locked: await isWorkoutLocked(todaysWorkouts[0].id) }, isToday: true, isOverdue: false });
       }
 
       // 2. No workout today — look for the most recent overdue (incomplete, scheduled before today)
@@ -18018,7 +18053,7 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         .limit(1);
 
       if (overdueWorkouts.length > 0) {
-        return res.json({ workout: overdueWorkouts[0], isToday: false, isOverdue: true });
+        return res.json({ workout: { ...overdueWorkouts[0], locked: await isWorkoutLocked(overdueWorkouts[0].id) }, isToday: false, isOverdue: true });
       }
 
       // 3. Rest day — no workout today and nothing overdue

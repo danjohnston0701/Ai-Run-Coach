@@ -20,6 +20,7 @@ import { runs, trainingPlans, weeklyPlans, plannedWorkouts, sessionInstructions 
 import { eq, and, desc, lt, inArray, ne, sql } from "drizzle-orm";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { checkAndGeneratePendingBlocks } from "./training-plan-service";
+import { isWorkoutLocked } from "./plan-trial-cap";
 
 // ── Enrich weeks 1-2 once the orientation session is done ────────────────
 // Every way an orientation can become complete must call this — auto-complete from a saved
@@ -144,7 +145,9 @@ export async function findSameDayOpenSession(run: any, explicit: boolean): Promi
       ne(plannedWorkouts.workoutType, "orientation"),
       sql`${plannedWorkouts.scheduledDate}::date = ${runDate}::date`,
     ));
-  const fits = explicit ? candidates : candidates.filter(w =>
+  const unlocked = [];
+  for (const c of candidates) if (!(await isWorkoutLocked(c.id))) unlocked.push(c);
+  const fits = explicit ? unlocked : unlocked.filter(w =>
     (!isWalk(run) || String(w.workoutType).includes("walk")) &&
     (w.distance == null || km >= w.distance * 0.5));
   if (fits.length === 0) return null;
@@ -194,6 +197,8 @@ async function completeWorkoutRow(wid: string, runId: string, userId: string): P
   const [pw] = await db.select().from(plannedWorkouts).where(eq(plannedWorkouts.id, wid)).limit(1);
   // A skipped workout (completed, no run) that the runner then did anyway gets the run.
   if (!pw || ((pw as any).isCompleted && (pw as any).completedRunId)) return;
+  // A free-trial plan's locked session is never completed by a run (plan-trial-cap.ts).
+  if (await isWorkoutLocked(wid)) return;
 
   await db.update(plannedWorkouts)
     .set({ isCompleted: true, completedRunId: runId })

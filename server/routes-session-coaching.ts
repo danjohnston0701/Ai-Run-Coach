@@ -18,6 +18,7 @@ import {
 } from "./session-coaching-service";
 import { AuthenticatedRequest } from "./types";
 import { authMiddleware } from "./auth";
+import { isWorkoutLocked, PLAN_SESSION_LOCKED } from "./plan-trial-cap";
 
 export function registerSessionCoachingRoutes(app: Express) {
   /**
@@ -365,6 +366,11 @@ export function registerSessionCoachingRoutes(app: Express) {
         // sessionType — passed by Android to indicate if this is a "run" or "walk" session
         // Used to generate walk-specific pre-run briefing and coaching language
         const sessionType: string = req.body?.sessionType ?? "run";
+
+        // A free-trial plan's sessions past its free ones are locked (plan-trial-cap.ts).
+        if (await isWorkoutLocked(workoutId)) {
+          return res.status(403).json(PLAN_SESSION_LOCKED);
+        }
 
         const plan = await getOrGenerateSessionCoaching({
           userId,

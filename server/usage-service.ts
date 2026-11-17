@@ -8,6 +8,9 @@
 import { Response } from "express";
 import { storage } from "./storage";
 import { getLimitsForTier, TierLimits, USAGE_ALERT_THRESHOLD, FREE_TRIAL_DAYS } from "./tier-limits";
+import { db } from "./db";
+import { monthlyUsage } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 // ── Trial expiry helpers ──────────────────────────────────────────────────────
 
@@ -97,6 +100,28 @@ export function currentYearMonth(): string {
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
+/**
+ * Free-trial allowances that cover the whole trial instead of resetting each calendar month.
+ * A 30-day trial usually crosses a month boundary, which would otherwise double them (and a
+ * second plan would mean a second set of free plan sessions). AI coaching km and post-run
+ * summaries stay monthly, as designed.
+ */
+export const WHOLE_TRIAL_FEATURES = ["trainingPlansGenerated", "routesGenerated", "singleSessionsGenerated"] as const;
+
+function isWholeTrialFeature(feature: string): boolean {
+  return (WHOLE_TRIAL_FEATURES as readonly string[]).includes(feature);
+}
+
+/** Usage summed over every month on record; for a trial user that is the whole trial. */
+async function usageAcrossAllMonths(userId: string): Promise<Record<string, number>> {
+  const rows = await db.select().from(monthlyUsage).where(eq(monthlyUsage.userId, userId));
+  const totals: Record<string, number> = {};
+  for (const r of rows as any[]) {
+    for (const f of WHOLE_TRIAL_FEATURES) totals[f] = (totals[f] ?? 0) + (Number(r[f]) || 0);
+  }
+  return totals;
+}
+
 export interface UsageWithLimits {
   yearMonth: string;
   tier: string;
@@ -139,10 +164,14 @@ export async function getUsageWithLimits(
   aiPlansEnabled: boolean = true
 ): Promise<UsageWithLimits> {
   const yearMonth = currentYearMonth();
-  const row = await storage.getMonthlyUsage(userId, yearMonth);
+  const monthRow = await storage.getMonthlyUsage(userId, yearMonth);
 
   // Resolve effective tier — "trial_expired" if free user's window has closed
   const resolvedTier = effectiveTier(tier, trialExpiresAt, createdAt);
+  // Trial: plans / routes / one-off sessions are counted across the whole trial.
+  const row: typeof monthRow = resolvedTier === "free"
+    ? { ...monthRow, ...(await usageAcrossAllMonths(userId)) }
+    : monthRow;
   // getLimitsForTier() returns a direct reference into the shared TIER_LIMITS record —
   // never mutate it in place. Copy before applying the aiPlansEnabled override.
   const limits: TierLimits = { ...getLimitsForTier(resolvedTier, aiPlansEnabled) };
@@ -281,7 +310,9 @@ export async function checkAndEnforceLimit(
 
   const yearMonth = currentYearMonth();
   const row = await storage.getMonthlyUsage(userId, yearMonth);
-  const current = (row[feature] as number | null | undefined) ?? 0;
+  const current = resolvedTier === "free" && isWholeTrialFeature(feature)
+    ? ((await usageAcrossAllMonths(userId))[feature] ?? 0)
+    : ((row[feature] as number | null | undefined) ?? 0);
 
   if (current + amount > limit) {
     const featureLabel = FEATURE_LABELS;

@@ -32,11 +32,13 @@ export interface TierLimits {
 // open (trial_expires_at in the future). Once it has passed, the server enforces
 // "trial_expired" (all zeros).
 //
-// Since 2026-11-18 the trial includes a taste of the AI Plans features (one plan, a few
-// routes and one-off sessions). Before that they were 0, so trial users never saw the
+// Since 2026-11-18 the trial includes a taste of the AI Plans features: one plan with only its
+// first 4 sessions unlocked (server/plan-trial-cap.ts), a few routes and one-off sessions.
+// Plans, routes and one-off sessions count across the whole trial, not per month
+// (WHOLE_TRIAL_FEATURES in usage-service.ts). Before that they were 0, so trial users never saw the
 // features the paid plans are for: of 50 sign-ups 2026-10-01..11-18, every one who tried to
 // build a plan was refused, none generated a route, and none paid. A 30-day trial can span
-// two calendar months, so the most a trial user can get is twice these numbers.
+// two calendar months, which is why those three count across the whole trial.
 //
 // LITE / STANDARD — the "with AI Plans" SKUs. The "no AI Plans" SKUs of the same tier
 // (users.ai_plans_enabled = false) use the *_noaiplan entries below, which keep the
@@ -44,7 +46,7 @@ export interface TierLimits {
 export const TIER_LIMITS: Record<string, TierLimits> = {
   free: {
     aiCoachingKm: 50,              // 50 km of AI-coached running per month during the trial
-    trainingPlansGenerated: 0,     // TEMP 0 until the 4-session trial cap ships (2026-11-18)
+    trainingPlansGenerated: 1,     // One plan per trial, first 4 sessions unlocked (plan-trial-cap.ts)
     routesGenerated: 5,            // A few AI routes
     postRunAnalyses: 15,           // 15 AI post-run summaries per month during the trial
     singleSessionsGenerated: 2,    // A couple of one-off AI-designed sessions

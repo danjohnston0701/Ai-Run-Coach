@@ -15,6 +15,7 @@
 // Allowance: singleSessionsGenerated (server/tier-limits.ts), AI Plans tiers only, spent when
 // the session is designed. Opening or running a designed session again costs nothing.
 
+import { isWorkoutLocked } from "./plan-trial-cap";
 import type { Express, Response } from "express";
 import { db } from "./db";
 import { runs, users, trainingPlans, weeklyPlans, plannedWorkouts } from "@shared/schema";
@@ -75,9 +76,10 @@ export async function findOpenPlanSessionOn(userId: string, date: string) {
       eq(plannedWorkouts.isCompleted, false),
       ne(plannedWorkouts.workoutType, "rest"),
       sql`${plannedWorkouts.scheduledDate}::date = ${date}::date`,
-    ))
-    .limit(1);
-  return rows[0] ?? null;
+    ));
+  // Never offer a free-trial plan's locked session (plan-trial-cap.ts).
+  for (const r of rows) if (!(await isWorkoutLocked(r.workout.id))) return r;
+  return null;
 }
 
 export function registerSingleSessionRoutes(app: Express): void {

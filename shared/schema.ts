@@ -1489,6 +1489,9 @@ export const trainingPlans = pgTable("training_plans", {
   // enrichedThroughWeek: how many weeks have been enriched with real pace/HR targets.
   // null = legacy plan (no enrichment architecture); 2 = weeks 1-2 enriched; etc.
   enrichedThroughWeek: integer("enriched_through_week"),
+  // Free-trial plan: only the first N non-rest sessions are unlocked and later blocks aren't
+  // generated until the runner has AI Plans (server/plan-trial-cap.ts). NULL = no cap.
+  trialSessionCap: integer("trial_session_cap"),
   // Injury/safety — populated by AI when active injuries are present at plan creation time.
   // Stored as a JSON string: { medicalClearanceRequired, prerequisiteChecks, stopCriteria, progressionGates, disclaimer }
   safetyDisclaimer: text("safety_disclaimer"),

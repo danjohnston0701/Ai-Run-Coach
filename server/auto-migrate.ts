@@ -25,6 +25,13 @@ export async function runAutoMigrations(): Promise<void> {
       name: "runs.gps_filter_stats",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS gps_filter_stats JSONB",
     },
+    // training_plans.trial_session_cap — a plan made on the free trial has only its first N
+    // sessions unlocked (server/plan-trial-cap.ts). NULL = no cap. Must exist before anything
+    // selects from training_plans, since the column is in the Drizzle schema.
+    {
+      name: "training_plans.trial_session_cap",
+      sql: "ALTER TABLE training_plans ADD COLUMN IF NOT EXISTS trial_session_cap INTEGER",
+    },
     // planned_workouts.session_type — added to shared/schema.ts for walk/run workout
     // classification but the DB migration was never applied. Without this, any
     // db.select().from(plannedWorkouts) (e.g. plan reassessment after a run save)
