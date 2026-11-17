@@ -44,7 +44,7 @@ export interface TierLimits {
 export const TIER_LIMITS: Record<string, TierLimits> = {
   free: {
     aiCoachingKm: 50,              // 50 km of AI-coached running per month during the trial
-    trainingPlansGenerated: 1,     // One AI training plan, so the runner sees what they'd pay for
+    trainingPlansGenerated: 0,     // TEMP 0 until the 4-session trial cap ships (2026-11-18)
     routesGenerated: 5,            // A few AI routes
     postRunAnalyses: 15,           // 15 AI post-run summaries per month during the trial
     singleSessionsGenerated: 2,    // A couple of one-off AI-designed sessions
