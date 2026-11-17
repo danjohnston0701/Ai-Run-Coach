@@ -123,7 +123,7 @@ fun TodayWorkoutCard(
                     PlanStatChip(R.drawable.icon_heart_vector, zoneLabel)
                 }
                 // Row 3: Pace (if available)
-                workout.targetPace?.let { raw ->
+                workout.displayTargetPace?.let { raw ->
                     val paceValue = raw.replace("/km", "").trim()
                     PlanStatChip(R.drawable.icon_timer_vector, "$paceValue min/km")
                 }

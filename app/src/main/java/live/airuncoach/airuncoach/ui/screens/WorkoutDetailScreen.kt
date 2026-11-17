@@ -356,7 +356,7 @@ fun WorkoutDetailScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(Spacing.md)
                 ) {
-                    workout.targetPace?.let {
+                    workout.displayTargetPace?.let {
                         WorkoutStatCard(label = "Target Pace", value = it, icon = R.drawable.icon_timer_vector, modifier = Modifier.weight(1f))
                     }
                 }
@@ -488,10 +488,12 @@ fun WorkoutDetailScreen(
                                 Spacer(modifier = Modifier.height(Spacing.sm))
                                 Text("What it feels like:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
                                 Text(baseInfo.description, style = AppTextStyles.small, color = Colors.textSecondary)
-                                if (!workout.targetPace.isNullOrBlank()) {
+                                // restTargetPace, not targetPace: on rep sessions targetPace is the
+                                // whole-session average, which is neither the warm-up nor the recovery pace.
+                                if (!workout.restTargetPace.isNullOrBlank()) {
                                     Spacer(modifier = Modifier.height(Spacing.sm))
                                     Text("Pace guidance:", style = AppTextStyles.small.copy(fontWeight = FontWeight.SemiBold), color = Colors.textSecondary)
-                                    Text("Base / recovery pace: ${workout.targetPace}/km", style = AppTextStyles.small, color = Colors.textSecondary)
+                                    Text("Recovery pace: ${workout.restTargetPace}/km", style = AppTextStyles.small, color = Colors.textSecondary)
                                 }
                                 // Recovery HR cap
                                 if (workout.restHeartRateMax != null) {
@@ -727,7 +729,7 @@ fun WorkoutDetailScreen(
                         distanceKm       = workout.distance?.toFloat() ?: 0f,
                         workoutType      = workout.workoutType,
                         workoutIntensity = workout.intensity,
-                        targetPace       = workout.targetPace,
+                        targetPace       = workout.displayTargetPace,
                         intervalCount    = workout.intervalCount,
                         intervalDistKm   = workout.intervalDistanceMeters?.let { it / 1000f },
                         intervalDurSecs  = workout.intervalDurationSeconds

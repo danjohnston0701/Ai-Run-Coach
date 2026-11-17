@@ -159,7 +159,16 @@ data class WorkoutDetails(
     @SerializedName("hrZoneMaxBpm") val hrZoneMaxBpm: Int? = null,     // Actual BPM ceiling for target zone
     @SerializedName("hrZoneScenario") val hrZoneScenario: String? = null, // 'device' | 'history' | 'effort'
     @SerializedName("sessionType") val sessionType: String = "run" // "run" or "walk"
-)
+) {
+    /**
+     * The pace to show the runner as "target pace". On rep sessions `targetPace` is the server's
+     * whole-session average (warm-up + reps + recoveries + cool-down, used for the duration
+     * estimate), so an interval card read "7:45/km" for reps at 6:40. Mirrors iOS
+     * `WorkoutDetails.displayTargetPace`.
+     */
+    val displayTargetPace: String?
+        get() = intervalTargetPace?.takeIf { it.isNotBlank() } ?: targetPace
+}
 
 /** GET /api/training-plans/:planId/today */
 data class TodayWorkoutResponse(

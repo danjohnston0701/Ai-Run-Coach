@@ -31,7 +31,13 @@ function sessionLine(wo: any, easyPaceSecs: number): Record<string, unknown> {
     day: wo.dayOfWeek, type: wo.workoutType, km, approxMinutes: durMin, zone: wo.intensity,
     description: wo.description ?? "", instructions: wo.instructions ?? "",
   };
-  if (wo.targetPace) out.pace = wo.targetPace;
+  // On rep sessions targetPace is the whole-session average (warm-up + reps + recoveries), not
+  // a pace to run at. Labelled "pace", the reviewer could "correct" a rep instruction ("6 × 400 m
+  // at 6:40/km") to that average — so give it the rep pace and name the average for what it is.
+  if (wo.intervalTargetPace) {
+    out.repPace = wo.intervalTargetPace;
+    if (wo.targetPace) out.sessionAveragePace = wo.targetPace;
+  } else if (wo.targetPace) out.pace = wo.targetPace;
   if (wo.intervalCount) {
     out.reps = wo.intervalCount;
     if (wo.intervalDistanceMeters) out.repMetres = wo.intervalDistanceMeters;

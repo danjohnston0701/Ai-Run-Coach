@@ -1146,7 +1146,7 @@ fun WorkoutRow(workout: WorkoutDetails, onClick: () -> Unit) {
             // Duration/distance + pace instructions below the description
             if ((isTimeBasedWorkout(workout) && workout.duration != null) || 
                 (!isTimeBasedWorkout(workout) && workout.distance != null) || 
-                workout.targetPace != null) {
+                workout.displayTargetPace != null) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
@@ -1163,7 +1163,7 @@ fun WorkoutRow(workout: WorkoutDetails, onClick: () -> Unit) {
                             Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
                         }
                     }
-                    workout.targetPace?.let { raw ->
+                    workout.displayTargetPace?.let { raw ->
                         val paceValue = raw.replace("/km", "").trim()
                         Text("$paceValue/km", style = AppTextStyles.small.copy(fontSize = 10.sp), color = Colors.textMuted)
                     }
@@ -1494,7 +1494,7 @@ fun ExpandedWeekWorkoutRow(
                     workout.distance?.let {
                         Text("${it}km", style = AppTextStyles.small, color = Colors.textMuted)
                     }
-                    workout.targetPace?.let { raw ->
+                    workout.displayTargetPace?.let { raw ->
                         val paceValue = raw.replace("/km", "").trim()
                         Text("$paceValue/km", style = AppTextStyles.small, color = Colors.textMuted)
                     }
