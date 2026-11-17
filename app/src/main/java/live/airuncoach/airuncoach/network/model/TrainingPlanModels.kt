@@ -53,7 +53,10 @@ data class GeneratePlanRequest(
     @SerializedName("activityType") val activityType: String = "run", // "run" or "walk"
     // Build the plan in the background: the server answers at once with a jobId to poll
     // (GET /api/training-plans/jobs/{jobId}) instead of holding the request for 1–3 minutes.
-    @SerializedName("async") val async: Boolean = true
+    @SerializedName("async") val async: Boolean = true,
+    // This build shows a free-trial plan's locked sessions and weeks, so the server may give a
+    // trial user a plan capped to its first sessions (server/plan-trial-cap.ts).
+    @SerializedName("supportsTrialCap") val supportsTrialCap: Boolean = true
 )
 
 /** Response from generate: planId when built straight away (older servers), jobId when building in the background. */
@@ -95,15 +98,30 @@ data class TrainingPlanSummary(
     @SerializedName("nextBlockAt") val nextBlockAt: String? = null,
     // AI-generated safety disclaimer JSON (present when plan was created with active/recovering injuries)
     // JSON shape: { prerequisiteChecks: string[], stopCriteria: string[], progressionGates: string[], disclaimer: string }
-    @SerializedName("safetyDisclaimer") val safetyDisclaimer: String? = null
+    @SerializedName("safetyDisclaimer") val safetyDisclaimer: String? = null,
+    // Free-trial plan: only this many sessions are unlocked (null = full plan)
+    @SerializedName("trialSessionCap") val trialSessionCap: Int? = null
 )
 
 /** Full plan returned from GET /api/training-plans/details/:planId */
 data class TrainingPlanDetails(
     @SerializedName("plan") val plan: TrainingPlanSummary,
     @SerializedName("weeks") val weeks: List<WeekDetails>,
-    @SerializedName("performanceBaseline") val performanceBaseline: PerformanceBaseline? = null
+    @SerializedName("performanceBaseline") val performanceBaseline: PerformanceBaseline? = null,
+    // Present only while the plan is capped by the free trial
+    @SerializedName("trialCap") val trialCap: TrialCapInfo? = null
 )
+
+/** A free-trial plan's cap: the first [freeSessions] sessions are unlocked, the rest need AI Plans. */
+data class TrialCapInfo(
+    @SerializedName("freeSessions") val freeSessions: Int,
+    @SerializedName("freeSessionsCompleted") val freeSessionsCompleted: Int = 0,
+    @SerializedName("lockedSessions") val lockedSessions: Int = 0,
+    @SerializedName("lockedWeeks") val lockedWeeks: Int = 0,   // weeks not generated yet
+    @SerializedName("message") val message: String? = null
+) {
+    val allFreeSessionsDone: Boolean get() = freeSessionsCompleted >= freeSessions
+}
 
 data class PerformanceBaseline(
     @SerializedName("hasHistory") val hasHistory: Boolean,
@@ -158,7 +176,9 @@ data class WorkoutDetails(
     @SerializedName("hrZoneMinBpm") val hrZoneMinBpm: Int? = null,     // Actual BPM floor for target zone
     @SerializedName("hrZoneMaxBpm") val hrZoneMaxBpm: Int? = null,     // Actual BPM ceiling for target zone
     @SerializedName("hrZoneScenario") val hrZoneScenario: String? = null, // 'device' | 'history' | 'effort'
-    @SerializedName("sessionType") val sessionType: String = "run" // "run" or "walk"
+    @SerializedName("sessionType") val sessionType: String = "run", // "run" or "walk"
+    // Past a free-trial plan's free sessions: shown greyed and blurred, can't be started
+    @SerializedName("locked") val locked: Boolean = false
 ) {
     /**
      * The pace to show the runner as "target pace". On rep sessions `targetPace` is the server's

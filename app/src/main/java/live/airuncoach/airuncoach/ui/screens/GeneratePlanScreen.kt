@@ -845,6 +845,28 @@ fun GeneratePlanScreen(
                         }
                     }
 
+                    // ── Free trial: say up front what the trial plan includes ────────────
+                    // (server/plan-trial-cap.ts: first 4 sessions; the rest with AI Plans)
+                    val trialSubscriptionVm: live.airuncoach.airuncoach.viewmodel.SubscriptionViewModel = hiltViewModel()
+                    if (remember { trialSubscriptionVm.isInActiveTrial() }) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.10f)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(modifier = Modifier.padding(Spacing.md), verticalAlignment = Alignment.Top) {
+                                Icon(Icons.Filled.Lock, contentDescription = null, tint = Colors.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(Spacing.sm))
+                                Text(
+                                    "Your free trial includes the first 4 sessions of your plan. You'll see the whole ${durationWeeks}-week plan; upgrade to a plan with AI Plans to unlock the rest.",
+                                    style = AppTextStyles.small,
+                                    color = Colors.textPrimary
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(Spacing.md))
+                    }
+
                     // ── Generate CTA ─────────────────────────────────────────────────────
                     Button(
                         onClick = {

@@ -103,6 +103,7 @@ fun DashboardScreen(
     onCreateGoal: () -> Unit = {},
     onNavigateToWorkoutDetail: () -> Unit = {},
     onNavigateToColorOSSetup: () -> Unit = {},
+    onNavigateToSubscription: () -> Unit = {},  // free-trial plan: unlock the locked sessions
     viewModel: DashboardViewModel = hiltViewModel(),
     // Key to trigger refresh when returning from other screens
     refreshKey: Int = 0
@@ -210,7 +211,11 @@ fun DashboardScreen(
         if (todayActivePlans.isNotEmpty()) {
             item {
                 val (plan, todayWorkout) = todayActivePlans.first()
-                todayWorkout?.workout?.let { workout ->
+                todayWorkout?.workout?.takeIf { it.locked && !it.isCompleted }?.let {
+                    // Past a free-trial plan's free sessions (server/plan-trial-cap.ts)
+                    live.airuncoach.airuncoach.ui.components.LockedTodayCard(onUpgrade = onNavigateToSubscription)
+                }
+                todayWorkout?.workout?.takeUnless { it.locked && !it.isCompleted }?.let { workout ->
                     // Determine the status (today vs overdue)
                     val isActuallyToday = todayWorkout.isToday
                     val isOverdue = todayWorkout.isOverdue

@@ -376,6 +376,7 @@ fun MainScreen(
                 // Use backStackEntry as refresh key - it changes when navigating back
                 val refreshKey = backStackEntry.lifecycle.currentState.hashCode()
                 DashboardScreen(
+                    onNavigateToSubscription = { navController.navigate("subscription") },
                     onNavigateToRouteGeneration = { gated {
                         val dist = dashboardViewModel.targetDistance.value
                         val timeOn = dashboardViewModel.isTargetTimeEnabled.value
@@ -1294,6 +1295,7 @@ fun MainScreen(
 
                 TrainingPlanDashboardScreen(
                     planId = planId,
+                    onNavigateToSubscription = { navController.navigate("subscription") },
                     onNavigateBack = { 
                         // Reset to active tab when returning from plan detail
                         // This ensures newly created plans appear in the active tab
@@ -1335,6 +1337,7 @@ fun MainScreen(
                     WorkoutDetailScreen(
                         workout = workout,
                         onNavigateBack = { navController.popBackStack() },
+                        onNavigateToSubscription = { navController.navigate("subscription") },
                         onStartWorkout = { w ->
                             // Build a RunSetupConfig pre-loaded with coaching plan context
                             // so the in-run AI coach knows which plan workout is being executed.

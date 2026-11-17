@@ -478,7 +478,8 @@ fun TrainingPlanDashboardScreen(
     onNavigateBack: () -> Unit,
     onStartWorkout: (WorkoutDetails) -> Unit,
     onViewWorkoutDetail: (WorkoutDetails) -> Unit,
-    onViewAdaptations: (planId: String) -> Unit = {}
+    onViewAdaptations: (planId: String) -> Unit = {},
+    onNavigateToSubscription: () -> Unit = {}  // free-trial plan: unlock the rest
 ) {
     val viewModel: TrainingPlanViewModel = hiltViewModel()
     val state by viewModel.planDetailState.collectAsState()
@@ -594,7 +595,8 @@ fun TrainingPlanDashboardScreen(
                 viewModel = viewModel,
                 blockStatus = blockStatus,
                 onTriggerNextBlock = { viewModel.triggerNextBlock(planId) },
-                nextBlockTriggering = nextBlockTriggering
+                nextBlockTriggering = nextBlockTriggering,
+                onUpgrade = onNavigateToSubscription
             )
             }
         }
@@ -792,7 +794,8 @@ fun PlanDashboardContent(
     viewModel: TrainingPlanViewModel? = null,
     blockStatus: live.airuncoach.airuncoach.network.model.BlockStatus? = null,
     onTriggerNextBlock: () -> Unit = {},
-    nextBlockTriggering: Boolean = false
+    nextBlockTriggering: Boolean = false,
+    onUpgrade: () -> Unit = {}
 ) {
     // Helpers that stamp plan context into WorkoutHolder before delegating to nav callbacks.
     // This allows WorkoutDetailScreen → run_session to build a plan-aware RunSetupConfig.
@@ -804,7 +807,9 @@ fun PlanDashboardContent(
         details.weeks.firstOrNull { week -> week.workouts.any { it.id == workoutId } }?.weekNumber
             ?: progress.currentWeek
 
-    val startWithContext: (WorkoutDetails) -> Unit = { w ->
+    // A session locked by the free-trial cap never opens: every tap goes to the upgrade screen.
+    val startWithContext: (WorkoutDetails) -> Unit = start@{ w ->
+        if (w.locked) { onUpgrade(); return@start }
         WorkoutHolder.planContext = WorkoutPlanContext(
             planId = details.plan.id,
             goalType = details.plan.goalType,
@@ -813,7 +818,8 @@ fun PlanDashboardContent(
         )
         onStartWorkout(w)
     }
-    val viewWithContext: (WorkoutDetails) -> Unit = { w ->
+    val viewWithContext: (WorkoutDetails) -> Unit = view@{ w ->
+        if (w.locked) { onUpgrade(); return@view }
         WorkoutHolder.planContext = WorkoutPlanContext(
             planId = details.plan.id,
             goalType = details.plan.goalType,
@@ -836,6 +842,14 @@ fun PlanDashboardContent(
         item {
             AiPlanSummary(details = details)
             Spacer(modifier = Modifier.height(Spacing.lg))
+        }
+
+        // ── Free-trial plan: what's included and how to unlock the rest ───────
+        details.trialCap?.let { cap ->
+            item {
+                live.airuncoach.airuncoach.ui.components.TrialPlanBanner(cap = cap, totalWeeks = details.plan.totalWeeks, onUpgrade = onUpgrade)
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
         }
 
         // ── Overall progress card ─────────────────────────────────────────────
@@ -911,6 +925,13 @@ fun PlanDashboardContent(
         val isActuallyToday = todayWorkout?.isToday == true
         val isOverdue = todayWorkout?.isOverdue == true
         when {
+            // ── Today's (or overdue) session is past a free-trial plan's free ones ─
+            workout != null && workout.locked && !workout.isCompleted -> {
+                item {
+                    live.airuncoach.airuncoach.ui.components.LockedTodayCard(onUpgrade = onUpgrade)
+                    Spacer(modifier = Modifier.height(Spacing.lg))
+                }
+            }
             // ── Today's scheduled workout, not yet done ────────────────────────
             workout != null && isActuallyToday && !workout.isCompleted -> {
                 item {
@@ -1019,10 +1040,20 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.sm))
         }
 
+        // ── Free-trial plan: the weeks not generated yet, greyed and locked ────
+        if (details.trialCap != null) {
+            val firstLockedWeek = (details.weeks.maxOfOrNull { it.weekNumber } ?: 0) + 1
+            items((firstLockedWeek..details.plan.totalWeeks).toList()) { weekNumber ->
+                live.airuncoach.airuncoach.ui.components.LockedWeekPlaceholder(weekNumber = weekNumber, onUpgrade = onUpgrade)
+                Spacer(modifier = Modifier.height(Spacing.sm))
+            }
+        }
+
         // ── Rolling block banner — shown after the last generated week ────────
         // Position here so the runner finishes reading the plan, then sees
         // the "next block coming" message right at the end of the generated weeks.
-        if (blockStatus != null) {
+        // Not on a free-trial plan: its next block waits for AI Plans, not a date.
+        if (blockStatus != null && details.trialCap == null) {
             item {
                 Spacer(modifier = Modifier.height(Spacing.sm))
                 RollingBlockBanner(
@@ -1129,6 +1160,12 @@ fun WeekCard(week: WeekDetails, onWorkoutTap: (WorkoutDetails) -> Unit) {
 
 @Composable
 fun WorkoutRow(workout: WorkoutDetails, onClick: () -> Unit) {
+    if (workout.locked) {
+        live.airuncoach.airuncoach.ui.components.LockedSessionRow(onUpgrade = onClick) {
+            WorkoutRow(workout = workout.copy(locked = false), onClick = {})
+        }
+        return
+    }
     val dayName = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(((workout.dayOfWeek % 7) + 7) % 7) { "Day" }
     Row(
         modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 4.dp),
@@ -1404,6 +1441,13 @@ fun ExpandedWeekWorkoutRow(
     onComplete: () -> Unit,
     onSkip: () -> Unit
 ) {
+    // Free-trial plan: shown greyed and blurred; the tap goes to the upgrade screen (onClick).
+    if (workout.locked) {
+        live.airuncoach.airuncoach.ui.components.LockedSessionRow(onUpgrade = onClick) {
+            ExpandedWeekWorkoutRow(workout = workout.copy(locked = false), onClick = {}, onComplete = {}, onSkip = {})
+        }
+        return
+    }
     val dayName = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(((workout.dayOfWeek % 7) + 7) % 7) { "Day" }
     
     // Determine status: scheduled, completed, missed, or skipped

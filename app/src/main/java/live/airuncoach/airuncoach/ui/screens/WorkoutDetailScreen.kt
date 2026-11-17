@@ -71,8 +71,25 @@ fun WorkoutDetailScreen(
     onNavigateBack: () -> Unit,
     onStartWorkout: (WorkoutDetails) -> Unit,
     onMarkComplete: (WorkoutDetails) -> Unit,
-    onSkipWorkout: (WorkoutDetails) -> Unit = {}
+    onSkipWorkout: (WorkoutDetails) -> Unit = {},
+    onNavigateToSubscription: () -> Unit = {}
 ) {
+    // Past a free-trial plan's free sessions (server/plan-trial-cap.ts). The plan screen and the
+    // dashboard never open one, but a link from elsewhere could: say so instead of letting the
+    // runner prepare a session the server will refuse.
+    if (workout.locked) {
+        Column(
+            modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot).padding(Spacing.lg),
+            verticalArrangement = Arrangement.Center
+        ) {
+            live.airuncoach.airuncoach.ui.components.LockedTodayCard(onUpgrade = onNavigateToSubscription)
+            Spacer(modifier = Modifier.height(Spacing.md))
+            TextButton(onClick = onNavigateBack, modifier = Modifier.fillMaxWidth()) {
+                Text("Back", color = Colors.textSecondary)
+            }
+        }
+        return
+    }
     val context = LocalContext.current
     val color = workoutTypeColor(workout.workoutType)
     val runSessionViewModel: RunSessionViewModel = hiltViewModel()
