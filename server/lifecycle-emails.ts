@@ -398,8 +398,8 @@ export async function sweepLifecycleEmails(): Promise<Record<LifecycleEmailType,
 
 /**
  * Called when a trial user's usage reaches the limit or a request is refused for it. Only AI
- * coaching km and post-run summaries have a trial allowance (routes and plans are 0 = not
- * included, which is a different message). Once a month; never throws.
+ * coaching km and post-run summaries send this email: running out of the trial's one plan or
+ * few routes isn't what the email is about. Once a month; never throws.
  */
 export async function maybeSendTrialLimitEmail(
   user: {

@@ -79,7 +79,10 @@ fun CoachingProgrammeScreen(
     // Free-tier users cannot CREATE new plans, but they MUST still be able to VIEW
     // any plans they created during a trial or paid period.  Only the create action
     // is gated — the list itself is always visible.
-    val isFreeTier = subscriptionTier == "free"
+    // Trial users can build a plan too (the trial includes one since 2026-11-18), so only a
+    // free account whose trial has ended gets the "Paid Feature" upsell here. The create flow
+    // still asks the server, which has the final say on the allowance.
+    val isFreeTier = subscriptionTier == "free" && !subscriptionViewModel.isInActiveTrial()
     // "Sessions" (one-off AI sessions) is a 4th tab that isn't a plan status, so it's held here
     // rather than in TrainingPlanViewModel's status tabs. Survives the return-to-Active reset below.
     var sessionsTabSelected by rememberSaveable { mutableStateOf(false) }

@@ -190,13 +190,23 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
             // Handle 401 Unauthorized responses — ALWAYS clear session and force re-login.
             // An expired/invalid token means the user must re-authenticate, even if it's
             // a data endpoint. This prevents using the app with a stale token.
+            //
+            // Only when this request carried the session that is still saved. A request sent
+            // with no token (e.g. the FCM token upload on a fresh install, before sign-in) or
+            // with a token that has since been replaced by a new login says nothing about the
+            // current session. Treating those as "signed out" cleared a brand-new login and
+            // sent the user round a LOGIN ↔ MAIN loop (blank screen until restart, 2026-11-18).
             if (response.code == 401) {
                 val path = request.url.encodedPath
-                android.util.Log.e("RetrofitClient", "❌ 401 Unauthorized on $path - clearing session and forcing re-login")
-                sessionManager.clearAuthToken()
-                // Let the UI (MainScreen) take the user to sign-in; clearing alone left the
-                // app running with a dead session until it was restarted.
-                signalUnauthorized()
+                if (!token.isNullOrEmpty() && sessionManager.getAuthToken() == token) {
+                    android.util.Log.e("RetrofitClient", "❌ 401 Unauthorized on $path - clearing session and forcing re-login")
+                    sessionManager.clearAuthToken()
+                    // Let the UI (MainScreen) take the user to sign-in; clearing alone left the
+                    // app running with a dead session until it was restarted.
+                    signalUnauthorized()
+                } else {
+                    android.util.Log.w("RetrofitClient", "401 on $path without the current session's token - ignored")
+                }
             }
             
             // Log response details for debugging

@@ -56,6 +56,7 @@ import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.viewmodel.VersionCheckViewModel
 import kotlinx.coroutines.launch
+import androidx.lifecycle.withResumed
 
 @Composable
 fun RootNavigationGraph(navController: NavHostController) {
@@ -385,24 +386,31 @@ private fun NavGraphBuilder.rootNavigationDestinations(
 
         composable(AppRoutes.MAIN) {
             val sessionManager = remember { SessionManager(appContext) }
-            
-            // Check if user needs to complete onboarding on app restart
-            if (sessionManager.needsProfileSetup()) {
-                // Navigate to personal details
-                navController.navigate("personal_details") {
-                    popUpTo(AppRoutes.MAIN) { inclusive = true }
+
+            // Check if user needs to complete onboarding on app restart. Fitness level has no
+            // flag of its own, so this landing check used to skip it entirely — see
+            // SessionManager.needsFitnessLevel().
+            val unfinishedOnboarding = remember {
+                when {
+                    sessionManager.needsProfileSetup() -> "personal_details"
+                    sessionManager.needsFitnessLevel() -> "fitness_level_onboarding"
+                    sessionManager.needsCoachSetup() -> "coach_settings"
+                    else -> null
                 }
-            } else if (sessionManager.needsFitnessLevel()) {
-                // Fitness level has no flag of its own, so this landing check used to skip it
-                // entirely — see SessionManager.needsFitnessLevel().
-                navController.navigate("fitness_level_onboarding") {
-                    popUpTo(AppRoutes.MAIN) { inclusive = true }
+            }
+            if (unfinishedOnboarding != null) {
+                // navigate() from a side effect, once this entry has settled, never from the
+                // composition itself: that ran on every recomposition mid-transition and is a
+                // known way to leave the NavHost blank.
+                val entryLifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+                LaunchedEffect(unfinishedOnboarding) {
+                    entryLifecycle.withResumed {
+                        navController.navigate(unfinishedOnboarding) {
+                            popUpTo(AppRoutes.MAIN) { inclusive = true }
+                        }
+                    }
                 }
-            } else if (sessionManager.needsCoachSetup()) {
-                // Navigate to coach settings
-                navController.navigate("coach_settings") {
-                    popUpTo(AppRoutes.MAIN) { inclusive = true }
-                }
+                Box(modifier = Modifier.fillMaxSize().background(Colors.backgroundRoot))
             } else {
                 // Only show MainScreen if onboarding is complete
                 MainScreen(

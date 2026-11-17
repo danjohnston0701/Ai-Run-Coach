@@ -1281,7 +1281,7 @@ private fun UsageRowsContainer(
                 unit = "routes",
                 accentColor = Colors.primary,
                 isUnlimited = !isFreeTrial && usage.routesGeneratedLimit == -1,
-                isLocked = isFreeTrial,   // Always locked on free trial
+                isLocked = isFreeTrial && (isTrialExpired || routesLimit == 0),
                 lockedLabel = "Paid plans only"
             )
             HorizontalDivider(color = Colors.border, thickness = 1.dp)
@@ -1293,7 +1293,7 @@ private fun UsageRowsContainer(
                 unit = "plans",
                 accentColor = Color(0xFFA78BFA),
                 isUnlimited = !isFreeTrial && usage.trainingPlansLimit == -1,
-                isLocked = isFreeTrial,   // Always locked on free trial
+                isLocked = isFreeTrial && (isTrialExpired || plansLimit == 0),
                 lockedLabel = "Paid plans only"
             )
         }

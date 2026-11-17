@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.withResumed
 import live.airuncoach.airuncoach.R
 import live.airuncoach.airuncoach.ui.theme.AppTextStyles
 import live.airuncoach.airuncoach.ui.theme.BorderRadius
@@ -92,12 +93,20 @@ fun LocationPermissionScreen(onPermissionGranted: () -> Unit) {
         }
     }
 
-    // Auto-navigate if permission is already granted on first load
+    // Auto-navigate if permission is already granted on first load — but only once this
+    // screen has finished arriving (RESUMED). Navigating on the first frame, while the
+    // transition into this screen was still running, could leave the NavHost blank until the
+    // app was restarted (seen after login). If a system dialog is up, this waits for it.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
         if (checkPermission() && checkActivityRecognitionPermission() && !hasNavigated) {
-            android.util.Log.d("LocationPermission", "Already has permission, navigating...")
-            hasNavigated = true
-            onPermissionGranted()
+            lifecycleOwner.lifecycle.withResumed {
+                if (!hasNavigated) {
+                    android.util.Log.d("LocationPermission", "Already has permission, navigating...")
+                    hasNavigated = true
+                    onPermissionGranted()
+                }
+            }
         }
     }
 

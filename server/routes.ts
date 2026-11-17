@@ -116,6 +116,7 @@ import { recognizeRoute, updateKnownRoutes, dropMismatchedRouteContext } from ".
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
 import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime, defaultRunName } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
+import { parseGoalDate } from "./utils/parse-goal-date";
 import {
   snapTrackToOSMSegments,
   recordSegmentUsage,
@@ -4726,7 +4727,9 @@ function transformRunForAndroid(run: any) {
         title: req.body.title,
         description: req.body.description || null,
         notes: req.body.notes || null,
-        targetDate: req.body.targetDate ? new Date(req.body.targetDate) : null,
+        // Month names in the phone's language (see parse-goal-date.ts); an unreadable date is
+        // dropped rather than failing the whole goal.
+        targetDate: parseGoalDate(req.body.targetDate) ?? null,
         eventName: req.body.eventName || null,
         eventLocation: req.body.eventLocation || null,
         distanceTarget: req.body.distanceTarget || null,
@@ -4745,6 +4748,9 @@ function transformRunForAndroid(run: any) {
         progressPercent: 0,
       };
       
+      if (req.body.targetDate && goalData.targetDate === null) {
+        console.warn(`[POST /api/goals] Unreadable targetDate ${JSON.stringify(req.body.targetDate)}, saving the goal without it`);
+      }
       const rawGoal = await storage.createGoal(goalData);
       
       // Transform response to match Android app's expected format
@@ -4802,7 +4808,7 @@ function transformRunForAndroid(run: any) {
         title: req.body.title,
         description: req.body.description || null,
         notes: req.body.notes || null,
-        targetDate: req.body.targetDate ? new Date(req.body.targetDate) : null,
+        targetDate: parseGoalDate(req.body.targetDate),
         eventName: req.body.eventName || null,
         eventLocation: req.body.eventLocation || null,
         distanceTarget: req.body.distanceTarget || null,
@@ -4818,6 +4824,12 @@ function transformRunForAndroid(run: any) {
         injuryNotes: req.body.injuryNotes || null,
         injurySide: req.body.injurySide || null,
       };
+
+      // An unreadable date keeps the one already saved instead of wiping it or failing the update.
+      if (updateData.targetDate === undefined) {
+        if (req.body.targetDate) console.warn(`[PUT /api/goals/:id] Unreadable targetDate ${JSON.stringify(req.body.targetDate)}, keeping the saved one`);
+        delete updateData.targetDate;
+      }
 
       // Handle completion / status fields sent by the app
       if (req.body.isCompleted === true) {

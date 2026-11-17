@@ -17,7 +17,8 @@ export interface TierLimits {
   /**
    * Maximum one-off AI-designed sessions per calendar month (server/routes-single-sessions.ts).
    * A separate allowance from trainingPlansGenerated so a one-off never uses up the month's
-   * plan. Part of AI Plans: zero on the free trial and on every *_noaiplan SKU. Spent when the
+   * plan. Part of AI Plans: zero on every *_noaiplan SKU (a small allowance on the free trial
+   * since 2026-11-18). Spent when the
    * AI designs the session, not when it is run. Starting values (2026-11-15) are a guess —
    * tune them from the "[SingleSession] cost" log lines.
    */
@@ -29,8 +30,13 @@ export interface TierLimits {
 //
 // FREE TIER — trial only. These limits apply per calendar month while the trial is
 // open (trial_expires_at in the future). Once it has passed, the server enforces
-// "trial_expired" (all zeros). Route generation and training plans are NOT available
-// on the free trial — users must upgrade to access those features at all.
+// "trial_expired" (all zeros).
+//
+// Since 2026-11-18 the trial includes a taste of the AI Plans features (one plan, a few
+// routes and one-off sessions). Before that they were 0, so trial users never saw the
+// features the paid plans are for: of 50 sign-ups 2026-10-01..11-18, every one who tried to
+// build a plan was refused, none generated a route, and none paid. A 30-day trial can span
+// two calendar months, so the most a trial user can get is twice these numbers.
 //
 // LITE / STANDARD — the "with AI Plans" SKUs. The "no AI Plans" SKUs of the same tier
 // (users.ai_plans_enabled = false) use the *_noaiplan entries below, which keep the
@@ -38,10 +44,10 @@ export interface TierLimits {
 export const TIER_LIMITS: Record<string, TierLimits> = {
   free: {
     aiCoachingKm: 50,              // 50 km of AI-coached running per month during the trial
-    trainingPlansGenerated: 0,     // Not available on free trial — paid plans only
-    routesGenerated: 0,            // Not available on free trial — paid plans only
+    trainingPlansGenerated: 1,     // One AI training plan, so the runner sees what they'd pay for
+    routesGenerated: 5,            // A few AI routes
     postRunAnalyses: 15,           // 15 AI post-run summaries per month during the trial
-    singleSessionsGenerated: 0,    // AI Plans only — not on the free trial
+    singleSessionsGenerated: 2,    // A couple of one-off AI-designed sessions
   },
   // Hard block applied server-side when trial_expires_at is in the past for a free user.
   // All limits are 0 — every feature request is rejected with a 402 upgrade required.

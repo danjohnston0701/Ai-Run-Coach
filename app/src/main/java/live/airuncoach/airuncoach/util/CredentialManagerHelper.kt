@@ -1,6 +1,8 @@
 package live.airuncoach.airuncoach.util
 
 import android.app.Activity
+import android.content.Context
+import android.os.Build
 import android.util.Log
 import androidx.credentials.CreatePasswordRequest
 import androidx.credentials.CredentialManager
@@ -12,6 +14,7 @@ import androidx.credentials.exceptions.CreateCredentialException
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Handles credential saving and retrieval for password managers.
@@ -59,6 +62,29 @@ object CredentialManagerHelper {
             Log.w(TAG, "⚠️ Could not save credentials: ${e.message}")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Unexpected error saving credentials: ${e.message}")
+        }
+    }
+
+    /**
+     * Whether the password manager (Samsung Pass, Google PM, ...) holds a saved login for this
+     * app, checked silently: no picker is shown. Android 14+ only (`prepareGetCredential`);
+     * older versions, errors and timeouts all answer false.
+     *
+     * Used by LoginScreen to tell a returning user who reinstalled (the install's own
+     * "has ever logged in" flag is gone with the old install) from a genuinely new one.
+     */
+    suspend fun hasSavedPasswordSilently(context: Context, timeoutMs: Long = 1500): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
+        return try {
+            withTimeoutOrNull(timeoutMs) {
+                val response = CredentialManager.create(context).prepareGetCredential(
+                    GetCredentialRequest(credentialOptions = listOf(GetPasswordOption()))
+                )
+                response.hasCredentialResults(PasswordCredential.TYPE_PASSWORD_CREDENTIAL)
+            } ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "Silent saved-login check failed: ${e.message}")
+            false
         }
     }
 

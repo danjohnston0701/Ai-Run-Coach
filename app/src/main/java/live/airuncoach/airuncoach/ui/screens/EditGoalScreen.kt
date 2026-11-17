@@ -410,7 +410,8 @@ fun EditGoalScreen(
                 TextButton(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
-                            val sdf = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+                            // English month names: the server parses this text (see CreateGoalScreen).
+                            val sdf = SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH)
                             sdf.timeZone = TimeZone.getTimeZone("UTC")
                             targetDate = sdf.format(Date(millis))
                         }

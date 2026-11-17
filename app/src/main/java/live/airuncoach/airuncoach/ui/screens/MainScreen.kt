@@ -196,9 +196,14 @@ fun MainScreen(
     }
     // The server rejected the token (401): RetrofitClient has already cleared it, but nothing
     // used to navigate — the app just sat there with every request failing until a restart.
+    // The counter is process-wide and never resets, so only a 401 after this screen opened
+    // counts. Comparing with > 0 sent every MainScreen opened after an earlier 401 (any 401
+    // before sign-in) straight back to LOGIN, which, with a valid session, came straight back
+    // here: a LOGIN ↔ MAIN loop every 250 ms that showed as a blank screen until restart.
+    val unauthorizedTickAtOpen = remember { live.airuncoach.airuncoach.network.RetrofitClient.unauthorizedEvents.value }
     val unauthorizedTick by live.airuncoach.airuncoach.network.RetrofitClient.unauthorizedEvents.collectAsState()
     LaunchedEffect(unauthorizedTick) {
-        if (unauthorizedTick > 0) onNavigateToLogin()
+        if (unauthorizedTick > unauthorizedTickAtOpen) onNavigateToLogin()
     }
     /** Runs [action] unless the subscription has lapsed, in which case the renew gate shows. */
     fun gated(action: () -> Unit) {

@@ -269,7 +269,7 @@ export async function checkAndEnforceLimit(
   }
 
   // ── Feature not included in this plan at all ────────────────────────────────
-  // A zero allowance (free trial → AI plans/routes; paid tiers without a feature)
+  // A zero allowance (paid tiers without a feature, e.g. the *_noaiplan SKUs)
   // is not a "monthly limit reached" — there's nothing to wait for next month.
   // Give the clients a distinct code + a message they can show verbatim, so a
   // trial user sees "not included, upgrade" instead of "0 of 0 used, resets on…".
@@ -289,7 +289,9 @@ export async function checkAndEnforceLimit(
     const nextMonth = nextMonthLabel(yearMonth);
     const isFreeUser = resolvedTier === "free" || !tier;
 
-    let message = `You have reached the limit of ${featureLabel[feature]} for your ${resolvedTier} plan. `;
+    let message = resolvedTier === "free"
+      ? `You've used the ${featureLabel[feature]} included in your free trial. `
+      : `You have reached the limit of ${featureLabel[feature]} for your ${resolvedTier} plan. `;
     if (isFreeUser) {
       message += `Upgrade to a paid plan to unlock more ${featureLabel[feature]}.`;
     } else {

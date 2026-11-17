@@ -535,7 +535,9 @@ fun CreateGoalScreen(
                 TextButton(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
-                            val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
+                            // English month names: this text is also what the server parses, and it
+                            // couldn't read e.g. Italian "20 ott 2026" (500 on goal save, 2026-10-20).
+                            val sdf = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.ENGLISH)
                             sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
                             targetDate = sdf.format(java.util.Date(millis))
                         }

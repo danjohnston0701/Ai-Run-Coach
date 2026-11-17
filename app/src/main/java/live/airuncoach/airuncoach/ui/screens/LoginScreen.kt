@@ -2,8 +2,6 @@ package live.airuncoach.airuncoach.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -47,7 +45,6 @@ import live.airuncoach.airuncoach.ui.theme.Colors
 import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.viewmodel.LoginViewModel
 import live.airuncoach.airuncoach.viewmodel.ObserverLoginViewModel
-import live.airuncoach.airuncoach.util.NotificationPermissionHelper
 import live.airuncoach.airuncoach.util.CredentialManagerHelper
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.text.ClickableText
@@ -92,18 +89,6 @@ fun LoginScreen(
         ).toDp() + Spacing.xxxl
     }
     
-    // Notification permission launcher
-    val notificationPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted: Boolean ->
-            if (isGranted) {
-                android.util.Log.d("LoginScreen", "Notification permission granted ✅")
-            } else {
-                android.util.Log.d("LoginScreen", "Notification permission denied")
-            }
-        }
-    )
-
     // Check if already logged in on first load.
     // We validate the token LOCALLY by decoding the JWT exp claim — no network
     // call needed. This avoids logging the user out due to transient network
@@ -136,6 +121,14 @@ fun LoginScreen(
 
         // No token or token has expired — show the login screen.
         android.util.Log.d("LoginScreen", "No valid session (token missing or expired), showing login screen")
+        // A reinstall loses this install's "has ever logged in" flag, so a returning user got
+        // the new-user welcome. A login saved in Samsung Pass / Google PM for this app means
+        // they've had an account: open on the sign-in form instead (the picker then offers
+        // it). Checked silently, before the screen shows, so the welcome never flashes.
+        if (!showSignInForm && CredentialManagerHelper.hasSavedPasswordSilently(context)) {
+            android.util.Log.d("LoginScreen", "Saved login found in password manager → sign-in form")
+            showSignInForm = true
+        }
         isCheckingAuth = false
     }
 
@@ -154,7 +147,7 @@ fun LoginScreen(
     // Navigate on successful login
     LaunchedEffect(loginState.isLoginSuccessful) {
         if (loginState.isLoginSuccessful) {
-            android.util.Log.d("LoginScreen", "Login successful, requesting notification permission")
+            android.util.Log.d("LoginScreen", "Login successful")
 
             // Only offer to save credentials if they didn't come from the password manager.
             // If user logged in with saved credentials, don't prompt to save the same credentials again.
@@ -180,21 +173,39 @@ fun LoginScreen(
                 android.util.Log.d("LoginScreen", "Credentials from password manager — skipping save prompt")
             }
 
-            // Request notification permission after successful login
-            if (NotificationPermissionHelper.shouldRequestPermission()) {
-                notificationPermissionLauncher.launch(NotificationPermissionHelper.getPermissionString())
-            }
-            
-            // After a brief delay, navigate to location permission screen
-            kotlinx.coroutines.delay(500)
-            onNavigateToLocationPermission()
+            // Go straight to the app when nothing is left to set up, the same single hop as
+            // reopening the app with a saved session. Going through the location screen meant
+            // two navigations in quick succession (LOGIN → LOCATION_PERMISSION, which then
+            // immediately moved on to MAIN because permission was already granted). Navigating
+            // away from a screen still entering left the NavHost showing a blank screen until
+            // the app was restarted. Notification permission is no longer asked here either:
+            // MainScreen asks on opening, and the dialog paused the activity mid-navigation.
+            val sessionManager = SessionManager(context)
+            val hasLocation = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasActivityRecognition = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q ||
+                ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.ACTIVITY_RECOGNITION
+                ) == PackageManager.PERMISSION_GRANTED
+            val readyForMain = hasLocation && hasActivityRecognition &&
+                live.airuncoach.airuncoach.data.AiConsentManager(context).hasSeenConsent() &&
+                !sessionManager.needsProfileSetup() &&
+                !sessionManager.needsFitnessLevel() &&
+                !sessionManager.needsCoachSetup()
+            if (readyForMain) onNavigateToMain() else onNavigateToLocationPermission()
         }
     }
 
     // On screen load: try to retrieve saved credentials from Samsung Pass / Google PM
     // If the user has saved credentials, pre-fill the fields automatically.
-    LaunchedEffect(isCheckingAuth) {
-        if (!isCheckingAuth) {
+    // Only once the sign-in form is showing: on a fresh install the welcome (Start My Free
+    // Trial / Take a Tour) comes first, and the password manager's sheet popped up over it.
+    // Tapping "Log in" there flips showSignInForm and runs this then.
+    LaunchedEffect(isCheckingAuth, showSignInForm) {
+        if (!isCheckingAuth && showSignInForm) {
             val activity = context as? ComponentActivity ?: return@LaunchedEffect
             val saved = CredentialManagerHelper.getSavedCredential(activity)
             if (saved != null) {
