@@ -59,7 +59,7 @@ class ObserverLoginViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                Log.d("ObserverLoginVM", "Validating token: $token")
+                Log.d("ObserverLoginVM", "Validating observer token")
 
                 val response = apiService.validateObserverInvitation(
                     ValidateObserverInvitationRequest(token)

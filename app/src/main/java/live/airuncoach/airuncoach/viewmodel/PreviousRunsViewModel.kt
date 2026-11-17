@@ -44,19 +44,16 @@ class PreviousRunsViewModel @Inject constructor(
         
         val token = sessionManager.getAuthToken()
         android.util.Log.d("PreviousRunsViewModel", "Auth token exists: ${token != null}")
-        if (token != null) {
-            android.util.Log.d("PreviousRunsViewModel", "Token preview: ${token.take(20)}...")
-        }
         
         return if (userJson != null) {
             try {
                 val user = gson.fromJson(userJson, User::class.java)
                 android.util.Log.d("PreviousRunsViewModel", "✅ User ID found: ${user.id}")
-                android.util.Log.d("PreviousRunsViewModel", "User name: ${user.name}, email: ${user.email}")
+                android.util.Log.d("PreviousRunsViewModel", "User loaded: ${user.id}")
                 user.id
             } catch (e: Exception) {
                 android.util.Log.e("PreviousRunsViewModel", "❌ Failed to parse user JSON: ${e.message}")
-                android.util.Log.e("PreviousRunsViewModel", "JSON was: $userJson")
+                android.util.Log.e("PreviousRunsViewModel", "JSON length: ${userJson.length}")
                 null
             }
         } else {

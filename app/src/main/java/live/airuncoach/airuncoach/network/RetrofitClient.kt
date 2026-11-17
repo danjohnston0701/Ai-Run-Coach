@@ -227,12 +227,6 @@ class RetrofitClient(context: Context, private val sessionManager: SessionManage
                 }
             }
             
-            // Log raw response body for login/register endpoints
-            if (request.url.encodedPath.contains("/login") || request.url.encodedPath.contains("/register")) {
-                val responseBody = response.peekBody(Long.MAX_VALUE).string()
-                Log.d("RetrofitClient", "📦 RAW RESPONSE BODY: $responseBody")
-            }
-            
             response
         }
         .addInterceptor(okhttp3.logging.HttpLoggingInterceptor().apply {

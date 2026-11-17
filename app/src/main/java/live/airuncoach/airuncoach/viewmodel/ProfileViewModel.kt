@@ -94,7 +94,7 @@ class ProfileViewModel @Inject constructor(
                 android.util.Log.d("ProfileViewModel", "✅ User loaded: ${user.name} (ID: ${user.id}, ShortID: $shortUserId)")
             } catch (e: Exception) {
                 android.util.Log.e("ProfileViewModel", "❌ Failed to parse user JSON: ${e.message}")
-                android.util.Log.e("ProfileViewModel", "JSON was: $userJson")
+                android.util.Log.e("ProfileViewModel", "JSON length: ${userJson.length}")
             }
         } else {
             android.util.Log.w("ProfileViewModel", "⚠️ No user data found in SharedPreferences")

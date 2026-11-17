@@ -84,9 +84,6 @@ class LoginViewModel @Inject constructor(
                 val email = _loginState.value.email.trim().lowercase()
                 val password = _loginState.value.password
                 
-                android.util.Log.d("LoginViewModel", "📧 Attempting login for: $email")
-                android.util.Log.d("LoginViewModel", "📧 Original email: ${_loginState.value.email}")
-                android.util.Log.d("LoginViewModel", "🔑 Password length: ${password.length}")
                 
                 // Get device timezone
                 val deviceTimezone = java.util.TimeZone.getDefault().id
@@ -103,15 +100,12 @@ class LoginViewModel @Inject constructor(
                 )
                 
                 android.util.Log.d("LoginViewModel", "✅ Login API call successful!")
-                android.util.Log.d("LoginViewModel", "🔍 RAW RESPONSE: ${gson.toJson(response)}")
-                android.util.Log.d("LoginViewModel", "Token in body: ${response.token != null} (${response.token?.take(20) ?: "null"}...)")
                 
                 // Extract user from response (handles both wrapped and flattened formats)
                 val user = response.extractUser()
                 android.util.Log.d("LoginViewModel", "User extracted: ${user != null}")
                 
                 if (user != null) {
-                    android.util.Log.d("LoginViewModel", "User details - Name: ${user.name}, ID: ${user.id}, Email: ${user.email}")
                 } else {
                     android.util.Log.e("LoginViewModel", "⚠️ Failed to extract user from response!")
                     android.util.Log.e("LoginViewModel", "Response had user field: ${response.user != null}")
@@ -128,7 +122,6 @@ class LoginViewModel @Inject constructor(
                     "user_${user.id}_${System.currentTimeMillis()}"
                 }
                 
-                android.util.Log.d("LoginViewModel", "Using token: ${token.take(20)}...")
                 
                 // Save auth token, user ID and user name
                 Log.d("LoginViewModel", "💾 Saving auth token, user ID and name...")
@@ -147,7 +140,6 @@ class LoginViewModel @Inject constructor(
                 
                 // Save user data to SharedPreferences for dashboard
                 val userJson = gson.toJson(user)
-                android.util.Log.d("LoginViewModel", "💾 Saving user data: $userJson")
                 val saveSuccess = sharedPrefs.edit().putString("user", userJson).commit()
                 android.util.Log.d("LoginViewModel", "User data save result: $saveSuccess")
                 
@@ -161,7 +153,6 @@ class LoginViewModel @Inject constructor(
                 val savedUserJson = sharedPrefs.getString("user", null)
                 android.util.Log.d("LoginViewModel", "✅ Verification - User data exists: ${savedUserJson != null}")
                 if (savedUserJson != null) {
-                    android.util.Log.d("LoginViewModel", "Saved user JSON: $savedUserJson")
                     
                     // Triple-check we can deserialize it and sync coaching prefs
                     try {
@@ -311,7 +302,6 @@ class LoginViewModel @Inject constructor(
                 // requiresVerification boolean which can fail to parse in some Gson configurations.
                 val requiresVerification = response.requiresVerification == true || response.token == null
                 if (requiresVerification) {
-                    android.util.Log.d("LoginViewModel", "📧 Email verification required for ${_loginState.value.email}")
                     _loginState.update {
                         it.copy(
                             isLoading = false,
@@ -323,15 +313,12 @@ class LoginViewModel @Inject constructor(
                     return@launch
                 }
 
-                android.util.Log.d("LoginViewModel", "🔍 RAW RESPONSE: ${gson.toJson(response)}")
-                android.util.Log.d("LoginViewModel", "Token in body: ${response.token != null} (${response.token?.take(20) ?: "null"}...)")
                 
                 // Extract user from response (handles both wrapped and flattened formats)
                 val user = response.extractUser()
                 android.util.Log.d("LoginViewModel", "User extracted: ${user != null}")
                 
                 if (user != null) {
-                    android.util.Log.d("LoginViewModel", "User details - Name: ${user.name}, ID: ${user.id}, Email: ${user.email}")
                 } else {
                     android.util.Log.e("LoginViewModel", "⚠️ Failed to extract user from registration response!")
                     _loginState.update { it.copy(isLoading = false, error = "Registration failed: no user data received") }
@@ -344,7 +331,6 @@ class LoginViewModel @Inject constructor(
                     "user_${user.id}_${System.currentTimeMillis()}"
                 }
                 
-                android.util.Log.d("LoginViewModel", "Using token: ${token.take(20)}...")
                 
                 // Save auth token, user ID and user name
                 android.util.Log.d("LoginViewModel", "💾 Saving auth token, user ID and name...")
@@ -362,7 +348,6 @@ class LoginViewModel @Inject constructor(
                 
                 // Save user data to SharedPreferences for dashboard
                 val userJson = gson.toJson(user)
-                android.util.Log.d("LoginViewModel", "💾 Saving user data: $userJson")
                 val saveSuccess = sharedPrefs.edit().putString("user", userJson).commit()
                 android.util.Log.d("LoginViewModel", "User data save result: $saveSuccess")
                 
@@ -376,7 +361,6 @@ class LoginViewModel @Inject constructor(
                 val savedUserJson = sharedPrefs.getString("user", null)
                 android.util.Log.d("LoginViewModel", "✅ Verification - User data exists: ${savedUserJson != null}")
                 if (savedUserJson != null) {
-                    android.util.Log.d("LoginViewModel", "Saved user JSON: $savedUserJson")
                     
                     // Triple-check we can deserialize it and sync coaching prefs
                     try {
@@ -497,7 +481,6 @@ class LoginViewModel @Inject constructor(
                     live.airuncoach.airuncoach.network.model.ResendVerificationRequest(email = email)
                 )
                 _loginState.update { it.copy(isLoading = false, error = null) }
-                android.util.Log.d("LoginViewModel", "📧 Verification email resent to $email")
             } catch (e: Exception) {
                 _loginState.update { it.copy(isLoading = false, error = "Failed to resend code. Please try again.") }
             }
@@ -529,7 +512,6 @@ class LoginViewModel @Inject constructor(
                             changeEmailSuccess = true
                         )
                     }
-                    android.util.Log.d("LoginViewModel", "📧 Verification email updated to ${response.email}")
                 } else {
                     _loginState.update {
                         it.copy(isLoading = false, changeEmailError = response.error ?: "Failed to update email")
