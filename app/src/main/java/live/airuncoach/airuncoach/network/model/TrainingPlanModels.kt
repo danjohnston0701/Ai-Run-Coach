@@ -109,7 +109,10 @@ data class TrainingPlanDetails(
     @SerializedName("weeks") val weeks: List<WeekDetails>,
     @SerializedName("performanceBaseline") val performanceBaseline: PerformanceBaseline? = null,
     // Present only while the plan is capped by the free trial
-    @SerializedName("trialCap") val trialCap: TrialCapInfo? = null
+    @SerializedName("trialCap") val trialCap: TrialCapInfo? = null,
+    // The rest of the plan is being built right now (just upgraded from a free-trial plan, or a
+    // next block running): the plan screen says so and reloads until it's done.
+    @SerializedName("generatingNextBlock") val generatingNextBlock: Boolean = false
 )
 
 /** A free-trial plan's cap: the first [freeSessions] sessions are unlocked, the rest need AI Plans. */
@@ -237,7 +240,9 @@ data class BlockStatus(
     @SerializedName("isFullyGenerated") val isFullyGenerated: Boolean,
     @SerializedName("nextBlockAt") val nextBlockAt: String?,
     @SerializedName("nextBlockMessage") val nextBlockMessage: String?,
-    @SerializedName("nextBlockReady") val nextBlockReady: Boolean
+    @SerializedName("nextBlockReady") val nextBlockReady: Boolean,
+    // A block is being generated right now (nextBlockAt is the old date then)
+    @SerializedName("generating") val generating: Boolean = false
 )
 
 /** Response from PUT /api/training-plans/workouts/:id/complete */

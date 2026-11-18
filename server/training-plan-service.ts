@@ -10,7 +10,7 @@ import { parseWeightKg } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
 import { db } from "./db";
 import { trainingPlans, weeklyPlans, plannedWorkouts, users, runs, goals, connectedDevices, planAdaptations, sessionInstructions, coachingSessionEvents } from "@shared/schema";
-import { eq, and, desc, gte, isNotNull } from "drizzle-orm";
+import { eq, and, desc, gte, isNotNull, sql } from "drizzle-orm";
 import { getCurrentFitness } from "./fitness-service";
 import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this utility
 import { generateSessionInstructions } from "./session-coaching-service";
@@ -1899,18 +1899,58 @@ App capabilities available in every session: real-time GPS pace/distance, live a
  * Uses the athlete's actual run data since block 1 was generated, plus a
  * summary of the previous block, so each new block genuinely adapts to growth.
  */
-// Plans with a next block being generated on this instance. Lifting a trial cap and the
-// app-start check (checkAndGeneratePendingBlocks) can both ask for the same block at once.
+// Plans with a next block being generated on this instance: a cheap first check before the
+// database claim below.
 const nextBlockInFlight = new Set<string>();
 
-export async function generateNextBlock(planId: string, userId: string): Promise<void> {
+// A claim older than this is from a generation that died (instance restarted mid-block).
+const NEXT_BLOCK_CLAIM_STALE_MINUTES = 10;
+
+/**
+ * Whether a next block is being generated for this plan right now, on any instance. The plan
+ * screen shows "building the rest of your plan" and reloads until it's done.
+ */
+export async function isNextBlockGenerating(planId: string): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT 1 FROM training_plans
+    WHERE id = ${planId}
+      AND next_block_generating_at > NOW() - make_interval(mins => ${NEXT_BLOCK_CLAIM_STALE_MINUTES})
+  `);
+  return result.rows.length > 0;
+}
+
+/**
+ * @param opts.onlyIfDue only generate if nextBlockAt has passed. The app-start check passes it:
+ *   it read the plan before calling, so without this a block another instance has just
+ *   finished would be followed straight away by the one after it.
+ */
+export async function generateNextBlock(planId: string, userId: string, opts: { onlyIfDue?: boolean } = {}): Promise<void> {
   if (nextBlockInFlight.has(planId)) {
     console.log(`[NextBlock] Plan ${planId} already has a block being generated — skipping`);
     return;
   }
   nextBlockInFlight.add(planId);
   try {
-    await generateNextBlockInner(planId, userId);
+    // Atomic claim across instances: lifting a trial cap, the app-start check and the manual
+    // trigger can all ask for the same block at once, on different autoscale instances.
+    const claim = await db.execute(sql`
+      UPDATE training_plans SET next_block_generating_at = NOW()
+      WHERE id = ${planId}
+        AND (next_block_generating_at IS NULL
+             OR next_block_generating_at <= NOW() - make_interval(mins => ${NEXT_BLOCK_CLAIM_STALE_MINUTES}))
+        AND (${opts.onlyIfDue === true} = FALSE OR (next_block_at IS NOT NULL AND next_block_at <= NOW()))
+      RETURNING id
+    `);
+    if (claim.rows.length === 0) {
+      console.log(`[NextBlock] Plan ${planId}: block already being generated elsewhere, or not due — skipping`);
+      return;
+    }
+    try {
+      await generateNextBlockInner(planId, userId);
+    } finally {
+      await db.execute(sql`UPDATE training_plans SET next_block_generating_at = NULL WHERE id = ${planId}`)
+        .catch((err) => console.error(`[NextBlock] Could not release the claim on plan ${planId}:`, err));
+    }
   } finally {
     nextBlockInFlight.delete(planId);
   }
@@ -2342,7 +2382,7 @@ export async function checkAndGeneratePendingBlocks(userId: string): Promise<voi
   for (const plan of activePlans) {
     if (plan.nextBlockAt && plan.nextBlockAt <= now && plan.generatedThroughWeek != null) {
       console.log(`[NextBlock] Auto-triggering next block for plan ${plan.id} (nextBlockAt=${plan.nextBlockAt.toDateString()})`);
-      generateNextBlock(plan.id, userId).catch(err =>
+      generateNextBlock(plan.id, userId, { onlyIfDue: true }).catch(err =>
         console.error(`[NextBlock] Auto-generation failed for plan ${plan.id}:`, err)
       );
     }

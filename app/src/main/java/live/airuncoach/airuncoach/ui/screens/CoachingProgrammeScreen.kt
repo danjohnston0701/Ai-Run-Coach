@@ -514,6 +514,19 @@ fun TrainingPlanDashboardScreen(
         }
     }
 
+    // The rest of the plan is being built (e.g. just after upgrading from a free-trial plan):
+    // reload quietly every few seconds until the new weeks are there.
+    val generatingNextBlock = (state as? PlanDetailState.Success)?.details?.generatingNextBlock == true
+    LaunchedEffect(lifecycleOwner, planId, generatingNextBlock) {
+        if (!generatingNextBlock) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                kotlinx.coroutines.delay(5_000)
+                viewModel.loadPlanDetail(planId, silent = true)
+            }
+        }
+    }
+
     // Navigate back once the API call has completed.
     // NOTE: We deliberately do NOT call clearPlanActionSuccess() here — the ViewModel is
     // scoped to this back-stack entry and gets destroyed on pop anyway. Clearing it early
@@ -844,6 +857,14 @@ fun PlanDashboardContent(
             Spacer(modifier = Modifier.height(Spacing.lg))
         }
 
+        // ── The rest of the plan is being built (e.g. just upgraded) ──────────
+        if (details.generatingNextBlock) {
+            item {
+                BuildingRestOfPlanCard(generatedWeeks = details.plan.generatedThroughWeek ?: details.weeks.size, totalWeeks = details.plan.totalWeeks)
+                Spacer(modifier = Modifier.height(Spacing.lg))
+            }
+        }
+
         // ── Free-trial plan: what's included and how to unlock the rest ───────
         details.trialCap?.let { cap ->
             item {
@@ -1052,8 +1073,9 @@ fun PlanDashboardContent(
         // ── Rolling block banner — shown after the last generated week ────────
         // Position here so the runner finishes reading the plan, then sees
         // the "next block coming" message right at the end of the generated weeks.
-        // Not on a free-trial plan: its next block waits for AI Plans, not a date.
-        if (blockStatus != null && details.trialCap == null) {
+        // Not on a free-trial plan: its next block waits for AI Plans, not a date. Not while the
+        // block is being built either: its date is the old one then (the card at the top says so).
+        if (blockStatus != null && details.trialCap == null && !details.generatingNextBlock && !blockStatus.generating) {
             item {
                 Spacer(modifier = Modifier.height(Spacing.sm))
                 RollingBlockBanner(
@@ -1984,5 +2006,33 @@ fun calculateActualCurrentWeek(planCreatedAtString: String?): Int {
         return maxOf(1, weeksDiff + 1)
     } catch (e: Exception) {
         return 1
+    }
+}
+
+/**
+ * The rest of the plan is being built right now: just after upgrading from a free-trial plan
+ * (server/plan-trial-cap.ts lifts the cap and generates the next block), or a next block that's
+ * running. The screen reloads quietly until the new weeks arrive.
+ */
+@Composable
+fun BuildingRestOfPlanCard(generatedWeeks: Int, totalWeeks: Int) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Colors.primary.copy(alpha = 0.10f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Colors.primary.copy(alpha = 0.35f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(modifier = Modifier.padding(Spacing.lg), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(color = Colors.primary, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+            Spacer(modifier = Modifier.width(Spacing.md))
+            Column {
+                Text("Building the rest of your plan", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Weeks 1–$generatedWeeks are ready. Your coach is writing the next weeks of your $totalWeeks-week plan now; they'll appear here in a minute or two.",
+                    style = AppTextStyles.small, color = Colors.textSecondary
+                )
+            }
+        }
     }
 }

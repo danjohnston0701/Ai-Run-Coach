@@ -164,6 +164,8 @@ A plan made on the free trial is generated only far enough to hold its first `TR
 - **Enforced on the server:** prepare-coaching returns 403 `plan_session_locked`; runs never complete a locked session (`plan-run-sync.ts`); `open-today` never offers one. Plan details return a per-workout `locked` flag and a `trialCap` summary, and today's workout carries `locked`.
 - **App versions:** only apps that send `supportsTrialCap` (Android 2.0.81+, iOS after 2026-11-18) can create a trial plan. Older apps get the old "not in the free trial" 403.
 - **Allowances:** trial plans, routes and one-off sessions count across the whole trial (`WHOLE_TRIAL_FEATURES` in `usage-service.ts`), not per month. AI coaching km and run summaries stay monthly.
+- **Today's session** (`GET /api/training-plans/:id/today`) offers a locked session only once no free one is left open; a missed free session comes back as overdue.
+- **After the lift:** plan details return `generatingNextBlock` (true on the read that lifts the cap, then while `training_plans.next_block_generating_at` is set) and the apps show "Building the rest of your plan" and reload every 5 s. `generateNextBlock` claims that column atomically (10 min stale), so autoscale instances can't build the same weeks twice; the app-start check passes `onlyIfDue` so it never builds the block after one that just finished.
 - **Apps:** Android `ui/components/TrialPlanCap.kt` and iOS views at the end of `CoachingPlanScreens.swift` (banner, locked rows, locked-week placeholders, locked today card; every tap opens the subscription screen). Change them together.
 
 ### Session types and one-off AI sessions (`server/routes-single-sessions.ts`, Android `domain/model/SessionTypes.kt`)

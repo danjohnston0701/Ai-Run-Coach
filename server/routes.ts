@@ -64,6 +64,7 @@ import {
   reassessTrainingPlansWithRunData,
   generateNextBlock,
   checkAndGeneratePendingBlocks,
+  isNextBlockGenerating,
 } from "./training-plan-service";
 import {
   sendActivityNotification,
@@ -17353,6 +17354,11 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       const lockedIds = trialSessionCap == null
         ? new Set<string>()
         : await lockedWorkoutIdsForPlan({ ...plan[0], trialSessionCap });
+      // The rest of the plan is being built: just now, by lifting the trial cap above (that
+      // generation starts in the background, so it may not have claimed the plan yet), or by a
+      // next block already running. The apps say so and reload until it's done.
+      const capJustLifted = plan[0].trialSessionCap != null && trialSessionCap == null;
+      const generatingNextBlock = capJustLifted || (await isNextBlockGenerating(plan[0].id));
 
       // Get weeks
       const weeks = await db
@@ -17500,6 +17506,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         plan: { ...plan[0], trialSessionCap },
         weeks: weeksWithWorkouts,
         trialCap,
+        generatingNextBlock,
         performanceBaseline
       });
     } catch (error: any) {
@@ -17737,10 +17744,14 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const generatedThroughWeek = plan.generatedThroughWeek ?? plan.totalWeeks;
       const isFullyGenerated = generatedThroughWeek >= plan.totalWeeks;
       const nextBlockAt = plan.nextBlockAt;
+      // A block being built right now: the stored nextBlockAt is the old date, so don't quote it.
+      const generating = !isFullyGenerated && (await isNextBlockGenerating(plan.id));
 
       // Human-readable next block message
       let nextBlockMessage: string | null = null;
-      if (!isFullyGenerated && nextBlockAt) {
+      if (generating) {
+        nextBlockMessage = "The rest of your plan is being built now. It will appear here in a minute or two.";
+      } else if (!isFullyGenerated && nextBlockAt) {
         const dateStr = nextBlockAt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
         nextBlockMessage = `Your next training block will be generated on ${dateStr}. This ensures your plan evolves with your progress and adapts to your actual fitness.`;
       }
@@ -17753,7 +17764,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
         isFullyGenerated,
         nextBlockAt: nextBlockAt ?? null,
         nextBlockMessage,
-        nextBlockReady: !isFullyGenerated && nextBlockAt != null && new Date(nextBlockAt) <= new Date(),
+        generating,
+        nextBlockReady: !generating && !isFullyGenerated && nextBlockAt != null && new Date(nextBlockAt) <= new Date(),
       });
     } catch (err: any) {
       console.error("Error getting block status:", err);
@@ -18026,6 +18038,14 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
+      // Free-trial plan: sessions past its free ones are locked (plan-trial-cap.ts). A locked
+      // session is only offered when no free one is left open: a runner who missed a free
+      // session gets that one back (as overdue) instead of a "you've used your free sessions"
+      // card while they still have some.
+      const [capPlan] = await db.select().from(trainingPlans).where(eq(trainingPlans.id, planId)).limit(1);
+      const lockedIds = capPlan ? await lockedWorkoutIdsForPlan(capPlan) : new Set<string>();
+      const withLock = (w: typeof plannedWorkouts.$inferSelect) => ({ ...w, locked: lockedIds.has(w.id) });
+
       // 1. Look for an incomplete workout scheduled EXACTLY today
       const todaysWorkouts = await db.select().from(plannedWorkouts)
         .where(and(
@@ -18034,26 +18054,30 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
           lt(plannedWorkouts.scheduledDate, tomorrow),
           eq(plannedWorkouts.isCompleted, false)
         ))
-        .orderBy(plannedWorkouts.scheduledDate)
-        .limit(1);
+        .orderBy(plannedWorkouts.scheduledDate);
 
-      if (todaysWorkouts.length > 0) {
-        // locked: past a free-trial plan's free sessions (plan-trial-cap.ts)
-        return res.json({ workout: { ...todaysWorkouts[0], locked: await isWorkoutLocked(todaysWorkouts[0].id) }, isToday: true, isOverdue: false });
-      }
-
-      // 2. No workout today — look for the most recent overdue (incomplete, scheduled before today)
+      // 2. The most recent overdue (incomplete, scheduled before today)
       const overdueWorkouts = await db.select().from(plannedWorkouts)
         .where(and(
           eq(plannedWorkouts.trainingPlanId, planId),
           lt(plannedWorkouts.scheduledDate, today),
           eq(plannedWorkouts.isCompleted, false)
         ))
-        .orderBy(desc(plannedWorkouts.scheduledDate))
-        .limit(1);
+        .orderBy(desc(plannedWorkouts.scheduledDate));
 
+      const todayUnlocked = todaysWorkouts.find((w) => !lockedIds.has(w.id));
+      if (todayUnlocked) {
+        return res.json({ workout: withLock(todayUnlocked), isToday: true, isOverdue: false });
+      }
+      const overdueUnlocked = overdueWorkouts.find((w) => !lockedIds.has(w.id) && (w.workoutType ?? "").toLowerCase() !== "rest");
+      if (overdueUnlocked && lockedIds.size > 0) {
+        return res.json({ workout: withLock(overdueUnlocked), isToday: false, isOverdue: true });
+      }
+      if (todaysWorkouts.length > 0) {
+        return res.json({ workout: withLock(todaysWorkouts[0]), isToday: true, isOverdue: false });
+      }
       if (overdueWorkouts.length > 0) {
-        return res.json({ workout: { ...overdueWorkouts[0], locked: await isWorkoutLocked(overdueWorkouts[0].id) }, isToday: false, isOverdue: true });
+        return res.json({ workout: withLock(overdueWorkouts[0]), isToday: false, isOverdue: true });
       }
 
       // 3. Rest day — no workout today and nothing overdue

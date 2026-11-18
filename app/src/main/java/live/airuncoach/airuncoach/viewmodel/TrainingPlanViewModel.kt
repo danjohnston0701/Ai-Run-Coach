@@ -212,14 +212,17 @@ class TrainingPlanViewModel @Inject constructor(
         }
     }
 
-    fun loadPlanDetail(planId: String) {
+    /** @param silent keep the plan on screen while reloading (the poll while the rest of the plan is built). */
+    fun loadPlanDetail(planId: String, silent: Boolean = false) {
         // Cancel any in-flight load before starting a new one so the latest call always wins.
         // This prevents a stale lifecycle-triggered reload from overwriting fresh data that
         // was returned by a reload triggered after completeWorkout finishes.
         planDetailJob?.cancel()
         planDetailJob = viewModelScope.launch {
             Log.d("TrainingPlanVM", "📋 Loading plan detail for planId=$planId...")
-            _planDetailState.value = PlanDetailState.Loading
+            if (!silent || _planDetailState.value !is PlanDetailState.Success) {
+                _planDetailState.value = PlanDetailState.Loading
+            }
             try {
                 // Wrap each async block in its own try-catch to prevent structured
                 // concurrency from propagating the exception past the outer try-catch.
@@ -257,7 +260,8 @@ class TrainingPlanViewModel @Inject constructor(
                 } catch (e: Exception) {
                     progressDeferred.cancel()
                     Log.e("TrainingPlanVM", "Error loading plan detail: ${e.message}", e)
-                    _planDetailState.value = PlanDetailState.Error("Unable to load plan. Please try again.")
+                    // A failed background reload keeps the plan on screen; the next poll retries.
+                    if (!silent) _planDetailState.value = PlanDetailState.Error("Unable to load plan. Please try again.")
                     return@launch
                 }
 
@@ -280,7 +284,7 @@ class TrainingPlanViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 Log.e("TrainingPlanVM", "Unexpected error loading plan detail: ${e.message}", e)
-                _planDetailState.value = PlanDetailState.Error("Something went wrong. Please try again.")
+                if (!silent) _planDetailState.value = PlanDetailState.Error("Something went wrong. Please try again.")
             }
         }
     }

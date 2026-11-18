@@ -32,6 +32,14 @@ export async function runAutoMigrations(): Promise<void> {
       name: "training_plans.trial_session_cap",
       sql: "ALTER TABLE training_plans ADD COLUMN IF NOT EXISTS trial_session_cap INTEGER",
     },
+    // training_plans.next_block_generating_at — set while a next block is being generated, on
+    // any instance (generateNextBlock claims it atomically so autoscale instances can't build the
+    // same weeks twice; the apps show "building the rest of your plan" while it's set). Not in
+    // the Drizzle schema: only raw SQL in training-plan-service.ts reads or writes it.
+    {
+      name: "training_plans.next_block_generating_at",
+      sql: "ALTER TABLE training_plans ADD COLUMN IF NOT EXISTS next_block_generating_at TIMESTAMP",
+    },
     // planned_workouts.session_type — added to shared/schema.ts for walk/run workout
     // classification but the DB migration was never applied. Without this, any
     // db.select().from(plannedWorkouts) (e.g. plan reassessment after a run save)
