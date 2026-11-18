@@ -70,7 +70,7 @@ import {
   sendActivityNotification,
   getUnreadNotificationCount
 } from "./notification-service";
-import { getUsageWithLimits, checkAndEnforceLimit, recordUsage, FEATURE_LABELS, featureNotIncludedResponse, effectiveTier as resolveEffectiveTier } from "./usage-service";
+import { getUsageWithLimits, checkAndEnforceLimit, recordUsage, FEATURE_LABELS, featureNotIncludedResponse, effectiveTier as resolveEffectiveTier, WHOLE_TRIAL_FEATURES } from "./usage-service";
 import { FREE_TRIAL_DAYS } from "./tier-limits";
 import { checkCooldown, recordFired, buildSkipResponse } from "./coaching-cooldown";
 import {
@@ -6553,6 +6553,11 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         };
       }
       
+      // On the trial, plans / routes / one-off sessions are one allowance for the whole
+      // trial (WHOLE_TRIAL_FEATURES), so don't call it monthly.
+      const wholeTrial = usageData.tier === "free" && (WHOLE_TRIAL_FEATURES as readonly string[]).includes(featureName);
+      const periodText = wholeTrial ? "during your free trial" : "this month";
+
       // Get renewal date (start of next month)
       const [year, month] = usageData.yearMonth.split("-");
       const nextMonth = parseInt(month) === 12 ? 1 : parseInt(month) + 1;
@@ -6567,14 +6572,15 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         renewalDate,
         isUnlimited,
         notIncluded,
+        period: wholeTrial ? "trial" : "month",
         reason: notIncludedInfo?.reason ?? null,
         message: isUnlimited 
           ? `You have unlimited ${label}`
           : notIncludedInfo
           ? notIncludedInfo.message
           : isAvailable
-          ? `You have ${remaining} of ${limit}${gated === "aiCoachingKm" ? " km of" : ""} ${label} remaining this month`
-          : `You've reached your limit of ${limit}${gated === "aiCoachingKm" ? " km of" : ""} ${label} this month`
+          ? `You have ${remaining} of ${limit}${gated === "aiCoachingKm" ? " km of" : ""} ${label} remaining ${periodText}`
+          : `You've reached your limit of ${limit}${gated === "aiCoachingKm" ? " km of" : ""} ${label} ${periodText}`
       });
     } catch (error: any) {
       console.error("[Features] GET /api/features/:featureName/available error:", error);

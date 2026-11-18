@@ -24,6 +24,8 @@ data class SingleSessionAllowance(
     val isUnlimited: Boolean,
     val notIncluded: Boolean,
     val message: String?,
+    /** True on the free trial: the allowance covers the whole trial, not a month. */
+    val wholeTrial: Boolean = false,
 )
 
 sealed class SingleSessionCreateState {
@@ -80,6 +82,7 @@ class SingleSessionViewModel @Inject constructor(
                     isUnlimited = r.isUnlimited == true,
                     notIncluded = r.notIncluded ?: (r.limit == 0 && r.isUnlimited != true),
                     message = r.message,
+                    wholeTrial = r.period == "trial",
                 )
             } catch (e: Exception) {
                 // Never block on the check — the create call enforces the allowance anyway.

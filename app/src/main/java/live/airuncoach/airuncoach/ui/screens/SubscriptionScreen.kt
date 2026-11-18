@@ -1578,8 +1578,11 @@ data class PlanData(
             features = listOf(
                 PlanFeature("50km of AI Coaching per month during trial", true),
                 PlanFeature("15 AI Session Summaries per month during trial", true),
-                PlanFeature("No AI Route Generation", false),
-                PlanFeature("No AI Training Plans", false),
+                // Mirrors TIER_LIMITS.free (server/tier-limits.ts); these three count across
+                // the whole trial, not per month.
+                PlanFeature("1 AI Training Plan, first 4 sessions unlocked", true),
+                PlanFeature("5 AI Route Generations during trial", true),
+                PlanFeature("4 one-off AI Sessions during trial", true),
                 PlanFeature("Never auto-charged — it simply ends, you choose whether to upgrade", true)
             )
         )

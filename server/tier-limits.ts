@@ -49,7 +49,7 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
     trainingPlansGenerated: 1,     // One plan per trial, first 4 sessions unlocked (plan-trial-cap.ts)
     routesGenerated: 5,            // A few AI routes
     postRunAnalyses: 15,           // 15 AI post-run summaries per month during the trial
-    singleSessionsGenerated: 2,    // A couple of one-off AI-designed sessions
+    singleSessionsGenerated: 4,    // 4 one-off AI-designed sessions per trial
   },
   // Hard block applied server-side when trial_expires_at is in the past for a free user.
   // All limits are 0 — every feature request is rejected with a 402 upgrade required.

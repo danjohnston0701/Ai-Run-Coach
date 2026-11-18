@@ -220,5 +220,7 @@ data class FeatureAvailabilityResponse(
     /** True when the allowance is 0 because the feature isn't in the plan (server ≥ 2026-09-18). */
     val notIncluded: Boolean? = null,
     val reason: String? = null,
-    val message: String? = null
+    val message: String? = null,
+    /** "trial" = one allowance for the whole free trial, "month" = monthly (server ≥ 2026-11-18). */
+    val period: String? = null
 )

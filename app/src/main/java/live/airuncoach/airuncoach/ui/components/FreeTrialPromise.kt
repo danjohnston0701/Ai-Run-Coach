@@ -87,6 +87,7 @@ fun FreeTrialPromise(modifier: Modifier = Modifier, compact: Boolean = false) {
             PromiseLine("No card or payment details needed to start")
             PromiseLine("Nothing to cancel — you're never charged automatically when it ends")
             PromiseLine("Live AI coaching and post-run analysis from your very first run")
+            PromiseLine("Try an AI training plan: your first 4 sessions are free")
         }
         Spacer(modifier = Modifier.height(Spacing.md))
         Text(

@@ -315,7 +315,7 @@ fun CreateSingleSessionScreen(
                 val line = when {
                     a.notIncluded -> a.message ?: "AI-designed sessions are part of AI Plans."
                     a.isUnlimited -> "Unlimited sessions on your plan."
-                    a.remaining != null && a.limit != null -> "${a.remaining} of ${a.limit} AI sessions left this month."
+                    a.remaining != null && a.limit != null -> "${a.remaining} of ${a.limit} AI sessions left ${if (a.wholeTrial) "in your free trial" else "this month"}."
                     else -> null
                 }
                 line?.let {

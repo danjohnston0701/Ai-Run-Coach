@@ -451,8 +451,13 @@ private fun TrialSummaryCard() {
 
             Spacer(modifier = Modifier.height(Spacing.md))
 
+            // Mirrors TIER_LIMITS.free in server/tier-limits.ts. The plan, routes and one-off
+            // sessions count across the whole trial, not per month (WHOLE_TRIAL_FEATURES).
             FeatureItem("50 km of realtime AI coaching and run insights per month")
             FeatureItem("15 post-run AI summaries per month")
+            FeatureItem("An AI training plan, with your first 4 sessions unlocked")
+            FeatureItem("5 AI-generated routes")
+            FeatureItem("4 one-off AI-designed sessions")
             FeatureItem("Garmin watch compatibility for enhanced insights and reporting")
         }
     }
@@ -484,8 +489,8 @@ private fun WhatsIncludedInPaidPlans() {
             )
             Spacer(modifier = Modifier.height(Spacing.md))
 
-            FeatureItem("Unlock AI route generation")
-            FeatureItem("Create personalized AI coaching plans")
+            FeatureItem("Unlock every session of your AI training plan")
+            FeatureItem("More AI routes and one-off sessions every month")
             FeatureItem("Continue AI coaching and insights beyond the trial allowance")
         }
     }

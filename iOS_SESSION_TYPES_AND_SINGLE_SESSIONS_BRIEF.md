@@ -59,7 +59,7 @@ build-verify with `xcodebuild` (see CLAUDE.md). Android files are named on each 
 - `CreateSingleSessionScreen`: type picker (AI types), Time / Distance length, optional notes,
   "N of M AI sessions left this month", Design → spinner → opens the normal workout detail with
   `WorkoutPlanContext(planId, goalType = "single_session", 1, 1)`.
-- Allowance: Lite 5 / Standard 15 a month, 0 on the trial and the no-AI-plan SKUs
+- Allowance: Lite 5 / Standard 15 a month, 4 for the whole free trial (since 2026-11-18), 0 on the no-AI-plan SKUs
   (`server/tier-limits.ts`), spent when the session is designed.
 
 ## 3. "You have a plan session today" (both features)
@@ -80,5 +80,5 @@ build-verify with `xcodebuild` (see CLAUDE.md). Android files are named on each 
 - [ ] Configure-session card + local plan builder, line-for-line with `SelfConfiguredSessionPlan.kt`.
 - [ ] Self-managed rep gates in `RunSessionViewModel` mirroring the list above; race picks not sent as a type.
 - [ ] `planSessionChoice` on the run upload; open-today check + dialog for typed runs and one-off sessions.
-- [ ] Sessions tab, + menu, create screen, list/delete, open in the workout detail screen.
+- [x] Sessions tab, + menu, create screen, list/delete, open in the workout detail screen (2026-11-18, `SingleSessionScreens.swift`).
 - [ ] `RunNaming.swift`: `race` / `walk_race` names.
