@@ -79,6 +79,7 @@ build-verify with `xcodebuild` (see CLAUDE.md). Android files are named on each 
 - [ ] `SessionTypes.swift` catalogue + picker replacing the run/walk toggle; hide distance/time for reps.
 - [ ] Configure-session card + local plan builder, line-for-line with `SelfConfiguredSessionPlan.kt`.
 - [ ] Self-managed rep gates in `RunSessionViewModel` mirroring the list above; race picks not sent as a type.
-- [ ] `planSessionChoice` on the run upload; open-today check + dialog for typed runs and one-off sessions.
+- [x] `planSessionChoice` on the run upload (phone, offline queue, crash recovery, Apple Watch mirror) + open-today check and dialog for one-off sessions (2026-11-19, `WorkoutDetailScreen.withPlanSessionCheck`, models in `SingleSessionScreens.swift`).
+- [ ] Same check for typed setup-screen runs, once the session-type picker exists.
 - [x] Sessions tab, + menu, create screen, list/delete, open in the workout detail screen (2026-11-18, `SingleSessionScreens.swift`).
 - [ ] `RunNaming.swift`: `race` / `walk_race` names.
