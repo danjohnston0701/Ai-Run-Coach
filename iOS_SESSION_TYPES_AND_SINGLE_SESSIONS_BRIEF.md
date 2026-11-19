@@ -25,7 +25,9 @@ build-verify with `xcodebuild` (see CLAUDE.md). Android files are named on each 
 - `isSelfManagedRepSession` = no coaching plan loaded and the pick is a rep type. When true:
   no km-split callout (the split is still recorded), no pace coaching, no struggle cues, no
   25/50/75 % or 500 m check-ins, no phase-change cue, no inferred target distance, no split
-  lockout, and elite coaching skips target-ETA and pace-trend. HR timer, cadence/technique and
+  lockout, and elite coaching skips target-ETA and pace-trend.
+  Since 2026-11-19 the opening lockout doesn't wait for the 500 m check-in either (it never
+  plays in these sessions, so before that it muted the HR/form/encouragement cues all session). HR timer, cadence/technique and
   positive reinforcement stay on.
 - **Configure session** builds a local plan on the phone (`domain/model/SelfConfiguredSessionPlan.kt`):
   phases warm-up → work×N / recovery×N (walk-run: `jog` / `walk`) → cool-down, plus triggers:
@@ -76,10 +78,10 @@ build-verify with `xcodebuild` (see CLAUDE.md). Android files are named on each 
   plan matching for that run, orientation included.
 
 ## iOS checklist
-- [ ] `SessionTypes.swift` catalogue + picker replacing the run/walk toggle; hide distance/time for reps.
-- [ ] Configure-session card + local plan builder, line-for-line with `SelfConfiguredSessionPlan.kt`.
-- [ ] Self-managed rep gates in `RunSessionViewModel` mirroring the list above; race picks not sent as a type.
+- [x] `SessionTypes.swift` catalogue + picker replacing the run/walk toggle; hide distance/time for reps; free types only for group runs (2026-11-19).
+- [x] Configure-session card + local plan builder, line-for-line with `SelfConfiguredSessionPlan.kt` (2026-11-19, `SessionTypes.swift`).
+- [x] Self-managed rep gates in `RunSessionViewModel` mirroring the list above; race picks not sent as a type (2026-11-19: `isSelfManagedRepSession`, `coachingWorkoutType`, `savedWorkoutType`, `configureChosenSession`).
 - [x] `planSessionChoice` on the run upload (phone, offline queue, crash recovery, Apple Watch mirror) + open-today check and dialog for one-off sessions (2026-11-19, `WorkoutDetailScreen.withPlanSessionCheck`, models in `SingleSessionScreens.swift`).
-- [ ] Same check for typed setup-screen runs, once the session-type picker exists.
+- [x] Same check for typed setup-screen runs (2026-11-19, `RunSetupScreen.withPlanSessionCheck`).
 - [x] Sessions tab, + menu, create screen, list/delete, open in the workout detail screen (2026-11-18, `SingleSessionScreens.swift`).
-- [ ] `RunNaming.swift`: `race` / `walk_race` names.
+- [x] `RunNaming.swift`: `race` / `walk_race` names.

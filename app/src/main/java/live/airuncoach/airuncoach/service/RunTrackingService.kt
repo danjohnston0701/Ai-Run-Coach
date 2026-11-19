@@ -6812,7 +6812,9 @@ class RunTrackingService : Service(), SensorEventListener {
         // phase transitions take the bypassDistanceGate path above and are unaffected.
         // (check500mMilestones() itself doesn't come through here, so this can't deadlock it.)
         if (totalDistance < 500.0) return false
-        if (coachingFeaturePrefs.halfKmCheckInEnabled && last500mMilestone == 0) return false
+        // Self-managed reps never get the 500 m check-in (check500mMilestones is skipped for
+        // them), so waiting for it would mute their HR, form and encouragement cues all session.
+        if (coachingFeaturePrefs.halfKmCheckInEnabled && last500mMilestone == 0 && !isSelfManagedRepSession) return false
         // Split-proximity lockout: within the last 150 m before a km-split boundary, leave the
         // slot for the split so it is never queued behind a discretionary cue and announced
         // late (iOS heard "you're at 1 kilometre" at 1.10 km on 17 Sep for exactly this reason).
