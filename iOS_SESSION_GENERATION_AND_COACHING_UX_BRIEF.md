@@ -60,7 +60,7 @@ Now built from `runSessionViewModel.activeSessionCoachingPlan.phases` — the sa
 
 ---
 
-## C. Known Android bugs — NOT fixed, flagged for independent iOS check
+## C. Android bugs flagged for an independent iOS check
 
 ### C1. Live-trigger fallback text loses rep-number context (confirmed via a real hill-repeats session audit)
 
@@ -68,7 +68,7 @@ Now built from `runSessionViewModel.activeSessionCoachingPlan.phases` — the sa
 
 Audited against a real 4× hill-repeat session: **every single coaching cue** that fired that session came from this fallback path (verbatim matches to the plan's static template text, not distinctive OpenAI-generated prose) — meaning the live call failed/timed out for the whole session — and every rep announcement said "Rep 1 of 1." Recovery-phase transitions never announced at all; suspected (not fully confirmed) secondary cause: the expanded-phase-timeline's cumulative-distance bookkeeping for interleaved work/recovery reps doesn't account for real GPS distance covered during time-based recovery phases, causing later work-phase entries to be skipped by the phase-resolution scan.
 
-**This is not fixed on Android** — flagged, not resolved, out of scope for this batch.
+**Fixed on Android in `eca7768d` (2026-08-11)**: the rep numbers are now parsed from the phase name before the fallback is built (`fireLiveTriggerMessage`), and the direct `pickTriggerMessage` calls use the timeline entry's rep number. Re-checked 2026-11-19: every caller passes a rep-carrying phase name (`dynamicCurrentPhaseName` / `resolvedPhaseName`). iOS fills `{repNum}` from `currentRepNumber`, also correct. The recovery-phase bookkeeping suspicion above is still unconfirmed.
 
 **iOS action:** If iOS has an equivalent local-fallback-message system for live coaching triggers (used when its own live-AI call fails/times out), check independently whether it correctly threads the real rep number / total reps / current interleaved-phase state into that fallback text. This is exactly the kind of bug that looks fine under fast/cache-hit testing conditions but only surfaces when the live call genuinely fails under real network conditions — worth testing iOS's fallback path deliberately (e.g. by simulating a timeout) rather than only testing the happy path.
 
