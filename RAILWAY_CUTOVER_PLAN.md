@@ -16,7 +16,7 @@ Nothing is deleted until Railway has run cleanly for 7 days.
 | Railway service (US East, `ai-run-coach-production.up.railway.app`) | ✅ deploys from `main` (auto-deploy on push), on a **test copy** of the database, jobs off |
 | All 47 secrets on Railway, checked against the code | ✅ |
 | Every page and API response matches live Replit | ✅ login ~25% faster server-side |
-| Domain DNS can point at Railway | ❌ **blocked:** see Phase 0 |
+| Domain DNS can point at Railway | ⏳ Cloudflare zone ready (all 15 records verified); waiting on Replit Support to switch nameservers (0.3) |
 | Live production | Still 100% on Replit |
 
 ## Phase 0: Move the domain's DNS off Replit (start now, takes days)
@@ -29,14 +29,19 @@ Replit account without moving it first would lose the domain.
 **Recommended:** move DNS, then the registration, to **Cloudflare** (free DNS, at-cost renewals,
 supports the bare-domain CNAME that Railway needs).
 
-- [ ] **0.1** Create a Cloudflare account and add `airuncoach.live` (free plan). It scans the existing records.
-- [ ] **0.2** Check that Cloudflare has **all 15 records** below, exactly. Set every record to **DNS only (grey cloud)**.
+- [x] **0.1** Create a Cloudflare account and add `airuncoach.live` (free plan). Done 2026-11-15.
+      **Cloudflare nameservers: `desi.ns.cloudflare.com` and `ray.ns.cloudflare.com`.**
+- [x] **0.2** Check that Cloudflare has **all 15 records** below, exactly. Set every record to **DNS only (grey cloud)**.
       The `A @` record stays pointing at Replit for now, so nothing changes yet.
+      Done 2026-11-15: the scan missed `zb10269481`, `171847._domainkey` and `_railway-verify` (added by hand) and had
+      proxied `@` and `www` (switched to DNS only). Querying `desi.ns.cloudflare.com` directly gives answers identical to
+      the current name.com nameservers for every record. DNSSEC is off (no DS record), so nothing to disable first.
 - [ ] **0.3** Contact **Replit Support** and ask them to either change the nameservers to the two Cloudflare gives you,
       or unlock the domain and send the transfer (EPP/auth) code. Ask for both; nameservers first is fastest.
-      Message to send (fill in the two nameservers from step 0.1):
+      Message to send:
       > Hi, I own the domain **airuncoach.live**, registered through Replit Domains on this account. I'm moving its DNS to Cloudflare.
-      > Could you please (1) change the domain's nameservers to `<ns1>.ns.cloudflare.com` and `<ns2>.ns.cloudflare.com`,
+      > Could you please (1) change the domain's nameservers to `desi.ns.cloudflare.com` and `ray.ns.cloudflare.com`
+      > (replacing the current name.com ones),
       > and (2) unlock the domain and send me the transfer authorisation (EPP) code so I can transfer the registration afterwards?
       > My deployment should keep running unchanged; I've already copied every DNS record to Cloudflare. Thanks!
 - [ ] **0.4** Once the nameservers are on Cloudflare (24–48 h to settle), check that the site, app, `support@` email and app emails all work.

@@ -144,6 +144,43 @@ export async function runAutoMigrations(): Promise<void> {
         )
       `,
     },
+    // ── dev_updates — Development updates & asks (server/routes-dev-updates.ts, /admin/dev-updates) ──
+    {
+      name: "dev_updates.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS dev_updates (
+          id          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          kind        TEXT NOT NULL,
+          title       TEXT NOT NULL,
+          body        TEXT NOT NULL DEFAULT '',
+          platforms   TEXT[] NOT NULL DEFAULT '{}',
+          status      TEXT NOT NULL DEFAULT 'open',
+          answer      TEXT,
+          answered_at TIMESTAMPTZ,
+          author      TEXT NOT NULL DEFAULT 'Claude',
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `,
+    },
+    {
+      name: "dev_update_images.create_table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS dev_update_images (
+          id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+          update_id    VARCHAR NOT NULL REFERENCES dev_updates(id) ON DELETE CASCADE,
+          position     INTEGER NOT NULL DEFAULT 0,
+          caption      TEXT,
+          content_type TEXT NOT NULL,
+          data         BYTEA NOT NULL,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `,
+    },
+    {
+      name: "idx_dev_update_images_update",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dev_update_images_update ON dev_update_images(update_id, position)",
+    },
     // ── plan_generation_jobs — background plan generation (server/plan-jobs.ts) ──
     {
       name: "plan_generation_jobs.create_table",

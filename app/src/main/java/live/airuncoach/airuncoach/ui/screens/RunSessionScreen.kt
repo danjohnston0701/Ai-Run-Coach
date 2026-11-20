@@ -401,6 +401,10 @@ fun RunSessionScreen(
         }
     }
 
+    // Phased sessions (warm-up / reps / recoveries / cool-down): where the runner is, from the
+    // service's timeline — the same one the coach announces from.
+    val phaseStrip by live.airuncoach.airuncoach.service.RunTrackingService.phaseStrip.collectAsState()
+
     // ✅ NEW ARCHITECTURE
     Scaffold(
         containerColor = Colors.backgroundRoot,
@@ -605,8 +609,10 @@ fun RunSessionScreen(
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
 
+                        phaseStrip?.let { PhaseStrip(it, Modifier.padding(horizontal = Spacing.md).padding(top = Spacing.sm)) }
+
                         // 1B️⃣ Interval Phase Display (if interval training)
-                        if (runState.isIntervalWorkout && runState.intervalPhase != null) {
+                        if (phaseStrip == null && runState.isIntervalWorkout && runState.intervalPhase != null) {
                             Spacer(modifier = Modifier.height(Spacing.md))
                             IntervalPhaseDisplay(
                                 intervalPhase = runState.intervalPhase,
@@ -646,6 +652,8 @@ fun RunSessionScreen(
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
 
+                        phaseStrip?.let { PhaseStrip(it, Modifier.padding(horizontal = Spacing.md).padding(top = Spacing.sm)) }
+
                         GarminElitePlusDashboard(
                             time = runState.time,
                             paceStr = runState.pace,
@@ -671,6 +679,8 @@ fun RunSessionScreen(
                             isLoading = runState.isLoadingBriefing,
                             modifier = Modifier.padding(horizontal = Spacing.md)
                         )
+
+                        phaseStrip?.let { PhaseStrip(it, Modifier.padding(horizontal = Spacing.md).padding(top = Spacing.sm)) }
 
                         FreeRunEliteDashboard(
                             time = runState.time,
@@ -3494,6 +3504,82 @@ internal fun RunSavingOverlay(activityType: String = "run") {
                 style = MaterialTheme.typography.bodyLarge,
                 color = Colors.textSecondary
             )
+        }
+    }
+}
+
+/**
+ * Phased-session strip: "REP 2 OF 4 · 210 m left", a progress bar through the current entry,
+ * the target pace on work entries and what comes next. Work entries are red-tinted, recoveries,
+ * warm-up and cool-down green. iOS `PhaseStripView` (HomeScreens.swift) mirrors it.
+ */
+@Composable
+fun PhaseStrip(
+    state: live.airuncoach.airuncoach.service.RunTrackingService.Companion.PhaseStripState,
+    modifier: Modifier = Modifier
+) {
+    val tint = when {
+        state.finished -> Colors.primary
+        state.isWork -> Colors.error
+        else -> Color(0xFF4CAF50)
+    }
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(Spacing.md),
+        colors = CardDefaults.cardColors(containerColor = tint.copy(alpha = 0.14f))
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = 10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = state.label,
+                    color = tint,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                if (state.remaining.isNotEmpty()) {
+                    Text(
+                        text = state.remaining,
+                        color = Colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp
+                    )
+                }
+            }
+            if (!state.finished) {
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { state.progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = tint,
+                    trackColor = Colors.textMuted.copy(alpha = 0.2f)
+                )
+            }
+            val footer = listOfNotNull(
+                state.targetPace?.let { "Target $it" },
+                state.next?.let { "Next: $it" }
+            )
+            if (footer.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = footer.first(),
+                        color = Colors.textSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (footer.size > 1) {
+                        Text(text = footer[1], color = Colors.textSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
         }
     }
 }

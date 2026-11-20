@@ -43,3 +43,31 @@ data class OpenPlanSession(
     @SerializedName("planId") val planId: String,
     @SerializedName("goalType") val goalType: String?,
 )
+
+// ── Confirm session: suggested paces (POST /api/sessions/suggest-paces, server/session-pace-suggest.ts) ──
+
+data class SuggestPacesRequest(
+    @SerializedName("sessionType") val sessionType: String,
+    @SerializedName("reps") val reps: Int,
+    @SerializedName("workSeconds") val workSeconds: Int? = null,
+    @SerializedName("workMeters") val workMeters: Int? = null,
+    @SerializedName("restSeconds") val restSeconds: Int? = null,
+    @SerializedName("restMeters") val restMeters: Int? = null,
+    @SerializedName("warmupMinutes") val warmupMinutes: Int = 0,
+    @SerializedName("cooldownMinutes") val cooldownMinutes: Int = 0,
+)
+
+/** Pace band in sec/km; min is the faster end. */
+data class PaceBandDto(
+    @SerializedName("min") val min: Int,
+    @SerializedName("max") val max: Int,
+)
+
+data class SuggestedPacesResponse(
+    /** "history" (worked out from the runner's runs) or "none" (nothing to base them on). */
+    @SerializedName("source") val source: String,
+    @SerializedName("basis") val basis: String? = null,
+    @SerializedName("workPace") val workPace: PaceBandDto? = null,
+    @SerializedName("easyPace") val easyPace: PaceBandDto? = null,
+    @SerializedName("workNote") val workNote: String? = null,
+)

@@ -83,7 +83,17 @@ data class ManualSessionStructure(
     val restMeters: Int? = null,
     val warmupMinutes: Int = 0,
     val cooldownMinutes: Int = 0,
+    // Target paces confirmed on the "Confirm session" screen, sec/km (min = faster end). Null =
+    // coach on effort (no history to suggest from, hill repeats, or the runner cleared them).
+    val workPaceMinSec: Int? = null,
+    val workPaceMaxSec: Int? = null,
+    val easyPaceMinSec: Int? = null,
+    val easyPaceMaxSec: Int? = null,
 ) {
+    /** Key for remembering the runner's confirmed paces for this rep shape ("intervals_m400"). */
+    fun paceMemoryKey(typeKey: String?): String =
+        "${typeKey ?: "reps"}_" + (workMeters?.let { "m$it" } ?: "s${workSeconds ?: 0}")
+
     fun isValid(): Boolean =
         reps in 1..50 &&
             ((workSeconds ?: 0) > 0) != ((workMeters ?: 0) > 0) &&

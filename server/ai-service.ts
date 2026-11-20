@@ -7497,6 +7497,14 @@ export async function generateSessionTriggerMessage(params: {
   const isWorkPhase = (params as any).isWorkPhase as boolean | undefined;
   const phaseElapsedMinutes = (params as any).phaseElapsedMinutes as number | undefined;
   const phaseRemainingMinutes = (params as any).phaseRemainingMinutes as number | undefined;
+  // Distance-based phases (e.g. a 400 m rep): length and metres left. Absent for timed phases.
+  const phaseDistanceMeters = (params as any).phaseDistanceMeters as number | undefined;
+  const phaseRemainingMeters = (params as any).phaseRemainingMeters as number | undefined;
+  const phaseDistanceText = phaseDistanceMeters !== undefined && phaseDistanceMeters !== null && phaseDistanceMeters > 0
+    ? (phaseRemainingMeters !== undefined && phaseRemainingMeters !== null
+        ? `${phaseDistanceMeters} m phase, ${Math.round(phaseRemainingMeters / 10) * 10} m remaining`
+        : `${phaseDistanceMeters} m phase`)
+    : '';
 
   const repContext = (currentRepNumber && totalRepsInSession)
     ? [
@@ -7507,14 +7515,14 @@ export async function generateSessionTriggerMessage(params: {
           : 'FINAL rep',
         phaseElapsedMinutes !== undefined && phaseRemainingMinutes !== undefined
           ? `${Math.round(phaseElapsedMinutes * 10) / 10} min into this phase, ${Math.round(phaseRemainingMinutes * 10) / 10} min remaining`
-          : '',
+          : phaseDistanceText,
       ].filter(Boolean).join(' — ')
     : '';
 
   // Phase time context for non-interval sessions
   const phaseTimeContext = (!currentRepNumber && phaseElapsedMinutes !== undefined && phaseRemainingMinutes !== undefined)
     ? `${Math.round(phaseElapsedMinutes * 10) / 10} min into current phase, ${Math.round(phaseRemainingMinutes * 10) / 10} min remaining`
-    : '';
+    : (!currentRepNumber ? phaseDistanceText : '');
 
   // ── Build the full session context block ──────────────────────────────────
   // Includes workout philosophy so GPT understands WHY this session exists, not just

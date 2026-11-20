@@ -1089,6 +1089,22 @@ class RunTrackingService : Service(), SensorEventListener {
         private val _navUiState = MutableStateFlow(NavUiState())
         val navUiState: StateFlow<NavUiState> = _navUiState
 
+        /** Where the runner is in a phased session (warm-up / reps / recoveries / cool-down), for
+         *  the run screen's strip. Null outside a plan with at least two timeline entries. */
+        data class PhaseStripState(
+            val label: String,          // "REP 2 OF 4", "RECOVERY 2 OF 4", "WARM-UP", "SESSION COMPLETE"
+            val isWork: Boolean,
+            val remaining: String,      // "210 m left", "0:45 left"
+            val progress: Float,        // 0..1 through the current entry
+            val next: String?,          // "Recovery 2 · 60 s"
+            val targetPace: String?,    // "4:45–4:55/km" (work entries only)
+            val step: Int,
+            val stepCount: Int,
+            val finished: Boolean,
+        )
+        private val _phaseStrip = MutableStateFlow<PhaseStripState?>(null)
+        val phaseStrip: StateFlow<PhaseStripState?> = _phaseStrip
+
         // Talk-to-Coach trigger — set to true when watch taps to request coach conversation.
         // Observed by RunSessionViewModel; reset to false after handled.
         private val _watchTalkToCoachRequest = MutableStateFlow(false)
@@ -1526,6 +1542,13 @@ class RunTrackingService : Service(), SensorEventListener {
     private var dynamicPhaseTimeStartMin: Double = 0.0  // elapsed minutes when current phase began
     private var dynamicPhaseIsWorkInterval: Boolean = true  // false for recovery/walk phases
     private var dynamicPhaseDurationMin: Double = 0.0  // planned duration of current phase (0 = distance-based)
+    private var dynamicPhaseDistanceKm: Double = 0.0   // planned distance of current phase (0 = time-based)
+    private var dynamicCurrentPhase: live.airuncoach.airuncoach.network.model.DynamicCoachingPhase? = null
+    // Position in evaluateDynamicPhase's expanded timeline, and where (elapsed min / km) the
+    // current entry began — each entry's end is measured from here on its own measure.
+    private var dynamicTimelineIdx: Int = 0
+    private var dynamicTimelineAnchorMin: Double = 0.0
+    private var dynamicTimelineAnchorKm: Double = 0.0
 
     // Interval midpoint tracking — fires a live AI midpoint cue once per work rep
     private var lastRepMidpointFiredAtRep: Int = -1
@@ -1854,6 +1877,12 @@ class RunTrackingService : Service(), SensorEventListener {
                     dynamicCoachingPlan = gson.fromJson(dynamicPlanJson, live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan::class.java)
                     sessionCoachingPlanComplete = false // Reset so new plan can fire all triggers
                     pendingPhaseAnnounce = null
+                    dynamicTimelineIdx = 0
+                    dynamicTimelineAnchorMin = 0.0
+                    dynamicTimelineAnchorKm = 0.0
+                    dynamicCurrentPhase = null
+                    _phaseStrip.value = null
+                    dynamicCurrentPhaseName = null
                     lastPhaseTransitionCueMs = 0L
                     // Reset session memory for fresh run
                     sessionTopicsDiscussed.clear()
@@ -2146,6 +2175,7 @@ class RunTrackingService : Service(), SensorEventListener {
         isInWatchStandby = false
         preCacheSystemAudio()  // Warm the pause/resume audio cache before any pause can happen
         _currentRunSession.value = null  // Clear stale data from previous run
+        _phaseStrip.value = null
         _uploadComplete.value = null
         _isServiceRunning.value = true
         _firstGpsPoint.value = null      // Reset route recognition for new run
@@ -3986,6 +4016,19 @@ class RunTrackingService : Service(), SensorEventListener {
                                 if (idleMs > 0) {
                                     totalPausedMs += idleMs
                                     splitPausedMs += idleMs
+                                    // The phase timeline keeps its own clock anchors: move them back
+                                    // with the run clock, or a timed phase that started during the
+                                    // wait would last the credited time longer (iOS rebases the same).
+                                    // Back to the start if the wait had run through phases.
+                                    val creditMin = idleMs / 60_000.0
+                                    if (dynamicTimelineIdx > 0 && dynamicTimelineAnchorMin < creditMin) {
+                                        dynamicTimelineIdx = 0
+                                        dynamicTimelineAnchorMin = 0.0
+                                        dynamicTimelineAnchorKm = 0.0
+                                    } else {
+                                        dynamicTimelineAnchorMin = (dynamicTimelineAnchorMin - creditMin).coerceAtLeast(0.0)
+                                    }
+                                    dynamicPhaseTimeStartMin = (dynamicPhaseTimeStartMin - creditMin).coerceAtLeast(0.0)
                                     Log.d("RunTrackingService", "Auto-credited ${idleMs}ms of start-line idle time before first movement " +
                                         "(confirmed sustained ${windowPaceSecPerKm.toInt()}s/km over $START_IDLE_CONFIRM_SAMPLES samples)")
                                 }
@@ -4536,6 +4579,8 @@ class RunTrackingService : Service(), SensorEventListener {
         // Reset per-tick flag - only one coaching trigger fires per location update
         hasCoachingFiredThisTick = false
 
+        publishPhaseStrip(displayDistanceKm)
+
         // ── 25/50/75% CHECK-INS — on time or not at all (see ProgressMilestones) ──
         // Evaluated before every other cue so a milestone inside its few-second window gets first
         // claim on a free slot. Plans with their own distance_pct triggers handle progress themselves.
@@ -4552,10 +4597,14 @@ class RunTrackingService : Service(), SensorEventListener {
             // the distance declared in the coaching plan so that "remaining_m" conditions work.
             // Not for time-based plans (no phase has a distance): their totalDistanceKm is the
             // AI's guess (5 km for a 6×(2+3 min) walk-run) and would fake a finish line.
+            // Nor for plans mixing timed and distance phases: their totalDistanceKm leaves out (or
+            // guesses) the timed phases, so a 10 min warm-up + 4 × 400 m inferred a 1.6 km
+            // "finish" the runner had passed during the warm-up — final-stretch mode from there on.
             val isTimeBasedPlan = dynamicCoachingPlan?.phases.orEmpty().let { phases ->
                 phases.isNotEmpty() && phases.none { (it.distanceKm ?: 0.0) > 0.0 }
             }
-            if (targetDistance == null && !isTimeBasedPlan) {
+            val isMixedPlan = dynamicCoachingPlan?.let { planMixesTimeAndDistance(it) } == true
+            if (targetDistance == null && !isTimeBasedPlan && !isMixedPlan) {
                 val planDist = dynamicCoachingPlan?.targetMetrics?.totalDistanceKm
                 if (planDist != null && planDist > 0) {
                     targetDistance = planDist * 1000.0
@@ -6675,6 +6724,7 @@ class RunTrackingService : Service(), SensorEventListener {
         // we should leave the state intact for the START_STICKY restart to find it.
         if (!isTracking) {
             _currentRunSession.value = null
+            _phaseStrip.value = null
             Log.d("RunTrackingService", "onDestroy: cleared companion _currentRunSession (was not tracking)")
         }
         // Tell the watch if a run ended without stopTracking(). Not while one is live or paused:
@@ -7285,7 +7335,10 @@ class RunTrackingService : Service(), SensorEventListener {
         evaluateDynamicPhase(currentDistanceKm, plan)
 
         val now = System.currentTimeMillis()
-        val currentPhase = plan.phases.getOrNull(dynamicCurrentPhaseIndex)
+        // dynamicCurrentPhaseIndex indexes the expanded (per-rep) timeline, not plan.phases — the
+        // phase itself is tracked separately (indexing plan.phases with it gave rep 2 of a
+        // warm-up + 4 × (work, recovery) + cool-down session the cool-down's targets).
+        val currentPhase = dynamicCurrentPhase
 
         // Resolve per-phase HR / pace targets — fall back to plan-level targets if phase has none
         val phaseHRMax = currentPhase?.targetHRMax ?: plan.targetMetrics.mainEffortHRMax
@@ -7330,6 +7383,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     else if ((trigger.type.contains("session_complete") || trigger.type.contains("session_end")) &&
                         plan.phases.isNotEmpty() && plan.phases.none { (it.distanceKm ?: 0.0) > 0.0 } &&
                         trigger.condition.contains("distance")) false
+                    // A plan mixing timed and distance phases ends when its last phase does
+                    // (evaluateDynamicPhase's safety net): any fixed time or distance here is a guess.
+                    else if ((trigger.type.contains("session_complete") || trigger.type.contains("session_end")) &&
+                        planMixesTimeAndDistance(plan)) false
                     else evaluateConditionExpression(
                         trigger.condition, phaseHRMin, phaseHRMax, phasePaceMin, phasePaceMax, currentDistanceKm, currentPhaseBaseName
                     )
@@ -7684,6 +7741,12 @@ class RunTrackingService : Service(), SensorEventListener {
             phaseElapsedMin = null
             phaseRemainingMin = null
         }
+        // Distance-based phase (a 400 m rep): its length and what's left, so the coach can say
+        // "200 m to go" instead of guessing.
+        val phaseDistM: Int? = dynamicPhaseDistanceKm.takeIf { it > 0 }?.let { (it * 1000).toInt() }
+        val phaseRemainingM: Int? = phaseDistM?.let { total ->
+            (total - ((snapshotDistKm - dynamicPhaseDistanceStartKm) * 1000).toInt()).coerceIn(0, total)
+        }
 
         serviceScope.launch {
             try {
@@ -7703,6 +7766,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     isWorkPhase = dynamicPhaseIsWorkInterval.takeIf { currentRepNum != null },
                     phaseElapsedMinutes = phaseElapsedMin,
                     phaseRemainingMinutes = phaseRemainingMin,
+                    phaseDistanceMeters = phaseDistM,
+                    phaseRemainingMeters = phaseRemainingM,
                     phasesSummary = phasesSummary,
                     sessionType = plan.sessionType ?: "run",
                     sessionGoal = plan.sessionGoal ?: "",
@@ -7964,6 +8029,201 @@ class RunTrackingService : Service(), SensorEventListener {
         }
     }
 
+    /** One entry of a dynamic plan's per-rep timeline (repeated phases expanded and interleaved). */
+    private data class ExpandedPhase(
+        val phase: live.airuncoach.airuncoach.network.model.DynamicCoachingPhase,
+        val repNumber: Int,          // 1-indexed rep number (1 for non-repeating phases)
+        val totalReps: Int,          // total reps for this phase (1 for non-repeating)
+        val cumulativeMinStart: Double,
+        val cumulativeKmStart: Double,
+        val durationMin: Double,
+        val distKm: Double
+    )
+
+    /**
+     * Repeated phases expanded into individual rep entries. Consecutive phases with
+     * repetitions > 1 form a group and interleave: work ×4 + recovery ×4 →
+     * work 1, recovery 1, work 2, recovery 2, …
+     */
+    private fun expandDynamicTimeline(phases: List<live.airuncoach.airuncoach.network.model.DynamicCoachingPhase>): List<ExpandedPhase> {
+        val expanded = mutableListOf<ExpandedPhase>()
+        var cumMin = 0.0
+        var cumKm = 0.0
+        var i = 0
+        while (i < phases.size) {
+            val phase = phases[i]
+            val reps = (phase.repetitions ?: 1).coerceAtLeast(1)
+            if (reps > 1) {
+                val groupPhases = mutableListOf(phase)
+                var j = i + 1
+                while (j < phases.size && (phases[j].repetitions ?: 1) > 1) {
+                    groupPhases.add(phases[j])
+                    j++
+                }
+                repeat(reps) { repIdx ->
+                    for (gp in groupPhases) {
+                        val pMin = gp.durationMinutes ?: 0.0
+                        val pKm = gp.distanceKm ?: 0.0
+                        expanded.add(ExpandedPhase(gp, repIdx + 1, reps, cumMin, cumKm, pMin, pKm))
+                        cumMin += pMin
+                        cumKm += pKm
+                    }
+                }
+                i = j
+            } else {
+                val pMin = phase.durationMinutes ?: 0.0
+                val pKm = phase.distanceKm ?: 0.0
+                expanded.add(ExpandedPhase(phase, 1, 1, cumMin, cumKm, pMin, pKm))
+                cumMin += pMin
+                cumKm += pKm
+                i++
+            }
+        }
+        return expanded
+    }
+
+    private fun timelineUsesTime(e: ExpandedPhase, isIntervalPlan: Boolean) =
+        e.durationMin > 0 && (isIntervalPlan || e.distKm <= 0.0)
+
+    private fun timelineEntryDone(e: ExpandedPhase, isIntervalPlan: Boolean, currentDistanceKm: Double, elapsedMinutes: Double): Boolean =
+        when {
+            timelineUsesTime(e, isIntervalPlan) -> elapsedMinutes >= dynamicTimelineAnchorMin + e.durationMin
+            e.distKm > 0 -> currentDistanceKm >= dynamicTimelineAnchorKm + e.distKm
+            else -> true  // zero-length entry — nothing to run
+        }
+
+    /**
+     * Advance through the timeline in order. Each entry ends on its own measure (time or
+     * distance) counted from where the runner actually entered it. Time and distance used to be
+     * summed separately from the start of the run, so in a mixed session the distance phases
+     * ignored everything covered during the timed ones: after a 10 min warm-up (~1.5 km) a
+     * 4 × 400 m set looked already done and the engine went straight from warm-up to recoveries
+     * and cool-down (Wayne, 2026-11-20). Idempotent within a tick: the run-screen strip and the
+     * coaching engine both call it.
+     */
+    private fun advanceDynamicTimeline(expanded: List<ExpandedPhase>, isIntervalPlan: Boolean, currentDistanceKm: Double, elapsedMinutes: Double) {
+        if (expanded.isEmpty()) return
+        if (dynamicTimelineIdx > expanded.lastIndex) dynamicTimelineIdx = expanded.lastIndex
+        while (dynamicTimelineIdx < expanded.lastIndex &&
+            timelineEntryDone(expanded[dynamicTimelineIdx], isIntervalPlan, currentDistanceKm, elapsedMinutes)) {
+            val done = expanded[dynamicTimelineIdx]
+            // The next entry starts exactly where this one ended on this one's own measure, and at
+            // the current reading on the other (ticks are ~1 s apart).
+            if (timelineUsesTime(done, isIntervalPlan)) {
+                dynamicTimelineAnchorMin += done.durationMin
+                dynamicTimelineAnchorKm = currentDistanceKm
+            } else if (done.distKm > 0) {
+                dynamicTimelineAnchorKm += done.distKm
+                dynamicTimelineAnchorMin = elapsedMinutes
+            }
+            dynamicTimelineIdx++
+        }
+    }
+
+    /** Run-screen phase strip label: "REP 2 OF 4", "RECOVERY 2 OF 4", "WARM-UP", "COOL-DOWN". */
+    private fun phaseStripLabel(e: ExpandedPhase, isWork: Boolean): String {
+        val n = e.phase.name.lowercase()
+        val base = when {
+            n.contains("warm") -> "WARM-UP"
+            n.contains("cool") -> "COOL-DOWN"
+            !isWork && n.startsWith("walk") -> "WALK"
+            !isWork -> "RECOVERY"
+            e.totalReps > 1 && (n.startsWith("run") || n.startsWith("jog")) -> "RUN"
+            e.totalReps > 1 -> "REP"
+            else -> e.phase.name.replace('_', ' ').replace(Regex("\\s+"), " ").trim().uppercase()
+        }
+        return if (e.totalReps > 1) "$base ${e.repNumber} OF ${e.totalReps}" else base
+    }
+
+    private fun isRecoveryPhaseName(name: String): Boolean = name.lowercase().let {
+        it.startsWith("recovery") || it.startsWith("walk") || it.startsWith("rest") || it.startsWith("float") ||
+            (it.contains("walk") && (it.contains("warm") || it.contains("cool")))
+    }
+
+    private fun stripMeasure(e: ExpandedPhase, isIntervalPlan: Boolean): String? = when {
+        timelineUsesTime(e, isIntervalPlan) -> {
+            val secs = Math.round(e.durationMin * 60.0).toInt()
+            if (secs < 120) "$secs s" else if (secs % 60 == 0) "${secs / 60} min" else "${secs / 60}:${String.format("%02d", secs % 60)}"
+        }
+        e.distKm > 0 -> if (e.distKm < 1.0) "${Math.round(e.distKm * 1000).toInt()} m" else String.format(java.util.Locale.US, "%.1f km", e.distKm).replace(".0 km", " km")
+        else -> null
+    }
+
+    private fun stripPace(sec: Int?): String? = sec?.takeIf { it > 0 }?.let { "${it / 60}:${String.format("%02d", it % 60)}" }
+
+    /**
+     * Publishes where the runner is in a phased session for the run screen's strip
+     * ("REP 2 OF 4 · 210 m left"). Called every tick, independent of whether a cue may fire, so
+     * the strip keeps moving while the coach is speaking, muted or turned off.
+     */
+    private fun publishPhaseStrip(currentDistanceKm: Double) {
+        val plan = dynamicCoachingPlan
+        if (plan == null) { if (_phaseStrip.value != null) _phaseStrip.value = null; return }
+        val expanded = expandDynamicTimeline(plan.phases.sortedBy { it.order })
+        if (expanded.size < 2) { if (_phaseStrip.value != null) _phaseStrip.value = null; return }
+        val isIntervalPlan = plan.cueingStrategy == "interval"
+        val elapsedMinutes = getActiveRunDuration() / 60000.0
+        advanceDynamicTimeline(expanded, isIntervalPlan, currentDistanceKm, elapsedMinutes)
+        val idx = dynamicTimelineIdx.coerceIn(0, expanded.lastIndex)
+        val e = expanded[idx]
+        val finished = idx == expanded.lastIndex && timelineEntryDone(e, isIntervalPlan, currentDistanceKm, elapsedMinutes)
+        val isWork = !isRecoveryPhaseName(e.phase.name) && !e.phase.name.lowercase().let { it.contains("warm") || it.contains("cool") }
+        val (remaining, progress) = when {
+            timelineUsesTime(e, isIntervalPlan) -> {
+                val leftSec = ((e.durationMin - (elapsedMinutes - dynamicTimelineAnchorMin)) * 60.0).coerceAtLeast(0.0)
+                val s = Math.ceil(leftSec).toInt()
+                "${s / 60}:${String.format("%02d", s % 60)} left" to
+                    (1.0 - leftSec / (e.durationMin * 60.0)).toFloat().coerceIn(0f, 1f)
+            }
+            e.distKm > 0 -> {
+                val leftM = ((e.distKm - (currentDistanceKm - dynamicTimelineAnchorKm)) * 1000.0).coerceAtLeast(0.0)
+                val txt = if (leftM >= 1000) String.format(java.util.Locale.US, "%.2f km left", leftM / 1000.0)
+                          else "${(Math.round(leftM / 10.0) * 10).toInt()} m left"
+                txt to (1.0 - leftM / (e.distKm * 1000.0)).toFloat().coerceIn(0f, 1f)
+            }
+            else -> "" to 0f
+        }
+        val nextEntry = expanded.getOrNull(idx + 1)
+        val next = nextEntry?.let { n ->
+            val nWork = !isRecoveryPhaseName(n.phase.name) && !n.phase.name.lowercase().let { it.contains("warm") || it.contains("cool") }
+            val label = phaseStripLabel(n, nWork).lowercase().replaceFirstChar { it.uppercase() }
+                .replace(Regex(" (\\d+) of (\\d+)$"), " $1")
+            listOfNotNull(label, stripMeasure(n, isIntervalPlan)).joinToString(" · ")
+        }
+        val pMin = stripPace(e.phase.targetPaceMin)
+        val pMax = stripPace(e.phase.targetPaceMax)
+        val target = when {
+            !isWork -> null
+            pMin != null && pMax != null && pMin != pMax -> "$pMin–$pMax/km"
+            pMin != null -> "$pMin/km"
+            pMax != null -> "$pMax/km"
+            else -> null
+        }
+        val state = PhaseStripState(
+            label = if (finished) "SESSION COMPLETE" else phaseStripLabel(e, isWork),
+            isWork = isWork && !finished,
+            remaining = if (finished) "" else remaining,
+            progress = if (finished) 1f else progress,
+            next = if (finished) null else next,
+            targetPace = if (finished) null else target,
+            step = idx + 1,
+            stepCount = expanded.size,
+            finished = finished,
+        )
+        if (_phaseStrip.value != state) _phaseStrip.value = state
+    }
+
+    /**
+     * True when some phases end on time and others on distance (same rule as
+     * evaluateDynamicPhase's usesTime). Such a plan has no fixed total time or distance.
+     */
+    private fun planMixesTimeAndDistance(plan: live.airuncoach.airuncoach.network.model.DynamicSessionCoachingPlan): Boolean {
+        val interval = plan.cueingStrategy == "interval"
+        val timed = plan.phases.count { (it.durationMinutes ?: 0.0) > 0 && (interval || (it.distanceKm ?: 0.0) <= 0.0) }
+        val byDistance = plan.phases.count { (it.distanceKm ?: 0.0) > 0 && !((it.durationMinutes ?: 0.0) > 0 && interval) }
+        return timed > 0 && byDistance > 0
+    }
+
     /**
      * Evaluate which phase the runner is in and fire phase_start / phase_end /
      * rep_start / rep_end / recovery_start triggers when phase boundaries are crossed.
@@ -7987,79 +8247,21 @@ class RunTrackingService : Service(), SensorEventListener {
         val elapsedMinutes = getActiveRunDuration() / 60000.0
         val isIntervalPlan = plan.cueingStrategy == "interval"
 
-        // ── Build the expanded flat timeline ─────────────────────────────────
-        // For phases with repetitions > 1, expand them into individual rep entries.
-        // Consecutive phases with the same repetitions count are "grouped" and interleave.
-        data class ExpandedPhase(
-            val phase: live.airuncoach.airuncoach.network.model.DynamicCoachingPhase,
-            val repNumber: Int,          // 1-indexed rep number (1 for non-repeating phases)
-            val totalReps: Int,          // total reps for this phase (1 for non-repeating)
-            val cumulativeMinStart: Double,
-            val cumulativeKmStart: Double,
-            val durationMin: Double,
-            val distKm: Double
-        )
-
-        val expanded = mutableListOf<ExpandedPhase>()
-        var cumMin = 0.0
-        var cumKm = 0.0
-        var i = 0
-
-        while (i < phases.size) {
-            val phase = phases[i]
-            val reps = (phase.repetitions ?: 1).coerceAtLeast(1)
-
-            if (reps > 1) {
-                // This phase has repetitions — find consecutive sibling phases in the same group
-                // (consecutive phases with non-null repetitions that have the same count)
-                val groupPhases = mutableListOf(phase)
-                var j = i + 1
-                while (j < phases.size && (phases[j].repetitions ?: 1) > 1) {
-                    groupPhases.add(phases[j])
-                    j++
-                }
-
-                // Interleave: for each rep, add all group phases in order
-                repeat(reps) { repIdx ->
-                    for (gp in groupPhases) {
-                        val pMin = gp.durationMinutes ?: 0.0
-                        val pKm = gp.distanceKm ?: 0.0
-                        expanded.add(ExpandedPhase(gp, repIdx + 1, reps, cumMin, cumKm, pMin, pKm))
-                        cumMin += pMin
-                        cumKm += pKm
-                    }
-                }
-                i = j  // skip all processed group phases
-            } else {
-                val pMin = phase.durationMinutes ?: 0.0
-                val pKm = phase.distanceKm ?: 0.0
-                expanded.add(ExpandedPhase(phase, 1, 1, cumMin, cumKm, pMin, pKm))
-                cumMin += pMin
-                cumKm += pKm
-                i++
-            }
-        }
-
+        val expanded = expandDynamicTimeline(phases)
         if (expanded.isEmpty()) return
 
-        // ── Find which expanded entry we're currently in ──────────────────────
-        var resolvedEntryIdx = expanded.size - 1
-
-        for ((idx, entry) in expanded.withIndex()) {
-            val stillInPhase = when {
-                isIntervalPlan && entry.durationMin > 0 ->
-                    elapsedMinutes < entry.cumulativeMinStart + entry.durationMin
-                entry.distKm > 0 ->
-                    currentDistanceKm < entry.cumulativeKmStart + entry.distKm
-                entry.durationMin > 0 ->
-                    elapsedMinutes < entry.cumulativeMinStart + entry.durationMin
-                else -> false
-            }
-            if (stillInPhase) {
-                resolvedEntryIdx = idx
-                break
-            }
-        }
+        // ── Advance through the timeline in order ────────────────────────────
+        // Each entry ends on its own measure (time or distance) counted from where the runner
+        // actually entered it. Time and distance used to be summed separately from the start of
+        // the run, so in a mixed session the distance phases ignored everything covered during
+        // the timed ones: after a 10 min warm-up (~1.5 km) a 4 × 400 m set looked already done and
+        // the engine went straight from warm-up to recoveries and cool-down (Wayne, 2026-11-20).
+        // Pure-time and pure-distance plans resolve exactly as before.
+        fun usesTime(e: ExpandedPhase) = timelineUsesTime(e, isIntervalPlan)
+        fun isDone(idx: Int) = timelineEntryDone(expanded[idx], isIntervalPlan, currentDistanceKm, elapsedMinutes)
+        advanceDynamicTimeline(expanded, isIntervalPlan, currentDistanceKm, elapsedMinutes)
+        val resolvedEntryIdx = dynamicTimelineIdx
+        val timelineFinished = resolvedEntryIdx == expanded.lastIndex && isDone(resolvedEntryIdx)
 
         val entry = expanded[resolvedEntryIdx]
         val resolvedPhase = entry.phase
@@ -8069,15 +8271,19 @@ class RunTrackingService : Service(), SensorEventListener {
         // Resolved phase name includes rep number for repeated phases, e.g. "work_rep_3_of_10"
         val resolvedPhaseName = if (totalReps > 1) "${resolvedPhase.name}_rep_${repNumber}_of_${totalReps}"
                                 else resolvedPhase.name
-        val isNewPhase = resolvedPhaseName != dynamicCurrentPhaseName
+        // A move along the timeline is a new phase even when two neighbours share a name.
+        val isNewPhase = resolvedPhaseName != dynamicCurrentPhaseName || resolvedEntryIdx != dynamicCurrentPhaseIndex
 
         if (isNewPhase) {
             val previousPhaseName = dynamicCurrentPhaseName
             dynamicCurrentPhaseIndex = resolvedEntryIdx
+            dynamicCurrentPhase = resolvedPhase
             dynamicCurrentPhaseName = resolvedPhaseName
-            dynamicPhaseDistanceStartKm = currentDistanceKm
-            dynamicPhaseTimeStartMin = elapsedMinutes
+            dynamicPhaseDistanceStartKm = dynamicTimelineAnchorKm
+            dynamicPhaseTimeStartMin = dynamicTimelineAnchorMin
+            // Time context whenever the phase has a duration (even if it ends on distance).
             dynamicPhaseDurationMin = entry.durationMin
+            dynamicPhaseDistanceKm = if (!usesTime(entry) && entry.distKm > 0) entry.distKm else 0.0
 
             // "walk", "recovery", "rest", and "float" are rest/recovery phases.
             // NOTE: "jog" is intentionally NOT classified as recovery — in walk-run interval
@@ -8223,6 +8429,27 @@ class RunTrackingService : Service(), SensorEventListener {
                     }
                     triggerLastFiredMs[phaseStartTrigger.id] = System.currentTimeMillis()
                     fireDynamicTrigger(rawMsg, phaseStartTrigger.type, resolvedPhaseName)
+                } else if (isIntervalPlan && resolvedEntryIdx > 0) {
+                    // An interval plan's warm-up / cool-down with no cue of its own (AI plans often
+                    // omit one): the live coach announces it from the phase's instructions, so the
+                    // runner hears the reps are over. Not the first phase — the pre-run brief opens.
+                    val msg = "Next: ${resolvedPhase.name.replace('_', ' ')}. ${resolvedPhase.phaseInstructions.orEmpty()}".trim()
+                    hasCoachingFiredThisTick = true
+                    fireLiveTriggerMessage(
+                        trigger = live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger(
+                            id = "phase_start_auto_$resolvedEntryIdx", type = "phase_start", condition = "always",
+                            message = msg, frequency = "once", alternativeMessages = null,
+                            alertType = null, suppressWhenIntensity = null,
+                        ),
+                        phaseName = resolvedPhaseName,
+                        phaseHRMin = resolvedPhase.targetHRMin,
+                        phaseHRMax = resolvedPhase.targetHRMax,
+                        phasePaceMin = resolvedPhase.targetPaceMin,
+                        phasePaceMax = resolvedPhase.targetPaceMax,
+                        currentDistanceKm = currentDistanceKm,
+                        plan = plan,
+                        currentPhase = resolvedPhase,
+                    )
                 }
             }
         }
@@ -8231,28 +8458,40 @@ class RunTrackingService : Service(), SensorEventListener {
         // Fires once per work rep at ~50% of its duration — gives the athlete a brief check-in
         // with seconds remaining, current pace, and whether effort is on target.
         // This is an always-on coaching opportunity that doesn't require a plan trigger.
+        // Timed reps over 20 s and distance reps of 300 m or more (a 200 m rep is over before a
+        // cue could finish).
+        val timedRep = usesTime(entry)
+        val repLongEnough = if (timedRep) entry.durationMin * 60.0 > 20.0 else entry.distKm >= 0.3
         if (!hasCoachingFiredThisTick && isIntervalPlan &&
-            dynamicPhaseIsWorkInterval && entry.totalReps > 1 &&
-            entry.durationMin > 0 && lastRepMidpointFiredAtRep != repNumber) {
+            dynamicPhaseIsWorkInterval && entry.totalReps > 1 && repLongEnough &&
+            lastRepMidpointFiredAtRep != repNumber) {
 
-            val phaseElapsedSec = (elapsedMinutes - dynamicPhaseTimeStartMin) * 60.0
-            val phaseTotalSec = entry.durationMin * 60.0
-            val phaseFraction = if (phaseTotalSec > 0) phaseElapsedSec / phaseTotalSec else 0.0
+            val phaseFraction = if (timedRep) {
+                (elapsedMinutes - dynamicTimelineAnchorMin) / entry.durationMin
+            } else {
+                (currentDistanceKm - dynamicTimelineAnchorKm) / entry.distKm
+            }
 
             // Fire between 45%–60% through the rep (once only per rep, guarded by lastRepMidpointFiredAtRep)
             if (phaseFraction in 0.45..0.60 && canFireCoaching(bypassDistanceGate = true)) {
                 lastRepMidpointFiredAtRep = repNumber
-                val secsRemaining = (phaseTotalSec - phaseElapsedSec).coerceAtLeast(0.0).toInt()
+                val left = if (timedRep) {
+                    val secs = ((entry.durationMin - (elapsedMinutes - dynamicTimelineAnchorMin)) * 60.0).coerceAtLeast(0.0).toInt()
+                    "$secs seconds"
+                } else {
+                    val m = ((entry.distKm - (currentDistanceKm - dynamicTimelineAnchorKm)) * 1000.0).coerceAtLeast(0.0)
+                    "${(Math.round(m / 10.0) * 10).toInt()} metres"
+                }
                 val midpointTrigger = live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger(
                     id = "rep_midpoint_auto",
                     type = "rep_midpoint",
                     condition = "always",
-                    message = "Halfway through rep {repNum} — $secsRemaining seconds to go, hold the effort.",
+                    message = "Halfway through rep {repNum} — $left to go, hold the effort.",
                     frequency = "on_condition",
                     alternativeMessages = listOf(
-                        "Halfway — $secsRemaining seconds left on this rep. Stay strong.",
-                        "Midpoint — $secsRemaining seconds remaining. Keep the pace.",
-                        "$secsRemaining seconds left, rep {repNum} — don't let up now.",
+                        "Halfway — $left left on this rep. Stay strong.",
+                        "Midpoint — $left remaining. Keep the pace.",
+                        "$left left, rep {repNum} — don't let up now.",
                     ),
                     alertType = null,
                     suppressWhenIntensity = null,
@@ -8279,10 +8518,11 @@ class RunTrackingService : Service(), SensorEventListener {
         // session_complete trigger is missing or (as in plans generated before v3.1) keyed to a
         // distance the session never covers — Damion's walk-run ended in silence and he kept
         // going for another 5 minutes (2026-10-10).
-        val timelineEndMin = expanded.last().let { it.cumulativeMinStart + it.durationMin }
-        val planIsTimed = expanded.all { it.distKm <= 0.0 } && timelineEndMin > 0
-        if (planIsTimed && !sessionCoachingPlanComplete && !hasCoachingFiredThisTick &&
-            elapsedMinutes >= timelineEndMin && canFireCoaching(bypassDistanceGate = true)) {
+        // Also any plan mixing timed and distance phases: its end is wherever the runner finishes
+        // the last phase, which no single time or distance condition can know in advance.
+        val planEndsOnTimeline = expanded.any { usesTime(it) }
+        if (planEndsOnTimeline && timelineFinished && !sessionCoachingPlanComplete && !hasCoachingFiredThisTick &&
+            canFireCoaching(bypassDistanceGate = true)) {
             val planComplete = plan.triggers.firstOrNull { it.type.contains("session_complete") || it.type.contains("session_end") }
             val usable = planComplete?.takeIf { !Regex("""distance|km|kilomet""", RegexOption.IGNORE_CASE).containsMatchIn(it.condition + " " + it.message) }
             val completeTrigger = usable ?: live.airuncoach.airuncoach.network.model.DynamicCoachingTrigger(
@@ -8311,17 +8551,13 @@ class RunTrackingService : Service(), SensorEventListener {
         // ── Phase-end warning ────────────────────────────────────────────────
         if (!hasCoachingFiredThisTick) {
             val nearPhaseEnd = when {
-                isIntervalPlan && entry.durationMin > 0 -> {
-                    val secsToEnd = (entry.cumulativeMinStart + entry.durationMin - elapsedMinutes) * 60.0
+                usesTime(entry) -> {
+                    val secsToEnd = (dynamicTimelineAnchorMin + entry.durationMin - elapsedMinutes) * 60.0
                     secsToEnd in 5.0..12.0
                 }
                 entry.distKm > 0 -> {
-                    val distToEnd = entry.cumulativeKmStart + entry.distKm - currentDistanceKm
+                    val distToEnd = dynamicTimelineAnchorKm + entry.distKm - currentDistanceKm
                     distToEnd in 0.05..0.10
-                }
-                entry.durationMin > 0 -> {
-                    val secsToEnd = (entry.cumulativeMinStart + entry.durationMin - elapsedMinutes) * 60.0
-                    secsToEnd in 5.0..12.0
                 }
                 else -> false
             }

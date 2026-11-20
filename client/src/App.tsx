@@ -21,6 +21,7 @@ import TermsOfUse from "@/pages/TermsOfUse";
 import Login from "@/pages/Login";
 import AdminAIConfig from "@/pages/AdminAIConfig";
 import AdminCostDashboard from "@/pages/AdminCostDashboard";
+import AdminDevUpdates from "@/pages/AdminDevUpdates";
 import AdminHub from "@/pages/AdminHub";
 import Routes from "@/pages/Routes";
 import Events from "@/pages/Events";
@@ -107,6 +108,7 @@ function Router() {
       <Route path="/admin" component={AdminHub} />
       <Route path="/admin/ai-config" component={AdminAIConfig} />
       <Route path="/admin/costs" component={AdminCostDashboard} />
+      <Route path="/admin/dev-updates" component={AdminDevUpdates} />
       <Route path="/observe/:code" component={ObserveLive} />
       {!hasProfile && (
         <>

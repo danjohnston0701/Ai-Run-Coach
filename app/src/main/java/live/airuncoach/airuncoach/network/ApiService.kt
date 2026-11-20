@@ -505,6 +505,10 @@ interface ApiService {
     @DELETE("/api/single-sessions/{workoutId}")
     suspend fun deleteSingleSession(@Path("workoutId") workoutId: String): retrofit2.Response<Unit>
 
+    /** Suggested target paces for a setup-screen configured session ("Confirm session"). Free, no allowance. */
+    @POST("/api/sessions/suggest-paces")
+    suspend fun suggestSessionPaces(@Body body: live.airuncoach.airuncoach.network.model.SuggestPacesRequest): live.airuncoach.airuncoach.network.model.SuggestedPacesResponse
+
     /** The runner's open plan session today (or workout = null) — for the "count it / leave it open" prompt. */
     @GET("/api/plan-sessions/open-today")
     suspend fun getOpenPlanSessionToday(@Query("date") date: String? = null): live.airuncoach.airuncoach.network.model.OpenPlanSessionTodayResponse

@@ -1,6 +1,6 @@
 import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
-import { BarChart3, ChevronRight, ArrowLeft } from "lucide-react";
+import { BarChart3, ChevronRight, ArrowLeft, MessagesSquare } from "lucide-react";
 
 function getAuthToken(): string | null {
   try {
@@ -71,6 +71,22 @@ export default function AdminHub() {
               <p className="font-semibold text-foreground">Cost Analysis</p>
               <p className="text-sm text-muted-foreground mt-0.5">
                 Track OpenAI, GraphHopper and infrastructure spend per user
+              </p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
+          </button>
+          <button
+            onClick={() => setLocation("/admin/dev-updates")}
+            className="flex items-center gap-4 p-5 rounded-xl border border-border bg-card hover:bg-muted/30 transition-colors text-left group"
+            data-testid="tile-dev-updates"
+          >
+            <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <MessagesSquare className="w-6 h-6 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-foreground">Development updates &amp; asks</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Questions and tests waiting for you, changes made, reviews and UX testing with screenshots
               </p>
             </div>
             <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />

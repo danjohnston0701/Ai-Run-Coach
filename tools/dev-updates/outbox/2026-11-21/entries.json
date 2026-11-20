@@ -1,0 +1,116 @@
+[
+ {
+  "kind": "ux_test",
+  "platforms": [
+   "Android"
+  ],
+  "title": "Emulator run-through of Wayne's session (Android, local test server)",
+  "body": "Ran on the Android emulator against a local server on a **Neon branch** (a copy of the database; test account, three seeded runs; background jobs and email off). Simulated GPS at ~5:00/km.\n\n**Worked:**\n- The sheet suggested 4:45–4:55/km reps (≈ 1:54–1:58 per 400 m) and 6:00–6:55/km easy.\n- The − and + buttons and the per-rep time updated correctly.\n- The run went warm-up → rep 1 at exactly 1:00 → \"halfway, 210 metres to go\" → recovery after 0.41 km → 30 s recovery → rep 2 → recovery → rep 3.\n- The rep-pace cue fired.\n\n**Found and fixed during the test:**\n- \"Set a pace\" after \"Coach on effort\" brought back a generic 7:00–7:40/km instead of the suggestion.\n- Nothing said which of −/+ is faster; there's now a hint line.\n- \"Your paces from last time you ran this session\" was wrong: they only set it up, and it matches the rep shape, not the session. Reworded.\n- The warm-up cue said \"1 minutes\". Fixed.\n\n**Not verified:** the end of the session (emulator crashed in rep 3), and iOS (see the question about a debug server switch). Live pace showed 0:00 on the emulator; the simulated GPS has no speed, so this is probably not an app bug.",
+  "images": [
+   {
+    "path": "b02.png",
+    "caption": "Saved paces (before the fix): the wording and the bad 7:00 pace that couldn't be undone"
+   },
+   {
+    "path": "a16.png",
+    "caption": "Prepare screen after Confirm (briefing timed out on the local weather lookup)"
+   },
+   {
+    "path": "c01.png",
+    "caption": "Run start: warm-up cue"
+   },
+   {
+    "path": "c02.png",
+    "caption": "Rep 1, 2:36 in (the \"210 metres to go\" cue had just played)"
+   }
+  ]
+ },
+ {
+  "kind": "review",
+  "platforms": [
+   "Android",
+   "iOS",
+   "Server"
+  ],
+  "title": "Code review: interval fix + Confirm session (8 findings, all fixed)",
+  "body": "A code review of the uncommitted changes found 2 important issues and 6 minor ones. All are fixed and both apps build.\n- **Important:** on Android, the start-line idle credit took time off the run clock but not off the new phase timeline, so a timed phase could last minutes too long. The timeline now moves back with the clock (iOS already did this).\n- **Important:** iOS and Android split some AI-plan phases differently (time vs distance). They now use the same rule.\n- Walk-run got pace targets despite \"no pace pressure\". Fixed: no pace for run segments.\n- A single configured rep announced the whole session summary as its cue. It now says \"Each rep: 400 m, hard but controlled\".\n- Continuous plan phases lost their minutes-left context for the coach. Restored.\n- The confirm sheet's date used UTC, so an NZ morning run showed as the previous day. It now uses the runner's time zone.\n- Saved paces made the sheet wait for the server, and there was no way back to suggestions. Saved paces now show at once, with a \"Use suggested paces\" button.\n- Two neighbouring phases with the same name weren't treated as a phase change. Fixed."
+ },
+ {
+  "kind": "change",
+  "platforms": [
+   "Android",
+   "iOS",
+   "Server"
+  ],
+  "title": "Confirm session: suggested paces before a configured session",
+  "body": "After configuring reps, a **Confirm session** sheet shows the session with target paces before it's prepared.\n- **Where the paces come from:** the server works them out from the runner's best recent run (the same pace anchor the training plans use). Short reps are a little quicker than 5K pace, ~1 km reps are 5K pace, longer reps are 10K or threshold pace. Hill repeats are coached on effort. It isn't an AI call and costs no allowance.\n- **Changing them:** − and + move a pace 5 s/km (− is faster). \"Coach on effort instead\" turns a pace off.\n- **Memory:** if the runner changes a pace, it's remembered for that rep shape, with \"Use suggested paces\" to go back.\n- **During the run:** the confirmed paces become the coach's targets, plus a cue when a rep is more than 10 s/km off the target. Walk-run never gets pace targets.\n- **Not done yet:** watches don't get the targets.",
+  "images": [
+   {
+    "path": "a09.png",
+    "caption": "Configure session: 4 × 400 m, 60 s recovery, 10 min warm-up, 5 min cool-down"
+   },
+   {
+    "path": "a11.png",
+    "caption": "Confirm session: paces from the runner's recent 5.2 km (5K ≈ 25:25)"
+   },
+   {
+    "path": "a12.png",
+    "caption": "Reps moved 10 s/km slower with + (per-rep time updates)"
+   }
+  ]
+ },
+ {
+  "kind": "change",
+  "platforms": [
+   "Android",
+   "iOS",
+   "Server"
+  ],
+  "title": "Interval sessions skipped their reps — fixed",
+  "body": "**What happened:** Wayne's session (10 min warm-up, 4 × 400 m / 60 s, 5 min cool-down) went warm-up → \"recover\" → cool-down.\n\n**Why:** both apps' phase timelines added time and distance separately from the start of the run. The 400 m reps were measured from 0 km, but he'd covered ~1.5 km in the warm-up, so they looked done already (Android). On iOS, distance reps had zero length. AI plan sessions mixing time and distance had the same bug: a timed warm-up made a tempo block end 1.5 km early.\n\n**Fix:**\n- Each phase now ends on its own measure, counted from where the runner actually entered it.\n- A mixed session ends when its last phase does.\n- Mixed sessions no longer get a made-up finish distance (it was putting Wayne in \"final stretch\" mode from the warm-up).\n- Android checked heart-rate and pace triggers against the wrong phase's targets from rep 2 on. Fixed.\n- iOS sessions without reps no longer guess timed phases at 0.1 km a minute.\n- The halfway cue now works on distance reps (\"210 metres to go\").\n- The live coach is now told the rep length and metres left."
+ },
+ {
+  "kind": "test_request",
+  "platforms": [
+   "Android"
+  ],
+  "title": "Check the end of a configured session",
+  "body": "In the emulator test the session ran correctly through warm-up → rep 1 → recovery → rep 2 → recovery → rep 3, then the emulator crashed. The last recovery, the cool-down announcement and the \"session done\" cue weren't seen on a device. The code path is the same one that already ends timed plans, but please listen for those three at the end of your next configured session."
+ },
+ {
+  "kind": "test_request",
+  "platforms": [
+   "Android",
+   "iOS"
+  ],
+  "title": "Wayne's session on a real phone",
+  "body": "After the new builds and the redeploy:\n- Setup → Run without route → Intervals → Configure session: **10 min warm-up, 4 × 400 m, 60 s recovery, 5 min cool-down**\n- Tap Prepare: the **Confirm session** sheet should show your suggested paces (or say there aren't enough runs)\n- Run it and check each rep is called in order, the halfway cue says metres left, the cool-down is announced after rep 4's recovery, and the session ends with a \"session done\" cue\n\nPlease write down anything that's late, missing or said twice."
+ },
+ {
+  "kind": "question",
+  "platforms": [
+   "Android",
+   "iOS"
+  ],
+  "title": "Push and build the interval fix, Confirm session and rep strip?",
+  "body": "You said to commit (done 2026-11-21, not pushed). Pushing the monorepo also auto-deploys Railway's test service. Next steps when you're ready: push both repos, build **Android 2.0.86 (128)** and **iOS 1.8.28 (99)**, and redeploy Replit (pace suggestions, the \"metres left\" coaching detail and this page)."
+ },
+ {
+  "kind": "question",
+  "platforms": [
+   "iOS"
+  ],
+  "title": "Add a debug server switch to the iOS app for simulator testing?",
+  "body": "I could run the Android emulator against a local test server on a Neon branch (a copy of production, with background jobs off), so new server features could be tested before a redeploy. The iOS app can't do that: it has no debug server switch, and its network security settings block plain-HTTP connections to a local server.\n\nAdding a **DEBUG-only** switch (Android has one: `debug_api_base_url`) plus an exception for local addresses would let me run the same tests on the iOS simulator. Release builds wouldn't change. OK to add?"
+ },
+ {
+  "kind": "change",
+  "platforms": [
+   "Android",
+   "iOS"
+  ],
+  "status": "done",
+  "title": "Rep strip on the run screen",
+  "body": "You said yes (2026-11-21). Any session with a phase plan (configured reps, one-off AI sessions, plan workouts with more than one phase) now shows a strip under the coach panel:\n- **REP 2 OF 4 · 210 m left** (or **RECOVERY 2 OF 4 · 0:35 left**, **WARM-UP · 6:12 left**), with a progress bar\n- the target pace on reps, and **Next: Recovery 2 · 60 s** underneath\n- red on reps, green on recoveries, warm-up and cool-down; **SESSION COMPLETE** at the end\n\nIt reads the same timeline the coach announces from, every second, so it keeps moving while the coach is talking or muted. Android `PhaseStrip` (RunSessionScreen.kt), iOS `PhaseStripView` (HomeScreens.swift).\n\nBuild-checked on both apps. Not yet seen on a screen: the emulator wouldn't boot again, so please check it during Wayne's session test."
+ }
+]

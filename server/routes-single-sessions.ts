@@ -27,6 +27,7 @@ import { classifySession, derivePaceAnchor, describeAnchor, normaliseIntensity }
 import { enrichWorkoutBlock } from "./session-enrichment-service";
 import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 import { localDateTime } from "./utils/run-derivation";
+import { suggestSessionPaces } from "./session-pace-suggest";
 import { runDistanceKm } from "./utils/run-units";
 
 export const SINGLE_SESSION_STATUS = "single_session";
@@ -107,6 +108,41 @@ export function registerSingleSessionRoutes(app: Express): void {
     } catch (err) {
       console.error("[SingleSession] open-today failed:", err);
       res.status(500).json({ error: "Failed to check today's plan session" });
+    }
+  });
+
+  /**
+   * POST /api/sessions/suggest-paces — suggested target paces for a session the runner
+   * configured on the setup screen ("Confirm session"). Body: { sessionType, reps, workSeconds |
+   * workMeters, restSeconds | restMeters, warmupMinutes, cooldownMinutes }. Free (no allowance):
+   * worked out from the same pace anchor the plans use, not an AI call. See session-pace-suggest.ts.
+   */
+  app.post("/api/sessions/suggest-paces", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.userId;
+      const b = req.body ?? {};
+      const sessionType = typeof b.sessionType === "string" ? b.sessionType : "intervals";
+      const recentRuns = await db
+        .select({ distance: runs.distance, duration: runs.duration, movingTime: runs.movingTime, completedAt: runs.completedAt })
+        .from(runs)
+        .where(and(eq(runs.userId, userId), gte(runs.completedAt, new Date(Date.now() - 120 * 86_400_000))))
+        .orderBy(desc(runs.completedAt))
+        .limit(60);
+      const anchor = derivePaceAnchor(recentRuns as any);
+      const [u] = await db.select({ timezone: users.timezone }).from(users).where(eq(users.id, userId)).limit(1);
+      res.json(suggestSessionPaces(anchor, {
+        sessionType,
+        reps: clampInt(b.reps, 1, 50) ?? 1,
+        workSeconds: clampInt(b.workSeconds, 1, 7200),
+        workMeters: clampInt(b.workMeters, 1, 50000),
+        restSeconds: clampInt(b.restSeconds, 1, 7200),
+        restMeters: clampInt(b.restMeters, 1, 50000),
+        warmupMinutes: clampInt(b.warmupMinutes, 0, 120),
+        cooldownMinutes: clampInt(b.cooldownMinutes, 0, 120),
+      }, u?.timezone));
+    } catch (err) {
+      console.error("[SessionPaces] suggest failed:", err);
+      res.status(500).json({ error: "Failed to suggest paces" });
     }
   });
 

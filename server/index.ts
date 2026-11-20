@@ -219,6 +219,9 @@ function setupErrorHandler(app: express.Application) {
   const port = parseInt(process.env.PORT || "3000", 10);
   server.listen(port, "0.0.0.0", () => {
     log(`express server serving on port ${port} (accessible from Android emulator)`);
-    startScheduler();
+    // DISABLE_SCHEDULER=1 for local test servers (e.g. against a Neon branch copy of production):
+    // the sweeps send lifecycle emails and push notifications to real users.
+    if (process.env.DISABLE_SCHEDULER === "1") log("scheduler disabled (DISABLE_SCHEDULER=1)");
+    else startScheduler();
   });
 })();

@@ -1446,6 +1446,44 @@ class RunSessionViewModel @Inject constructor(
         }
 
     /**
+     * Suggested paces for a configured rep session (Confirm session screen). Null on any failure
+     * or after 6 s — the screen then offers effort-only coaching and manual paces.
+     */
+    suspend fun suggestSessionPaces(typeKey: String?, s: ManualSessionStructure): live.airuncoach.airuncoach.network.model.SuggestedPacesResponse? =
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(6_000L) {
+                apiService.suggestSessionPaces(
+                    live.airuncoach.airuncoach.network.model.SuggestPacesRequest(
+                        sessionType = typeKey ?: "intervals", reps = s.reps,
+                        workSeconds = s.workSeconds, workMeters = s.workMeters,
+                        restSeconds = s.restSeconds, restMeters = s.restMeters,
+                        warmupMinutes = s.warmupMinutes, cooldownMinutes = s.cooldownMinutes,
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Log.w("RunSessionViewModel", "Pace suggestion failed (non-fatal): ${e.message}")
+            null
+        }
+
+    private val sessionPacePrefs by lazy { context.getSharedPreferences("confirmed_session_paces", Context.MODE_PRIVATE) }
+
+    /** The paces the runner last confirmed for this rep shape: [workMin, workMax, easyMin, easyMax] (0 = none). */
+    fun rememberedSessionPaces(key: String): IntArray? =
+        sessionPacePrefs.getString(key, null)?.split(",")?.mapNotNull { it.toIntOrNull() }
+            ?.takeIf { it.size == 4 }?.toIntArray()
+
+    fun forgetSessionPaces(key: String) {
+        sessionPacePrefs.edit().remove(key).apply()
+    }
+
+    fun rememberSessionPaces(key: String, s: ManualSessionStructure) {
+        sessionPacePrefs.edit().putString(key, listOf(
+            s.workPaceMinSec ?: 0, s.workPaceMaxSec ?: 0, s.easyPaceMinSec ?: 0, s.easyPaceMaxSec ?: 0,
+        ).joinToString(",")).apply()
+    }
+
+    /**
      * Setup-screen session type + plan-session choice for the service. The chosen type only
      * applies to a run with no plan workout — a plan / one-off session carries its own type.
      */

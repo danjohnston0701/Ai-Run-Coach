@@ -36,6 +36,8 @@ import live.airuncoach.airuncoach.domain.model.Friend
 import live.airuncoach.airuncoach.domain.model.PhysicalActivityType
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.domain.model.ChosenSession
+import live.airuncoach.airuncoach.domain.model.ManualSessionStructure
+import live.airuncoach.airuncoach.ui.components.ConfirmSessionSheet
 import live.airuncoach.airuncoach.domain.model.SessionKind
 import live.airuncoach.airuncoach.domain.model.SessionTypes
 import live.airuncoach.airuncoach.domain.model.withChosenSession
@@ -155,13 +157,23 @@ fun MapMyRunSetupScreen(
     var clashCheck by remember { mutableStateOf<OpenPlanSessionTodayResponse?>(null) }
     var pendingStart by remember { mutableStateOf<((String?) -> Unit)?>(null) }
     var isCheckingPlan by remember { mutableStateOf(false) }
-    fun chosenSession(choice: String?) = ChosenSession(
-        workoutType = sessionOption.key,
-        structure = if (isRepSession && configureSession) structureDraft.toStructure() else null,
-        planSessionChoice = choice,
-    )
+    // "Confirm session": a configured rep session is confirmed (paces) before it's prepared.
+    var confirmPending by remember { mutableStateOf<((String?) -> Unit)?>(null) }
+    var confirmedStructure by remember { mutableStateOf<ManualSessionStructure?>(null) }
+    fun chosenSession(choice: String?): ChosenSession {
+        val base = if (isRepSession && configureSession) structureDraft.toStructure() else null
+        // The confirmed paces only apply while the reps are still the ones that were confirmed.
+        val confirmed = confirmedStructure?.takeIf {
+            base != null && it.copy(workPaceMinSec = null, workPaceMaxSec = null, easyPaceMinSec = null, easyPaceMaxSec = null) == base
+        }
+        return ChosenSession(
+            workoutType = sessionOption.key,
+            structure = confirmed ?: base,
+            planSessionChoice = choice,
+        )
+    }
     /** Runs [action] with the runner's plan-session choice, asking first when it applies. */
-    fun withPlanSessionCheck(action: (String?) -> Unit) {
+    fun checkPlanSession(action: (String?) -> Unit) {
         if (sessionOption.kind == SessionKind.FREE) { action(null); return }
         if (isCheckingPlan) return
         isCheckingPlan = true
@@ -175,6 +187,14 @@ fun MapMyRunSetupScreen(
                 action(null)
             }
         }
+    }
+    /** Confirm session first (configured reps), then the plan-session check, then [action]. */
+    fun withPlanSessionCheck(action: (String?) -> Unit) {
+        if (isRepSession && configureSession && structureDraft.toStructure() != null) {
+            confirmPending = action
+            return
+        }
+        checkPlanSession(action)
     }
 
     // Core inputs
@@ -457,6 +477,30 @@ fun MapMyRunSetupScreen(
  */
 
             // contentPadding handles bottom clearance above the fixed CTA bar
+        }
+
+        if (confirmPending != null) {
+            val structure = structureDraft.toStructure()
+            if (structure == null) {
+                confirmPending = null
+            } else {
+                val memoryKey = structure.paceMemoryKey(sessionOption.key)
+                ConfirmSessionSheet(
+                    type = sessionOption,
+                    structure = structure,
+                    remembered = remember(memoryKey) { runSessionViewModel.rememberedSessionPaces(memoryKey) },
+                    loadSuggestion = { runSessionViewModel.suggestSessionPaces(sessionOption.key, structure) },
+                    onDismiss = { confirmPending = null },
+                    onConfirm = { confirmed, edited ->
+                        confirmedStructure = confirmed
+                        if (edited) runSessionViewModel.rememberSessionPaces(memoryKey, confirmed)
+                        else runSessionViewModel.forgetSessionPaces(memoryKey)
+                        val action = confirmPending
+                        confirmPending = null
+                        action?.let { checkPlanSession(it) }
+                    },
+                )
+            }
         }
 
         clashCheck?.let { open ->

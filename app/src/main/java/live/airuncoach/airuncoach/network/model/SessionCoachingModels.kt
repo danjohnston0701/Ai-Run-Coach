@@ -316,6 +316,9 @@ data class SessionTriggerLiveRequest(
     // How far through this phase and how much is left (in minutes). Null for distance-based phases.
     @com.google.gson.annotations.SerializedName("phaseElapsedMinutes") val phaseElapsedMinutes: Double? = null,
     @com.google.gson.annotations.SerializedName("phaseRemainingMinutes") val phaseRemainingMinutes: Double? = null,
+    // Distance-based phases (e.g. a 400 m rep): the phase length and what's left, in metres. Null for timed phases.
+    @com.google.gson.annotations.SerializedName("phaseDistanceMeters") val phaseDistanceMeters: Int? = null,
+    @com.google.gson.annotations.SerializedName("phaseRemainingMeters") val phaseRemainingMeters: Int? = null,
     // Summary of all phases (compact description of the session structure)
     @com.google.gson.annotations.SerializedName("phasesSummary") val phasesSummary: String? = null,
 
