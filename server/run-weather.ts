@@ -33,6 +33,37 @@ export function weatherCodeToCondition(code: number): string {
   return "Unknown";
 }
 
+/**
+ * iOS uploads the weather the runner saw at the start as loose fields (`temperature`,
+ * `weatherCondition` / `weather_condition`, and from iOS 1.8.29 a `weatherData` object), not
+ * Android's `weatherData`. The loose fields map to no column and were dropped, so the server
+ * filled in Open-Meteo's hourly reading instead, which can differ from what the phone showed
+ * (Chris Ryan, 2026-11-21: "questionable weather"). Builds `weatherData` from them when the
+ * upload has none. Mutates `data`.
+ */
+export function weatherFromClientFields(data: Record<string, any>): void {
+  if (data.weatherData != null || data.weather_data != null) {
+    if (data.weatherData == null) data.weatherData = data.weather_data;
+    if (typeof data.weatherData === "string") {
+      try { data.weatherData = JSON.parse(data.weatherData); } catch { data.weatherData = null; }
+    }
+    return;
+  }
+  const n = (v: unknown) => { const x = typeof v === "string" ? Number(v) : v; return typeof x === "number" && Number.isFinite(x) ? x : null; };
+  const temperature = n(data.temperature);
+  const condition = (data.weatherCondition ?? data.weather_condition) as string | undefined;
+  if (temperature == null && !condition) return;
+  data.weatherData = {
+    temperature,
+    feelsLike: n(data.feelsLike ?? data.feels_like),
+    humidity: n(data.humidity),
+    windSpeed: n(data.windSpeed ?? data.wind_speed),
+    windDirection: n(data.windDirection ?? data.wind_direction),
+    condition: condition ?? null,
+    description: condition ?? null,
+  };
+}
+
 const HOURLY = "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m";
 const DAY_MS = 86_400_000;
 

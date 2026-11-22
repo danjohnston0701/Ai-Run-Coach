@@ -260,6 +260,7 @@ export const CLIENT_ACTIONS = new Set([
   "Generated share video",
   "Watch app no answer after prompt",
   "Watch app answered late after prompt",
+  "Watch app crash breadcrumb",
 ]);
 
 export function registerUserActivityRoutes(app: Express) {

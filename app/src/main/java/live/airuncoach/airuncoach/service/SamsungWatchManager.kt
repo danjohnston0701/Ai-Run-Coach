@@ -302,6 +302,25 @@ class SamsungWatchManager(
         ))
     }
 
+    /** Rep strip for the Galaxy Watch run screen (Wear 1.0.14+). See GarminWatchManager.sendPhase. */
+    fun sendPhase(label: String, isWork: Boolean, remainingSec: Int?, remainingMeters: Int?, next: String?, target: String?, finished: Boolean) {
+        sendToWatch(mapOf(
+            "type" to "phase",
+            "ts"   to (System.currentTimeMillis() / 1000L).toInt(),
+            "lbl"  to label,
+            "work" to isWork,
+            "sec"  to (remainingSec ?: -1),
+            "m"    to (remainingMeters ?: -1),
+            "nxt"  to (next ?: ""),
+            "tgt"  to (target ?: ""),
+            "done" to finished
+        ))
+    }
+
+    fun sendPhaseCleared() {
+        sendToWatch(mapOf("type" to "phase", "ts" to (System.currentTimeMillis() / 1000L).toInt(), "lbl" to ""))
+    }
+
     fun sendStartRun() {
         sendToWatch(mapOf("type" to "startRun"))
     }

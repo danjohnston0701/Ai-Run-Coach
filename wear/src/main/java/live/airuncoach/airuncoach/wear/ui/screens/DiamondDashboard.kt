@@ -91,6 +91,25 @@ fun DiamondDashboard(state: RunScreenState, onDone: () -> Unit, modifier: Modifi
         if (finished) {
             // The cadence slot is the one place with room for it on a round face.
             DoneButton(onDone, Modifier.align(Alignment.TopCenter).offset(y = h * 0.25f))
+        } else if (state.phaseActive) {
+            // Phased session: what's left of this rep in the cadence slot, the rep below it.
+            val p = state.phase!!
+            val tint = when { p.done -> WearColors.TealKm; p.isWork -> WearColors.RedHr; else -> androidx.compose.ui.graphics.Color(0xFF4CAF50) }
+            val rem = state.phaseRemaining
+            Text(
+                text = rem.ifEmpty { p.label },
+                color = if (rem.isEmpty()) tint else WearColors.White,
+                style = TextStyle(fontSize = 14.sp, textAlign = TextAlign.Center),
+                modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.24f)
+            )
+            if (rem.isNotEmpty()) {
+                Text(
+                    text = p.label,
+                    color = tint,
+                    style = TextStyle(fontSize = 9.sp, textAlign = TextAlign.Center),
+                    modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.34f)
+                )
+            }
         } else {
             Text(
                 text = formatIntOrDash(state.cadence),

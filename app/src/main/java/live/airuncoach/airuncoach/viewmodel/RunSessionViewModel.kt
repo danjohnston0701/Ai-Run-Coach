@@ -1295,9 +1295,15 @@ class RunSessionViewModel @Inject constructor(
                         planGoalType = runConfig?.planGoalType,
                         planWeekNumber = runConfig?.planWeekNumber,
                         planTotalWeeks = runConfig?.planTotalWeeks,
-                        workoutType = runConfig?.workoutType,
+                        // A setup-screen session (intervals, tempo…) has no plan workout: send its
+                        // type and reps so the brief leads with the session, not a distance.
+                        workoutType = runConfig?.workoutType ?: runConfig?.chosenWorkoutType,
                         workoutIntensity = runConfig?.workoutIntensity,
-                        workoutDescription = runConfig?.workoutDescription
+                        workoutDescription = runConfig?.workoutDescription ?: runConfig?.let { cfg ->
+                            val type = live.airuncoach.airuncoach.domain.model.SessionTypes.byKey(cfg.chosenWorkoutType)
+                            listOfNotNull(type?.label, cfg.manualStructure?.takeIf { it.isValid() }?.summary())
+                                .joinToString(": ").ifEmpty { null }
+                        }
                     )
                     
                     // Use the correct endpoint based on activity type (run vs. walk)

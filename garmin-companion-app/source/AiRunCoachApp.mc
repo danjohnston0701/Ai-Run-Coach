@@ -10,7 +10,26 @@ using Toybox.System as Sys;
 // tell which watch build a user is on. Connect IQ has no runtime API for reading the manifest
 // version, so this MUST be kept in step with `version="..."` in manifest.xml on every bump —
 // a hardcoded copy in PairingCodeManager previously drifted a release behind.
-const APP_VERSION = "3.4.16";
+const APP_VERSION = "3.4.17";
+
+// Startup breadcrumbs (3.4.17). Every recorded IQ! crash ("Symbol Not Found / Failed invoking
+// <symbol>", empty stack) came on the FIRST launch of a new version, ~1-2 s in, and the next launch
+// was fine (Daniel, 31 Oct, 6 Nov, 21 Nov). While starting up, each stage is written to Storage
+// before it runs; RunView marks "ok" after 10 s. A launch that finds a stage other than "ok"
+// knows the previous one died there and reports it through the usual lastCrashInfo path (shown on
+// screen, sent to the phone in watchReady, logged to the server as "Watch app crash breadcrumb").
+function bootStage(stage) {
+    try {
+        var prev = App.Storage.getValue("bootStage");
+        if (stage.equals("app.init") && prev != null && !prev.equals("ok")
+                && App.Storage.getValue("lastCrashInfo") == null) {
+            App.Storage.setValue("lastCrashInfo", "Startup stopped after " + prev);
+        }
+        App.Storage.setValue("bootStage", stage.equals("ok") ? "ok" : APP_VERSION + " " + stage);
+    } catch (e) {
+        // Diagnostics must never be the thing that crashes the app.
+    }
+}
 
 class AiRunCoachApp extends App.AppBase {
 
@@ -18,6 +37,7 @@ class AiRunCoachApp extends App.AppBase {
 
     function initialize() {
         AppBase.initialize();
+        bootStage("app.init");
     }
 
     function onStart(state) {
@@ -31,6 +51,7 @@ class AiRunCoachApp extends App.AppBase {
     // Return RunView as the initial view (no StartView).
     // RunView displays overlay messaging to guide the user through auth & run flow.
     function getInitialView() {
+        bootStage("view");
         _runView  = new RunView();
         var delegate = new RunDelegate();
         delegate.setView(_runView);

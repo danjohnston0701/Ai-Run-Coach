@@ -3,6 +3,8 @@
 package live.airuncoach.airuncoach.ui.screens
 
 
+import live.airuncoach.airuncoach.ui.components.SessionBreakdownCard
+import live.airuncoach.airuncoach.ui.components.hasReps
 import live.airuncoach.airuncoach.ui.components.FREE_TRIAL_DAYS
 import live.airuncoach.airuncoach.ui.components.WatchOnlyRunNotice
 import live.airuncoach.airuncoach.domain.model.isWatchOnlySession
@@ -1490,8 +1492,24 @@ internal fun AiInsightsTabContent(
             }
         }
 
-        // Pace Consistency — moved here from Summary tab so it sits alongside the AI analysis
-        item { PaceConsistencyCard(run = run) }
+        // Pace Consistency — moved here from Summary tab so it sits alongside the AI analysis.
+        // A session with reps is judged rep against rep and recovery against recovery; another
+        // variable-pace type (fartlek with no reps recorded…) isn't scored on km splits at all.
+        // A session with reps gets the Round 1 summary under the AI analysis (Daniel, 2026-11-22):
+        // rep lab (with the rep / recovery consistency), effort trace, pulse.
+        val runPhases = run.sessionPhases
+        if (runPhases.hasReps()) {
+            item { live.airuncoach.airuncoach.ui.components.RepLabCard(runPhases!!, run.routePoints, run.startTime) }
+            item { live.airuncoach.airuncoach.ui.components.EffortTraceCard(run.routePoints, run.startTime, runPhases) }
+            item { live.airuncoach.airuncoach.ui.components.PulseCard(run.routePoints, run.heartRate.takeIf { it > 0 }, run.routePoints.mapNotNull { it.heartRate }.filter { it in 40..230 }.maxOrNull()) }
+        } else {
+            item {
+                when {
+                    run.workoutType?.lowercase() in live.airuncoach.airuncoach.ui.components.VARIABLE_PACE_TYPES -> Unit
+                    else -> PaceConsistencyCard(run = run)
+                }
+            }
+        }
 
         // AI Coaching During Run — standalone section, always visible regardless of analysis state
         if (coachingNotes.isNotEmpty()) {
@@ -1592,18 +1610,31 @@ internal fun SummaryTabContent(
             MainStatsGridFlagship(run = run, lastRunForDelta = lastRunForDelta)
         }
 
-        item {
-            if (run.kmSplits.isNotEmpty()) {
-                KmSplitsCardFlagship(run.kmSplits)
+        // Phased session (reps): the session breakdown first, then the km splits as usual
+        // (Daniel, 2026-11-22: show both, intervals on top).
+        val phases = run.sessionPhases
+        if (phases.hasReps()) {
+            item {
+                SessionBreakdownCard(
+                    title = live.airuncoach.airuncoach.utils.RunNaming.planWorkoutName(run.workoutType) ?: "Session breakdown",
+                    phases = phases!!,
+                )
             }
         }
+        if (true) { // km splits for every run, phased or not
+            item {
+                if (run.kmSplits.isNotEmpty()) {
+                    KmSplitsCardFlagship(run.kmSplits)
+                }
+            }
 
-        item { SplitAnalysisCard(run = run) }
+            item { SplitAnalysisCard(run = run) }
 
-        // Km Splits Visual Bar Chart
-        item {
-            if (run.kmSplits.size >= 2) {
-                KmSplitsVisualChart(kmSplits = run.kmSplits)
+            // Km Splits Visual Bar Chart
+            item {
+                if (run.kmSplits.size >= 2) {
+                    live.airuncoach.airuncoach.ui.components.KmSplitBarsCard(run.kmSplits, run.distance / 1000.0, run.routePoints)
+                }
             }
         }
 

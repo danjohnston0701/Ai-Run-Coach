@@ -150,7 +150,8 @@ fun MapMyRunSetupScreen(
     val activityMode = if (sessionOption.activity == PhysicalActivityType.WALK) ActivityMode.WALK else ActivityMode.RUN
     val isRepSession = sessionOption.kind == SessionKind.REPS
     // Optional "Configure session" reps (rep types only).
-    var configureSession by remember { mutableStateOf(false) }
+    // Open by default (Daniel, 2026-11-22); the runner can switch it off.
+    var configureSession by remember { mutableStateOf(true) }
     var structureDraft by remember { mutableStateOf(ManualStructureDraft.defaultFor(sessionOption.key)) }
     // "You have a plan session today" — asked before a typed (non-free) session starts.
     val setupScope = rememberCoroutineScope()
@@ -362,7 +363,7 @@ fun MapMyRunSetupScreen(
                     onSelected = {
                         if (it.key != sessionOption.key || it.activity != sessionOption.activity) {
                             sessionOption = it
-                            configureSession = false
+                            configureSession = true
                             structureDraft = ManualStructureDraft.defaultFor(it.key)
                         }
                     },

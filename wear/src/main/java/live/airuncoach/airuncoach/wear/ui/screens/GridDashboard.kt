@@ -69,7 +69,9 @@ fun GridDashboard(state: RunScreenState, onDone: () -> Unit, modifier: Modifier 
 
         StatusBar(
             input = StatusBarInput(
-                ephemeralMessage = state.statusMessage,
+                // The grid has no cadence slot to borrow: a phased session's rep goes in the status line.
+                ephemeralMessage = state.statusMessage ?: if (state.phaseActive)
+                    listOf(state.phase!!.label, state.phaseRemaining).filter { it.isNotEmpty() }.joinToString("  ") else null,
                 isRunning = state.isRunning,
                 gpsLost = state.gpsLost,
                 isAuthenticated = state.isAuthenticated,

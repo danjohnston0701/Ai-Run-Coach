@@ -39,8 +39,32 @@ data class RunScreenState(
     /** Runner's max HR (208 − 0.7 × age), known only once the phone has sent a real one — a
      * guessed value must never be dressed up as a heart-rate zone. Mirrors RunView.mc's
      * _maxHr / _maxHrKnown. */
-    val maxHr: Int? = null
+    val maxHr: Int? = null,
+    /** Phased session: the phone's rep strip (phone RunTrackingService.sendPhaseToWatches). */
+    val phase: PhaseLine? = null
 ) {
+    /** Shown while running, for 30 s after the phone's last phase message. */
+    val phaseActive: Boolean
+        get() = phase != null && phase.label.isNotEmpty() && (isRunning || isPaused) &&
+            System.currentTimeMillis() - phase.heardAtMs < 30_000L
+
+    /** What's left of the current phase, counted down from the phone's figure on the watch's
+     *  own clock and distance: "0:35", "210 m", "1.20 km"; "" when there's nothing to count. */
+    val phaseRemaining: String
+        get() {
+            val p = phase ?: return ""
+            if (p.done) return ""
+            if (p.remainingSec >= 0) {
+                val left = (p.remainingSec - ((elapsedMs - p.atElapsedMs) / 1000L).toInt()).coerceAtLeast(0)
+                return "%d:%02d".format(left / 60, left % 60)
+            }
+            if (p.remainingM >= 0) {
+                val leftM = (p.remainingM - (distanceM - p.atDistanceM)).coerceAtLeast(0.0)
+                return if (leftM >= 1000) "%.2f km".format(leftM / 1000.0) else "${(Math.round(leftM / 10.0) * 10).toInt()} m"
+            }
+            return ""
+        }
+
     val isWalk: Boolean get() = sessionType == "walk"
 
     /** Before a run, after GPS lock and the prepare step: the ready screen with START. */
@@ -79,3 +103,15 @@ data class RunScreenState(
  * Paging is a horizontal swipe instead.
  */
 enum class BackAction { Pause, ConfirmFinish, ConfirmExit, None }
+
+/** One phase message from the phone, plus where the watch was when it arrived. */
+data class PhaseLine(
+    val label: String,        // "REP 2/4", "REC 2/4", "WARM-UP", "DONE"
+    val isWork: Boolean,
+    val remainingSec: Int,    // -1 when the phase isn't timed
+    val remainingM: Int,      // -1 when the phase isn't measured in distance
+    val done: Boolean,
+    val atElapsedMs: Long,
+    val atDistanceM: Double,
+    val heardAtMs: Long,
+)

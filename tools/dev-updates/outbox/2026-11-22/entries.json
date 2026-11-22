@@ -1,0 +1,20 @@
+[
+  {
+    "kind": "change",
+    "title": "Wayne's session follow-ups + new Run Summary for rep sessions",
+    "platforms": ["Android", "iOS", "Garmin", "Galaxy Watch", "Server"],
+    "body": "Everything from the feedback on Wayne's interval session, plus the Round 1 summary design you picked.\n\n- **Pre-run brief** no longer calls a rep session \"a 5 km run\"; it leads with the session.\n- **Run name:** intervals are named \"Interval Session\" (a watch-started \"Lunch Run\" is renamed when the phone's upload merges in).\n- **No extra recovery** after the last rep when a cool-down follows.\n- **Phases as run** are saved with each run (`session_phases`). The Run Summary shows a session breakdown above the km splits (both kept), then rep lab, effort trace and pulse under the AI analysis.\n- **Bars:** short = fast, tall = slow. Reps and km splits are blue, red only when more than 10% slower than target.\n- **Session Consistency** replaces the pace score for rep sessions (reps strict, recoveries loose). The AI analysis now gets the real structure, so it won't read it as a tempo run.\n- **Share image:** Split Summary becomes \"Interval progression\".\n- **Watches** show the rep (Garmin 3.4.17, Galaxy Watch 1.0.14, Apple Watch); timed phases follow the watch's clock.\n- **Coach voice** is ~7 dB louder over music on Android (iOS not yet).\n- **Chris Ryan:** weather now from the phone's own reading; his loop is recognised as a known route.\n- **Garmin crash breadcrumbs:** 3.4.17 records each startup step; after a crash, the next launch reports where it stopped.\n- **iOS debug server switch** for simulator testing against a local server.\n\nBuilds: Android 2.0.87 (129), iOS 1.8.29 (100), Garmin 3.4.17, Galaxy Watch 1.0.14 (1000015). Needs the Replit redeploy for the server parts."
+  },
+  {
+    "kind": "test_request",
+    "title": "Try an interval session on the new builds",
+    "platforms": ["Android", "iOS"],
+    "body": "After the Replit redeploy and installing Android 2.0.87 / iOS 1.8.29:\n\n- Run a configured interval session (e.g. 10 min warm-up, 4 × 400 m / 60 s, 5 min cool-down).\n- Check the pre-run brief describes the session, not a 5 km run.\n- Check there's no recovery between the last rep and the cool-down.\n- On the Run Summary: session breakdown above the km splits, rep lab / effort trace / pulse under the AI analysis, Session Consistency instead of a pace score of 0.\n- Run name should be \"Interval Session\".\n- Share image: Interval progression template.\n- Android: is the coach voice now loud enough over music?"
+  },
+  {
+    "kind": "test_request",
+    "title": "Garmin 3.4.17: let the first-launch crash happen, then reopen",
+    "platforms": ["Garmin"],
+    "body": "Install 3.4.17 from the store. Open it from the phone prompt as usual. If it shows IQ!, open it again by hand.\n\nThe second launch should say \"Startup stopped after 3.4.17 <stage>\" on the watch, and Android reports it to the server. Tell me when it's happened and I'll read where it died."
+  }
+]

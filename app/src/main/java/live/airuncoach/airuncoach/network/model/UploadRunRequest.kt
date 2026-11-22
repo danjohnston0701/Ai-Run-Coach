@@ -133,4 +133,5 @@ data class UploadRunRequest(
     // "count" / "leave_open": whether this run also completes today's open plan session
     // (server/plan-run-sync.ts). Null = not asked.
     val planSessionChoice: String? = null,
+    val sessionPhases: List<live.airuncoach.airuncoach.domain.model.SessionPhaseRecord>? = null,
 )

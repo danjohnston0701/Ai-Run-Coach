@@ -302,7 +302,10 @@ export const runs = pgTable("runs", {
   estSweatLoss: real("est_sweat_loss"), // liters
   
   // Route Memory Engine — matched known route at run start
-  knownRouteId: varchar("known_route_id"),        // FK to known_routes.id (set after route recognition)
+  knownRouteId: varchar("known_route_id"),
+  // Phased sessions: the timeline as run [{label, kind, rep, startSec, endSec, startM, endM, targetPaceMinSec?, targetPaceMaxSec?}]
+  // (Android SessionPhaseRecord / iOS SessionPhaseRecord). Drives the summary's session chart.
+  sessionPhases: jsonb("session_phases"),        // FK to known_routes.id (set after route recognition)
   routeConfidence: real("route_confidence"),       // 0.0–1.0 confidence score at run start
 
   // Training plan context (if this run is part of a coached plan)

@@ -1101,6 +1101,10 @@ class RunTrackingService : Service(), SensorEventListener {
             val step: Int,
             val stepCount: Int,
             val finished: Boolean,
+            /** Watch form of [label]: "REP 2/4", "REC 2/4", "WARM-UP". */
+            val watchLabel: String = label,
+            val remainingSec: Int? = null,
+            val remainingMeters: Int? = null,
         )
         private val _phaseStrip = MutableStateFlow<PhaseStripState?>(null)
         val phaseStrip: StateFlow<PhaseStripState?> = _phaseStrip
@@ -1882,6 +1886,8 @@ class RunTrackingService : Service(), SensorEventListener {
                     dynamicTimelineAnchorKm = 0.0
                     dynamicCurrentPhase = null
                     _phaseStrip.value = null
+                    recordedPhases.clear()
+                    lastExpandedTimeline = emptyList()
                     dynamicCurrentPhaseName = null
                     lastPhaseTransitionCueMs = 0L
                     // Reset session memory for fresh run
@@ -4025,8 +4031,14 @@ class RunTrackingService : Service(), SensorEventListener {
                                         dynamicTimelineIdx = 0
                                         dynamicTimelineAnchorMin = 0.0
                                         dynamicTimelineAnchorKm = 0.0
+                                        recordedPhases.clear()
                                     } else {
                                         dynamicTimelineAnchorMin = (dynamicTimelineAnchorMin - creditMin).coerceAtLeast(0.0)
+                                        val creditSec = (idleMs / 1000L).toInt()
+                                        for (i in recordedPhases.indices) {
+                                            val r = recordedPhases[i]
+                                            recordedPhases[i] = r.copy(startSec = (r.startSec - creditSec).coerceAtLeast(0), endSec = (r.endSec - creditSec).coerceAtLeast(0))
+                                        }
                                     }
                                     dynamicPhaseTimeStartMin = (dynamicPhaseTimeStartMin - creditMin).coerceAtLeast(0.0)
                                     Log.d("RunTrackingService", "Auto-credited ${idleMs}ms of start-line idle time before first movement " +
@@ -4738,6 +4750,7 @@ class RunTrackingService : Service(), SensorEventListener {
             planProgressWeeks = planTotalWeeks,
             workoutType = savedWorkoutType,
             planSessionChoice = planSessionChoice,
+            sessionPhases = sessionPhasesSnapshot(),
             workoutIntensity = planWorkoutIntensity,
             workoutDescription = planWorkoutDescription,
             // Group run link — stamped on the session itself (not just read from the service
@@ -5726,6 +5739,7 @@ class RunTrackingService : Service(), SensorEventListener {
             planProgressWeeks = runSession.planProgressWeeks,
             workoutType = runSession.workoutType,
             planSessionChoice = runSession.planSessionChoice ?: planSessionChoice,
+            sessionPhases = sessionPhasesSnapshot() ?: runSession.sessionPhases,
             workoutIntensity = runSession.workoutIntensity,
             workoutDescription = runSession.workoutDescription,
             // Group run context if this run is part of a group
@@ -7543,7 +7557,7 @@ class RunTrackingService : Service(), SensorEventListener {
                     trigger.type.contains("heart_rate_high")
                 var triggerToFire = trigger
                 if (isHrHigh && !dynamicPhaseIsWorkInterval && dynamicCurrentPhaseName != null) {
-                    val recoverySec = (getActiveRunDuration() / 60_000.0 - dynamicPhaseTimeStartMin) * 60.0
+                    val recoverySec = (currentWatchClockMs() / 60_000.0 - dynamicPhaseTimeStartMin) * 60.0
                     if (recoverySec < RECOVERY_HR_HIGH_GRACE_SEC) continue
                     triggerToFire = trigger.copy(
                         message = "Heart rate's still {hr} — keep walking and let it come down before the next one.",
@@ -7653,7 +7667,7 @@ class RunTrackingService : Service(), SensorEventListener {
         val snapshotPaceSecPerKm = parsePaceToSeconds(currentPace).let { if (it > 0) it.toInt() else null }
         val snapshotCadence = currentCadence.takeIf { it > 0 }
         val snapshotDistKm = currentDistanceKm
-        val snapshotElapsedMin = getActiveRunDuration() / 60_000.0
+        val snapshotElapsedMin = currentWatchClockMs() / 60_000.0
         val snapshotGrade = currentSmoothedGrade
         val snapshotElevGain = totalElevationGain
         val snapshotTargetDistKm = targetDistance?.let { it / 1000.0 }
@@ -7940,7 +7954,7 @@ class RunTrackingService : Service(), SensorEventListener {
                 val td = (targetDistance ?: 0.0) / 1000.0
                 if (td > 0) (currentDistanceKm / td * 100.0) else return false
             }
-            "elapsed_min"    -> getActiveRunDuration() / 60_000.0
+            "elapsed_min"    -> currentWatchClockMs() / 60_000.0
             // Metres remaining to target distance (e.g. "remaining_m < 500" for final 500m cue)
             "remaining_m"    -> {
                 val td = targetDistance ?: inferredTargetDistance ?: return false
@@ -7951,7 +7965,7 @@ class RunTrackingService : Service(), SensorEventListener {
             // Minutes remaining to target duration (e.g. "remaining_min < 5" for final 5-min cue)
             "remaining_min"  -> {
                 val totalDurMs = (dynamicCoachingPlan?.targetMetrics?.totalDurationMinutes ?: return false) * 60_000.0
-                val remainingMs = totalDurMs - getActiveRunDuration()
+                val remainingMs = totalDurMs - currentWatchClockMs()
                 if (remainingMs < 0) return false  // Already past target duration
                 remainingMs / 60_000.0
             }
@@ -8061,7 +8075,10 @@ class RunTrackingService : Service(), SensorEventListener {
                     j++
                 }
                 repeat(reps) { repIdx ->
-                    for (gp in groupPhases) {
+                    for ((k, gp) in groupPhases.withIndex()) {
+                        // No recovery after the last rep when more follows (the cool-down is the
+                        // recovery): Daniel's 4 × 400 m ended rep 4 → 60 s recovery → cool-down.
+                        if (repIdx == reps - 1 && k > 0 && j < phases.size && isRecoveryPhaseName(gp.name)) continue
                         val pMin = gp.durationMinutes ?: 0.0
                         val pKm = gp.distanceKm ?: 0.0
                         expanded.add(ExpandedPhase(gp, repIdx + 1, reps, cumMin, cumKm, pMin, pKm))
@@ -8103,10 +8120,13 @@ class RunTrackingService : Service(), SensorEventListener {
      */
     private fun advanceDynamicTimeline(expanded: List<ExpandedPhase>, isIntervalPlan: Boolean, currentDistanceKm: Double, elapsedMinutes: Double) {
         if (expanded.isEmpty()) return
+        lastExpandedTimeline = expanded
         if (dynamicTimelineIdx > expanded.lastIndex) dynamicTimelineIdx = expanded.lastIndex
         while (dynamicTimelineIdx < expanded.lastIndex &&
             timelineEntryDone(expanded[dynamicTimelineIdx], isIntervalPlan, currentDistanceKm, elapsedMinutes)) {
             val done = expanded[dynamicTimelineIdx]
+            val startMin = dynamicTimelineAnchorMin
+            val startKm = dynamicTimelineAnchorKm
             // The next entry starts exactly where this one ended on this one's own measure, and at
             // the current reading on the other (ticks are ~1 s apart).
             if (timelineUsesTime(done, isIntervalPlan)) {
@@ -8116,8 +8136,76 @@ class RunTrackingService : Service(), SensorEventListener {
                 dynamicTimelineAnchorKm += done.distKm
                 dynamicTimelineAnchorMin = elapsedMinutes
             }
+            recordPhase(done, startMin, startKm, dynamicTimelineAnchorMin, dynamicTimelineAnchorKm)
             dynamicTimelineIdx++
         }
+    }
+
+    // ── Phases as run (runs.session_phases) ──────────────────────────────────
+    private val recordedPhases = mutableListOf<live.airuncoach.airuncoach.domain.model.SessionPhaseRecord>()
+    private var lastExpandedTimeline: List<ExpandedPhase> = emptyList()
+
+    private fun phaseRecordKind(e: ExpandedPhase): String {
+        val n = e.phase.name.lowercase()
+        return when {
+            n.contains("warm") -> "warmup"
+            n.contains("cool") -> "cooldown"
+            isRecoveryPhaseName(e.phase.name) -> "recovery"
+            e.totalReps > 1 -> "work"
+            else -> "steady"
+        }
+    }
+
+    private fun phaseRecordLabel(e: ExpandedPhase, kind: String): String = when (kind) {
+        "warmup" -> "Warm-up"
+        "cooldown" -> "Cool-down"
+        "recovery" -> if (e.totalReps > 1) "Recovery ${e.repNumber}" else "Recovery"
+        "work" -> "Rep ${e.repNumber}"
+        else -> e.phase.name.replace('_', ' ').trim().replaceFirstChar { it.uppercase() }
+    }
+
+    private fun recordPhase(e: ExpandedPhase, startMin: Double, startKm: Double, endMin: Double, endKm: Double) {
+        val kind = phaseRecordKind(e)
+        recordedPhases.add(live.airuncoach.airuncoach.domain.model.SessionPhaseRecord(
+            label = phaseRecordLabel(e, kind),
+            kind = kind,
+            rep = if (e.totalReps > 1) e.repNumber else null,
+            startSec = Math.round(startMin * 60).toInt(),
+            endSec = Math.round(endMin * 60).toInt(),
+            startM = Math.round(startKm * 1000).toInt(),
+            endM = Math.round(endKm * 1000).toInt(),
+            targetPaceMinSec = if (kind == "work") e.phase.targetPaceMin else null,
+            targetPaceMaxSec = if (kind == "work") e.phase.targetPaceMax else null,
+        ))
+    }
+
+    /** Finished phases plus the one in progress, cut at the current reading. Null without a phased plan. */
+    private fun sessionPhasesSnapshot(): List<live.airuncoach.airuncoach.domain.model.SessionPhaseRecord>? {
+        val expanded = lastExpandedTimeline
+        if (expanded.size < 2) return null
+        val out = recordedPhases.toMutableList()
+        val idx = dynamicTimelineIdx.coerceIn(0, expanded.lastIndex)
+        if (idx >= recordedPhases.size) {
+            val e = expanded[idx]
+            val kind = phaseRecordKind(e)
+            val nowSec = (currentWatchClockMs() / 1000L).toInt()
+            val startSec = Math.round(dynamicTimelineAnchorMin * 60).toInt()
+            val nowM = Math.round(totalDistance).toInt()
+            val startM = Math.round(dynamicTimelineAnchorKm * 1000).toInt()
+            if (nowSec - startSec >= 5) {
+                // A finished timeline's last entry may run on past its end: cut it where it ended.
+                val endSec = if (timelineUsesTime(e, dynamicCoachingPlan?.cueingStrategy == "interval"))
+                    minOf(nowSec, startSec + Math.round(e.durationMin * 60).toInt()) else nowSec
+                out.add(live.airuncoach.airuncoach.domain.model.SessionPhaseRecord(
+                    label = phaseRecordLabel(e, kind), kind = kind,
+                    rep = if (e.totalReps > 1) e.repNumber else null,
+                    startSec = startSec, endSec = endSec, startM = startM, endM = maxOf(nowM, startM),
+                    targetPaceMinSec = if (kind == "work") e.phase.targetPaceMin else null,
+                    targetPaceMaxSec = if (kind == "work") e.phase.targetPaceMax else null,
+                ))
+            }
+        }
+        return out.takeIf { it.isNotEmpty() }
     }
 
     /** Run-screen phase strip label: "REP 2 OF 4", "RECOVERY 2 OF 4", "WARM-UP", "COOL-DOWN". */
@@ -8158,25 +8246,29 @@ class RunTrackingService : Service(), SensorEventListener {
      */
     private fun publishPhaseStrip(currentDistanceKm: Double) {
         val plan = dynamicCoachingPlan
-        if (plan == null) { if (_phaseStrip.value != null) _phaseStrip.value = null; return }
+        if (plan == null) { if (_phaseStrip.value != null) { _phaseStrip.value = null; sendPhaseToWatches(null) }; return }
         val expanded = expandDynamicTimeline(plan.phases.sortedBy { it.order })
-        if (expanded.size < 2) { if (_phaseStrip.value != null) _phaseStrip.value = null; return }
+        if (expanded.size < 2) { if (_phaseStrip.value != null) { _phaseStrip.value = null; sendPhaseToWatches(null) }; return }
         val isIntervalPlan = plan.cueingStrategy == "interval"
-        val elapsedMinutes = getActiveRunDuration() / 60000.0
+        val elapsedMinutes = currentWatchClockMs() / 60000.0
         advanceDynamicTimeline(expanded, isIntervalPlan, currentDistanceKm, elapsedMinutes)
         val idx = dynamicTimelineIdx.coerceIn(0, expanded.lastIndex)
         val e = expanded[idx]
         val finished = idx == expanded.lastIndex && timelineEntryDone(e, isIntervalPlan, currentDistanceKm, elapsedMinutes)
         val isWork = !isRecoveryPhaseName(e.phase.name) && !e.phase.name.lowercase().let { it.contains("warm") || it.contains("cool") }
+        var remSec: Int? = null
+        var remM: Int? = null
         val (remaining, progress) = when {
             timelineUsesTime(e, isIntervalPlan) -> {
                 val leftSec = ((e.durationMin - (elapsedMinutes - dynamicTimelineAnchorMin)) * 60.0).coerceAtLeast(0.0)
                 val s = Math.ceil(leftSec).toInt()
+                remSec = s
                 "${s / 60}:${String.format("%02d", s % 60)} left" to
                     (1.0 - leftSec / (e.durationMin * 60.0)).toFloat().coerceIn(0f, 1f)
             }
             e.distKm > 0 -> {
                 val leftM = ((e.distKm - (currentDistanceKm - dynamicTimelineAnchorKm)) * 1000.0).coerceAtLeast(0.0)
+                remM = Math.round(leftM).toInt()
                 val txt = if (leftM >= 1000) String.format(java.util.Locale.US, "%.2f km left", leftM / 1000.0)
                           else "${(Math.round(leftM / 10.0) * 10).toInt()} m left"
                 txt to (1.0 - leftM / (e.distKm * 1000.0)).toFloat().coerceIn(0f, 1f)
@@ -8209,8 +8301,38 @@ class RunTrackingService : Service(), SensorEventListener {
             step = idx + 1,
             stepCount = expanded.size,
             finished = finished,
+            watchLabel = if (finished) "DONE" else phaseStripLabel(e, isWork)
+                .replace(" OF ", "/").replace("RECOVERY", "REC").replace("COOL-DOWN", "COOL DOWN"),
+            remainingSec = if (finished) null else remSec,
+            remainingMeters = if (finished) null else remM,
         )
         if (_phaseStrip.value != state) _phaseStrip.value = state
+        sendPhaseToWatches(state)
+    }
+
+    private var lastWatchPhaseLabel: String? = null
+    private var lastWatchPhaseSentMs = 0L
+
+    /** Rep strip → watch run screens, on each phase change and every 5 s (the watch counts down between). */
+    private fun sendPhaseToWatches(state: PhaseStripState?) {
+        val now = System.currentTimeMillis()
+        val label = state?.watchLabel
+        if (label == lastWatchPhaseLabel && now - lastWatchPhaseSentMs < 5_000L) return
+        if (state == null && lastWatchPhaseLabel == null) return
+        lastWatchPhaseLabel = label
+        lastWatchPhaseSentMs = now
+        try {
+            val garmin = garminWatchManager?.takeIf { it.isWatchConnected.value }
+            val samsung = samsungWatchManager?.takeIf { it.isWatchConnected.value }
+            if (state == null) {
+                garmin?.sendPhaseCleared(); samsung?.sendPhaseCleared(); return
+            }
+            val next = state.next?.replace("Recovery", "Rec")
+            garmin?.sendPhase(state.watchLabel, state.isWork, state.remainingSec, state.remainingMeters, next, state.targetPace, state.finished)
+            samsung?.sendPhase(state.watchLabel, state.isWork, state.remainingSec, state.remainingMeters, next, state.targetPace, state.finished)
+        } catch (e: Exception) {
+            Log.w("RunTrackingService", "Phase → watch failed: ${e.message}")
+        }
     }
 
     /**
@@ -8244,7 +8366,7 @@ class RunTrackingService : Service(), SensorEventListener {
         val phases = plan.phases.sortedBy { it.order }
         if (phases.isEmpty()) return
 
-        val elapsedMinutes = getActiveRunDuration() / 60000.0
+        val elapsedMinutes = currentWatchClockMs() / 60000.0
         val isIntervalPlan = plan.cueingStrategy == "interval"
 
         val expanded = expandDynamicTimeline(phases)

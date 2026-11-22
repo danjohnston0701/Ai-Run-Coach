@@ -127,6 +127,7 @@ class AudioPlayerHelper(private val context: Context) {
                         }
                         
                         mediaPlayer = player
+                        boostCoachVoice(player.audioSessionId)
                         player.start()
                         Log.d("AudioPlayerHelper", "Playing $format audio (${audioBytes.size} bytes)")
                     } catch (e: Exception) {
@@ -183,6 +184,7 @@ class AudioPlayerHelper(private val context: Context) {
                 
                 // Write audio data
                 audioTrack.write(audioBytes, 0, audioBytes.size)
+                boostCoachVoice(audioTrack.audioSessionId)
                 audioTrack.play()
                 
                 // Wait for playback to complete
@@ -203,6 +205,27 @@ class AudioPlayerHelper(private val context: Context) {
         }
     }
     
+    private var loudness: android.media.audiofx.LoudnessEnhancer? = null
+
+    /**
+     * Lifts the coach's voice ~7 dB over the music. Android ducks other apps' audio by a fixed
+     * amount the app can't choose (there is no "75/25" setting), so the gap is widened from this
+     * side instead: Daniel asked for music closer to 90/10 under the coach (2026-11-22).
+     * LoudnessEnhancer limits, so the louder voice doesn't clip.
+     */
+    private fun boostCoachVoice(sessionId: Int) {
+        try {
+            loudness?.release()
+            loudness = android.media.audiofx.LoudnessEnhancer(sessionId).apply {
+                setTargetGain(COACH_VOICE_GAIN_MB)
+                enabled = true
+            }
+        } catch (e: Exception) {
+            Log.w("AudioPlayerHelper", "LoudnessEnhancer unavailable: ${e.message}")
+            loudness = null
+        }
+    }
+
     private fun startSafetyTimeout(onTimeout: () -> Unit) {
         cancelSafetyTimeout()
         safetyTimeout = Runnable {
@@ -258,7 +281,14 @@ class AudioPlayerHelper(private val context: Context) {
      * Clean up resources
      */
     fun destroy() {
+        try { loudness?.release() } catch (_: Exception) {}
+        loudness = null
         stop()
         scope.cancel()
+    }
+
+    companion object {
+        /** Coach voice gain in millibels (700 = +7 dB). */
+        private const val COACH_VOICE_GAIN_MB = 700
     }
 }

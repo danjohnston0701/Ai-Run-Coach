@@ -479,6 +479,8 @@ class GarminWatchManager(
     private var openAppRunnables: List<Runnable> = emptyList()
     private val OPEN_APP_RESEND_AFTER_MS = 2_500L
     private val OPEN_APP_PROMPT_AFTER_MS = 5_000L
+    private val PROMPT_RETRY_AFTER_MS = 6_000L
+    @Volatile private var promptRetried = false
     // The wake notification goes first so the prompt lands on a lit screen, on top of it.
     private val OPEN_APP_WAKE_AFTER_MS = 3_500L
 
@@ -660,6 +662,35 @@ class GarminWatchManager(
         ))
     }
 
+    /**
+     * Where the runner is in a phased session (rep strip, RunTrackingService.publishPhaseStrip),
+     * for the watch's run screen: "REP 2/4" plus the seconds or metres left, which the watch
+     * counts down itself between messages. Sent on each phase change and every few seconds.
+     * Garmin 3.4.17+ shows it; older watch apps ignore an unknown type.
+     */
+    fun sendPhase(label: String, isWork: Boolean, remainingSec: Int?, remainingMeters: Int?, next: String?, target: String?, finished: Boolean) {
+        val now = System.currentTimeMillis()
+        // Watch app not heard from recently: it may be closed, so don't fill its mailbox.
+        if (now - lastWatchMessageAtMs > WATCH_HEARD_WINDOW_MS) return
+        sendToWatch(mapOf(
+            "type" to "phase",
+            "ts"   to (now / 1000L).toInt(),
+            "lbl"  to label,
+            "work" to isWork,
+            "sec"  to (remainingSec ?: -1),
+            "m"    to (remainingMeters ?: -1),
+            "nxt"  to (next ?: ""),
+            "tgt"  to (target ?: ""),
+            "done" to finished
+        ))
+    }
+
+    /** Phased session over or abandoned: the watch drops the phase line. */
+    fun sendPhaseCleared() {
+        if (System.currentTimeMillis() - lastWatchMessageAtMs > WATCH_HEARD_WINDOW_MS) return
+        sendToWatch(mapOf("type" to "phase", "ts" to (System.currentTimeMillis() / 1000L).toInt(), "lbl" to ""))
+    }
+
     fun sendStartRun() {
         stopSessionEndedResend()
         sendToWatch(mapOf("type" to "startRun", "ts" to (System.currentTimeMillis() / 1000L).toInt()))
@@ -743,6 +774,7 @@ class GarminWatchManager(
             openAppRunnables = emptyList()
             if (cachedPreparedRunPayload === payload) {
                 Log.d(TAG, "No answer from the watch app — asking the watch to open it")
+                promptRetried = false
                 openWatchApp()
                 watchForPromptAnswer()
             }
@@ -855,6 +887,23 @@ class GarminWatchManager(
                 override fun onOpenApplicationResponse(d: IQDevice?, a: IQApp?, status: ConnectIQ.IQOpenApplicationStatus?) {
                     Log.d(TAG, "openApplication on watch: $status")
                     lastPromptStatus = status?.name
+                    // The watch refused to show the prompt (busy in another app, a menu or an
+                    // activity: Daniel 2026-11-22). Ask once more a few seconds later, and tell the
+                    // runner now rather than after the 20 s no-answer wait.
+                    if (status == ConnectIQ.IQOpenApplicationStatus.PROMPT_NOT_SHOWN_ON_DEVICE) {
+                        openAppHandler.post {
+                            _watchAppNotAnswering.value = true
+                            if (!promptRetried && promptSentAtMs != 0L && cachedPreparedRunPayload != null) {
+                                promptRetried = true
+                                openAppHandler.postDelayed({
+                                    if (promptSentAtMs != 0L && cachedPreparedRunPayload != null) {
+                                        Log.d(TAG, "Prompt not shown on the watch — asking again")
+                                        openWatchApp()
+                                    }
+                                }, PROMPT_RETRY_AFTER_MS)
+                            }
+                        }
+                    }
                 }
             })
         } catch (e: InvalidStateException) {
@@ -1252,6 +1301,15 @@ class GarminWatchManager(
                         if (lastCrash != null) {
                             Log.e(TAG, "Garmin watch reported a crash from its previous run: $lastCrash")
                             logWatchCrash(lastCrash)
+                            // To the server too, so a crash on someone's watch can be read without
+                            // their phone ("Startup stopped after …" from Garmin 3.4.17's breadcrumbs).
+                            apiService?.let { api ->
+                                UserActivityReporter.report(api, "Watch app crash breadcrumb", mapOf(
+                                    "watch" to "garmin",
+                                    "breadcrumb" to lastCrash,
+                                    "sdkAppVersion" to sdkAppVersion,
+                                ), lastCrash)
+                            }
                         }
                         // Read the hasPendingSync flag the watch now includes
                         val hasPending = map["hasPendingSync"] as? Boolean ?: false

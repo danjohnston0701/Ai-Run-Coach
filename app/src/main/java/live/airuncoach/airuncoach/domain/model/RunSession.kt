@@ -94,6 +94,8 @@ data class RunSession(
     val workoutDescription: String? = null, // e.g., "Zone 2 aerobic building session"
     // "count" / "leave_open" — see PlanSessionChoice / runs.plan_session_choice
     val planSessionChoice: String? = null,
+    // Phased sessions: the timeline as run (runs.session_phases), for the summary's session chart.
+    val sessionPhases: List<SessionPhaseRecord>? = null,
     
     // Group run context (if this run is part of a group run)
     val groupRunId: String? = null, // ID of the group run this run belongs to

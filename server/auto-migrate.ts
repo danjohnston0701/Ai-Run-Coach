@@ -246,6 +246,27 @@ export async function runAutoMigrations(): Promise<void> {
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS known_route_id VARCHAR",
     },
     {
+      name: "runs.session_phases",
+      sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS session_phases JSONB",
+    },
+    {
+      // updateKnownRoutes never wrote runs.known_route_id (fixed 2026-11-22): link every run a
+      // known route already lists. Idempotent — only fills NULLs.
+      name: "runs.known_route_id backfill",
+      sql: `UPDATE runs SET known_route_id = kr.id FROM known_routes kr
+            WHERE runs.known_route_id IS NULL AND runs.user_id = kr.user_id
+              AND jsonb_typeof(kr.constituent_run_ids::jsonb) = 'array'
+              AND kr.constituent_run_ids::jsonb ? runs.id`,
+    },
+    {
+      // Walk routes named before walks got their own wording ("Saturday Morning Long Run").
+      // Only names still in the auto-generated form; idempotent.
+      name: "known_routes walk names",
+      sql: `UPDATE known_routes SET name = regexp_replace(name, ' Run$', ' Walk')
+            WHERE session_type = 'walk'
+              AND name ~ '^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday) (Morning|Afternoon|Evening)( Short| Long| Ultra)? Run$'`,
+    },
+    {
       name: "runs.route_confidence",
       sql: "ALTER TABLE runs ADD COLUMN IF NOT EXISTS route_confidence REAL",
     },

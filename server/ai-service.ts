@@ -3828,7 +3828,7 @@ function analyzePositiveWeatherConditions(
 }
 
 export async function generateWellnessAwarePreRunBriefing(params: {
-  distance: number;
+  distance: number | null;
   elevationGain: number;
   elevationLoss?: number;
   maxGradientDegrees?: number;
@@ -3937,7 +3937,7 @@ export async function generateWellnessAwarePreRunBriefing(params: {
     
     routeInfo = `
 ROUTE:
-- Distance: ${formatDistanceForTTS(distance)}
+- Distance: ${formatDistanceForTTS(distance ?? undefined)}
 - Difficulty: ${difficulty}
 - Elevation gain: ${gain}m / Elevation loss: ${loss}m
 - Terrain: ${terrainDescription}
@@ -3945,16 +3945,26 @@ ${gradientNote ? `- Gradient: ${gradientNote}` : ''}
 - Route type: Road ${activityLabel} on mapped route`;
   } else {
     // Free walk/run (no route) - NO terrain mention at all
-    routeInfo = `
+    routeInfo = distance && distance > 0 ? `
 ${activityLabelShout} (No planned route):
 - Distance: ${formatDistanceForTTS(distance)}
-- Type: Free ${activityLabel} / Training ${activityLabel}`;
+- Type: Free ${activityLabel} / Training ${activityLabel}` : `
+${activityLabelShout} (No planned route):
+- Distance: none set. This session is not a distance target. Never state or imply a total distance (no "5 km run").`;
   }
+
+  // A session type picked on the setup screen (no training plan): intervals, tempo, fartlek…
+  // The brief used to hear only "5 km" for these (the server filled a default distance) and
+  // announced Daniel's 4 × 400 m session as a 5 km run (2026-11-22).
+  const setupSessionContext = !trainingPlanId && workoutType && workoutType !== 'free'
+    ? `\nSESSION TYPE: ${workoutType}${workoutDescription ? ` — ${workoutDescription}` : ''}
+- Lead the briefing with this session (e.g. "four 400 metre reps today"), not with a distance.`
+    : '';
 
   // Add target pace info if user has a target time/pace
   if (targetTime && resolvedTargetPace) {
     routeInfo += `
-- Target: Complete ${formatDistanceForTTS(distance)} in ${formatDurationForTTS(targetTime)} (target pace: ${formatPaceForTTS(resolvedTargetPace)})`;
+- Target: Complete ${formatDistanceForTTS(distance ?? undefined)} in ${formatDurationForTTS(targetTime)} (target pace: ${formatPaceForTTS(resolvedTargetPace)})`;
   }
 
   // ── POLICY: Garmin Connect data excluded from AI processing ──────────────
@@ -4015,7 +4025,7 @@ ${fitnessLevel ? `${isWalk ? 'Walker' : 'Runner'}'s fitness level: ${fitnessLeve
 
 Generate a personalized pre-${activityLabel} briefing for an upcoming ${activityLabel}.
 ${routeInfo}
-${coachingPlanContext}
+${coachingPlanContext}${setupSessionContext}
 - ${weatherInfo}
 ${weatherAdvantage}
 
@@ -4028,7 +4038,7 @@ ${coachingPlanContext ? `1. "briefing": 2-3 SHORT SENTENCES (max 35 words). This
 3. "weatherAdvice": ONE sentence (≤15 words) on how weather conditions affect the run. Be specific (wind, temp, rain, etc.). Can be empty if weather is neutral.
 4. "warnings": Array of warnings — empty if none. Include readiness warnings if wellness data suggests caution.
 5. "${hasRoute === true ? 'routeInsight' : 'readinessInsight'}": ONE sentence (≤12 words). ${wellnessContext ? 'Key readiness or terrain challenge affecting this specific workout.' : 'One specific motivational detail tied to this workout.'}`
-: `1. "briefing": 2-3 SENTENCES (max 40 words) for a free-form run. Lead with distance${resolvedTargetPace ? ' and target pace' : ''}, mention weather and how it might affect you. ${wellnessContext ? 'Include your readiness status.' : ''} Be conversational. ${PACE_FORMAT_RULE}
+: `1. "briefing": 2-3 SENTENCES (max 40 words) for a ${setupSessionContext ? 'self-chosen session' : 'free-form run'}. Lead with ${setupSessionContext ? 'the session' : `distance${resolvedTargetPace ? ' and target pace' : ''}`}, mention weather and how it might affect you. ${wellnessContext ? 'Include your readiness status.' : ''} Be conversational. ${PACE_FORMAT_RULE}
 2. "intensityAdvice": ONE sentence (≤15 words). About pace, effort, and listening to your body today.
 3. "weatherAdvice": ONE sentence (≤15 words) on how conditions will impact the ${activityLabel}. Empty if weather is neutral/favorable.
 4. "warnings": Array of warnings ${wellnessContext ? 'if wellness or weather suggest adjusting intensity' : 'based on weather or route conditions'}. Empty if none.
@@ -4855,6 +4865,55 @@ function buildElevationConsistencyContext(params: {
   return analysis;
 }
 
+const VARIABLE_PACE_WORKOUTS = new Set(["intervals", "interval", "short_interval", "hill_repeats", "fartlek", "walk_run"]);
+
+function sessionPhasePace(p: any): number | null {
+  const secs = Number(p?.endSec) - Number(p?.startSec), m = Number(p?.endM) - Number(p?.startM);
+  if (!(secs >= 5) || !(m >= 20)) return null;
+  const pace = secs / (m / 1000);
+  return pace >= 120 && pace <= 1800 ? Math.round(pace) : null;
+}
+const fmtSecPace = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, "0")}/km`;
+function cvPercent(xs: number[]): number {
+  const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+  return Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / xs.length) / mean * 100;
+}
+
+/** Prompt section for a session with a phase timeline, or a variable-pace type without one. */
+export function buildSessionStructureContext(phases: any, workoutType?: string): string {
+  const type = (workoutType || "").toLowerCase();
+  const list: any[] = Array.isArray(phases) ? phases : [];
+  const reps = list.filter((p) => p?.kind === "work").map((p) => ({ p, pace: sessionPhasePace(p) })).filter((r) => r.pace != null) as { p: any; pace: number }[];
+  if (reps.length === 0) {
+    if (!VARIABLE_PACE_WORKOUTS.has(type)) return "";
+    return `
+## SESSION TYPE: ${type.replace(/_/g, " ")}
+- Pace varies by design in this session (hard efforts and easy stretches). Do NOT judge pace consistency from km splits, do NOT call uneven splits a pacing problem, and do NOT describe it as a tempo or steady run.
+`;
+  }
+  const recs = list.filter((p) => p?.kind === "recovery").map(sessionPhasePace).filter((v): v is number => v != null);
+  const tMin = reps.map((r) => r.p.targetPaceMinSec).find((v) => v != null);
+  const tMax = reps.map((r) => r.p.targetPaceMaxSec).find((v) => v != null) ?? tMin;
+  const lines = list.map((p) => {
+    const pace = sessionPhasePace(p);
+    const secs = Number(p.endSec) - Number(p.startSec), m = Number(p.endM) - Number(p.startM);
+    return `- ${p.label}: ${m} m in ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}${pace ? ` (${fmtSecPace(pace)})` : ""}`;
+  }).join("\n");
+  const repPaces = reps.map((r) => r.pace);
+  const onTarget = tMax != null ? repPaces.filter((p) => p <= tMax).length : null;
+  return `
+## SESSION STRUCTURE (${type ? type.replace(/_/g, " ") : "rep session"}) — phases as run
+${lines}
+- Reps: ${reps.length}, average ${fmtSecPace(repPaces.reduce((a, b) => a + b, 0) / repPaces.length)}, fastest ${fmtSecPace(Math.min(...repPaces))}, slowest ${fmtSecPace(Math.max(...repPaces))}, spread ${Math.max(...repPaces) - Math.min(...repPaces)} s/km, rep-to-rep variation ${cvPercent(repPaces).toFixed(1)}%.
+${tMin != null && tMax != null ? `- Rep target: ${fmtSecPace(tMin)}–${fmtSecPace(tMax)}; ${onTarget} of ${reps.length} reps at or quicker than the slow end.` : "- No rep target pace was set (coached on effort)."}
+${recs.length >= 2 ? `- Recoveries: ${recs.length}, rep-to-rep variation ${cvPercent(recs).toFixed(1)}% (they are easy jogs or walks, so looser is fine).` : ""}
+
+**CRITICAL — this is a rep session (${type ? type.replace(/_/g, " ") : "reps"}), not a steady or tempo run:**
+- "paceAnalysis" must judge the REPS (against the target if set, and against each other: did they hold, fade or build?) and the RECOVERIES separately. Never judge pace consistency from km splits or overall average pace — they mix reps and recoveries.
+- Never call this a tempo, threshold or steady run. Describe it as the session it is, using the rep numbers above.
+`;
+}
+
 export async function generateComprehensiveRunAnalysis(params: {
   runData: any;
   // User-selected activity for this session — "run" or "walk".
@@ -5182,6 +5241,11 @@ Terrain: ${garminDataFromWatch.terrainSummary}
 Consider how terrain affects reasonable pacing and form expectations.`;
     }
   }
+
+  // Phased session (intervals, hill repeats, fartlek, walk-run): the reps and recoveries as run.
+  // Without this the model judged Daniel's 4 × 400 m by km-split evenness and called it a tempo
+  // session (2026-11-22). Reps and recoveries are judged separately; km splits are not.
+  prompt += buildSessionStructureContext(runData?.sessionPhases, workoutType);
 
   // Add training plan context if available
   if (linkedPlanId || workoutType) {

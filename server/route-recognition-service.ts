@@ -17,7 +17,7 @@
 
 import { db } from "./db";
 import { knownRoutes, runs, users } from "../shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -669,8 +669,11 @@ export async function updateKnownRoutes(
       ? detectNotableSegments(elevationProfile, distKm)
       : (matchingRoute.notableSegments as NotableSegment[]);
 
-    // Generate a friendly name if none exists
-    const routeName = matchingRoute.name ?? generateRouteName(dayOfWeek, hour, newTypicalKm, sessionType);
+    // Generate a friendly name if none exists. An auto-generated walk name from before walks
+    // got their own wording ("Saturday Morning Long Run" for Chris Ryan's walking loop) is
+    // corrected; a name in any other form is left alone.
+    const routeName = fixAutoRouteNoun(matchingRoute.name, sessionType)
+      ?? generateRouteName(dayOfWeek, hour, newTypicalKm, sessionType);
 
     await db
       .update(knownRoutes)
@@ -697,6 +700,7 @@ export async function updateKnownRoutes(
       .where(eq(knownRoutes.id, matchingRoute.id));
 
     console.log(`[RouteMemory] Updated known_route ${matchingRoute.id} (${routeName}) — run #${newRunCount}`);
+    await linkRunsToRoute(matchingRoute.id, [completedRun.id]);
 
   } else {
     // ── Check if user has any prior run from within 100m (potential new route) ──
@@ -760,7 +764,7 @@ export async function updateKnownRoutes(
 
     const routeName = generateRouteName(dayOfWeek, hour, avgKm, sessionType);
 
-    await db.insert(knownRoutes).values({
+    const [created] = await db.insert(knownRoutes).values({
       userId,
       name: routeName,
       sessionType,
@@ -782,9 +786,10 @@ export async function updateKnownRoutes(
       avgTimeMs: avgMs,
       avgPaceSecPerKm: avgPace,
       splitProfiles: splitProfiles as any,
-    });
+    }).returning({ id: knownRoutes.id });
 
     console.log(`[RouteMemory] Created new known_route (${routeName}) for user ${userId}`);
+    if (created) await linkRunsToRoute(created.id, allIds);
   }
 }
 
@@ -928,6 +933,31 @@ function updateSplitProfiles(
 }
 
 // ─── Route name generator ─────────────────────────────────────────────────────
+
+/**
+ * runs.known_route_id was never written (0 rows on 2026-11-22, though 33 known routes existed),
+ * so nothing could go from a run to its route. Set it for the route's runs; auto-migrate
+ * backfills older ones from known_routes.constituent_run_ids.
+ */
+async function linkRunsToRoute(routeId: string, runIds: string[]): Promise<void> {
+  if (!runIds.length) return;
+  try {
+    await db.update(runs).set({ knownRouteId: routeId }).where(inArray(runs.id, runIds));
+  } catch (err: any) {
+    console.warn(`[RouteMemory] Could not link runs to route ${routeId}: ${err?.message ?? err}`);
+  }
+}
+
+const AUTO_ROUTE_NAME = /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday) (Morning|Afternoon|Evening)( Short| Long| Ultra)? (Run|Walk)$/;
+
+/** Keeps a route's name, except an auto-generated one whose Run/Walk noun is wrong for the session type. */
+function fixAutoRouteNoun(name: string | null | undefined, sessionType: RouteSessionType): string | null {
+  if (!name) return null;
+  const m = name.match(AUTO_ROUTE_NAME);
+  if (!m) return name;
+  const noun = sessionType === "walk" ? "Walk" : "Run";
+  return m[4] === noun ? name : name.replace(/ (Run|Walk)$/, ` ${noun}`);
+}
 
 function generateRouteName(dayOfWeek: number, hour: number, distKm: number, sessionType: RouteSessionType): string {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

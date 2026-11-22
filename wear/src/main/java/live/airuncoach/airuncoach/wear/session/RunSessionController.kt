@@ -399,7 +399,7 @@ class RunSessionController(
 
     /** "Done" on the post-run screen: back to the prepare screen (or the ready screen). */
     fun dismissFinished() {
-        _state.update { it.copy(isFinished = false, elapsedMs = 0, distanceM = 0.0, paceSecPerKm = 0.0,
+        _state.update { it.copy(isFinished = false, phase = null, elapsedMs = 0, distanceM = 0.0, paceSecPerKm = 0.0,
             heartRate = 0, cadence = 0, avgPaceSecPerKm = 0.0, screenPage = 0) }
     }
 
@@ -733,6 +733,23 @@ class RunSessionController(
                         isPaused = paused ?: it.isPaused,
                         overlay = if (running == true) Overlay.NONE else it.overlay
                     )
+                }
+            }
+            "phase" -> {
+                val label = payload["lbl"] as? String
+                if (label.isNullOrEmpty()) { _state.update { it.copy(phase = null) }; return }
+                if (isFinishing || (!_state.value.isRunning && !_state.value.isPaused)) return
+                _state.update {
+                    it.copy(phase = live.airuncoach.airuncoach.wear.ui.PhaseLine(
+                        label = label,
+                        isWork = payload["work"] == true,
+                        remainingSec = (payload["sec"] as? Number)?.toInt() ?: -1,
+                        remainingM = (payload["m"] as? Number)?.toInt() ?: -1,
+                        done = payload["done"] == true,
+                        atElapsedMs = it.elapsedMs,
+                        atDistanceM = it.distanceM,
+                        heardAtMs = System.currentTimeMillis(),
+                    ))
                 }
             }
             "statusMessage" -> {

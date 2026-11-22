@@ -90,6 +90,140 @@ export interface RunDataForImage {
   name?: string;
   weatherData?: { temperature?: number; conditions?: string };
   timezone?: string;
+  /** Phased sessions' timeline as run (runs.session_phases). */
+  sessionPhases?: SessionPhase[];
+  workoutType?: string;
+}
+
+export interface SessionPhase {
+  label: string;
+  kind: string; // warmup | work | recovery | cooldown | steady
+  rep?: number | null;
+  startSec: number;
+  endSec: number;
+  startM: number;
+  endM: number;
+  targetPaceMinSec?: number | null;
+  targetPaceMaxSec?: number | null;
+}
+
+function phasePace(p: SessionPhase): number | null {
+  const secs = p.endSec - p.startSec, m = p.endM - p.startM;
+  if (secs < 5 || m < 20) return null;
+  const pace = secs / (m / 1000);
+  return pace >= 120 && pace <= 1800 ? Math.round(pace) : null;
+}
+const fmtPaceSec = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, "0")}`;
+
+/** A run with at least one rep in its phase timeline gets the interval designs. */
+export function hasSessionReps(run: RunDataForImage): boolean {
+  return Array.isArray(run.sessionPhases) && run.sessionPhases.some((p) => p.kind === "work" && phasePace(p) != null);
+}
+
+const SESSION_TITLES: Record<string, string> = {
+  intervals: "INTERVAL SESSION", interval: "INTERVAL SESSION", short_interval: "INTERVAL SESSION",
+  hill_repeats: "HILL REPEATS", fartlek: "FARTLEK", walk_run: "WALK / RUN",
+};
+
+/**
+ * Interval progression: the Split Summary template for a phased session (km splits mean little
+ * when every rep is 400 m — Daniel, 2026-11-22). A column per rep, height = pace (slower = taller; blue, red when 10%+ slower than target / average rep),
+ * the target band dashed, the rep paces under each column, then the session's whole phase strip
+ * (warm-up, reps, recoveries, cool-down) to scale. Mirrors the apps' SessionBreakdownCard.
+ */
+function buildIntervalProgressionSvg(w: number, h: number, run: RunDataForImage, userName?: string): string {
+  const pad = 28, cx = w / 2, contentEndY = h - LOGO_ZONE_H;
+  const BG = "#0A0F1A", CARD = "#111827", TXT = "#E2E8F0", TXT2 = "#94A3B8", BDR = "rgba(255,255,255,0.10)";
+  const REC = "#4CAF50", EASY = "#7A8699";
+  const phases = (run.sessionPhases || []).filter((p) => p.endSec > p.startSec);
+  const reps = phases.filter((p) => p.kind === "work").map((p) => ({ p, pace: phasePace(p) })).filter((r) => r.pace != null) as { p: SessionPhase; pace: number }[];
+  const tMin = reps.map((r) => r.p.targetPaceMinSec).find((v) => v != null) ?? null;
+  const tMax = reps.map((r) => r.p.targetPaceMaxSec).find((v) => v != null) ?? tMin;
+  const title = SESSION_TITLES[(run.workoutType || "").toLowerCase()] || "SESSION";
+
+  let y = 52;
+  let svg = "";
+  if (userName) { svg += `<text x="${cx}" y="${y}" font-family="${FONT}" font-size="22" font-weight="700" fill="${TXT}" text-anchor="middle">${esc(userName)}</text>`; y += 30; }
+  svg += `<text x="${cx}" y="${y}" font-family="${FONT}" font-size="13" fill="${TXT2}" text-anchor="middle" letter-spacing="0.5">${esc(formatDate(run.completedAt, run.timezone))}</text>`;
+  y += 50;
+  svg += `<text x="${cx}" y="${y}" font-family="${FONT}" font-size="34" font-weight="900" fill="${TXT}" text-anchor="middle" letter-spacing="2">${esc(title)}</text>`;
+  y += 34;
+  const avg = reps.length ? Math.round(reps.reduce((a, r) => a + r.pace, 0) / reps.length) : 0;
+  const repDist = reps.length ? Math.round(reps.reduce((a, r) => a + (r.p.endM - r.p.startM), 0) / reps.length) : 0;
+  const shape = reps.length ? `${reps.length} × ${repDist >= 1000 ? (repDist / 1000).toFixed(1) + " km" : Math.round(repDist / 10) * 10 + " m"}` : "";
+  svg += `<text x="${cx}" y="${y}" font-family="${FONT}" font-size="20" font-weight="600" fill="${C.cyan}" text-anchor="middle">${esc(shape)}${shape ? "  ·  " : ""}${esc(formatDuration(run.duration || 0))}</text>`;
+  y += 30;
+
+  // ── Rep columns ────────────────────────────────────────────────────
+  const cardTop = y;
+  const stripH = 120, statsH = 90;
+  // Everything ends above the logo banner's gradient, or the stats row fades into it.
+  const cardH = Math.max(300, contentEndY - LOGO_GRADIENT_H - cardTop - 24 - stripH - statsH - 30);
+  svg += `<rect x="${pad}" y="${cardTop}" width="${w - pad * 2}" height="${cardH}" rx="20" fill="${CARD}" stroke="${BDR}"/>`;
+  svg += `<text x="${pad + 20}" y="${cardTop + 32}" font-family="${FONT}" font-size="13" font-weight="700" fill="${TXT2}" letter-spacing="2">REP BY REP</text>`;
+  const plotTop = cardTop + 60, plotBottom = cardTop + cardH - 56;
+  const plotLeft = pad + 24, plotRight = w - pad - 24;
+  const vals = reps.map((r) => r.pace).concat([tMin, tMax].filter((v): v is number => v != null));
+  // Bar height = pace, so a slower rep is a taller bar (Daniel, 2026-11-22; the apps' SummaryPaceRule).
+  const scale = Math.max(...vals) * 1.06;
+  const yFor = (pace: number) => plotBottom - (plotBottom - plotTop) * Math.min(1, Math.max(0.05, pace / scale));
+  const repRef = tMax ?? (reps.length ? reps.reduce((a, r) => a + r.pace, 0) / reps.length : 0);
+  const SLOWER = "#FF5A6E", ONPACE = "#00D4FF";
+  const slot = (plotRight - plotLeft) / Math.max(reps.length, 1);
+  const colW = Math.min(90, slot * 0.62);
+  const bestPace = reps.length ? Math.min(...reps.map((r) => r.pace)) : 0;
+  reps.forEach((r, i) => {
+    const xMid = plotLeft + slot * (i + 0.5);
+    const top = yFor(r.pace);
+    const slower = repRef > 0 && r.pace > repRef * 1.1;
+    svg += `<rect x="${xMid - colW / 2}" y="${top}" width="${colW}" height="${plotBottom - top}" rx="10" fill="${slower ? SLOWER : ONPACE}"/>`;
+    svg += `<text x="${xMid}" y="${top - 12}" font-family="${FONT}" font-size="${reps.length > 8 ? 15 : 19}" font-weight="800" fill="${r.pace === bestPace ? C.green : TXT}" text-anchor="middle">${fmtPaceSec(r.pace)}</text>`;
+    svg += `<text x="${xMid}" y="${plotBottom + 28}" font-family="${FONT}" font-size="14" font-weight="600" fill="${TXT2}" text-anchor="middle">${reps.length > 12 ? r.p.rep ?? i + 1 : "Rep " + (r.p.rep ?? i + 1)}</text>`;
+  });
+  if (tMin != null && tMax != null) {
+    const y1 = yFor(tMin), y2 = yFor(tMax);
+    svg += `<rect x="${plotLeft}" y="${Math.min(y1, y2)}" width="${plotRight - plotLeft}" height="${Math.max(2, Math.abs(y2 - y1))}" fill="rgba(255,255,255,0.08)"/>`;
+    [y1, y2].forEach((yy) => { svg += `<line x1="${plotLeft}" y1="${yy}" x2="${plotRight}" y2="${yy}" stroke="rgba(255,255,255,0.55)" stroke-width="2" stroke-dasharray="10 8"/>`; });
+    svg += `<text x="${plotRight}" y="${cardTop + 32}" font-family="${FONT}" font-size="13" fill="${TXT2}" text-anchor="end">- - target ${fmtPaceSec(tMin)}–${fmtPaceSec(tMax)}/km</text>`;
+  }
+
+  // ── Whole-session strip ────────────────────────────────────────────
+  const sTop = cardTop + cardH + 24;
+  svg += `<text x="${pad + 4}" y="${sTop + 14}" font-family="${FONT}" font-size="12" font-weight="700" fill="${TXT2}" letter-spacing="2">THE SESSION</text>`;
+  const total = phases.reduce((a, p) => a + (p.endSec - p.startSec), 0) || 1;
+  const paces = phases.map(phasePace).filter((v): v is number => v != null);
+  const sScale = Math.max(...paces) * 1.06;
+  const sBottom = sTop + stripH, sPlotTop = sTop + 28;
+  let x = pad;
+  const sW = w - pad * 2;
+  phases.forEach((p) => {
+    const pw = sW * ((p.endSec - p.startSec) / total);
+    const pace = phasePace(p);
+    if (pace != null) {
+      const top = sBottom - (sBottom - sPlotTop) * Math.min(1, Math.max(0.05, pace / sScale));
+      const col = p.kind === "work" ? (repRef > 0 && pace > repRef * 1.1 ? SLOWER : ONPACE) : p.kind === "recovery" ? REC : EASY;
+      svg += `<rect x="${x + 1}" y="${top}" width="${Math.max(2, pw - 2)}" height="${sBottom - top}" rx="3" fill="${col}"/>`;
+    }
+    x += pw;
+  });
+
+  // ── Stats row ──────────────────────────────────────────────────────
+  const stY = sBottom + 44;
+  const onTargetCount = tMin != null && tMax != null ? reps.filter((r) => r.pace <= tMax).length : null;
+  const spread = reps.length ? Math.max(...reps.map((r) => r.pace)) - Math.min(...reps.map((r) => r.pace)) : 0;
+  const stats = [
+    ["AVG REP", reps.length ? `${fmtPaceSec(avg)}/km` : "--"],
+    onTargetCount != null ? ["ON TARGET", `${onTargetCount} of ${reps.length}`] : ["SPREAD", `${spread} s/km`],
+    ["DISTANCE", `${run.distance?.toFixed(2) || "0"} km`],
+  ];
+  const colWs = (w - pad * 2) / stats.length;
+  stats.forEach(([k, v], i) => {
+    const sx = pad + colWs * (i + 0.5);
+    svg += `<text x="${sx}" y="${stY}" font-family="${FONT}" font-size="12" font-weight="700" fill="${TXT2}" text-anchor="middle" letter-spacing="1.5">${k}</text>`;
+    svg += `<text x="${sx}" y="${stY + 34}" font-family="${FONT}" font-size="26" font-weight="800" fill="${TXT}" text-anchor="middle">${esc(v)}</text>`;
+  });
+
+  return `${globalDefs(w, h)}<rect width="${w}" height="${h}" fill="${BG}"/>${svg}`;
 }
 
 const C = {
@@ -1597,7 +1731,10 @@ export async function generateShareImage(req: GenerateImageRequest): Promise<Buf
       svgContent = buildRouteMapSvg(w, h, req.runData, req.userName);
       break;
     case "split-summary":
-      svgContent = buildSplitSummarySvg(w, h, req.runData, req.userName);
+      // A phased session's splits are its reps, not its kilometres.
+      svgContent = hasSessionReps(req.runData)
+        ? buildIntervalProgressionSvg(w, h, req.runData, req.userName)
+        : buildSplitSummarySvg(w, h, req.runData, req.userName);
       break;
     case "achievement":
       svgContent = buildAchievementSvg(w, h, req.runData, req.userName);

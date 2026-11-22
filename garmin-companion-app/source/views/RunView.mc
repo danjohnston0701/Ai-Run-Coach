@@ -105,9 +105,22 @@ class RunView extends Ui.View {
     private var _coachTargetPace    = "";
     private var _coachTargetPaceSec = 0.0;
     private var _statusMessage      = "";
+    // Phased session (reps): the phone's rep strip, counted down here between messages (3.4.17+).
+    private var _phaseLabel     = "";     // "REP 2/4", "REC 2/4", "WARM-UP", "DONE"; "" = none
+    private var _phaseWork      = false;
+    private var _phaseSec       = -1;     // seconds left when sent (timed phase), else -1
+    private var _phaseM         = -1;     // metres left when sent (distance phase), else -1
+    private var _phaseDone      = false;
+    private var _phaseAtElapsed = 0;      // _elapsedTime when the message arrived
+    private var _phaseAtDist    = 0.0;    // _distance (m) when the message arrived
+    private var _phaseHeardMs   = 0;
     private var _statusTicks        = 0;
     // Breadcrumb from _recordCrash() on the PREVIOUS app run, shown once on next open.
     private var _pendingCrashMsg    = null;
+    // Startup breadcrumbs (bootStage() in AiRunCoachApp.mc): on until 10 s after onShow.
+    private var _booting        = true;
+    private var _bootShownMs    = 0;
+    private var _bootTicked     = false;
 
     // Infrastructure
     private var _timer        = null;
@@ -654,6 +667,7 @@ class RunView extends Ui.View {
         _isRunning     = true;
         _isPaused      = false;
         _isFinished    = false;  // Clear finished state — new run starting
+        _phaseLabel    = "";
         _elapsedMs     = 0;
         _elapsedTime   = 0;
         _overlayState  = OVERLAY_NONE;
@@ -925,10 +939,13 @@ class RunView extends Ui.View {
     function onShow() {
         Sys.println(">>> onShow() — isRunning=" + _isRunning + " phoneControlled=" + _phoneControlled
             + " session=" + (_session != null) + " timerAlreadyAlive=" + (_timer != null));
+        if (_booting) { bootStage("onShow"); _bootShownMs = Sys.getTimer(); }
         _phoneLink.register(method(:onPhoneMessage));
+        if (_booting) { bootStage("registered"); }
         // Include hasPendingSync so phone dashboard shows a sync indicator, and forward
         // any crash breadcrumb from the previous run so it lands in the phone's logcat.
         _phoneLink.sendWatchReady(_hasPendingOfflineBatch(), _pendingCrashMsg);
+        if (_booting) { bootStage("watchReady sent"); }
         _watchReadyRetriesLeft = WATCH_READY_RETRY_MAX;
         _watchReadyRetryTick   = 0;
         _prepareRequestsLeft = PREPARE_REQUEST_MAX;
@@ -999,6 +1016,10 @@ class RunView extends Ui.View {
     // IQ crash with zero trace on real hardware. Wrap it and persist a breadcrumb via
     // _recordCrash() so the next app open can show what happened (see onShow()).
     function onPhoneMessage(data) {
+        if (_booting) {
+            var bt = (data != null) ? data.get("type") : null;
+            bootStage("msg " + ((bt != null) ? bt.toString() : "?"));
+        }
         try {
             _onPhoneMessageInner(data);
         } catch (e) {
@@ -1232,6 +1253,25 @@ class RunView extends Ui.View {
             if (_isRunning) { _overlayState = OVERLAY_NONE; }
             Ui.requestUpdate();
 
+        } else if (t.equals("phase")) {
+            // Rep strip from the phone: "REP 2/4" plus what's left of it, counted down locally.
+            var lbl = data.get("lbl");
+            if (lbl == null || lbl.toString().length() == 0) {
+                _phaseLabel = "";
+                Ui.requestUpdate();
+                return;
+            }
+            if (_isFinishing || (!_isRunning && !_isPaused)) { return; }
+            _phaseLabel = lbl.toString();
+            _phaseWork  = (data.get("work") == true);
+            var ps = data.get("sec"); _phaseSec = (ps != null) ? ps.toNumber() : -1;
+            var pm = data.get("m");   _phaseM   = (pm != null) ? pm.toNumber() : -1;
+            _phaseDone      = (data.get("done") == true);
+            _phaseAtElapsed = _elapsedTime;
+            _phaseAtDist    = _distance;
+            _phaseHeardMs   = Sys.getTimer();
+            Ui.requestUpdate();
+
         } else if (t.equals("statusMessage")) {
             var msg = data.get("message");
             if (msg != null) { setStatusMessage(msg); _vibeShort(); Ui.requestUpdate(); }
@@ -1427,6 +1467,15 @@ class RunView extends Ui.View {
     // ── Timer tick (250 ms) ───────────────────────────────────────────────────
 
     function onTick() as Void {
+        if (_booting) {
+            if (_bootShownMs != 0 && Sys.getTimer() - _bootShownMs > 10000) {
+                _booting = false;
+                bootStage("ok");
+            } else if (_bootShownMs != 0 && !_bootTicked) {
+                _bootTicked = true;
+                bootStage("first tick");
+            }
+        }
         try {
         _dotCount = (_dotCount + 1) % 4;
         // Grace period: count up for first 8s so UI does not flash OFFLINE before auth arrives
@@ -1998,6 +2047,33 @@ class RunView extends Ui.View {
         if (_isRunning || _isPaused) { _drawPageDots(dc, cx, w, h); }
     }
 
+    // A phase line is shown while running, for 30 s after the phone's last phase message.
+    private function _phaseActive() {
+        if (_phaseLabel.length() == 0 || !(_isRunning || _isPaused)) { return false; }
+        return (Sys.getTimer() - _phaseHeardMs) < 30000;
+    }
+
+    private function _phaseRemaining() {
+        if (_phaseDone) { return ""; }
+        if (_phaseSec >= 0) {
+            var left = _phaseSec - (_elapsedTime - _phaseAtElapsed);
+            if (left < 0) { left = 0; }
+            return (left / 60).format("%d") + ":" + (left % 60).format("%02d");
+        }
+        if (_phaseM >= 0) {
+            var leftM = _phaseM - (_distance - _phaseAtDist);
+            if (leftM < 0) { leftM = 0; }
+            if (leftM >= 1000) { return (leftM / 1000.0).format("%.2f") + " km"; }
+            return ((leftM / 10.0 + 0.5).toNumber() * 10).format("%d") + " m";
+        }
+        return "";
+    }
+
+    private function _phaseColor() {
+        if (_phaseDone) { return 0x00BFFF; }
+        return _phaseWork ? 0xFF3355 : 0x4CAF50;
+    }
+
     private function _drawTimeTop(dc, cx, w, h) {
         // Timer uses the primary device font. Cadence is a secondary metric drawn
         // immediately below the timer — using FONT_SMALL on all screen sizes so it
@@ -2034,6 +2110,20 @@ class RunView extends Ui.View {
         // Shows "--" until cadence sensor data arrives. Before a run the prepare hint uses
         // this slot instead (see _drawStatusBar).
         if (_showPrepareHint()) { return; }
+        if (_phaseActive()) {
+            // Phased session: what's left of this rep where cadence usually sits, and the rep below.
+            var rem = _phaseRemaining();
+            if (rem.length() > 0) {
+                dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+                dc.drawText(cx, cadY, Gfx.FONT_SMALL, rem, Gfx.TEXT_JUSTIFY_CENTER);
+                dc.setColor(_phaseColor(), Gfx.COLOR_TRANSPARENT);
+                dc.drawText(cx, spmY, Gfx.FONT_XTINY, _phaseLabel, Gfx.TEXT_JUSTIFY_CENTER);
+            } else {
+                dc.setColor(_phaseColor(), Gfx.COLOR_TRANSPARENT);
+                dc.drawText(cx, cadY, Gfx.FONT_SMALL, _phaseLabel, Gfx.TEXT_JUSTIFY_CENTER);
+            }
+            return;
+        }
         dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
         var cadStr = _dispCadence > 0 ? _dispCadence.format("%d") : "--";
         dc.drawText(cx, cadY, Gfx.FONT_SMALL, cadStr, Gfx.TEXT_JUSTIFY_CENTER);
@@ -2272,6 +2362,11 @@ class RunView extends Ui.View {
             // Arbitrary text: under the ring if it fits the round face there, else the old spot.
             var sy = (ringBottom > 0 && !_fitsRoundBand(dc, _statusMessage, y, w, h)) ? (h * 0.82).toNumber() : y;
             dc.drawText(cx, sy, Gfx.FONT_XTINY, _statusMessage, Gfx.TEXT_JUSTIFY_CENTER);
+        } else if (ringBottom < 0 && _phaseActive()) {
+            // Grid page has no cadence slot to borrow: the rep goes in the status line.
+            var rem2 = _phaseRemaining();
+            dc.setColor(_phaseColor(), Gfx.COLOR_TRANSPARENT);
+            dc.drawText(cx, y, Gfx.FONT_XTINY, rem2.length() > 0 ? _phaseLabel + "  " + rem2 : _phaseLabel, Gfx.TEXT_JUSTIFY_CENTER);
         } else if (_isRunning && _gpsLostTicks >= GPS_LOST_THRESHOLD) {
             // GPS signal lost during an active run — amber warning
             dc.setColor(0xFFAA00, Gfx.COLOR_TRANSPARENT);

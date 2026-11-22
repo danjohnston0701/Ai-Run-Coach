@@ -22,9 +22,9 @@ object RunNaming {
         "long_run" to "Long Run",
         "back_to_back_long" to "Back-to-Back Long Run",
         "walk_run" to "Walk/Run",
-        "interval" to "Intervals",
-        "intervals" to "Intervals",
-        "short_interval" to "Intervals",
+        "interval" to "Interval Session",
+        "intervals" to "Interval Session",
+        "short_interval" to "Interval Session",
         "park_run" to "parkrun",
         // Setup-screen race-day picks (SessionTypes) — server/iOS have the same entries.
         "race" to "Race Day",
@@ -33,7 +33,7 @@ object RunNaming {
     )
 
     /** Words that already make a name read as a session; anything else gets " Run" appended. */
-    private val SESSION_NOUNS = Regex("""\b(run|race|intervals|repeats|strides|fartlek|shakeout|walk|parkrun)$""", RegexOption.IGNORE_CASE)
+    private val SESSION_NOUNS = Regex("""\b(run|race|intervals|session|repeats|strides|fartlek|shakeout|walk|parkrun)$""", RegexOption.IGNORE_CASE)
 
     fun planWorkoutName(workoutType: String?): String? {
         val key = workoutType.orEmpty().trim().lowercase().replace(Regex("""[\s-]+"""), "_")

@@ -381,9 +381,9 @@ const PLAN_WORKOUT_NAMES: Record<string, string> = {
   long_run: "Long Run",
   back_to_back_long: "Back-to-Back Long Run",
   walk_run: "Walk/Run",
-  interval: "Intervals",
-  intervals: "Intervals",
-  short_interval: "Intervals",
+  interval: "Interval Session",
+  intervals: "Interval Session",
+  short_interval: "Interval Session",
   park_run: "parkrun",
   pre_race_shakeout: "Pre-Race Shakeout",
   // Setup-screen race-day picks (Android SessionTypes / iOS SessionTypes.swift).
@@ -392,7 +392,7 @@ const PLAN_WORKOUT_NAMES: Record<string, string> = {
 };
 
 /** Words that already make a name read as a session; anything else gets " Run" appended. */
-const SESSION_NOUNS = /\b(run|race|intervals|repeats|strides|fartlek|shakeout|walk|parkrun)$/i;
+const SESSION_NOUNS = /\b(run|race|intervals|session|repeats|strides|fartlek|shakeout|walk|parkrun)$/i;
 
 /** "tempo" → "Tempo Run", "hill_repeats" → "Hill Repeats", "parkrun_progression" → "parkrun Progression Run". */
 export function planWorkoutName(workoutType: string | null | undefined): string | null {
@@ -429,6 +429,21 @@ export function defaultRunName(opts: {
   const hour = parseInt(String(opts.runTime ?? "").split(":")[0], 10);
   if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
   return `${timeOfDayLabel(hour)} ${isWalk ? "Walk" : "Run"}`;
+}
+
+/** A name defaultRunName gives a run with no session type ("Lunch Run", "Morning Walk"). */
+const TIME_OF_DAY_NAME = /^(Morning|Lunch|Afternoon|Evening|Night) (Run|Walk)$/;
+
+/**
+ * The session name for a run that still has its time-of-day default, once its session type is
+ * known; null when nothing should change (the runner named it, or there's no session type).
+ * A watch-started run is named when the watch's session ends, before the phone's upload adds
+ * the workout type, so Daniel's interval session stayed "Lunch Run" (2026-11-22).
+ */
+export function upgradedSessionName(currentName: string | null | undefined, sessionType: string | null | undefined, workoutType: string | null | undefined): string | null {
+  if (currentName && !TIME_OF_DAY_NAME.test(currentName.trim())) return null;
+  if (!planWorkoutName(workoutType)) return null;
+  return defaultRunName({ sessionType, workoutType, runTime: "12:00" });
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────

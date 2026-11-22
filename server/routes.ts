@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { sendNewPlanReviewEmail } from "./plan-review-email";
-import { ensureRunWeather, weatherCodeToCondition } from "./run-weather";
+import { ensureRunWeather, weatherCodeToCondition, weatherFromClientFields } from "./run-weather";
 import { createServer, type Server } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -116,7 +116,7 @@ import { createPlanJob, finishPlanJob, failPlanJob, getPlanJob, getGeneratingPla
 import { whileRunnerWaits } from "./plan-ai";
 import { recognizeRoute, updateKnownRoutes, dropMismatchedRouteContext } from "./route-recognition-service";
 import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-resolver";
-import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime, defaultRunName } from "./utils/run-derivation";
+import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime, defaultRunName, upgradedSessionName } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
 import { parseGoalDate } from "./utils/parse-goal-date";
 import { capForNewPlan, isWorkoutLocked, lockedWorkoutIdsForPlan, activePlanCap, PLAN_SESSION_LOCKED, TRIAL_PLAN_SESSION_CAP } from "./plan-trial-cap";
@@ -2202,6 +2202,8 @@ function transformRunForAndroid(run: any) {
       workoutType: run.workoutType || null,
       workoutIntensity: run.workoutIntensity || null,
       workoutDescription: run.workoutDescription || null,
+      // Phased sessions' timeline as run (null for other runs): the summary's session chart.
+      sessionPhases: Array.isArray(run.sessionPhases) ? run.sessionPhases : null,
 
       // ── Extended scalars (always included — these are tiny) ──────────────────
       avgSpeed:        run.avgSpeed        ?? null,
@@ -2660,6 +2662,13 @@ function transformRunForAndroid(run: any) {
       // iOS sends every time series as a JSON string; the array-only extractions below dropped
       // them (heart_rate_data, cadence_data, altitude_data … NULL on every iOS run).
       normalizeSeriesFields(runData);
+      weatherFromClientFields(runData); // iOS: the weather the runner saw, not a later model reading
+      // Phased sessions' timeline; iOS sends JSON blobs as strings.
+      if (typeof runData.sessionPhases === "string") {
+        try { runData.sessionPhases = JSON.parse(runData.sessionPhases); } catch { runData.sessionPhases = null; }
+      }
+      if (runData.sessionPhases == null && runData.session_phases != null) runData.sessionPhases = runData.session_phases;
+      if (runData.sessionPhases != null && !Array.isArray(runData.sessionPhases)) runData.sessionPhases = null;
       // Garmin/Wear companion session ID, when this run was started via "Prepare for
       // Watch" — lets Case 2 below (and the later /session/end handler) deterministically
       // link the phone's upload to the watch's companion session instead of guessing from
@@ -3062,7 +3071,9 @@ function transformRunForAndroid(run: any) {
           steepestDecline,
         }, c2Merge);
 
+        if (Array.isArray(runData.sessionPhases) && !(garminDup as any).sessionPhases) c2Merge.sessionPhases = runData.sessionPhases;
         if (Object.keys(c2Merge).length > 0) {
+          { const nm = upgradedSessionName((garminDup as any).name, (garminDup as any).sessionType, c2Merge.workoutType ?? (garminDup as any).workoutType); if (nm && nm !== (garminDup as any).name) c2Merge.name = nm; }
           await db.update(runs).set(c2Merge).where(eq(runs.id, garminDup.id));
           console.log(`[POST /api/runs] Case 2 merge applied to run ${garminDup.id}:`, Object.keys(c2Merge).join(', '));
         }
@@ -3281,6 +3292,8 @@ function transformRunForAndroid(run: any) {
 
             if (groupRunId) await linkRunToGroupRun(groupRunId, userId, existingByExternalId.id);
 
+            if (Array.isArray(runData.sessionPhases) && !(existingByExternalId as any).sessionPhases) mergeFields.sessionPhases = runData.sessionPhases;
+            { const nm = upgradedSessionName((existingByExternalId as any).name, (existingByExternalId as any).sessionType, mergeFields.workoutType ?? (existingByExternalId as any).workoutType); if (nm && nm !== (existingByExternalId as any).name) mergeFields.name = nm; }
             if (Object.keys(mergeFields).length > 0) {
               console.log(`[POST /api/runs] Merging ${Object.keys(mergeFields).join(', ')} into run ${existingByExternalId.id}`);
               const [merged] = await db.update(runs)
@@ -3377,7 +3390,9 @@ function transformRunForAndroid(run: any) {
           }
           if (groupRunId) await linkRunToGroupRun(groupRunId, userId, rapidDup.id);
 
+          if (Array.isArray(runData.sessionPhases) && !(rapidDup as any).sessionPhases) c1Merge.sessionPhases = runData.sessionPhases;
           if (Object.keys(c1Merge).length > 0) {
+          { const nm = upgradedSessionName((rapidDup as any).name, (rapidDup as any).sessionType, c1Merge.workoutType ?? (rapidDup as any).workoutType); if (nm && nm !== (rapidDup as any).name) c1Merge.name = nm; }
             await db.update(runs).set(c1Merge).where(eq(runs.id, rapidDup.id));
             console.log(`[POST /api/runs] Case 1 merge applied to run ${rapidDup.id}:`, Object.keys(c1Merge).join(', '));
             const [updated1] = await db.select().from(runs).where(eq(runs.id, rapidDup.id)).limit(1);
@@ -11646,7 +11661,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       // IMPORTANT: Free runs should NOT mention terrain/elevation
       const aiService = await import("./ai-service");
       const briefing = await aiService.generateWellnessAwarePreRunBriefing({
-        distance: distance || 5,
+        // No distance = a session without one (intervals, fartlek…): never invent 5 km.
+        distance: Number(distance) > 0 ? Number(distance) : null,
         elevationGain: elevationGain || 0,
         elevationLoss: elevationLoss || 0,
         maxGradientDegrees: maxGradientDegrees || 0,
@@ -11965,7 +11981,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       
       // Use the AI-powered briefing function for intelligent, personalized content
       const aiBriefing = await aiService.generateWellnessAwarePreRunBriefing({
-        distance: distance || 5,
+        // No distance = a session without one (intervals, fartlek…): never invent 5 km.
+        distance: Number(distance) > 0 ? Number(distance) : null,
         elevationGain: elevationGain || 0,
         elevationLoss: elevationLoss || 0,
         maxGradientDegrees: maxGradientDegrees || 0,
@@ -12128,7 +12145,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       // Use the AI-powered briefing function for intelligent, personalized content
       // Force activityType to 'walk' for walk-specific briefing
       const aiBriefing = await aiService.generateWellnessAwarePreRunBriefing({
-        distance: distance || 5,
+        // No distance = a session without one (intervals, fartlek…): never invent 5 km.
+        distance: Number(distance) > 0 ? Number(distance) : null,
         elevationGain: elevationGain || 0,
         elevationLoss: elevationLoss || 0,
         maxGradientDegrees: maxGradientDegrees || 0,
@@ -18903,6 +18921,8 @@ Include ${plan[0].daysPerWeek} workouts per week.`;
       name: run.name || undefined,
       weatherData: (run.weatherData ?? run.weather_data) || undefined,
       timezone: timezone || undefined,
+      sessionPhases: Array.isArray(run.sessionPhases ?? run.session_phases) ? (run.sessionPhases ?? run.session_phases) : undefined,
+      workoutType: run.workoutType ?? run.workout_type ?? undefined,
     };
   }
 
