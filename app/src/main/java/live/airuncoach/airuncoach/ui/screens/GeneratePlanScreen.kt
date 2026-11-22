@@ -607,7 +607,7 @@ fun GeneratePlanScreen(
                     val startOptions = listOf(
                         Triple("today", "Today", "First session scheduled for today"),
                         Triple("tomorrow", "Tomorrow", "Start fresh from tomorrow"),
-                        Triple("flexible", "Flexible", "AI picks the best start day based on your schedule")
+                        Triple("flexible", "Flexible", "AI picks the best start day, from tomorrow")
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                         startOptions.forEach { (key, label, subtitle) ->
@@ -858,7 +858,7 @@ fun GeneratePlanScreen(
                                 Icon(Icons.Filled.Lock, contentDescription = null, tint = Colors.primary, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(Spacing.sm))
                                 Text(
-                                    "Your free trial includes the first 4 sessions of your plan. You'll see the whole ${durationWeeks}-week plan; upgrade to a plan with AI Plans to unlock the rest.",
+                                    "Your free trial includes the first 4 sessions of your plan. The rest of your ${durationWeeks}-week plan is built and unlocked when you upgrade to a plan with AI Plans.",
                                     style = AppTextStyles.small,
                                     color = Colors.textPrimary
                                 )

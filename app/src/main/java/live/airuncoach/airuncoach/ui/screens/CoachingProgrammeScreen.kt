@@ -997,16 +997,21 @@ fun PlanDashboardContent(
             }
             // ── Rest day — nothing scheduled today, nothing overdue ────────────
             else -> {
+                // Before the first session there's nothing to recover from (2026-11-23; iOS mirrors this).
+                val started = details.weeks.any { w -> w.workouts.any { it.isCompleted } }
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = Colors.backgroundSecondary), modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(Spacing.lg)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(painterResource(R.drawable.icon_calendar_vector), null, tint = Colors.primary, modifier = Modifier.size(24.dp))
                                 Spacer(modifier = Modifier.width(Spacing.md))
-                                Text("Rest Day", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
+                                Text(if (started) "Rest Day" else "No session today", style = AppTextStyles.body.copy(fontWeight = FontWeight.Bold), color = Colors.textPrimary)
                             }
                             Spacer(modifier = Modifier.height(Spacing.sm))
-                            Text("No session scheduled today. Take time to recover!", style = AppTextStyles.small, color = Colors.textSecondary)
+                            Text(
+                                if (started) "No session scheduled today. Take time to recover!" else "Your plan starts with the first session below.",
+                                style = AppTextStyles.small, color = Colors.textSecondary
+                            )
                         }
                     }
                     Spacer(modifier = Modifier.height(Spacing.lg))

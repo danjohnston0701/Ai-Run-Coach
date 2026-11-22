@@ -104,6 +104,34 @@ export async function linkRunToPendingOrientation(run: any): Promise<string | nu
   return pending.id;
 }
 
+// ── 1b. Plans with no orientation session get it from the first real run ──
+// Plans saved before plan-orientation.ts (Jade, 2026-11-22) can have no orientation at all, while
+// every session says its targets come "once your orientation run is complete". The first real
+// run after such a plan was created does that job: weeks 1-2 are enriched from it, once.
+export async function calibratePlansWithoutOrientation(run: any): Promise<void> {
+  if (!run?.userId || isWalk(run) || !(runKm(run) >= 1) || !plausiblePace(run)) return;
+  const runAt = new Date(run.completedAt ?? run.createdAt ?? Date.now());
+  const plans = await db
+    .select({ id: trainingPlans.id })
+    .from(trainingPlans)
+    .where(and(
+      eq(trainingPlans.userId, run.userId),
+      eq(trainingPlans.status, "active"),
+      eq(trainingPlans.enrichedThroughWeek, 0),
+      lt(trainingPlans.createdAt, runAt),
+      sql`NOT EXISTS (SELECT 1 FROM planned_workouts pw WHERE pw.training_plan_id = ${trainingPlans.id} AND pw.workout_type = 'orientation')`,
+    ));
+  for (const p of plans) {
+    // Claim it first so a second save of the same run (watch + phone merge) doesn't enrich twice.
+    const claimed = await db.update(trainingPlans).set({ enrichedThroughWeek: 2 } as any)
+      .where(and(eq(trainingPlans.id, p.id), eq(trainingPlans.enrichedThroughWeek, 0)))
+      .returning({ id: trainingPlans.id });
+    if (claimed.length === 0) continue;
+    console.log(`✅ [planSync] Run ${run.id} calibrates plan ${p.id} (it has no orientation session)`);
+    enrichWeeksAfterOrientation(p.id, run.userId, "firstRunNoOrientation");
+  }
+}
+
 // ── 2. A free or imported run on a session's date is that session ─────────
 // Same calendar date only (run_date is the runner's local date; planned dates are stored as
 // that date at UTC midnight). With several open sessions that day, the closest in distance.
@@ -183,6 +211,8 @@ export async function autoCompleteLinkedWorkout(runId: string): Promise<void> {
       }
     }
   }
+
+  await calibratePlansWithoutOrientation(savedRun);
 
   const wid = (savedRun as any).linkedWorkoutId
     ?? (choice === "leave_open" ? null

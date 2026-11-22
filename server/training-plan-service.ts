@@ -16,6 +16,7 @@ import { HeartRateZones } from "./heart-rate-zones"; // Assuming we create this 
 import { generateSessionInstructions } from "./session-coaching-service";
 import { getRunnerProfile, runnerProfileBlock } from "./runner-profile-service";
 import { generateOrientationCoachingPrompt } from "./orientation-session-service";
+import { ensureOrientationFirst } from "./plan-orientation";
 import { enrichWorkoutBlock, getWorkoutIdsForPlanWeeks, markPlanEnrichedThroughWeek } from "./session-enrichment-service";
 import { jsonrepair } from "jsonrepair";
 import {
@@ -1104,6 +1105,28 @@ Apply your coaching expertise to design the best plan for this athlete's stated 
     })();
 
     // Generate plan with OpenAI
+    // ── First session day ──────────────────────────────────────────────────
+    // Tomorrow unless the runner chose "today" (2026-11-23, Daniel): a plan made late in the day
+    // used to open with a session that same evening (Jade's 7 km long run at 17:07). "flexible"
+    // lets the AI pick, but never today. Week-1 sessions before this day are dropped at save, so
+    // on a Sunday with "tomorrow" week 1 is empty and the plan starts on Monday's week 2.
+    const startsToday = String(firstSessionStart).toLowerCase() === "today";
+    const userToday = userTimezone
+      ? new Date(new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) + 'T00:00:00')
+      : (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+    const todayDayIdx = userToday.getDay() === 0 ? 6 : userToday.getDay() - 1; // Mon=0 … Sun=6
+    // On a Sunday with "tomorrow" nothing is left this week, so week 1 is next week (Mon–Sun):
+    // weekShiftDays moves every date on a week, and plan details report that Monday as the
+    // plan's start (routes.ts planWeekOneAnchor) so the apps count weeks from it too.
+    const weekShiftDays = todayDayIdx + (startsToday ? 0 : 1) >= 7 ? 7 : 0;
+    const firstAllowedDayIdx = weekShiftDays ? 0 : todayDayIdx + (startsToday ? 0 : 1);
+    const firstSessionDate = new Date(userToday);
+    firstSessionDate.setDate(userToday.getDate() + (startsToday ? 0 : 1));
+    const fmtDay = (d: Date) => d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+    const firstSessionRule = weekShiftDays
+      ? `Week 1 starts tomorrow, ${fmtDay(firstSessionDate)}, and is a normal full week (Monday to Sunday). Every week's dayOfWeek values refer to that week.`
+      : `The first workout must be on or after ${fmtDay(firstSessionDate)}${startsToday ? " (today — the runner chose to start today)" : " (tomorrow)"}. Week-1 days before that are unavailable: omit them, so week 1 may have fewer sessions than usual.${String(firstSessionStart).toLowerCase() === "flexible" ? " Within that, pick the best start day for this runner's schedule." : ""}`;
+
     const prompt = `═══════════════════════════════════════════════════════════════
 COACHING COMMISSION — ${weeksUntilTarget}-WEEK PERSONALISED TRAINING PLAN
 ${isRollingPlan ? `BLOCK 1 OF ${Math.ceil(weeksUntilTarget / weeksToGenerate)} — WEEKS 1–${weeksToGenerate}` : ''}
@@ -1181,12 +1204,8 @@ ${targetDate ? `- Race date: ${targetDate.toDateString()}` : ''}
 ━━━ SCHEDULE & LIFESTYLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Training sessions per week: ${daysPerWeek}
-Today: ${new Date().toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
-First session: ${
-  firstSessionStart === "today" ? `TODAY — first workout must be on or after today. Any sessions earlier in week 1 that fall before today should be omitted; week 1 may have fewer sessions than usual.` :
-  firstSessionStart === "tomorrow" ? `TOMORROW — first workout on or after tomorrow. Omit any week-1 sessions that fall before tomorrow.` :
-  "Flexible — schedule from the current calendar week, omitting any slots that have already passed."
-}
+Today: ${fmtDay(userToday)} ${userToday.getFullYear()}
+First session: ${firstSessionRule}
 ${regularSessions.length > 0 ? `
 Fixed Sessions Already in This Athlete's Schedule:
 ${regularSessions.map(s => {
@@ -1597,6 +1616,19 @@ App capabilities available in every session: real-time GPS pace/distance, live a
     }, 'Training Plan');
     explainLongerThanGoal(planData.weeks, targetDistance, easyPaceSecs);
 
+    // New runners: the first session they'll actually see is the orientation run (plan-orientation.ts).
+    // Week-1 days already past are dropped at save time below, which used to drop the orientation too.
+    if (!hasRunHistory && !isPreEventPlan) {
+      const changed = ensureOrientationFirst(planData.weeks, {
+        walkRun: needsProgressionGuard,
+        isDropped: (weekNumber, dayOfWeek) => weekNumber === 1 && ((Number(dayOfWeek) || 1) + 6) % 7 < firstAllowedDayIdx,
+      });
+      if (changed) {
+        console.warn(`[Training Plan] Orientation: ${changed}`);
+        recomputeWeekTotals(planData.weeks, needsProgressionGuard ? guardPaceMinPerKm * 60 : easyPaceSecs);
+      }
+    }
+
     // Sanitise numeric fields before DB insert — Postgres rejects NaN for integer/real columns
     const safeTargetTime   = (targetTime != null && !isNaN(targetTime) && targetTime > 0) ? Math.round(targetTime) : null;
     const safeWeeklyMileage = (!isNaN(weeklyMileageBase) && weeklyMileageBase >= 0) ? weeklyMileageBase : 0;
@@ -1734,12 +1766,12 @@ App capabilities available in every session: real-time GPS pace/distance, live a
 
         const scheduledDate = new Date(weekStart);
         scheduledDate.setDate(
-          weekStart.getDate() + ((week.weekNumber - 1) * 7) + dayOffsetFromMonday
+          weekStart.getDate() + weekShiftDays + ((week.weekNumber - 1) * 7) + dayOffsetFromMonday
         );
 
-        // Skip week-1 workouts that fall before today — the user already
-        // passed those days, so we just start from today onwards.
-        if (week.weekNumber === 1 && scheduledDate < today) {
+        // Skip week-1 workouts before the first allowed day: days already past, and today too
+        // unless the runner chose to start today (firstAllowedDayIdx, set with the prompt).
+        if (week.weekNumber === 1 && dayOffsetFromMonday < firstAllowedDayIdx) {
           continue;
         }
 

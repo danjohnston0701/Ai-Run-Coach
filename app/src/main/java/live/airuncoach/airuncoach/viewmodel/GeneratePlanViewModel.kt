@@ -140,7 +140,7 @@ class GeneratePlanViewModel @Inject constructor(
     val isPreEventPlan: StateFlow<Boolean> = _isPreEventPlan.asStateFlow()
 
     // "today" | "tomorrow" | "flexible"
-    private val _firstSessionStart = MutableStateFlow("today")
+    private val _firstSessionStart = MutableStateFlow("tomorrow") // server never schedules today unless chosen (2026-11-23)
     val firstSessionStart: StateFlow<String> = _firstSessionStart.asStateFlow()
 
     // Regular sessions the user does each week (e.g. Parkrun, running club)

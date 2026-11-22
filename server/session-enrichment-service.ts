@@ -41,7 +41,7 @@ import {
   runs,
   users,
 } from "@shared/schema";
-import { eq, and, inArray, desc, isNotNull } from "drizzle-orm";
+import { eq, and, inArray, desc, asc, ne, isNotNull } from "drizzle-orm";
 import { getOrGenerateSessionCoaching } from "./session-coaching-service";
 import { HeartRateZones } from "./heart-rate-zones";
 import { derivePaceAnchor, describeAnchor, classifySession, fmtPace, type PaceBand } from "./plan-quality";
@@ -643,8 +643,18 @@ export async function findPlansNeedingEnrichment(): Promise<
         .where(and(eq(plannedWorkouts.trainingPlanId, plan.id), eq(plannedWorkouts.workoutType, "orientation")))
         .limit(1)
         .then(r => r[0]);
-      if (!orientation?.scheduledDate) continue;
-      const due = new Date(orientation.scheduledDate);
+      // No orientation session at all (plans saved before plan-orientation.ts): count from the
+      // plan's first session instead, so these plans don't stay on placeholders forever.
+      const firstSession = orientation?.scheduledDate ? null : await db
+        .select({ scheduledDate: plannedWorkouts.scheduledDate })
+        .from(plannedWorkouts)
+        .where(and(eq(plannedWorkouts.trainingPlanId, plan.id), ne(plannedWorkouts.workoutType, "rest")))
+        .orderBy(asc(plannedWorkouts.scheduledDate))
+        .limit(1)
+        .then(r => r[0]);
+      const anchorDate = orientation?.scheduledDate ?? firstSession?.scheduledDate;
+      if (!anchorDate) continue;
+      const due = new Date(anchorDate);
       due.setHours(0, 0, 0, 0);
       due.setDate(due.getDate() + 2);
       if (today >= due) {

@@ -17529,7 +17529,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       }
       
       res.json({
-        plan: { ...plan[0], trialSessionCap },
+        plan: { ...plan[0], trialSessionCap, createdAt: planWeekOneAnchor(plan[0].createdAt, weeksWithWorkouts) },
         weeks: weeksWithWorkouts,
         trialCap,
         generatingNextBlock,
@@ -20027,4 +20027,31 @@ function buildShareNotFoundPage(): string {
   </div>
 </body>
 </html>`;
+}
+
+
+/**
+ * Both apps count plan weeks from the Monday of `plan.createdAt` (calculateActualCurrentWeek).
+ * A plan made on a Sunday with a "tomorrow" start has week 1 on the NEXT Monday
+ * (training-plan-service weekShiftDays), so report week 1's Monday (noon UTC, which is that
+ * Monday or early Tuesday in every timezone) instead — installed apps then show the right week
+ * with no update. For every other plan that is the creation week's Monday, the same week as before.
+ */
+export function planWeekOneAnchor(createdAt: any, weeks: any[]): any {
+  const created = createdAt ? new Date(createdAt) : null;
+  if (!created || isNaN(created.getTime())) return createdAt;
+  for (const w of weeks ?? []) {
+    const wo = (w.workouts ?? []).find((x: any) => x?.scheduledDate);
+    if (!wo || !w.weekNumber) continue;
+    const d = new Date(wo.scheduledDate);
+    if (isNaN(d.getTime())) continue;
+    // Workouts are stored at the runner's local midnight as UTC, so the UTC date is their date.
+    const monday = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7) - (w.weekNumber - 1) * 7, 12);
+    // Sanity window: week 1 starts in the week of creation or the next one. Outside it (odd data),
+    // keep the real createdAt. Inside it this is the true week-1 Monday, which also fixes Android
+    // parsing createdAt's UTC wall-clock as local time (NZ Monday morning = Sunday UTC → a week off).
+    const day = 24 * 3600 * 1000;
+    return monday >= created.getTime() - 8 * day && monday <= created.getTime() + 8 * day ? new Date(monday) : createdAt;
+  }
+  return createdAt;
 }
