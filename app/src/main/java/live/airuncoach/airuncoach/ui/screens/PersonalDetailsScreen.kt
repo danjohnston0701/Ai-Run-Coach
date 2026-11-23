@@ -56,6 +56,8 @@ fun PersonalDetailsScreen(
     val weight by viewModel.weight.collectAsState()
     val weightUnit by viewModel.weightUnit.collectAsState()
     val weightNeedsUnitCheck by viewModel.weightNeedsUnitCheck.collectAsState()
+    val weightSlip by viewModel.weightSlip.collectAsState()
+    val weightError by viewModel.weightError.collectAsState()
     val height by viewModel.height.collectAsState()
     val defaultSessionType by viewModel.defaultSessionType.collectAsState()
     val targetDistanceDecimals by viewModel.targetDistanceDecimals.collectAsState()
@@ -369,6 +371,21 @@ fun PersonalDetailsScreen(
                             Text("No, it's kg", color = Colors.textSecondary)
                         }
                     }
+                } else if (weightSlip != null) {
+                    val slip = weightSlip!!
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(text = slip.message, style = AppTextStyles.small, color = Colors.warning)
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        TextButton(onClick = viewModel::acceptWeightSlip) {
+                            Text("Yes, $weight ${slip.unit.label}", color = Colors.primary, fontWeight = FontWeight.SemiBold)
+                        }
+                        TextButton(onClick = viewModel::dismissWeightSlip) {
+                            Text("No, $weight ${weightUnit.label} is right", color = Colors.textSecondary)
+                        }
+                    }
+                } else if (weightError != null) {
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(text = weightError!!, style = AppTextStyles.small, color = Colors.warning)
                 }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
@@ -627,7 +644,7 @@ fun PersonalDetailsScreen(
                             }
                         }
                     },
-                    enabled = distanceRangeError == null && heightError == null,
+                    enabled = distanceRangeError == null && heightError == null && weightSlip == null && weightError == null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),

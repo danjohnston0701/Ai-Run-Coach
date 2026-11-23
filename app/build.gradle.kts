@@ -27,8 +27,8 @@ android {
         applicationId = "live.airuncoach.airuncoach"
         minSdk = 26
         targetSdk = 36          // Google Play requires 36+ as of Aug 2026
-        versionCode = 132         // ← Increment by 1 for every Play Store upload
-        versionName = "2.0.90"   // ← Human-readable version shown in Play Store
+        versionCode = 133         // ← Increment by 1 for every Play Store upload
+        versionName = "2.0.91"   // ← Human-readable version shown in Play Store
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

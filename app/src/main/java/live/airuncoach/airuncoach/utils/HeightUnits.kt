@@ -49,5 +49,32 @@ object HeightUnits {
         return ((f * 12 + i) * CM_PER_INCH * 10).roundToInt() / 10.0
     }
 
+    private fun g(v: Double): String = if (v % 1.0 == 0.0) v.toInt().toString() else v.toString()
+
+    /**
+     * Why a centimetre entry is out of range, naming the likely slip: feet ("5.5") or inches ("65.5")
+     * typed into the cm field, or a feet-and-inches number run together ("55" for 5 ft 5 in).
+     * iOS mirror: `HeightUnits.cmEntryMessage`.
+     */
+    fun cmEntryMessage(cm: Double): String {
+        if (cm >= 3 && cm < 9) {
+            return "${g(cm)} looks like feet. Switch to ft in, or enter centimetres (5 ft 5 in is 165 cm)."
+        }
+        // Karen typed 5 ft 5 in as "55" (2026-11-23): a whole number reads as feet then inches.
+        if (cm in 30.0..89.0 && cm % 1.0 == 0.0) {
+            val feet = cm.toInt() / 10
+            val inches = cm.toInt() % 10
+            return "Did you mean $feet ft $inches in? Switch to ft in, or enter centimetres (${((feet * 12 + inches) * CM_PER_INCH).roundToInt()} cm)."
+        }
+        if (cm in 39.0..98.0) {
+            val asInches = cm * CM_PER_INCH
+            if (asInches in VALID_CM) {
+                val (f, i) = feetInches(asInches)
+                return "${g(cm)} looks like inches ($f ft $i in, ${asInches.roundToInt()} cm). Please enter centimetres or switch to ft in."
+            }
+        }
+        return RANGE_MESSAGE
+    }
+
     fun cm(text: String): Double? = text.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 }
 }

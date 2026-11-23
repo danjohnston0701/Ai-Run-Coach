@@ -79,9 +79,60 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
         if (_heightUnit.value == HeightUnit.CM) HeightUnits.cm(_height.value)
         else HeightUnits.cm(_heightFeet.value, _heightInches.value)
 
-    /** Non-null when the entered height is outside 100–250 cm; Save stays disabled. */
-    val heightError: StateFlow<String?> = combine(_height, _heightFeet, _heightInches, _heightUnit) { _, _, _, _ ->
-        heightCm()?.let { if (HeightUnits.isPlausible(it)) null else HeightUnits.RANGE_MESSAGE }
+    /** Non-null when the entered height is outside 100–250 cm (naming a likely slip); Save stays disabled. */
+    val heightError: StateFlow<String?> = combine(_height, _heightFeet, _heightInches, _heightUnit) { _, _, _, unit ->
+        val cm = heightCm()
+        when {
+            cm == null || HeightUnits.isPlausible(cm) -> null
+            unit == HeightUnit.CM -> HeightUnits.cmEntryMessage(cm)
+            (_heightInches.value.trim().replace(',', '.').toDoubleOrNull() ?: 0.0) >= 12 ->
+                "Inches should be 0 to 11 (${_heightFeet.value.ifBlank { "5" }} ft ${_heightInches.value.trim().toDoubleOrNull()?.toInt()} in isn't a height)."
+            else -> HeightUnits.RANGE_MESSAGE
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The runner said the weight that looked like a unit slip is right as shown. */
+    private val _weightSlipDismissed = MutableStateFlow(false)
+
+    /**
+     * The unit the typed weight probably was, when it's implausible in the unit shown but plausible
+     * in the other (Naeem, 2026-11-22: "70" typed with lb selected → 31.8 kg at 164 cm), with the
+     * question to ask. Null when it looks fine, is blank, or the runner has confirmed it.
+     */
+    data class WeightSlip(val unit: WeightUnit, val message: String)
+
+    val weightSlip: StateFlow<WeightSlip?> = combine(
+        combine(_weight, _weightUnit, _weightNeedsUnitCheck, _weightSlipDismissed) { _, _, _, _ -> Unit },
+        combine(_height, _heightFeet, _heightInches, _heightUnit) { _, _, _, _ -> Unit },
+    ) { _, _ -> computeWeightSlip() }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private fun computeWeightSlip(): WeightSlip? {
+        if (_weightNeedsUnitCheck.value || _weightSlipDismissed.value) return null
+        val unit = _weightUnit.value
+        val kg = WeightUnits.toKg(_weight.value, unit) ?: return null
+        val h = heightCm()?.takeIf { HeightUnits.isPlausible(it) }
+        val slip = WeightUnits.unitSlip(kg, unit, h) ?: return null
+        val shown = "${_weight.value} ${unit.label}"
+        val detail = if (unit == WeightUnit.LB) "$shown is ${WeightUnits.format(kg, WeightUnit.KG)} kg"
+            else "$shown is ${WeightUnits.format(kg, WeightUnit.LB)} lb"
+        val light = h?.let { kg / ((it / 100) * (it / 100)) < 13 } ?: (kg < 30)
+        val forHeight = h?.let { " for ${it.roundToInt()} cm" } ?: ""
+        return WeightSlip(slip, "$detail, which is very ${if (light) "light" else "heavy"}$forHeight. Did you mean ${_weight.value} ${slip.label}?")
+    }
+
+    /** "Yes, it's kg/lb": relabels the number as typed, never converts it. */
+    fun acceptWeightSlip() {
+        val slip = computeWeightSlip() ?: return
+        _weightUnit.value = slip.unit
+        WeightUnits.save(sharedPrefs, slip.unit)
+    }
+
+    fun dismissWeightSlip() { _weightSlipDismissed.value = true }
+
+    /** Non-null when the entered weight is outside 20–350 kg; Save stays disabled. */
+    val weightError: StateFlow<String?> = combine(_weight, _weightUnit, _weightNeedsUnitCheck) { w, unit, legacy ->
+        if (legacy) null
+        else WeightUnits.toKg(w, unit)?.let { if (it in WeightUnits.VALID_KG) null else WeightUnits.RANGE_MESSAGE }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun onHeightFeetChanged(text: String) { _heightFeet.value = text.filter { it.isDigit() }.take(1) }
@@ -141,6 +192,13 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 // Show the number exactly as they typed it, labelled kg as it was entered.
                 _weightUnit.value = WeightUnit.KG
                 _weight.value = WeightUnits.format(user.weight, WeightUnit.KG)
+            } else if (WeightUnits.looksLikeKgStoredAsPounds(user.weight, user.height)) {
+                // Too light for the height as kg, but right if the number was kg typed with lb
+                // selected: show the number as they typed it (lb), so the unit-slip question asks
+                // "Did you mean 70 kg?". Not gated on weightUnitConfirmed: every save sets that,
+                // including the slipped one, and a real BMI under 13 is vanishingly rare.
+                _weightUnit.value = WeightUnit.LB
+                _weight.value = WeightUnits.format(user.weight, WeightUnit.LB)
             } else {
                 _weightUnit.value = WeightUnits.load(sharedPrefs, user.country)
                 _weight.value = WeightUnits.format(user.weight, _weightUnit.value)
@@ -205,6 +263,7 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
         _weight.value = weight
         // Retyping the weight answers the question too — it's now in the unit shown.
         _weightNeedsUnitCheck.value = false
+        _weightSlipDismissed.value = false
     }
 
     fun onHeightChanged(height: String) {

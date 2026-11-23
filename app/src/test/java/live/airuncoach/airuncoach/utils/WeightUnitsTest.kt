@@ -1,7 +1,9 @@
 package live.airuncoach.airuncoach.utils
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WeightUnitsTest {
@@ -35,5 +37,30 @@ class WeightUnitsTest {
         assertEquals(WeightUnit.LB, WeightUnits.defaultFor("US"))
         assertEquals(WeightUnit.KG, WeightUnits.defaultFor("NZ"))
         assertEquals(WeightUnit.KG, WeightUnits.defaultFor("GB"))
+    }
+
+    // Naeem (2026-11-22): typed 70 with lb selected → 31.8 kg at 164 cm.
+    @Test fun unitSlipCatchesKgTypedAsPounds() {
+        val kg = WeightUnits.toKg("70", WeightUnit.LB)!!
+        assertEquals(WeightUnit.KG, WeightUnits.unitSlip(kg, WeightUnit.LB, 164.0))
+        assertTrue(WeightUnits.looksLikeKgStoredAsPounds(31.8, 164.0))
+    }
+
+    @Test fun unitSlipCatchesPoundsTypedAsKg() {
+        assertEquals(WeightUnit.LB, WeightUnits.unitSlip(235.0, WeightUnit.KG, 178.0))
+    }
+
+    @Test fun unitSlipLeavesPlausibleWeightsAlone() {
+        assertNull(WeightUnits.unitSlip(70.0, WeightUnit.KG, 164.0))
+        assertNull(WeightUnits.unitSlip(WeightUnits.toKg("154", WeightUnit.LB)!!, WeightUnit.LB, 164.0))
+        assertNull(WeightUnits.unitSlip(25.0, WeightUnit.KG, 125.0))   // a child
+        assertFalse(WeightUnits.looksLikeKgStoredAsPounds(70.0, 164.0))
+    }
+
+    @Test fun heightMessagesNameTheSlip() {
+        assertTrue(HeightUnits.cmEntryMessage(55.0).startsWith("Did you mean 5 ft 5 in?"))
+        assertTrue(HeightUnits.cmEntryMessage(5.5).startsWith("5.5 looks like feet"))
+        assertTrue(HeightUnits.cmEntryMessage(65.5).startsWith("65.5 looks like inches (5 ft 6 in, 166 cm)"))
+        assertEquals(HeightUnits.RANGE_MESSAGE, HeightUnits.cmEntryMessage(300.0))
     }
 }
