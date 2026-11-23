@@ -121,6 +121,7 @@ import { firstNameOf } from "./utils/first-name";
 import { parseGoalDate } from "./utils/parse-goal-date";
 import { findGoalForPlan, MAX_RACE_PLAN_WEEKS } from "./plan-goal-match";
 import { recordHeartRateDeviceReported } from "./hr-source";
+import { saneWatchElevation } from "./utils/watch-elevation";
 import { capForNewPlan, isWorkoutLocked, lockedWorkoutIdsForPlan, activePlanCap, PLAN_SESSION_LOCKED, TRIAL_PLAN_SESSION_CAP } from "./plan-trial-cap";
 import {
   snapTrackToOSMSegments,
@@ -14217,7 +14218,26 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           };
         }
       }
-      
+
+      // Reject an impossible watch ascent/descent (a fēnix 7X Pro reported 32,947 m for a
+      // flat 3.4 km run) and recount it from the streamed altitude series instead.
+      if (stats.totalAscent != null || stats.totalDescent != null) {
+        const altRows = await db.select({ altitude: garminRealtimeData.altitude })
+          .from(garminRealtimeData)
+          .where(eq(garminRealtimeData.sessionId, sessionId))
+          .orderBy(garminRealtimeData.timestamp);
+        const sane = saneWatchElevation({
+          ascent: stats.totalAscent,
+          descent: stats.totalDescent,
+          distanceM: stats.totalDistance,
+          altitudes: altRows.length > 1 ? altRows.map(r => r.altitude) : undefined,
+        });
+        if (sane.corrected) {
+          console.warn(`[Companion] session/end — session ${sessionId}: rejected watch elevation +${stats.totalAscent}/-${stats.totalDescent} m over ${Math.round(stats.totalDistance ?? 0)} m; using +${sane.ascent}/-${sane.descent} m from the altitude series`);
+          stats = { ...stats, totalAscent: sane.ascent, totalDescent: sane.descent };
+        }
+      }
+
       // Update session with end time and stats
       const [updated] = await db.update(garminCompanionSessions)
         .set({
@@ -14622,6 +14642,19 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
         return res.status(400).json({ error: "No points provided" });
       }
 
+      // Reject an impossible watch-accumulated ascent (see utils/watch-elevation.ts) in
+      // favour of a recount from the batch's own altitude column (alt_dm).
+      const batchElevation = saneWatchElevation({
+        ascent: totalAscent,
+        descent: null,
+        distanceM,
+        altitudes: points.map((p: any) => (Array.isArray(p) && typeof p[3] === "number" ? p[3] / 10 : null)),
+      });
+      if (batchElevation.corrected) {
+        console.warn(`[Offline Batch] Session ${sessionId}: rejected watch ascent ${totalAscent} m over ${Math.round(Number(distanceM) || 0)} m; using ${batchElevation.ascent} m from the altitude series`);
+      }
+      const saneTotalAscent: number | null = batchElevation.ascent;
+
       // Find the existing run record created by session/end.
       // For truly phone-less runs session/end never reaches the server, so
       // no record will exist — create one now from the batch summary data.
@@ -14775,8 +14808,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             avgHeartRate:   avgHR,
             maxHeartRate:   maxHR,
             cadence:        avgCad,
-            elevationGain:  totalAscent ?? null,
-            elevation:      totalAscent ?? null,
+            elevationGain:  saneTotalAscent ?? null,
+            elevation:      saneTotalAscent ?? null,
             name:           defaultRunName({ sessionType: resolvedBatchSessionType, runTime: batchLocalStart.runTime }),
             sessionType:    resolvedBatchSessionType,
             ...batchLocalStart,
@@ -14887,7 +14920,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       }
       // Fall back to the watch-accumulated totalAscent which is computed
       // at full 250ms resolution and is therefore more accurate.
-      const finalAscent = totalAscent && totalAscent > 0 ? totalAscent : computedAscent;
+      const finalAscent = saneTotalAscent && saneTotalAscent > 0 ? saneTotalAscent : computedAscent;
 
       // ── Patch the run record ─────────────────────────────────────────────
       // The app record is canonical. Offline Garmin data fills genuine gaps but

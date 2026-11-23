@@ -181,6 +181,8 @@ class RunView extends Ui.View {
     private var _lastGpsLng    = null;
     private var _lastGpsAlt    = null;
     private var _baroAlt        = null;   // Barometric altitude from Sensor.SensorInfo (continuous)
+    private var _prevAltSample  = null;   // Previous altitude reading (jump rejection)
+    private const MAX_ALT_STEP_M = 25.0;  // Max believable altitude change between two ticks
     private var _lastGpsSpeed   = 0.0;
     private var _lastGpsBearing = null;   // Degrees 0-360 (converted from Pos.Info.heading radians)
     private var _gpsStreamTick = 0;
@@ -695,7 +697,7 @@ class RunView extends Ui.View {
         _sumHR = 0; _maxHR = 0; _sumCadence = 0; _sumPace = 0.0;
         _sumGct = 0.0; _sumVo = 0.0; _sumVr = 0.0; _sumSl = 0.0;
         _sumGcb = 0.0; _sumPower = 0; _sumResp = 0.0; _sampleN = 0;
-        _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null; _lastAltIsBaro = false; _baroAlt = null;
+        _totalAscent = 0.0; _totalDescent = 0.0; _lastAlt = null; _lastAltIsBaro = false; _baroAlt = null; _prevAltSample = null;
 
         // Reset offline buffer and HTTP health counter
         _offlineBuffer          = [];
@@ -1716,8 +1718,20 @@ class RunView extends Ui.View {
             var altIsBaro    = (_baroAlt != null);
             var altSrc       = altIsBaro ? _baroAlt : _lastGpsAlt;
             var altThreshold = altIsBaro ? 1.5 : 5.0;
+            //
+            // A jump of more than MAX_ALT_STEP_M between two consecutive readings isn't
+            // terrain, it's the sensor: re-anchor on it and bank nothing. Real case
+            // (2026-11-22, fenix 7X Pro): the barometric reading kept flipping ~410 m between
+            // ticks on a flat 3.4 km run, and every flip was banked, saving 32,947 m of ascent
+            // for a run whose altitude spanned 25 m.
             if (altSrc != null) {
-                if (_lastAlt == null || _lastAltIsBaro != altIsBaro) {
+                var altJump = 0.0;
+                if (_prevAltSample != null && _lastAltIsBaro == altIsBaro) {
+                    altJump = altSrc - _prevAltSample;
+                    if (altJump < 0) { altJump = -altJump; }
+                }
+                _prevAltSample = altSrc;
+                if (_lastAlt == null || _lastAltIsBaro != altIsBaro || altJump > MAX_ALT_STEP_M) {
                     _lastAlt = altSrc;
                     _lastAltIsBaro = altIsBaro;
                 } else {

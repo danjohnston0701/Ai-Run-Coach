@@ -10,7 +10,7 @@ using Toybox.System as Sys;
 // tell which watch build a user is on. Connect IQ has no runtime API for reading the manifest
 // version, so this MUST be kept in step with `version="..."` in manifest.xml on every bump —
 // a hardcoded copy in PairingCodeManager previously drifted a release behind.
-const APP_VERSION = "3.4.17";
+const APP_VERSION = "3.4.18";
 
 // Startup breadcrumbs (3.4.17). Every recorded IQ! crash ("Symbol Not Found / Failed invoking
 // <symbol>", empty stack) came on the FIRST launch of a new version, ~1-2 s in, and the next launch
