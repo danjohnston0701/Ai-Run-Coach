@@ -1500,8 +1500,6 @@ internal fun AiInsightsTabContent(
         val runPhases = run.sessionPhases
         if (runPhases.hasReps()) {
             item { live.airuncoach.airuncoach.ui.components.RepLabCard(runPhases!!, run.routePoints, run.startTime) }
-            item { live.airuncoach.airuncoach.ui.components.EffortTraceCard(run.routePoints, run.startTime, runPhases) }
-            item { live.airuncoach.airuncoach.ui.components.PulseCard(run.routePoints, run.heartRate.takeIf { it > 0 }, run.routePoints.mapNotNull { it.heartRate }.filter { it in 40..230 }.maxOrNull()) }
         } else {
             item {
                 when {
@@ -1510,6 +1508,10 @@ internal fun AiInsightsTabContent(
                 }
             }
         }
+        // Effort trace and pulse on every run (Daniel, 2026-11-23); each hides itself without
+        // enough GPS / heart-rate data. Reps are shaded on the trace only when there are any.
+        item { live.airuncoach.airuncoach.ui.components.EffortTraceCard(run.routePoints, run.startTime, runPhases) }
+        item { live.airuncoach.airuncoach.ui.components.PulseCard(run.routePoints, run.heartRate.takeIf { it > 0 }, run.routePoints.mapNotNull { it.heartRate }.filter { it in 40..230 }.maxOrNull()) }
 
         // AI Coaching During Run — standalone section, always visible regardless of analysis state
         if (coachingNotes.isNotEmpty()) {
@@ -1622,6 +1624,13 @@ internal fun SummaryTabContent(
             }
         }
         if (true) { // km splits for every run, phased or not
+            // New split bars first, above the original splits table (Daniel, 2026-11-23).
+            item {
+                if (run.kmSplits.size >= 2) {
+                    live.airuncoach.airuncoach.ui.components.KmSplitBarsCard(run.kmSplits, run.distance / 1000.0, run.routePoints)
+                }
+            }
+
             item {
                 if (run.kmSplits.isNotEmpty()) {
                     KmSplitsCardFlagship(run.kmSplits)
@@ -1629,13 +1638,6 @@ internal fun SummaryTabContent(
             }
 
             item { SplitAnalysisCard(run = run) }
-
-            // Km Splits Visual Bar Chart
-            item {
-                if (run.kmSplits.size >= 2) {
-                    live.airuncoach.airuncoach.ui.components.KmSplitBarsCard(run.kmSplits, run.distance / 1000.0, run.routePoints)
-                }
-            }
         }
 
         // Effort Score / Training Load
