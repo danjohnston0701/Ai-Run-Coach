@@ -73,6 +73,7 @@ fun GeneratePlanScreen(
     val hasTimeGoal by viewModel.hasTimeGoal.collectAsState()
     val daysPerWeek by viewModel.daysPerWeek.collectAsState()
     val durationWeeks by viewModel.durationWeeks.collectAsState()
+    val goalMatch by viewModel.goalMatch.collectAsState()
     val experienceLevel by viewModel.experienceLevel.collectAsState()
     val generateState by viewModel.generateState.collectAsState()
     val regularSessions by viewModel.regularSessions.collectAsState()
@@ -459,9 +460,18 @@ fun GeneratePlanScreen(
                         else -> if (customDistanceKm > 0) (customDistanceKm / 3).toInt().coerceIn(4, 16) else 6
                     }
 
+                    // Set by the goal's race date when there is one (server/plan-goal-match.ts).
+                    val raceWeeks = goalMatch?.raceWeeks
+                    val matchedGoal = goalMatch?.goal
+                    if (raceWeeks != null && matchedGoal != null) {
+                        RaceDayCard(goal = matchedGoal, weeks = raceWeeks)
+                    } else {
+                    if (matchedGoal != null) {
+                        Text("Working towards your goal: ${matchedGoal.eventName ?: matchedGoal.title}", style = AppTextStyles.small, color = Colors.textSecondary)
+                    }
                     Text("Programme length: $durationWeeks weeks", style = AppTextStyles.body.copy(fontWeight = FontWeight.Medium), color = Colors.textPrimary)
                     Slider(
-                        value = durationWeeks.toFloat(),
+                        value = durationWeeks.coerceIn(minWeeks, maxWeeks).toFloat(),
                         onValueChange = { viewModel.setDurationWeeks(it.toInt()) },
                         valueRange = minWeeks.toFloat()..maxWeeks.toFloat(),
                         steps = maxWeeks - minWeeks - 1,
@@ -471,6 +481,14 @@ fun GeneratePlanScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("$minWeeks weeks", style = AppTextStyles.small, color = Colors.textMuted)
                         Text("$maxWeeks weeks", style = AppTextStyles.small, color = Colors.textMuted)
+                    }
+                    val weeksAway = goalMatch?.weeksToRace
+                    if (goalMatch?.raceTooFar == true && weeksAway != null) {
+                        Text(
+                            "Your race is $weeksAway weeks away. This plan builds your base towards it rather than being built around race day; your race plan comes nearer the time.",
+                            style = AppTextStyles.small, color = Colors.textMuted
+                        )
+                    }
                     }
 
                     // Pre-event intent question — shown when the chosen duration is shorter than the
@@ -1680,5 +1698,32 @@ private fun DateOfInjuryPickerDialog(
         ) {
             DatePicker(state = datePickerState)
         }
+    }
+}
+
+/** "Ends on race day" in place of the length slider: the plan runs to the goal's race date. */
+@Composable
+private fun RaceDayCard(goal: live.airuncoach.airuncoach.network.model.PlanGoalMatchGoal, weeks: Int) {
+    val dateText = goal.targetDate?.let { ymd ->
+        runCatching {
+            java.time.LocalDate.parse(ymd).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.getDefault()))
+        }.getOrDefault(ymd)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Colors.backgroundSecondary, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("🏁  Ends on race day", style = AppTextStyles.body.copy(fontWeight = FontWeight.SemiBold), color = Colors.textPrimary)
+        Text(
+            listOfNotNull(goal.eventName ?: goal.title, dateText, "$weeks weeks").joinToString(" · "),
+            style = AppTextStyles.body, color = Colors.textPrimary
+        )
+        Text(
+            "Your plan is built to your goal's race date. Change the date on the goal to change its length.",
+            style = AppTextStyles.small, color = Colors.textMuted
+        )
     }
 }

@@ -16,6 +16,8 @@ import live.airuncoach.airuncoach.data.SessionManager
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.RetrofitClient
 import live.airuncoach.airuncoach.network.model.UpdateUserRequest
+import live.airuncoach.airuncoach.utils.HeightUnit
+import live.airuncoach.airuncoach.utils.HeightUnits
 import live.airuncoach.airuncoach.utils.TargetDistance
 import live.airuncoach.airuncoach.utils.WeightUnit
 import live.airuncoach.airuncoach.utils.WeightUnits
@@ -55,8 +57,47 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
     private val _weightNeedsUnitCheck = MutableStateFlow(false)
     val weightNeedsUnitCheck: StateFlow<Boolean> = _weightNeedsUnitCheck.asStateFlow()
 
+    /** Height as typed in centimetres ([heightUnit] CM), or feet + inches. */
     private val _height = MutableStateFlow("")
     val height: StateFlow<String> = _height.asStateFlow()
+    private val _heightFeet = MutableStateFlow("")
+    val heightFeet: StateFlow<String> = _heightFeet.asStateFlow()
+    private val _heightInches = MutableStateFlow("")
+    val heightInches: StateFlow<String> = _heightInches.asStateFlow()
+    private val _heightUnit = MutableStateFlow(HeightUnit.CM)
+    val heightUnit: StateFlow<HeightUnit> = _heightUnit.asStateFlow()
+
+    /**
+     * The saved height is outside 100–250 cm (a unit slip, e.g. 5'5" saved as "55"): the field
+     * starts empty and asks the runner to enter it again. Holds the saved value, else null.
+     */
+    private val _implausibleSavedHeight = MutableStateFlow<String?>(null)
+    val implausibleSavedHeight: StateFlow<String?> = _implausibleSavedHeight.asStateFlow()
+
+    /** Height in centimetres from whichever fields are showing; null when they're blank. */
+    private fun heightCm(): Double? =
+        if (_heightUnit.value == HeightUnit.CM) HeightUnits.cm(_height.value)
+        else HeightUnits.cm(_heightFeet.value, _heightInches.value)
+
+    /** Non-null when the entered height is outside 100–250 cm; Save stays disabled. */
+    val heightError: StateFlow<String?> = combine(_height, _heightFeet, _heightInches, _heightUnit) { _, _, _, _ ->
+        heightCm()?.let { if (HeightUnits.isPlausible(it)) null else HeightUnits.RANGE_MESSAGE }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun onHeightFeetChanged(text: String) { _heightFeet.value = text.filter { it.isDigit() }.take(1) }
+    fun onHeightInchesChanged(text: String) {
+        if (text.length <= 4) _heightInches.value = text.filter { it.isDigit() || it == '.' || it == ',' }
+    }
+
+    fun onHeightUnitChanged(unit: HeightUnit) {
+        if (unit == _heightUnit.value) return
+        heightCm()?.let { cm ->
+            if (unit == HeightUnit.CM) _height.value = cm.roundToInt().toString()
+            else HeightUnits.feetInches(cm).let { (f, i) -> _heightFeet.value = f.toString(); _heightInches.value = i.toString() }
+        }
+        _heightUnit.value = unit
+        HeightUnits.save(sharedPrefs, unit)
+    }
 
     private val _defaultSessionType = MutableStateFlow("Run")
     val defaultSessionType: StateFlow<String> = _defaultSessionType.asStateFlow()
@@ -104,7 +145,16 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 _weightUnit.value = WeightUnits.load(sharedPrefs, user.country)
                 _weight.value = WeightUnits.format(user.weight, _weightUnit.value)
             }
-            _height.value = user.height?.toString() ?: ""
+            _heightUnit.value = HeightUnits.load(sharedPrefs, user.country)
+            val savedHeight = user.height
+            if (savedHeight != null && HeightUnits.isPlausible(savedHeight)) {
+                _height.value = savedHeight.roundToInt().toString()
+                HeightUnits.feetInches(savedHeight).let { (f, i) -> _heightFeet.value = f.toString(); _heightInches.value = i.toString() }
+                _implausibleSavedHeight.value = null
+            } else {
+                _height.value = ""
+                _implausibleSavedHeight.value = savedHeight?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }
+            }
             _defaultSessionType.value = when (user.defaultSessionType?.lowercase()) {
                 "walk" -> "Walk"
                 else -> "Run"
@@ -198,7 +248,8 @@ class PersonalDetailsViewModel(private val context: Context) : ViewModel() {
                 // saving a name change must not silently confirm a possibly-wrong unit.
                 weight = if (_weightNeedsUnitCheck.value) null else WeightUnits.toKg(_weight.value, _weightUnit.value),
                 weightUnitConfirmed = if (!_weightNeedsUnitCheck.value && WeightUnits.toKg(_weight.value, _weightUnit.value) != null) true else null,
-                height = _height.value.toDoubleOrNull(),
+                // Only a height in 100–250 cm is sent (Save is disabled otherwise).
+                height = heightCm()?.takeIf { HeightUnits.isPlausible(it) },
                 fitnessLevel = null,
                 distanceScale = null,
                 defaultSessionType = _defaultSessionType.value,

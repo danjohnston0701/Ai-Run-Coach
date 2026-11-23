@@ -119,6 +119,8 @@ import { resolveGarminUser, resolveGarminUserByActivity } from "./garmin-user-re
 import { normalizeSeriesFields, RECORDING_SOURCES, NON_PLAN_WORKOUT_TYPES, parseWeightKg, localDateTime, defaultRunName, upgradedSessionName } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
 import { parseGoalDate } from "./utils/parse-goal-date";
+import { findGoalForPlan, MAX_RACE_PLAN_WEEKS } from "./plan-goal-match";
+import { recordHeartRateDeviceReported } from "./hr-source";
 import { capForNewPlan, isWorkoutLocked, lockedWorkoutIdsForPlan, activePlanCap, PLAN_SESSION_LOCKED, TRIAL_PLAN_SESSION_CAP } from "./plan-trial-cap";
 import {
   snapTrackToOSMSegments,
@@ -1280,6 +1282,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const updateData = { ...req.body };
+      // Height is centimetres. Anything outside 100–250 is a unit slip (Karen, 2026-11-23, typed
+      // 5'5" as "55"), which skews calories, cadence and BMI — keep the stored value instead.
+      if (updateData.height !== undefined && updateData.height !== null) {
+        const h = Number(updateData.height);
+        if (!(h >= 100 && h <= 250)) {
+          console.warn(`[PUT /api/users/:id] Ignoring implausible height ${JSON.stringify(updateData.height)} cm`);
+          delete updateData.height;
+        }
+      }
       // Weight from the lb/kg toggle (new apps send weightUnitConfirmed: true) is definitely kg;
       // weight from an older app came from the kg-only field — unit unknown again.
       if (updateData.weight !== undefined) updateData.weightUnitConfirmed = updateData.weightUnitConfirmed === true;
@@ -17035,15 +17046,46 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
   // Key = userId, cleared once the request completes or fails.
   const planGenerationInProgress = new Set<string>();
 
+  // Which goal a new plan would be built for, and how long it would run (server/plan-goal-match.ts).
+  // The plan screens call it so they show "Ends on race day" with the same answer the server uses.
+  // GET /api/plan-goal-match?goalType=half_marathon[&goalId=…][&firstSessionStart=tomorrow][&tz=Europe/London]
+  app.get("/api/plan-goal-match", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const goalType = String(req.query.goalType ?? "");
+      const goalId = req.query.goalId ? String(req.query.goalId) : null;
+      const tz = req.query.tz ? String(req.query.tz) : null;
+      const firstSessionStart = req.query.firstSessionStart ? String(req.query.firstSessionStart) : "tomorrow";
+      const match = await findGoalForPlan(req.user!.userId, goalType, goalId, tz, firstSessionStart);
+      res.json({
+        goal: match ? {
+          id: match.goal.id,
+          title: match.goal.title,
+          eventName: match.goal.eventName ?? null,
+          eventLocation: match.goal.eventLocation ?? null,
+          distanceTarget: match.goal.distanceTarget ?? null,
+          timeTargetSeconds: match.goal.timeTargetSeconds ?? null,
+          targetDate: match.raceDate ? match.raceDate.toISOString().slice(0, 10) : null,
+        } : null,
+        raceWeeks: match?.raceWeeks ?? null,
+        raceTooFar: match?.raceTooFar ?? false,
+        weeksToRace: match?.weeksToRace ?? null,
+        maxRaceWeeks: MAX_RACE_PLAN_WEEKS,
+      });
+    } catch (error: any) {
+      console.error("[PlanGoalMatch] Failed:", error?.message ?? error);
+      res.status(500).json({ error: "Could not check goals" });
+    }
+  });
+
   app.post("/api/training-plans/generate", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     let keepLock = false; // a background job releases the lock itself when it finishes
     try {
       const userId = req.user!.userId;
-      const {
+      let {
         goalType,
         targetDistance,
         targetDate,
-        durationWeeks,  // user-selected duration (takes priority over targetDate)
+        durationWeeks,  // user-selected duration (a race date from the goal overrides it)
         experienceLevel,
         daysPerWeek,
         firstSessionStart = "flexible", // "today" | "tomorrow" | "flexible"
@@ -17058,8 +17100,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       } = req.body;
       // iOS sends targetTimeSeconds / linkedGoalId / is_pre_event_plan; these were silently
       // dropped, so iPhone plans lost the target time, the goal link and pre-race mode.
-      const targetTime = req.body.targetTime ?? req.body.targetTimeSeconds;
-      const goalId = req.body.goalId ?? req.body.linkedGoalId ?? null;
+      let targetTime = req.body.targetTime ?? req.body.targetTimeSeconds;
+      const requestedGoalId = req.body.goalId ?? req.body.linkedGoalId ?? null;
       const isPreEventPlan = req.body.isPreEventPlan ?? req.body.is_pre_event_plan ?? false;
 
       // ── Tier limit check ─────────────────────────────────────────────────
@@ -17126,6 +17168,34 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       if (!goalType || !targetDistance) {
         return res.status(400).json({ error: "goalType and targetDistance are required" });
       }
+
+      // ── The goal this plan is for (server/plan-goal-match.ts) ───────────────
+      // The app's goalId when it sent one, else the runner's active goal of the same distance.
+      // A goal with a race date sets the plan length so it ends on race day; its target time
+      // fills in when the app sent none. The goal's event name and notes reach the prompt via goalId.
+      const goalMatch = await findGoalForPlan(userId, goalType, requestedGoalId, userTimezone, firstSessionStart)
+        .catch((err: any) => { console.warn(`[Training Plan] Goal match failed:`, err?.message ?? err); return null; });
+      const goalId = goalMatch?.goal.id ?? requestedGoalId;
+      if (goalMatch && !requestedGoalId) {
+        console.log(`[Training Plan] Matched ${goalType} plan to goal ${goalMatch.goal.id} ("${goalMatch.goal.title}")`);
+      }
+      if (goalMatch?.raceDate && goalMatch.raceWeeks) {
+        if (Number(durationWeeks) !== goalMatch.raceWeeks) {
+          console.log(`[Training Plan] Race ${goalMatch.raceDate.toISOString().slice(0, 10)}: ${goalMatch.raceWeeks} weeks (app asked for ${durationWeeks ?? "none"})`);
+        }
+        targetDate = goalMatch.raceDate.toISOString();
+        durationWeeks = undefined;
+      } else if (goalMatch?.raceTooFar) {
+        console.log(`[Training Plan] Race ${goalMatch.goal.targetDate} is ${goalMatch.weeksToRace} weeks away: long-term goal, plan keeps ${durationWeeks} weeks`);
+      }
+      // The goal's target time only when the plan runs to that race (or the goal has no date):
+      // a time for a race months beyond this plan would set paces it isn't building to.
+      if (!(Number(targetTime) > 0) && goalMatch?.goal.timeTargetSeconds && !goalMatch.raceTooFar) {
+        targetTime = goalMatch.goal.timeTargetSeconds;
+      }
+
+      // An app saying a heart-rate watch is paired: remembered, so zones are used (server/hr-source.ts).
+      if (req.body.hasHeartRateDevice === true) await recordHeartRateDeviceReported(userId);
       
       // Validate duration inputs
       if (!durationWeeks && !targetDate) {

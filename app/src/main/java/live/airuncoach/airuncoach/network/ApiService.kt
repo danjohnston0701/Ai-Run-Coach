@@ -483,6 +483,14 @@ interface ApiService {
     @POST("/api/training-plans/generate")
     suspend fun generateTrainingPlan(@Body request: GeneratePlanRequest): GeneratePlanResponse
 
+    @GET("/api/plan-goal-match")
+    suspend fun getPlanGoalMatch(
+        @Query("goalType") goalType: String,
+        @Query("goalId") goalId: String? = null,
+        @Query("firstSessionStart") firstSessionStart: String = "tomorrow",
+        @Query("tz") tz: String = java.util.TimeZone.getDefault().id
+    ): live.airuncoach.airuncoach.network.model.PlanGoalMatchResponse
+
     @GET("/api/training-plans/jobs/{jobId}")
     suspend fun getPlanJob(@Path("jobId") jobId: String): PlanJobResponse
 

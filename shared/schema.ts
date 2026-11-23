@@ -123,6 +123,9 @@ export const users = pgTable("users", {
   garminWatchAppFirstSeenAt: timestamp("garmin_watch_app_first_seen_at"),   // When they first authenticated from the watch
   garminWatchAppLastSeenAt: timestamp("garmin_watch_app_last_seen_at"),     // Most recent companion auth
   garminWatchAppVersion: text("garmin_watch_app_version"),                   // Last-reported IQ app version
+  // Last time an app said this runner has a heart-rate watch paired (plan-generation request,
+  // server/hr-source.ts). Without any heart-rate source plans get effort targets, not HR zones.
+  heartRateDeviceReportedAt: timestamp("heart_rate_device_reported_at"),
 
   // Session type preference
   defaultSessionType: text("default_session_type").default("run"), // "run" | "walk" | "interval" — user's preferred activity type

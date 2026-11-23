@@ -11,6 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import live.airuncoach.airuncoach.domain.model.Goal
 import live.airuncoach.airuncoach.domain.model.Injury
@@ -19,6 +20,9 @@ import live.airuncoach.airuncoach.domain.model.RegularSession
 import live.airuncoach.airuncoach.domain.model.User
 import live.airuncoach.airuncoach.network.ApiService
 import live.airuncoach.airuncoach.network.model.GeneratePlanRequest
+import live.airuncoach.airuncoach.network.model.PlanGoalMatchResponse
+import live.airuncoach.airuncoach.service.GarminWatchManager
+import live.airuncoach.airuncoach.service.SamsungWatchManager
 import live.airuncoach.airuncoach.network.model.InjuryRequest
 import live.airuncoach.airuncoach.network.model.RegularSessionRequest
 import live.airuncoach.airuncoach.network.model.UpdateUserRequest
@@ -152,6 +156,50 @@ class GeneratePlanViewModel @Inject constructor(
     val linkedGoal: StateFlow<Goal?> = _linkedGoal.asStateFlow()
 
     // User injuries for AI to consider in plan design
+    /** Plan goal type of the goal the screen was opened from (its id is only sent for that type). */
+    private var prefilledGoalType: String? = null
+
+    /**
+     * The goal the server will build this plan for (server/plan-goal-match.ts): the runner's active
+     * goal of the same distance even when the plan isn't started from the goal. A race-dated goal
+     * sets the plan length ([PlanGoalMatchResponse.raceWeeks]) and the slider is replaced.
+     */
+    private val _goalMatch = MutableStateFlow<PlanGoalMatchResponse?>(null)
+    val goalMatch: StateFlow<PlanGoalMatchResponse?> = _goalMatch.asStateFlow()
+    private var goalMatchJob: Job? = null
+
+    fun refreshGoalMatch() {
+        val type = _goalType.value
+        val explicit = if (prefilledGoalType == type) _linkedGoal.value?.id else null
+        goalMatchJob?.cancel()
+        goalMatchJob = viewModelScope.launch {
+            val match = try {
+                apiService.getPlanGoalMatch(goalType = type, goalId = explicit, firstSessionStart = _firstSessionStart.value)
+            } catch (e: Exception) {
+                Log.w("GeneratePlanVM", "Goal match failed: ${e.message}")
+                return@launch
+            }
+            if (type != _goalType.value) return@launch
+            _goalMatch.value = match
+            match.raceWeeks?.let { _durationWeeks.value = it }
+                ?: run { if (_durationWeeks.value > 20) _durationWeeks.value = 10 }
+            val secs = match.goal?.timeTargetSeconds
+            if (!_hasTimeGoal.value && secs != null && secs > 0) {
+                _hasTimeGoal.value = true
+                _targetHours.value   = (secs / 3600).toString().padStart(2, '0')
+                _targetMinutes.value = ((secs % 3600) / 60).toString().padStart(2, '0')
+                _targetSeconds.value = (secs % 60).toString().padStart(2, '0')
+            }
+        }
+    }
+
+    /** A Garmin or Galaxy Watch app has reported in: the plan may use heart-rate zones. */
+    private fun hasHeartRateDevice(): Boolean =
+        context.getSharedPreferences("garmin_watch_prefs", Context.MODE_PRIVATE)
+            .getString(GarminWatchManager.PREF_WATCH_APP_VERSION, null) != null ||
+        context.getSharedPreferences(SamsungWatchManager.PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(SamsungWatchManager.PREF_WATCH_APP_VERSION, null) != null
+
     private val _injuries = MutableStateFlow<List<Injury>>(emptyList())
     val injuries: StateFlow<List<Injury>> = _injuries.asStateFlow()
 
@@ -164,6 +212,7 @@ class GeneratePlanViewModel @Inject constructor(
     init {
         loadFitnessLevelFromProfile()
         loadInjuriesFromProfile()
+        refreshGoalMatch()
     }
 
     /**
@@ -217,6 +266,8 @@ class GeneratePlanViewModel @Inject constructor(
                 if (km != null) _targetDistance.value = km.toString()
             }
         }
+        prefilledGoalType = _goalType.value
+        refreshGoalMatch()
         goal.timeTargetSeconds?.let { secs ->
             if (secs > 0) {
                 _hasTimeGoal.value = true
@@ -248,7 +299,11 @@ class GeneratePlanViewModel @Inject constructor(
         }
     }
 
-    fun setGoalType(type: String) { _goalType.value = type }
+    fun setGoalType(type: String) {
+        if (type == _goalType.value) return
+        _goalType.value = type
+        refreshGoalMatch()
+    }
     fun setTargetDistance(dist: String) { _targetDistance.value = dist }
     fun setTargetHours(h: String) { _targetHours.value = h }
     fun setTargetMinutes(m: String) { _targetMinutes.value = m }
@@ -256,7 +311,11 @@ class GeneratePlanViewModel @Inject constructor(
     fun setHasTimeGoal(has: Boolean) { _hasTimeGoal.value = has }
     fun setDaysPerWeek(days: Int) { _daysPerWeek.value = days }
     fun setDurationWeeks(weeks: Int) { _durationWeeks.value = weeks }
-    fun setFirstSessionStart(value: String) { _firstSessionStart.value = value }
+    fun setFirstSessionStart(value: String) {
+        if (value == _firstSessionStart.value) return
+        _firstSessionStart.value = value
+        refreshGoalMatch()
+    }
     /** Records whether this is a pre-event sharpening block vs a build-up plan. */
     fun setIsPreEventPlan(value: Boolean) { _isPreEventPlan.value = value }
 
@@ -421,11 +480,12 @@ class GeneratePlanViewModel @Inject constructor(
                     goalType = _goalType.value,
                     targetDistance = distKm,
                     targetTime = targetTimeSecs,
-                    targetDate = null,
+                    targetDate = _goalMatch.value?.takeIf { it.raceWeeks != null }?.goal?.targetDate,
                     durationWeeks = _durationWeeks.value,
                     experienceLevel = _experienceLevel.value,
                     daysPerWeek = _daysPerWeek.value,
-                    goalId = _linkedGoal.value?.id,
+                    goalId = _goalMatch.value?.goal?.id
+                        ?: _linkedGoal.value?.id?.takeIf { prefilledGoalType == _goalType.value },
                     firstSessionStart = _firstSessionStart.value,
                     isPreEventPlan = _isPreEventPlan.value,
                     regularSessions = _regularSessions.value.map { s ->
@@ -448,7 +508,8 @@ class GeneratePlanViewModel @Inject constructor(
                     // User's local timezone so the server assigns session dates correctly
                     userTimezone = java.util.TimeZone.getDefault().id,
                     // Activity type (run or walk) from user's default session type
-                    activityType = userSessionType
+                    activityType = userSessionType,
+                    hasHeartRateDevice = if (hasHeartRateDevice()) true else null
                 )
                 val response = apiService.generateTrainingPlan(request)
                 val planId = response.planId

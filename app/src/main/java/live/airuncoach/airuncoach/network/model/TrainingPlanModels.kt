@@ -56,7 +56,35 @@ data class GeneratePlanRequest(
     @SerializedName("async") val async: Boolean = true,
     // This build shows a free-trial plan's locked sessions and weeks, so the server may give a
     // trial user a plan capped to its first sessions (server/plan-trial-cap.ts).
-    @SerializedName("supportsTrialCap") val supportsTrialCap: Boolean = true
+    @SerializedName("supportsTrialCap") val supportsTrialCap: Boolean = true,
+    // A heart-rate watch is paired (Garmin / Galaxy Watch app seen). Without any heart-rate source
+    // the server gives effort targets only, no HR zones (server/hr-source.ts).
+    @SerializedName("hasHeartRateDevice") val hasHeartRateDevice: Boolean? = null
+)
+
+/**
+ * GET /api/plan-goal-match — the goal a new plan would be built for (server/plan-goal-match.ts).
+ * The server matches the runner's active goal of the same distance even when the plan isn't
+ * started from the goal, and a race-dated goal sets the plan length ([raceWeeks]).
+ */
+data class PlanGoalMatchResponse(
+    @SerializedName("goal") val goal: PlanGoalMatchGoal? = null,
+    @SerializedName("raceWeeks") val raceWeeks: Int? = null,
+    @SerializedName("raceTooFar") val raceTooFar: Boolean = false,
+    /** Weeks to the race however far out it is. */
+    @SerializedName("weeksToRace") val weeksToRace: Int? = null,
+    @SerializedName("maxRaceWeeks") val maxRaceWeeks: Int = 20
+)
+
+data class PlanGoalMatchGoal(
+    @SerializedName("id") val id: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("eventName") val eventName: String? = null,
+    @SerializedName("eventLocation") val eventLocation: String? = null,
+    @SerializedName("distanceTarget") val distanceTarget: String? = null,
+    @SerializedName("timeTargetSeconds") val timeTargetSeconds: Int? = null,
+    /** yyyy-MM-dd, only when the race is still ahead. */
+    @SerializedName("targetDate") val targetDate: String? = null
 )
 
 /** Response from generate: planId when built straight away (older servers), jobId when building in the background. */

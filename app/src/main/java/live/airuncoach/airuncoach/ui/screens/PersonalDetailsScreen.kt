@@ -34,6 +34,7 @@ import live.airuncoach.airuncoach.ui.theme.Spacing
 import live.airuncoach.airuncoach.utils.TargetDistance
 import live.airuncoach.airuncoach.utils.WeightUnit
 import live.airuncoach.airuncoach.ui.components.WeightUnitToggle
+import live.airuncoach.airuncoach.utils.HeightUnit
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import live.airuncoach.airuncoach.viewmodel.PersonalDetailsViewModel
@@ -61,6 +62,11 @@ fun PersonalDetailsScreen(
     val distanceMinKm by viewModel.distanceMinKm.collectAsState()
     val distanceMaxKm by viewModel.distanceMaxKm.collectAsState()
     val distanceRangeError by viewModel.distanceRangeError.collectAsState()
+    val heightFeet by viewModel.heightFeet.collectAsState()
+    val heightInches by viewModel.heightInches.collectAsState()
+    val heightUnit by viewModel.heightUnit.collectAsState()
+    val heightError by viewModel.heightError.collectAsState()
+    val implausibleSavedHeight by viewModel.implausibleSavedHeight.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     var showGenderMenu by remember { mutableStateOf(false) }
     var showDecimalsMenu by remember { mutableStateOf(false) }
@@ -367,20 +373,74 @@ fun PersonalDetailsScreen(
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
             item {
-                SectionTitle(title = "Height (cm)")
-                OutlinedTextField(
-                    value = height,
-                    onValueChange = viewModel::onHeightChanged,
-                    label = { Text("Enter your height in centimeters") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Colors.textPrimary,
-                        unfocusedTextColor = Colors.textPrimary,
-                        cursorColor = Colors.primary,
-                        focusedBorderColor = Colors.primary,
-                        unfocusedBorderColor = Colors.textMuted
-                    )
+                // Centimetres or feet and inches; stored in cm, 100–250 only (utils/HeightUnits.kt)
+                val fieldColors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Colors.textPrimary,
+                    unfocusedTextColor = Colors.textPrimary,
+                    cursorColor = Colors.primary,
+                    focusedBorderColor = Colors.primary,
+                    unfocusedBorderColor = Colors.textMuted
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SectionTitle(title = "Height (${heightUnit.label})")
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        HeightUnit.entries.forEach { option ->
+                            FilterChip(
+                                selected = heightUnit == option,
+                                onClick = { viewModel.onHeightUnitChanged(option) },
+                                label = { Text(option.label) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Colors.primary.copy(alpha = 0.2f),
+                                    selectedLabelColor = Colors.primary,
+                                    labelColor = Colors.textSecondary,
+                                ),
+                            )
+                        }
+                    }
+                }
+                if (heightUnit == HeightUnit.CM) {
+                    OutlinedTextField(
+                        value = height,
+                        onValueChange = viewModel::onHeightChanged,
+                        label = { Text("Enter your height in centimetres") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = heightError != null,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = fieldColors
+                    )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        OutlinedTextField(
+                            value = heightFeet,
+                            onValueChange = viewModel::onHeightFeetChanged,
+                            label = { Text("Feet") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            isError = heightError != null,
+                            modifier = Modifier.weight(1f),
+                            colors = fieldColors
+                        )
+                        OutlinedTextField(
+                            value = heightInches,
+                            onValueChange = viewModel::onHeightInchesChanged,
+                            label = { Text("Inches") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            isError = heightError != null,
+                            modifier = Modifier.weight(1f),
+                            colors = fieldColors
+                        )
+                    }
+                }
+                val heightNote = heightError ?: implausibleSavedHeight?.let {
+                    "Your saved height ($it) doesn't look right. Please enter it again: your coaching and calorie estimates use it."
+                }
+                heightNote?.let {
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Text(text = it, style = AppTextStyles.small, color = Colors.warning)
+                }
                 Spacer(modifier = Modifier.height(Spacing.lg))
             }
             item {
@@ -567,7 +627,7 @@ fun PersonalDetailsScreen(
                             }
                         }
                     },
-                    enabled = distanceRangeError == null,
+                    enabled = distanceRangeError == null && heightError == null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),

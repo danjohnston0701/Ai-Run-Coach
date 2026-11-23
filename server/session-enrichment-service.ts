@@ -32,6 +32,7 @@
  *   preceding weeks — genuinely adaptive, not guessed at day one.
  */
 
+import { userHasHeartRateSource } from "./hr-source";
 import { planChat } from "./plan-ai";
 import { db } from "./db";
 import {
@@ -180,6 +181,8 @@ export async function enrichWorkoutBlock(
   // Load user
   const user = await db.select().from(users).where(eq(users.id, userId)).then(r => r[0]);
   if (!user) throw new Error(`[Enrichment] User not found: ${userId}`);
+  // No heart-rate source (no watch, no run with HR): pace/effort targets only, never zones or BPM.
+  const hasHeartRateSource = await userHasHeartRateSource(userId);
 
   // Load recent runs — include ALL sources (Garmin, Strava, native) for enrichment
   // enrichment needs the best possible data, not just AI Run Coach runs
@@ -248,6 +251,9 @@ export async function enrichWorkoutBlock(
   Zone 5: ${tanakaZoneRanges![5].min}–${tanakaZoneRanges![5].max} bpm  (max effort / sprint)
 The BPM values above will be applied server-side — your job is to assign the correct hrZoneNumber for each session and appropriate pace targets for a ${fitnessLevel} runner running in that zone.`
       : `⚠️ TIER 3 — No HR data and no date of birth available. Estimate all targets from fitness level (${fitnessLevel}) only. Be appropriately conservative — err toward slower paces and lower HR ranges.`;
+  const hrSourceNote = hasHeartRateSource
+    ? ""
+    : "\n⚠️ This runner has no heart-rate monitor. Heart-rate zones and BPM are not shown to them: never mention heart rate, BPM or zones in any text; describe effort (conversational, RPE) instead.";
 
   // Load workouts to enrich — skip rest days
   const workouts = await db
@@ -325,7 +331,7 @@ The BPM values above will be applied server-side — your job is to assign the c
 RUNNER DATA:
 - Fitness level: ${fitnessLevel}
 - Age: ${userAge}${zone2PaceHint}
-- ${hrContextBlock}
+- ${hrContextBlock}${hrSourceNote}
 
 WORKOUTS TO ENRICH:
 ${workoutSummaries}
@@ -501,14 +507,21 @@ Apply your exercise physiology knowledge to ANY session type, including novel on
           .set({
             targetPace: safePace ?? workoutRecord.targetPace,
             duration: correctedDurationSecs ?? workoutRecord.duration,
-            hrZoneNumber: enrichment.hrZoneNumber ?? workoutRecord.hrZoneNumber,
-            hrZoneMinBpm: safeHRMin ?? workoutRecord.hrZoneMinBpm,
-            hrZoneMaxBpm: safeHRMax ?? workoutRecord.hrZoneMaxBpm,
             intervalTargetPace: safeIntervalPace ?? workoutRecord.intervalTargetPace,
             restTargetPace: safeRestPace ?? workoutRecord.restTargetPace,
-            intervalHeartRateMin: enrichment.intervalHRMin ?? workoutRecord.intervalHeartRateMin,
-            intervalHeartRateMax: enrichment.intervalHRMax ?? workoutRecord.intervalHeartRateMax,
-            restHeartRateMax: enrichment.restHRMax ?? workoutRecord.restHeartRateMax,
+            ...(hasHeartRateSource
+              ? {
+                  hrZoneNumber: enrichment.hrZoneNumber ?? workoutRecord.hrZoneNumber,
+                  hrZoneMinBpm: safeHRMin ?? workoutRecord.hrZoneMinBpm,
+                  hrZoneMaxBpm: safeHRMax ?? workoutRecord.hrZoneMaxBpm,
+                  intervalHeartRateMin: enrichment.intervalHRMin ?? workoutRecord.intervalHeartRateMin,
+                  intervalHeartRateMax: enrichment.intervalHRMax ?? workoutRecord.intervalHeartRateMax,
+                  restHeartRateMax: enrichment.restHRMax ?? workoutRecord.restHeartRateMax,
+                }
+              : {
+                  hrZoneNumber: null, hrZoneMinBpm: null, hrZoneMaxBpm: null, hrZoneScenario: null,
+                  intervalHeartRateMin: null, intervalHeartRateMax: null, restHeartRateMax: null,
+                }),
             isEnrichmentPending: false, // Mark as enriched — app can show real targets now
           } as any)
           .where(eq(plannedWorkouts.id, enrichment.id));

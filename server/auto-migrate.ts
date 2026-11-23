@@ -826,6 +826,12 @@ export async function runAutoMigrations(): Promise<void> {
       name: "users.apple_account_token",
       sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_account_token VARCHAR",
     },
+
+    // ── users.heart_rate_device_reported_at (server/hr-source.ts, 2026-11-23) ─────
+    {
+      name: "users.heart_rate_device_reported_at",
+      sql: "ALTER TABLE users ADD COLUMN IF NOT EXISTS heart_rate_device_reported_at TIMESTAMP",
+    },
   ];
 
   let succeeded = 0;

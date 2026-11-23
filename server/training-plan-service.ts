@@ -5,6 +5,8 @@
  * Plans are tailored to user's fitness level, goals, and current training load.
  */
 
+import { userHasHeartRateSource } from "./hr-source";
+import { weeksToRace } from "./plan-goal-match";
 import { trialWeeksToGenerate, isPlanCapped } from "./plan-trial-cap";
 import { parseWeightKg } from "./utils/run-derivation";
 import { firstNameOf } from "./utils/first-name";
@@ -585,10 +587,13 @@ export async function generateTrainingPlan(
     const hasHRHistory = runsWithHRData.length >= 3; // At least 3 runs with HR data
 
     // Determine which HR zone scenario applies
+    // No heart-rate source at all (no watch, no run with HR): effort targets only, no zones or
+    // BPM on any session (server/hr-source.ts). A Strava link alone used to count as a "device".
+    const hasHeartRateSource = await userHasHeartRateSource(userId);
     let hrZoneScenario: 'device' | 'history' | 'effort' = 'effort'; // Default to effort-based
-    if (hasConnectedDevice) {
+    if (hasHeartRateSource && hasConnectedDevice && connectedDevice[0]?.deviceType !== 'strava') {
       hrZoneScenario = 'device';
-    } else if (hasHRHistory) {
+    } else if (hasHeartRateSource && hasHRHistory) {
       hrZoneScenario = 'history';
     }
 
@@ -717,6 +722,7 @@ export async function generateTrainingPlan(
     let goalNotes: string | null = null;
     let goalEventName: string | null = null;
     let goalEventLocation: string | null = null;
+    let goalRaceDate: Date | null = null;
     if (goalId) {
       try {
         const goalRecord = await db.select().from(goals).where(eq(goals.id, goalId)).limit(1);
@@ -725,6 +731,7 @@ export async function generateTrainingPlan(
           goalNotes = goalRecord[0].notes || null;
           goalEventName = goalRecord[0].eventName || null;
           goalEventLocation = goalRecord[0].eventLocation || null;
+          goalRaceDate = goalRecord[0].targetDate ? new Date(goalRecord[0].targetDate) : null;
         }
       } catch (goalErr) {
         console.warn(`[Training Plan] Could not fetch goal ${goalId} for prompt:`, goalErr);
@@ -762,7 +769,9 @@ export async function generateTrainingPlan(
     if (durationWeeks && durationWeeks > 0) {
       weeksUntilTarget = durationWeeks;
     } else if (targetDate && targetDate instanceof Date && !isNaN(targetDate.getTime())) {
-      const calculatedWeeks = Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000));
+      // Counted from week 1's Monday so the race falls in the plan's last week (plan-goal-match.ts).
+      const calculatedWeeks = weeksToRace(targetDate, userTimezone, firstSessionStart)
+        ?? Math.ceil((targetDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000));
       // Ensure result is a valid positive number, fallback to default if calculation failed
       weeksUntilTarget = (calculatedWeeks && calculatedWeeks > 0) ? calculatedWeeks : getPlanDuration(goalType, experienceLevel);
     } else {
@@ -773,6 +782,18 @@ export async function generateTrainingPlan(
     if (!Number.isInteger(weeksUntilTarget) || weeksUntilTarget <= 0) {
       weeksUntilTarget = getPlanDuration(goalType, experienceLevel);
     }
+
+    // ── A race well beyond this plan is a long-term goal, not the plan's target ──
+    // Runners keep a plan for 6–10 weeks, so a race months out (Karen: Great North Run 42 weeks
+    // away, 2026-11-23) doesn't set the length or the peak (plan-goal-match.ts MAX_RACE_PLAN_WEEKS).
+    // The plan names it as the motivation and sets a realistic goal for the end of its own weeks.
+    const goalRaceWeeksAway = !targetDate && goalRaceDate && !isNaN(goalRaceDate.getTime())
+      ? weeksToRace(goalRaceDate, userTimezone, firstSessionStart)
+      : null;
+    const isLongTermGoal = goalRaceWeeksAway != null && goalRaceWeeksAway > weeksUntilTarget;
+    const longTermGoalNote = isLongTermGoal
+      ? `LONG-TERM GOAL, NOT THIS PLAN'S TARGET: ${goalEventName || "the race"} is on ${goalRaceDate!.toDateString()}, ${goalRaceWeeksAway} weeks away, well beyond this ${weeksUntilTarget}-week plan. Mention it as the runner's motivation, but do NOT design this plan around the race: no race-specific peaking, no taper, no race-week sessions, and the plan does not need to reach ${targetDistance} km. Set the goal for the end of these ${weeksUntilTarget} weeks to what is realistic and safe from where the runner starts today (for a beginner, e.g. running 20–30 minutes without stopping), as the first step towards the race, and state that end-of-plan goal in coachingProgrammeSummary.`
+      : "";
     
     // Rolling block: generate only a block of weeks now, rest generated later as the athlete progresses.
     // weeksUntilTarget is the FULL plan duration (stored in totalWeeks).
@@ -973,7 +994,9 @@ DO NOT treat the absence of run data as evidence of low fitness. Instead:
 
   if (isLongDistanceGoal) {
     return `IMPORTANT: This runner has NO previous run data recorded in this app — they are NEW to this app only.
-Build the OPTIMAL plan for this ${targetDistance}km goal. Session distances and weekly volume must build to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks — but they START from where the athlete is today and progress within the STARTING POINT & LOAD RULES below.
+${isLongTermGoal
+  ? `Build the OPTIMAL first ${weeksUntilTarget} weeks towards this ${targetDistance}km goal, whose race is ${goalRaceWeeksAway} weeks away. These weeks do not need to reach ${targetDistance}km: they START from where the athlete is today and progress as far as is safe within the STARTING POINT & LOAD RULES below.`
+  : `Build the OPTIMAL plan for this ${targetDistance}km goal. Session distances and weekly volume must build to genuinely achieve the ${targetDistance}km goal within ${weeksUntilTarget} weeks — but they START from where the athlete is today and progress within the STARTING POINT & LOAD RULES below.`}
 - ${weeklyMileageBase > 0 ? `Start at ~${Math.round(weeklyMileageBase)}km/week and build to meet the event requirements` : `This athlete is not currently running (0 km/week) — start from walk-run and build gradually (see the PROGRESSION RULES below)`}
 - Paces will be set after their first session using real performance data — focus on session structure, not numeric targets
 
@@ -1015,6 +1038,12 @@ Apply your expert coaching knowledge for pre-race preparation at this distance:
 - Taper begins in the final 1-2 weeks: volume reduces but intensity quality sessions continue
 - "Taper" means reducing FROM a high volume — long runs in week 1 must reflect a trained ${targetDistance}km athlete, not a beginner. A certified coach reviewing this plan should find the long runs and weekly volumes appropriate for ${targetDistance}km race preparation.
 - Focus: race-pace confidence, lactate threshold sharpening, neuromuscular activation, and arriving at the start line fresh`;
+      }
+
+      // ── Race months beyond this plan: the first phase towards it ───────────────
+      if (isLongTermGoal) {
+        return `🧭 FIRST PHASE TOWARDS A ${targetDistance}km RACE ${goalRaceWeeksAway} WEEKS AWAY — ${weeksUntilTarget}-WEEK PLAN
+This plan is the first ${weeksUntilTarget} weeks of a long road to ${goalEventName || `a ${targetDistance}km race`}. It is not race preparation: build the aerobic base, running habit and confidence this runner needs to train for ${targetDistance}km later. Progress from where they are today within the load rules; no race-pace work, peaking or taper. End the plan at a clear, achievable milestone for a ${experienceLevel} runner, and say what it is.`;
       }
 
       // ── Ultra / extreme distance ───────────────────────────────────────────────
@@ -1143,7 +1172,9 @@ ${goalContext}
 ━━━ THE ATHLETE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${runnerProfileSection}
-
+${hasHeartRateSource ? '' : `
+Heart rate: this athlete has no heart-rate monitor. Never mention heart rate, BPM or HR zones in any description or instruction; describe effort instead (conversational, able to chat, RPE).
+`}
 ━━━ THE GOAL ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Event: ${goalType.toUpperCase()} — ${targetDistance}km
@@ -1151,6 +1182,7 @@ ${goalEventName ? `Event name: ${goalEventName}${goalEventLocation ? ` in ${goal
 ${goalDescription ? `Runner's description: ${goalDescription}` : ''}
 ${goalNotes ? `Runner's own notes: "${goalNotes}" — weave this context into your coaching language throughout the plan` : ''}
 ${targetDate ? `Race date: ${targetDate.toDateString()} (${weeksUntilTarget} weeks away)` : `Timeline: ${weeksUntilTarget} weeks`}
+${longTermGoalNote}
 ${targetTime ? (() => {
   const goalPaceSecs = Math.round(targetTime / targetDistance);
   const goalPaceStr = `${Math.floor(goalPaceSecs / 60)}:${String(goalPaceSecs % 60).padStart(2, "0")}/km`;
@@ -1778,7 +1810,7 @@ App capabilities available in every session: real-time GPS pace/distance, live a
         // ── Parse HR zone from intensity field (z1-z5) and populate HR metadata ──
         const intensityStr = workout.intensity || '';
         const hrZoneMatch = intensityStr.match(/z(\d)/i);
-        const hrZoneNumber = hrZoneMatch ? parseInt(hrZoneMatch[1], 10) : null;
+        const hrZoneNumber = hasHeartRateSource && hrZoneMatch ? parseInt(hrZoneMatch[1], 10) : null;
 
         let hrZoneMinBpm: number | null = null;
         let hrZoneMaxBpm: number | null = null;

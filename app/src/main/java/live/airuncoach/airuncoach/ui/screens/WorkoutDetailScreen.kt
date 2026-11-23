@@ -339,6 +339,9 @@ fun WorkoutDetailScreen(
 
             Spacer(modifier = Modifier.height(Spacing.lg))
 
+            // HR zones only when the server gave this session one: a runner with no heart-rate
+            // source gets effort targets only (server/hr-source.ts, 2026-11-23).
+            val hasHeartRateZones = workout.hrZoneNumber != null || workout.hrZoneMinBpm != null
             // ── Key stats ─────────────────────────────────────────────────────
             if (workout.workoutType != "rest") {
                 // Top row: Distance + Intensity (50/50)
@@ -359,7 +362,12 @@ fun WorkoutDetailScreen(
                         val zoneLabel = if (isIntervalType && baseZone != peakZone)
                             "Z$baseZone → Z$peakZone" else "Zone $peakZone"
                         val effortLabel = peakZoneInfo.effort
-                        WorkoutStatCard(label = "Intensity", value = zoneLabel, subtitleValue = effortLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
+                        if (hasHeartRateZones) {
+                            WorkoutStatCard(label = "Intensity", value = zoneLabel, subtitleValue = effortLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
+                        } else {
+                            // No heart-rate source: the server sends no zone (server/hr-source.ts), so effort only.
+                            WorkoutStatCard(label = "Effort", value = effortLabel, icon = R.drawable.icon_heart_vector, modifier = Modifier.weight(1f))
+                        }
                     }
                     // Spacer if intensity is missing
                     if (workout.intensity == null) {
@@ -380,7 +388,7 @@ fun WorkoutDetailScreen(
                 Spacer(modifier = Modifier.height(Spacing.lg))
 
                 // ── Zone description and pace guidance ─────────────────────────────
-                workout.intensity?.let {
+                workout.intensity?.takeIf { hasHeartRateZones }?.let {
                     val isIntervalType = workout.workoutType.lowercase() in
                             setOf("hill_repeats", "intervals", "fartlek")
                     val peakZone = resolveZoneNumber(workout, userMaxHR)
@@ -526,7 +534,7 @@ fun WorkoutDetailScreen(
             }
 
             // ── Zone comparison chart ──────────────────────────────────────────
-            workout.intensity?.let {
+            workout.intensity?.takeIf { hasHeartRateZones }?.let {
                 val isIntervalType = workout.workoutType.lowercase() in
                         setOf("hill_repeats", "intervals", "fartlek")
                 val peakZone = resolveZoneNumber(workout, userMaxHR)
