@@ -269,13 +269,29 @@ export async function sendWatchSessionStartedPush(
       token: user.fcmToken,
       data: { type: "watchSessionStarted", sessionId },
       android: { priority: "high", ttl: 20000 },
-      // Required for iOS to wake the app for this data-only push at all — without
-      // content-available:1 + the background push-type, APNs has no reason to deliver
-      // it to a backgrounded/terminated app. AppDelegate.application(_:didReceiveRemoteNotification:)
-      // (Ai_Run_CoachApp.swift) is what actually acts on it once delivered.
+      // iOS: a visible alert at priority 10, so APNs delivers it now. It used to be a silent
+      // background push, which Apple only allows at priority 5: delivered whenever iOS
+      // chooses, or not at all (Naeem, 2026-11-22: watch started, phone never did).
+      // content-available:1 still wakes a backgrounded app, and
+      // AppDelegate.application(_:didReceiveRemoteNotification:) (Ai_Run_CoachApp.swift)
+      // starts the run; the app hides the banner while it's open (willPresent).
       apns: {
-        headers: { "apns-priority": "5", "apns-push-type": "background" },
-        payload: { aps: { "content-available": 1 } },
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert",
+          "apns-expiration": String(Math.floor(Date.now() / 1000) + 60),
+          "apns-collapse-id": `watch-start-${sessionId}`.slice(0, 64),
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: "Your watch run has started",
+              body: "Open Ai Run Coach to get your coaching.",
+            },
+            sound: "default",
+            "content-available": 1,
+          },
+        },
       },
     };
 
