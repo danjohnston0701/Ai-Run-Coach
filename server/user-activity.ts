@@ -261,6 +261,10 @@ export const CLIENT_ACTIONS = new Set([
   "Watch app no answer after prompt",
   "Watch app answered late after prompt",
   "Watch app crash breadcrumb",
+  // iOS (2026-11-28): the run screen's location gate (Always + Precise) blocked a session,
+  // and the watch started while the phone was still behind it (Carsell, 26 Nov).
+  "Run location gate shown",
+  "Watch started before phone was ready",
 ]);
 
 export function registerUserActivityRoutes(app: Express) {

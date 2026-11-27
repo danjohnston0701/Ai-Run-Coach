@@ -14341,6 +14341,9 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
           let heartRateData: any[] | null = null;
           let paceData: any[] | null = null;
           let altitudeData: any[] | null = null;
+          let cadenceData: number[] | null = null;
+          let maxCadence: number | null = null;
+          let minCadence: number | null = null;
           let storedKmSplits: any[] | null = null;
 
           const allDataPoints = await db.select()
@@ -14378,6 +14381,18 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
               .filter(d => d.heartRate != null && d.heartRate > 20)
               .map(d => d.heartRate as number);
             if (hrSamples.length >= 5) heartRateData = hrSamples;
+
+            // Cadence series + max/min, same shape as HR. The per-point cadence already went
+            // into gpsTrack, but cadence_data / max_cadence / min_cadence were never written,
+            // so every watch-only run stored no cadence chart and no max (Carsell, 26 Nov).
+            const cadSamples = allDataPoints
+              .filter(d => d.cadence != null && d.cadence > 0 && d.cadence < 260)
+              .map(d => d.cadence as number);
+            if (cadSamples.length >= 5) {
+              cadenceData = cadSamples;
+              maxCadence = Math.round(Math.max(...cadSamples));
+              minCadence = Math.round(Math.min(...cadSamples));
+            }
 
             // Build pace array from stored pace values (sec/km)
             const paceSamples = allDataPoints
@@ -14482,6 +14497,9 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             if (heartRateData && heartRateData.length > 0) mergeFields.heartRateData = heartRateData;
             if (paceData && paceData.length > 0) mergeFields.paceData = paceData;
             if (altitudeData && altitudeData.length > 0) mergeFields.altitudeData = altitudeData;
+            if (cadenceData && cadenceData.length > 0) mergeFields.cadenceData = cadenceData;
+            if (maxCadence != null) mergeFields.maxCadence = maxCadence;
+            if (minCadence != null) mergeFields.minCadence = minCadence;
             if (storedKmSplits && storedKmSplits.length > 0) mergeFields.kmSplits = storedKmSplits;
             if (gpsTrackFromData && gpsTrackFromData.length > 0) mergeFields.gpsTrack = gpsTrackFromData;
             if (derivedTotalSteps != null && (phoneMatchedRun as any).totalSteps == null) mergeFields.totalSteps = derivedTotalSteps;
@@ -14512,6 +14530,8 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             avgHeartRate: stats.avgHeartRate ?? null,
             maxHeartRate: stats.maxHeartRate ?? null,
             cadence: stats.avgCadence ?? null,
+            maxCadence,
+            minCadence,
             elevationGain: stats.totalAscent ?? null,
             elevationLoss: stats.totalDescent ?? null,
             elevation: stats.totalAscent ?? null,
@@ -14546,6 +14566,7 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
             heartRateData: heartRateData,
             paceData: paceData,
             altitudeData: altitudeData,
+            cadenceData: cadenceData,
             // GPS track built from garminRealtimeData per-second points (standalone runs)
             gpsTrack: gpsTrackFromData,
           }).returning();
@@ -14977,6 +14998,17 @@ ${status === "invalid" ? "" : `<p><strong>Your 8-character invite code</strong><
       if (hasExistingAlt)         console.log(`[Offline Batch] Preserved existing altitude data — watch batch skipped`);
       if (!shouldUpdateCadence && _existingCadRaw) console.log(`[Offline Batch] Preserved canonical cadence data — watch batch skipped`);
       if (hasExistingKmSplits) console.log(`[Offline Batch] Preserved existing km splits — watch batch skipped`);
+
+      // Max/min cadence were never written for watch runs. Fill them from the batch when the
+      // run has none, whichever path created it.
+      const batchCadValues = cadenceData.map(c => c.value).filter(v => v > 0 && v < 260);
+      if (batchCadValues.length >= 5) {
+        if ((existingRun as any).maxCadence == null) updatePayload.maxCadence = Math.round(Math.max(...batchCadValues));
+        if ((existingRun as any).minCadence == null) updatePayload.minCadence = Math.round(Math.min(...batchCadValues));
+        if ((existingRun as any).cadence == null) {
+          updatePayload.cadence = Math.round(batchCadValues.reduce((s, v) => s + v, 0) / batchCadValues.length);
+        }
+      }
 
       if (finalAscent != null) {
         updatePayload.elevationGain = finalAscent;
